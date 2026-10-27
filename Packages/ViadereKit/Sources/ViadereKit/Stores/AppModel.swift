@@ -29,6 +29,8 @@ public final class AppModel {
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
     public var toast: String?
+    /// Set to open Settings → Trusted devices (the security notice banner's "Review"); Settings clears it once it has navigated.
+    public var reviewDevicesRequested = false
     public private(set) var isLocked = false
     /// Bumped every time the app locks. The UI keys its content on this so every presented sheet, alert and
     /// pushed screen is torn down with the lock, and nothing underneath can stay visible or interactive.
@@ -45,6 +47,7 @@ public final class AppModel {
     public let rewards: RewardsViewModel
     public let wallet: WalletPassCoordinator
     public let messages: MessagesViewModel
+    public let securityNotices: SecurityNoticesViewModel
     private var queuedLink: DeepLink?
     /// Links and notification opens that arrived while the app was locked, replayed in order after unlock.
     private var lockedQueue: [DeepLink] = []
@@ -62,6 +65,7 @@ public final class AppModel {
         rewards = RewardsViewModel(services: services)
         wallet = WalletPassCoordinator(services: services, library: walletLibrary)
         messages = MessagesViewModel(services: services)
+        securityNotices = SecurityNoticesViewModel(services: services)
         // The API client reports "the server no longer trusts this device" through this notifier.
         services.revocation.setHandler { [weak self] in
             Task { @MainActor in await self?.deviceWasRevoked() }
@@ -96,6 +100,7 @@ public final class AppModel {
         if phase == .ready {
             await home.load()
             await activity.load()
+            await securityNotices.load()
             if let link = queuedLink { queuedLink = nil; await handle(link) }
         }
     }
@@ -104,10 +109,13 @@ public final class AppModel {
         phase = .ready
         await home.load()
         await activity.load()
+        await securityNotices.load()
         if let link = queuedLink { queuedLink = nil; await handle(link) }
     }
 
     // MARK: App lock & scene phases
+
+    public func reviewDevices() { reviewDevicesRequested = true; selectedTab = .settings }
 
     public func sceneDidEnterBackground() { backgroundedAt = services.clock() }
 
@@ -122,7 +130,7 @@ public final class AppModel {
             case .unavailable: break
             }
         }
-        if phase == .ready, !isLocked { await home.load(); await activity.load() }
+        if phase == .ready, !isLocked { await home.load(); await activity.load(); await securityNotices.load() }
     }
 
     /// Locks the app: dismisses every presented sheet and discards pending presentations, so nothing stays on

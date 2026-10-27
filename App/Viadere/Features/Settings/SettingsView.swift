@@ -55,12 +55,14 @@ struct SettingsView: View {
                 }
             }
             .task {
+                openDevicesIfRequested()
                 await vm.load()
                 device = try? await model.services.records.load()
                 await household.load()
                 await acknowledgments.load()
             }
         }
+        .onChange(of: model.reviewDevicesRequested) { _, _ in openDevicesIfRequested() }
         .sheet(isPresented: Binding(get: { model.pendingAccountLinkToken != nil }, set: { if !$0 { model.pendingAccountLinkToken = nil } })) {
             if let token = model.pendingAccountLinkToken {
                 AccountLinkSheet(vm: vm, token: token) { model.pendingAccountLinkToken = nil }
@@ -68,6 +70,13 @@ struct SettingsView: View {
                     .presentationBackground(ViadereColor.background)
             }
         }
+    }
+
+    /// "Review" on the Home security banner lands here, on the device list where anything unfamiliar can be removed.
+    private func openDevicesIfRequested() {
+        guard model.reviewDevicesRequested else { return }
+        model.reviewDevicesRequested = false
+        path = [.devices]
     }
 
     // MARK: Sections

@@ -60,6 +60,10 @@ public struct LiveViadereAPI: ViadereAPI {
     public func revokeSession(_ id: String) async throws {
         _ = try await client.call(APIRoutes.sessionRevoke, params: ["sessionId": id])
     }
+    public func securityNotices() async throws -> [SecurityNotice] { try await client.call(APIRoutes.securityNotices) }
+    public func dismissSecurityNotice(_ id: UUID) async throws {
+        _ = try await client.call(APIRoutes.securityNoticeDismiss, params: ["noticeId": id.uuidString.lowercased()])
+    }
 
     // MARK: Directory
     public func searchDirectory(query: String) async throws -> [BusinessSummary] {

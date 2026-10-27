@@ -66,6 +66,10 @@ public protocol ViadereAPI: Sendable {
     func confirmPhoneLink(_ id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink
     func sessions() async throws -> [ConsumerSession]
     func revokeSession(_ id: String) async throws
+    /// `GET /v1/security-notices`: undismissed notices, newest first, without the ones this device caused.
+    func securityNotices() async throws -> [SecurityNotice]
+    /// `POST /v1/security-notices/{id}/dismiss`: needs a trusted device (`403 device_cool_down` otherwise).
+    func dismissSecurityNotice(_ id: UUID) async throws
 
     // MARK: Directory
     func searchDirectory(query: String) async throws -> [BusinessSummary]

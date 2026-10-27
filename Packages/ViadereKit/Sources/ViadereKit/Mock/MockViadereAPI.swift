@@ -30,6 +30,10 @@ public actor MockViadereAPI: ViadereAPI {
     private var phones: [PhoneLink] = []
     private var pendingPhoneCodes: [PhoneLinkID: String] = [:]
     private var consumerSessions: [ConsumerSession]
+    private var noticeList: [SecurityNotice] = []
+    /// Test hook: when true, dismissing answers `403 device_cool_down` like a device that is not trusted yet.
+    public var dismissNeedsTrustedDevice = false
+    public private(set) var dismissedNoticeIds: [UUID] = []
     private var consumedChallenges: Set<String> = []
     public private(set) var registeredAPNsTokens: [APNsTokenRegistration] = []
     public private(set) var liveActivityTokens: [LiveActivityTokenRegistration] = []
@@ -147,7 +151,13 @@ public actor MockViadereAPI: ViadereAPI {
         freshSession = true
         return grant()
     }
-    public func logout() async throws {}
+    /// Test hook: makes logout and device revocation fail, like a 401/403 from the server.
+    public var signOutCallsFail: APIError?
+    public private(set) var logoutCalls = 0
+    public func logout() async throws {
+        logoutCalls += 1
+        if let failure = signOutCallsFail { throw failure }
+    }
     public func deleteAccount() async throws { accountDeleted = true }
 
     private func grant() -> AuthSession {
@@ -241,6 +251,7 @@ public actor MockViadereAPI: ViadereAPI {
     }
 
     public func revokeDevice(_ id: DeviceID) async throws {
+        if let failure = signOutCallsFail { throw failure }
         guard let index = deviceList.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
         deviceList[index].revokedAt = clock()
     }
@@ -351,6 +362,20 @@ public actor MockViadereAPI: ViadereAPI {
     public func removePhoneLink(_ id: PhoneLinkID) async throws { phones.removeAll { $0.id == id } }
     public func sessions() async throws -> [ConsumerSession] { consumerSessions }
     public func revokeSession(_ id: String) async throws { consumerSessions.removeAll { $0.id == id && !$0.isCurrent } }
+
+    public func securityNotices() async throws -> [SecurityNotice] { noticeList.sorted { $0.createdAt > $1.createdAt } }
+    public func dismissSecurityNotice(_ id: UUID) async throws {
+        if dismissNeedsTrustedDevice {
+            throw APIError.server(status: 403, code: .deviceCoolDown, message: "")
+        }
+        guard noticeList.contains(where: { $0.id == id }) else { throw Self.notFound() }
+        noticeList.removeAll { $0.id == id }
+        dismissedNoticeIds.append(id)
+    }
+    /// Test hook: puts notices on the account.
+    public func setDismissNeedsTrustedDevice(_ value: Bool) { dismissNeedsTrustedDevice = value }
+    public func setSignOutCallsFail(_ failure: APIError?) { signOutCallsFail = failure }
+    public func setSecurityNotices(_ notices: [SecurityNotice]) { noticeList = notices }
 
     // MARK: Directory
 
