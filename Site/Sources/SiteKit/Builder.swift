@@ -154,6 +154,32 @@ public struct SiteBuilder {
             .replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">")
     }
 
+    /// Content-level checks only (integrity lint, legal metadata and lock): what `viadere-site lint` runs before the output checks.
+    public func lintContent() throws -> [LintFinding] {
+        let config = try SiteConfig.load(from: options.siteRoot.appendingPathComponent("site.yaml"))
+        let api = try loadOpenAPI(config)
+        let pages = try loadPages(config: config, openapi: api)
+        var findings: [LintFinding] = []
+        if let text = try? String(contentsOf: options.siteRoot.appendingPathComponent("legal-lock.json"), encoding: .utf8) {
+            findings += LegalLock.check(lock: LegalLock.decode(text), pages: pages)
+        }
+        let lint = IntegrityLint(repoRoot: options.repoRoot)
+        for p in pages {
+            var md = Markdown()
+            let expanded = try expand(p, pages: pages, api: api, md: &md)
+            findings += lint.check(p, assembledText: Self.assembledText(p, expanded: expanded, md: md), allPages: pages)
+        }
+        return findings
+    }
+
+    static func assembledText(_ p: Page, expanded: String, md: Markdown) -> String {
+        var assembled = expanded
+        for (k, v) in md.rawBlocks where expanded.contains("{{raw:\(k)}}") { assembled += "\n" + stripTags(v) }
+        for key in ["headline", "lede", "tagline"] { if let v = p.front[key]?.string { assembled += "\n" + v } }
+        for a in p.front["components"]?.array ?? [] { assembled += "\n" + (a["description"]?.string ?? "") }
+        return assembled
+    }
+
     // MARK: Build
 
     @discardableResult
@@ -182,10 +208,7 @@ public struct SiteBuilder {
         for p in pages + permalinks(for: pages) {
             var md = Markdown()
             let expanded = try expand(p, pages: pages, api: api, md: &md)
-            var assembled = expanded
-            for (k, v) in md.rawBlocks where expanded.contains("{{raw:\(k)}}") { assembled += "\n" + Self.stripTags(v) }
-            for key in ["headline", "lede", "tagline"] { if let v = p.front[key]?.string { assembled += "\n" + v } }
-            for a in p.front["components"]?.array ?? [] { assembled += "\n" + (a["description"]?.string ?? "") }
+            let assembled = Self.assembledText(p, expanded: expanded, md: md)
             if !p.legalPermalink { report.findings += lint.check(p, assembledText: assembled, allPages: pages) }
             rendered.append((p, md.render(expanded)))
         }

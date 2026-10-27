@@ -1,7 +1,7 @@
 import Foundation
 import SiteKit
 
-// Usage: viadere-site [build|check-links|update-legal-lock] [--root DIR] [--out DIR] [--repo DIR]
+// Usage: viadere-site [build|lint|check-links|update-legal-lock] [--root DIR] [--out DIR | --dist DIR] [--repo DIR]
 let allArgs = Array(CommandLine.arguments.dropFirst())
 let command = allArgs.first.flatMap { $0.hasPrefix("-") ? nil : $0 } ?? "build"
 let args = allArgs.first.map { $0.hasPrefix("-") } == false ? Array(allArgs.dropFirst()) : allArgs
@@ -20,7 +20,7 @@ else { root = cwd.appendingPathComponent("Site") }
 root = root.standardizedFileURL
 
 var options = BuildOptions(siteRoot: root)
-if let o = value("--out") { options.outDir = URL(fileURLWithPath: o, relativeTo: cwd).standardizedFileURL }
+if let o = value("--out") ?? value("--dist") { options.outDir = URL(fileURLWithPath: o, relativeTo: cwd).standardizedFileURL }
 if let r = value("--repo") { options.repoRoot = URL(fileURLWithPath: r, relativeTo: cwd).standardizedFileURL }
 
 do {
@@ -38,6 +38,16 @@ do {
             for e in report.errors { FileHandle.standardError.write(Data("  \(e)\n".utf8)) }
             exit(1)
         }
+    case "lint":
+        let findings = try SiteBuilder(options: options).lintContent()
+        let config = try SiteConfig.load(from: root.appendingPathComponent("site.yaml"))
+        guard fm.fileExists(atPath: options.outDir.path) else { throw SiteError("no build output at \(options.outDir.path); run `viadere-site build` first") }
+        let problems = findings.filter { $0.severity == .error }.map { $0.description }
+            + LinkChecker.check(dist: options.outDir).map { "link: \($0)" }
+            + OutputChecker.check(dist: options.outDir, config: config).map { "output: \($0)" }
+        for f in findings where f.severity == .warning { print(f.description) }
+        if problems.isEmpty { print("Lint passed: integrity rules, legal metadata, links and output policy.") }
+        else { for p in problems { FileHandle.standardError.write(Data("\(p)\n".utf8)) }; exit(1) }
     case "check-links":
         let problems = LinkChecker.check(dist: options.outDir) + OutputChecker.check(dist: options.outDir, config: try SiteConfig.load(from: root.appendingPathComponent("site.yaml")))
         if problems.isEmpty { print("No broken links or policy violations in \(options.outDir.path)") }

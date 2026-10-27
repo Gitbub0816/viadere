@@ -176,13 +176,13 @@ def buckets_of(names: list[list[str]], by_hash: dict[str, Path]) -> list[list[tu
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--dir", default=str(Path(__file__).resolve().parent.parent / "dist"), help="directory to upload (default Site/dist)")
-    ap.add_argument("--name", default=os.environ.get("CLOUDFLARE_WORKER_NAME", "viadere-site"), help="Worker name (default viadere-site)")
+    ap.add_argument("--dist", "--dir", dest="dist", default=str(Path(__file__).resolve().parent.parent / "dist"), help="directory to upload (default Site/dist)")
+    ap.add_argument("--script", "--name", dest="name", default=os.environ.get("SITE_WORKER_NAME", "viadere-site"), help="Worker script name (default $SITE_WORKER_NAME or viadere-site)")
     ap.add_argument("--dry-run", action="store_true", help="hash and list files, make no network requests")
     ap.add_argument("--compatibility-date", default=datetime.date.today().isoformat())
     args = ap.parse_args(argv)
 
-    directory = Path(args.dir)
+    directory = Path(args.dist)
     if not directory.is_dir():
         print(f"error: {directory} does not exist; run `swift run viadere-site` first", file=sys.stderr)
         return 2
