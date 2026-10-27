@@ -30,6 +30,9 @@ struct AbuseService {
         case unchanged
     }
 
+    /// The thresholds in force: the deployment's, with the operator's bounded runtime override applied (ops gap G-12).
+    func thresholds() async -> AbuseThresholds { await PlatformFlags(db: db, ctx: ctx).abuse(base: ctx.config.abuse) }
+
     // MARK: Signals
 
     /// Counts one signal in a minute bucket. Best effort: it must never break the request that triggered it.
@@ -56,7 +59,7 @@ struct AbuseService {
     // MARK: Metrics
 
     func metrics(for businessId: UUID) async throws -> Metrics {
-        try await metrics(for: businessId, window: ctx.config.abuse.window)
+        try await metrics(for: businessId, window: await thresholds().window)
     }
 
     func metrics(for businessId: UUID, window: TimeInterval) async throws -> Metrics {
@@ -89,7 +92,7 @@ struct AbuseService {
     /// throttle is never lifted automatically.
     @discardableResult
     func evaluate(businessId: UUID) async throws -> Evaluation {
-        let settings = ctx.config.abuse
+        let settings = await thresholds()
         let m = try await metrics(for: businessId)
         var exceeded: String?
         if m.issued >= settings.minimumSample, m.complaintRate > settings.complaintRate { exceeded = "complaint_rate" }
@@ -126,7 +129,7 @@ struct AbuseService {
     /// Evaluates every verified business that issued anything in the window. Safe to run on any instance.
     @discardableResult
     func sweep(limit: Int = 500) async throws -> Int {
-        let start = ctx.now.addingTimeInterval(-ctx.config.abuse.window)
+        let start = ctx.now.addingTimeInterval(-(await thresholds().window))
         let active = try await InteractionRecord.query(on: db).filter(\.$createdAt >= start).unique().limit(limit).all(\.$businessId)
         let throttled = try await BusinessControlRecord.query(on: db).filter(\.$throttled == true).all().map(\.businessId)
         var count = 0

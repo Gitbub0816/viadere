@@ -17,7 +17,7 @@ public struct AppleApprovalKeyVault: ApprovalKeyVault {
                                           accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
     }
 
-    private func store(_ enrollment: UUID) -> SecureEnclaveKeyStore {
+    private func enclave(_ enrollment: UUID) -> SecureEnclaveKeyStore {
         SecureEnclaveKeyStore(tagPrefix: "com.viadere.approve." + enrollment.uuidString.lowercased() + ".", accessGroup: configuration.approvalKeychainAccessGroup,
                               approvalAccessGroup: configuration.approvalKeychainAccessGroup)
     }
@@ -26,11 +26,11 @@ public struct AppleApprovalKeyVault: ApprovalKeyVault {
     private func account(_ enrollment: UUID) -> String { enrollment.uuidString.lowercased() }
 
     public func createApprovalKey(enrollment: UUID, assurance: ApprovalAMR) async throws -> any ManagedSigningKey {
-        try await store(enrollment).createKey(for: purpose(assurance))
+        try await enclave(enrollment).createKey(for: purpose(assurance))
     }
 
     public func approvalKey(enrollment: UUID) async throws -> (any ManagedSigningKey)? {
-        let store = store(enrollment)
+        let store = enclave(enrollment)
         if let key = try await store.existingKey(for: .approvalBiometric) { return key }
         return try await store.existingKey(for: .approvalUserPresence)
     }
@@ -47,7 +47,7 @@ public struct AppleApprovalKeyVault: ApprovalKeyVault {
     }
 
     public func delete(enrollment: UUID) async throws {
-        let store = store(enrollment)
+        let store = enclave(enrollment)
         try await store.deleteKey(for: .approvalBiometric)
         try await store.deleteKey(for: .approvalUserPresence)
         try hpkeSecrets.delete(account(enrollment))

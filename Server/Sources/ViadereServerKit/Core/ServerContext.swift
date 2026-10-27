@@ -17,6 +17,12 @@ public final class ServerContext: Sendable {
     let policyCache = PolicyStateCache()
     /// In-memory copy of the key-directory Merkle tree's leaf hashes (the database is the source; the cache only avoids re-reading it).
     let keyLogCache = KeyLogTreeCache()
+    /// Short-lived cache of the operator switches in `platform_flags` (maintenance, sign-up stops, webhook pause, messaging restriction).
+    let platformCache = PlatformFlagCache()
+    /// Counters for `/metrics` (no personal data, bounded labels).
+    let metrics = MetricsRegistry()
+    /// Resolves and checks business domains (DNS TXT and well-known file) for onboarding and ongoing assurance.
+    let domains: any DomainChecker
     public let limiter: RateLimiter
     public let apns: any APNsSender
     public let sms: any SMSProvider
@@ -44,11 +50,11 @@ public final class ServerContext: Sendable {
                 dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
                 passPush: any PassPushSender = DisabledPassPushSender(),
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
-                email: any EmailSender = DisabledEmailSender()) {
+                email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil) {
         self.config = config
         self.clock = clock
-        cipher = FieldCipher(key: config.dataEncryptionKey)
-        hasher = Hasher256(pepper: config.pepper)
+        cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
+        hasher = Hasher256(pepper: config.pepper, pepperId: config.operations.pepperId, previous: config.operations.previousPeppers)
         subjects = SubjectRefDeriver(key: config.subjectRefKey)
         limiter = RateLimiter(store: rateLimitStore, clock: clock)
         self.apns = apns
@@ -63,6 +69,7 @@ public final class ServerContext: Sendable {
         self.passPush = passPush
         self.integrity = integrity
         self.email = email
+        self.domains = domains ?? UnconfiguredDomainChecker()
     }
 
     public var now: Date { clock.now() }

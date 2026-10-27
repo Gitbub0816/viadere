@@ -180,9 +180,9 @@ final class VerifyFlowTests: XCTestCase {
             try await eq(try await h.signed(r.consumer, .GET, "/v1/verifications").status, .notFound)
             try await eq(try await h.signedPost(r.consumer, "/v1/verifications/\(id)/consent", VerificationConsentRequest(displayDigest: "sha256:x")).status, .notFound)
             try await eq(try await h.signedPost(r.consumer, "/v1/verifications/\(id)/wallet/begin", EmptyBody()).status, .notFound)
-            // The provider webhook is also closed when neither the gate nor the provider is configured.
+            // The provider webhook is also unusable when neither the gate nor the provider is configured.
             try await withVerify(enabled: false, didit: false) { h2, _ in
-                try await eq(try await h2.request(.POST, "/v1/providers/didit/webhook", body: Data("{}".utf8)).status, .notFound)
+                try await eq(try await h2.request(.POST, "/v1/providers/didit/webhook", body: Data("{}".utf8)).status, .forbidden)
             }
         }
     }

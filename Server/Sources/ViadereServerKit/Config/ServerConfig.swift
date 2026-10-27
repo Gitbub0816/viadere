@@ -138,6 +138,8 @@ public struct ServerConfig: Sendable {
     public var approve = ApproveSettings()
     /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).
     public var verify = VerifySettings()
+    /// Operations, edge lock, key rotation, webhook verification and audit export (WP6).
+    public var operations = OperationsSettings()
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -146,7 +148,7 @@ public struct ServerConfig: Sendable {
 
     /// Deterministic configuration for tests: no network, no background jobs, fixed secrets.
     public static func testing() -> ServerConfig {
-        ServerConfig(
+        var config = ServerConfig(
             environment: .testing, databaseURL: nil, bindHost: "127.0.0.1", port: 0,
             publicBaseURL: "https://viadere.com", relyingPartyID: "viadere.com", relyingPartyName: "Viadere",
             relyingPartyOrigin: "https://viadere.com", appleTeamID: "TEAMID1234", appStoreID: "1234567890",
@@ -156,6 +158,9 @@ public struct ServerConfig: Sendable {
             apns: nil, twilio: nil, trustedProxyCount: 0, corsAllowedOrigins: [], runBackgroundJobs: false, jobIntervalSeconds: 5, autoMigrate: false,
             maxBodyBytes: 64 * 1024, rateLimits: .standard, accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true, smsMenuRaceWindow: 0)
+        // Existing suites subscribe endpoints that cannot answer a challenge; the verification suites switch this on.
+        config.operations.webhookOwnershipVerification = false
+        return config
     }
 
     /// Loads configuration from the process environment and validates it. Production requires every secret.
@@ -278,6 +283,7 @@ public struct ServerConfig: Sendable {
         config.applyVaultEnvironment(env)
         try config.applyApproveEnvironment(env, production: production)
         try config.applyVerifyEnvironment(env, production: production)
+        try config.applyOperationsEnvironment(env, production: production)
         return config
     }
 

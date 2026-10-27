@@ -24,6 +24,8 @@ get the customer's decision back, exchange messages, and let customers connect w
 | `statuses:write` | publish ongoing-event statuses |
 | `webhooks:manage` | manage webhook endpoints through the API |
 | `rewards:write` | loyalty program, rewards, points and redemption validation (`/v1/business/loyalty/*`, `/v1/business/rewards*`, `/v1/business/redemptions/consume`) |
+| `approvals:manage` | Approve v2: enrollments, requests, results, freeze (`/v1/business/approve/*`) |
+| `keydirectory:manage` | publish and read your key-directory entries (`/v1/business/key-directory/*`) |
 
 ### Capabilities (what a key may do)
 
@@ -325,6 +327,140 @@ mode). A selfie age estimate is never reported as a verified age. Check `audienc
 
 **Things to build in.** Treat `not_verified` as "not proven", not as "underage". Do not retain more than you need, and tell customers what you keep.
 Do not ask a customer to verify repeatedly: Viadere limits open requests per customer, and each request needs the customer's consent.
+
+## 5c. Approve v2: payments and sign-ins your customer confirms with Face ID
+
+Approve asks a customer to confirm one specific thing ("pay $2,500.00 to Example Merchant") and gives you a **signed result you verify yourself**. It is built so that Viadere, as the relay, **cannot approve for your customer, cannot change what they see without you noticing, and (end to end) cannot read it**.
+
+> **The relay status alone is never sufficient.** `status: "approved"` on a request, a webhook, or a poll is information for your UI. **Release money, grant access or change anything only after you have verified the signed result (`ApprovalVerifier`) against the key you enrolled and the request you created.** Treat any approval you have not verified as a denial.
+
+Requires the scopes `approvals:manage` (enrollment, requests, results, freeze) and `keydirectory:manage` (your key directory), a live key, and the `auth.challenge` / `transaction.approve` capabilities. Approve v2 is behind a release gate and may not be enabled for your environment yet.
+
+### The pieces
+
+| You hold | Purpose |
+|---|---|
+| **Root key** (P-256, offline or in a KMS/HSM) | Signs every other key you publish. Its id is pinned by customers' phones. Rarely used. |
+| **Enrollment-confirmation key** | Signs the confirmation that a customer's key is the one you accepted. |
+| **Request-signing key** | Signs each end-to-end request, so the phone can tell it came from you. |
+| **HPKE key** (optional) | Lets customers and Viadere deliver encrypted data to you (Verify). |
+| **Your own store of customer approval keys** | The keys you verified at enrollment. Results are verified against **this**, never against what Viadere sends later. |
+
+Viadere never holds or generates any of your keys. Keep the root key out of your application servers: use an `ExternalSigningKey` that signs in your KMS.
+
+### Step 1: publish your keys (once, then at rotation)
+
+```swift
+let business = BusinessID("…")!
+let client = try ViadereBusinessClient(apiKey: liveKey)                 // scope keydirectory:manage
+let authority = BusinessKeyAuthority(businessId: business, rootKey: rootKey)   // rootKey: any DeviceSigningKey (software, or ExternalSigningKey over your KMS)
+
+try await client.publishKeyEntry(authority.registrationEntry())                                   // your root, self-signed
+let confirmation = SoftwareP256SigningKey()                                                        // or a KMS key: keep the private part with you
+let requestSigning = SoftwareP256SigningKey()
+try await client.publishKeyEntry(authority.keyEntry(purpose: .approvalEnrollmentConfirmation, publicKey: confirmation.publicKey.x963, serial: 1))
+try await client.publishKeyEntry(authority.keyEntry(purpose: .approvalRequestSigning, publicKey: requestSigning.publicKey.x963, serial: 2))
+
+// Check what customers will see. This verifies Viadere's signed tree head, inclusion proofs and your key history.
+let directory = try await client.verifiedKeyDirectory(businessId: business, logKeys: [viadereLogKey])   // the log public key: `ViadereServer key-directory-log-key`
+print(directory.currentRootKid, directory.nextSerial)                                                  // show the root key id on your own screens
+```
+
+Show your **root key id** in your own signed-in pages and print it on the QR you hand out (the link carries it as `rk=`): customers' phones compare it with the log, which catches a relay that tries to substitute a root. Each key is valid for at most 400 days (30 to 90 is a good rotation period). Rotate by publishing a new key, switching, then revoking the old one with `authority.revocationEntry(kid:serial:)`. To replace the root itself, `authority.successionEntry(to:)` (both roots sign); customers are alerted and must re-confirm.
+
+**Run the log monitor** so you notice a key you did not publish (a stolen API key, or a relay that appended something):
+
+```
+VIADERE_API_KEY=vdk_live_… viadere-key-monitor --business <uuid> --log-key <log public key> --state /var/lib/monitor/state.json
+```
+
+Exit code `0` is fine; `2` is an incident (an entry you did not expect, or a log that is inconsistent with what it showed before). Run it every few minutes and alert on non-zero.
+
+### Step 2: enroll a customer's approval key
+
+You can only enroll a customer you already have a relationship with (`subject_ref`, section "Customer references"). Do this inside your own signed-in session for that customer, never over SMS or email.
+
+```swift
+let ticket = try await client.createApprovalEnrollment(subject: subject, capability: .transactionApprove)   // scope approvals:manage
+// Show ticket.code (ABCD-EFGH) and a QR of ticket.deepLink (it already carries your root key id).
+
+// Poll or wait for the webhook `approve.enrollment.device_completed`, then:
+let enrolled = try await client.confirmApprovalEnrollment(
+    id: ticket.enrollmentId, businessId: business, expectedSubject: subject,
+    confirmationKey: confirmation, minimumAssurance: .biometric)
+await keyStore.add(enrolled)            // YOUR store: this is what every later result is verified against
+```
+
+`confirmApprovalEnrollment` verifies the device's statement (signature by its own key, your business id, the customer you started it for, the enrollment id, assurance) **before** it signs a confirmation. The phone activates the key only if your confirmation names the exact statement it signed, so a relay that swapped the key is detected on the phone. Persist `enrolled` (its `key` holds the kid, public key, subject and assurance) durably; implement `ApprovalKeyStore` over your database (the SDK ships `InMemoryApprovalKeyStore` for tests).
+
+### Step 3: ask for approval
+
+```swift
+let builder = ApprovalRequestBuilder(businessId: business, requestSigningKey: requestSigning)
+let requestId = ApprovalRequestBuilder.newRequestId()
+let challenge = ApprovalRequestBuilder.newChallenge()          // 256 random bits, single use
+let details = ApprovalSubject.transaction(TransactionDetails(
+    currency: "USD", amountMinor: 250_000, payeeDisplay: "Example Merchant", transactionReference: "bank_tx_123"))
+
+// Store the pending request first: this is what the result will be checked against.
+let pending = PendingApproval(requestId: requestId, subject: subject, challenge: challenge, details: details,
+                              expiresAt: Date().addingTimeInterval(120))
+try await pendingStore.save(pending)
+
+// End to end (recommended): one signed, encrypted copy per enrolled device. Viadere relays ciphertext only.
+let request = try await builder.endToEnd(requestId: requestId, subject: subject, challenge: challenge, details: details,
+                                         devices: enrolledDevices.map(\.target))      // each target = the kid and HPKE key from enrollment
+_ = try await client.createApprovalRequest(request)
+
+// Or server-visible (spec 14.2 body; Viadere can read it and the phone says so):
+// let request = try builder.serverVisible(requestId: requestId, subject: subject, challenge: challenge, details: details)
+```
+
+`expires_in_seconds` is 30 to 600 (default 120). A customer with no active key gets `409` with `details.reason = "no_active_key"`: run enrollment first. Use a new `request_id` for each attempt; reusing one with different content is `409 idempotency_conflict`. Viadere limits requests per customer (a warning from the third in an hour, a pause after repeated denials); a `429` or `approvals_paused` is the customer-protection system, not an outage: do not retry in a loop.
+
+### Step 4: get the result and verify it
+
+Subscribe a webhook with `envelope_version: "2026-10-27"` for the opaque events. The body carries **ids only**:
+
+```json
+{"id":"evt_8d1f","type":"approve.request.decided","version":"2026-10-27","tenant_id":"<your business id>","request_id":"req_…","occurred_at":"2026-10-27T10:15:00Z","result_ref":"res_…"}
+```
+
+```swift
+let webhookVerifier = WebhookVerifier(secrets: [currentSecret, previousSecretDuringRotation])
+let delivered = try webhookVerifier.verifyEnvelope(headers: headers, body: rawBody, deduplicator: dedup)   // signature, timestamp, strict body, dedup
+// delivered.deliveryId is the Viadere-Delivery-Id, delivered.keyId the Viadere-Key-Id (whk_…_v<secret version>)
+
+guard delivered.envelope.type == WebhookEventType.approveRequestDecided.rawValue, let ref = delivered.envelope.resultRef else { return }
+let result = try await client.approvalResult(resultRef: ref)                                  // the signed JWS and its kid
+let pending = try await pendingStore.load(requestId: result.requestId)                        // YOUR record of what you asked
+
+let verifier = ApprovalVerifier(businessId: business, keys: keyStore, replayCache: replayGuard, minimumAMR: .biometric)
+do {
+    let verified = try await verifier.verify(result: result.result, for: pending)             // consumes the challenge
+    // verified.decision == .approve : the customer, with Face ID, approved EXACTLY pending.details. Proceed.
+} catch ApprovalVerificationError.notApproved(let decision) {
+    // a signed deny or report: .deny / .report
+} catch {
+    // anything else is a refusal: wrong key, revoked, wrong amount/payee, expired, replayed, weak authentication ...
+    // do not proceed; log the error
+}
+```
+
+`verify` checks, against **your** records: the JWS is `ES256` only (no `none`/`HS256`, no `crit`, no foreign header members), the `kid` is a key you enrolled and confirmed for this customer and is not revoked, the signature is by that key, `aud` is you, the subject, request id and challenge match the request you created, the signed `txn_digest` is the digest of the transaction **you** hold (a changed amount, payee, currency or reference fails), it has not expired, authentication meets your minimum, and the challenge has not been used. Pass a durable `ReplayGuard` (a table with a unique constraint) in production, shared by all your servers.
+
+Polling `client.approvalRequest(requestId:)` is fine for UX, but the only thing you may act on is the verified result.
+
+### Freeze and revocation
+
+* A customer can freeze approvals for everyone or for one business; while frozen, an approval cannot be submitted (only a refusal is accepted; an unanswered request simply expires), and you get `approve.frozen`. Only the customer lifts their own freeze (with Face ID).
+* You can freeze a customer on your side with `client.freezeApprovals(subject:frozen:reason:)` (for example after account takeover signs) and lift only your own freeze.
+* Revoke a key with `client.revokeApprovalKey(kid:reason:)` **and** mark it revoked in your store, since your store is what you verify against. You also receive `approve.key.revoked` when the customer, a device revocation or a disconnect removes a key.
+
+### Privacy
+
+Each customer has a different approval key and `subject_ref` for you; nothing links them to other businesses. Viadere clears displayed details at the terminal state and keeps requests for 400 days; the signed result is kept as evidence. In end-to-end mode Viadere never sees the amount or payee.
+
 
 ## 6. Errors
 

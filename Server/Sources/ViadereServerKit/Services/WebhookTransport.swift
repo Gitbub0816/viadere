@@ -148,7 +148,7 @@ public struct VaporWebhookTransport: WebhookTransport {
         }
     }
 
-    private static func resolve(host: String, port: Int) async throws -> [SocketAddress] {
+    static func resolve(host: String, port: Int) async throws -> [SocketAddress] {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global().async {
                 var hints = addrinfo()

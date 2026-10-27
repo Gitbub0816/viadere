@@ -57,7 +57,7 @@ struct FieldReencryptor {
         try await convert(DashboardUserRecord.self, context: "dashboard_users.email", id: { $0.id }, columns: [\.emailCiphertext])
         try await convert(OrgInviteRecord.self, context: "org_invites.email", id: { $0.id }, columns: [\.emailCiphertext])
         // Webhook delivery bodies were plaintext before they were encrypted.
-        for delivery in try await WebhookDeliveryRecord.query(on: db).all() where !(delivery.body.hasPrefix("v1.") || delivery.body.hasPrefix("v2.")) {
+        for delivery in try await WebhookDeliveryRecord.query(on: db).all() where !FieldCipher.isSealed(delivery.body) {
             delivery.body = try ctx.cipher.seal(delivery.body, context: "webhook_deliveries.body", rowId: delivery.id!)
             try await delivery.update(on: db)
             report.rewritten += 1
@@ -100,7 +100,7 @@ public struct AuditHeadCommand: AsyncCommand {
 
     public func run(using context: CommandContext, signature: Signature) async throws {
         let app = context.application
-        guard let head = try await AuditService.signedHead(on: app.db, key: app.ctx.config.auditChainKey, now: app.ctx.now) else {
+        guard let head = try await AuditService.signedHead(on: app.db, keyring: AuditKeyring(config: app.ctx.config), now: app.ctx.now) else {
             context.console.print("{}")
             return
         }
@@ -122,8 +122,8 @@ public struct AuditVerifyCommand: AsyncCommand {
 
     public func run(using context: CommandContext, signature: Signature) async throws {
         let app = context.application
-        let key = app.ctx.config.auditChainKey
-        let result = try await AuditService.verifyChain(on: app.db, key: key, legacyThroughSeq: app.ctx.config.auditLegacyThroughSeq)
+        let keyring = AuditKeyring(config: app.ctx.config)
+        let result = try await AuditService.verifyChain(on: app.db, keyring: keyring, legacyThroughSeq: app.ctx.config.auditLegacyThroughSeq)
         guard result.valid else {
             context.console.error("Audit chain BROKEN at seq \(result.firstBrokenSeq.map(String.init) ?? "?") after \(result.checked) valid events.")
             throw Abort(.internalServerError)
@@ -131,7 +131,7 @@ public struct AuditVerifyCommand: AsyncCommand {
         if let path = signature.head {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             guard let head = try? JSONDecoder().decode(AuditService.SignedHead.self, from: data),
-                  try await AuditService.verify(head: head, on: app.db, key: key) else {
+                  try await AuditService.verify(head: head, on: app.db, keyring: keyring) else {
                 context.console.error("The exported head does not match the chain (or its MAC is invalid).")
                 throw Abort(.internalServerError)
             }

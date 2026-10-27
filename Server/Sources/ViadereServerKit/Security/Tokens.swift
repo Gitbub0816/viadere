@@ -2,10 +2,16 @@ import Fluent
 import Foundation
 import ViadereCore
 
-/// Business API key format and lifecycle. Keys look like `vdk_live_<43 chars>`; only the SHA-256 is stored.
+/// Business API key format and lifecycle (SEC-API-001..003).
+///
+/// New keys look like `vdk_live_<kid>.<secret>`: `kid` is a non-secret 16-hex key id (indexed, shown in the console and logs) and `secret` is
+/// 256 bits from the CSPRNG (43 base64url characters), shown exactly once. Only the SHA-256 of the whole key is stored (the secret has 256 bits
+/// of entropy, so a fast hash is a sound verifier). Keys issued before key ids existed (`vdk_live_<43 chars>`, no dot) have no `kid` and are
+/// found by their hash exactly as before; they keep working until revoked or rotated.
 enum BusinessAPIKeys {
     static let livePrefix = "vdk_live_"
     static let testPrefix = "vdk_test_"
+    static let kidLength = 16
 
     enum Scope {
         static let interactionsWrite = "interactions:write"
@@ -28,21 +34,85 @@ enum BusinessAPIKeys {
         let record: BusinessAPIKeyRecord
     }
 
+    /// Restrictions fixed when a key is issued.
+    struct Options {
+        var expiresAt: Date?
+        /// CIDR blocks (validated by the caller with `IPNetwork.parseList`); empty = anywhere.
+        var ipAllowlist: [IPNetwork] = []
+        var requiresMTLS = false
+        var certBinding: UUID?
+        var createdBy: UUID?
+        var rotatedFrom: UUID?
+        init(expiresAt: Date? = nil) { self.expiresAt = expiresAt }
+    }
+
     /// `scopes` are the operational scopes of the key; `capabilities` are what it may ever do (SEC-API-003), bounded **at use time**
     /// by the business's entitlements. The default is Tier M (messaging) only: a key never carries approval or verification
     /// capabilities unless the caller names them, and the dashboard only offers what the business is entitled to.
     static func issue(businessId: UUID, name: String, live: Bool, scopes: [String], capabilities: [Capability] = Capability.messaging,
-                      now: Date, expiresAt: Date? = nil, on db: any Database) async throws -> Issued {
-        let key = (live ? livePrefix : testPrefix) + SecureToken.generate(byteCount: 32)
-        let record = BusinessAPIKeyRecord(businessId: businessId, keyHash: SecureToken.hash(key), prefix: live ? livePrefix : testPrefix,
-                                          last4: String(key.suffix(4)), name: String(name.prefix(64)), scopes: scopes,
-                                          capabilities: capabilities, now: now, expiresAt: expiresAt)
-        try await record.create(on: db)
-        return Issued(key: key, record: record)
+                      now: Date, expiresAt: Date? = nil, options: Options? = nil, on db: any Database) async throws -> Issued {
+        var options = options ?? Options()
+        if let expiresAt { options.expiresAt = expiresAt }
+        let prefix = live ? livePrefix : testPrefix
+        // A key id collision (2^-64 per pair) is retried against the unique index.
+        for _ in 0..<5 {
+            let kid = SecureToken.randomBytes(8).map { String(format: "%02x", $0) }.joined()
+            let key = prefix + kid + "." + SecureToken.generate(byteCount: 32)
+            let record = BusinessAPIKeyRecord(businessId: businessId, keyHash: SecureToken.hash(key), prefix: prefix, last4: String(key.suffix(4)),
+                                              name: String(name.prefix(64)), scopes: scopes, capabilities: capabilities, now: now, expiresAt: options.expiresAt)
+            record.kid = kid
+            record.ipAllowlist = options.ipAllowlist.isEmpty ? nil : options.ipAllowlist.map(\.description).joined(separator: ",")
+            record.requiresMTLS = options.requiresMTLS
+            record.certBinding = options.certBinding
+            record.createdBy = options.createdBy
+            record.rotatedFrom = options.rotatedFrom
+            do {
+                try await record.create(on: db)
+                return Issued(key: key, record: record)
+            } catch {
+                if error.isConstraintViolation { continue }
+                throw error
+            }
+        }
+        throw APIError.internalError
     }
 
-    static func looksLikeKey(_ token: String) -> Bool {
-        (token.hasPrefix(livePrefix) || token.hasPrefix(testPrefix)) && token.count <= 80
+    /// `(prefix, kid or nil, whole token)` for a well-formed key, else `nil`.
+    struct Parsed {
+        var prefix: String
+        var kid: String?
+        var token: String
+    }
+
+    static func parse(_ token: String) -> Parsed? {
+        guard token.count <= 80 else { return nil }
+        for prefix in [livePrefix, testPrefix] where token.hasPrefix(prefix) {
+            let rest = token.dropFirst(prefix.count)
+            guard !rest.isEmpty, rest.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ".") }) else { return nil }
+            if let dot = rest.firstIndex(of: ".") {
+                let kid = String(rest[rest.startIndex..<dot])
+                let secret = rest[rest.index(after: dot)...]
+                guard kid.count == kidLength, kid.allSatisfy(\.isHexDigit), secret.count == 43, !secret.contains(".") else { return nil }
+                return Parsed(prefix: prefix, kid: kid, token: token)
+            }
+            return Parsed(prefix: prefix, kid: nil, token: token)
+        }
+        return nil
+    }
+
+    static func looksLikeKey(_ token: String) -> Bool { parse(token) != nil }
+
+    /// The key record a presented token names, **after** the secret was verified in constant time. Does not check revocation or expiry.
+    static func record(for parsed: Parsed, on db: any Database) async throws -> BusinessAPIKeyRecord? {
+        let hash = SecureToken.hash(parsed.token)
+        let found: BusinessAPIKeyRecord?
+        if let kid = parsed.kid {
+            found = try await BusinessAPIKeyRecord.query(on: db).filter(\.$kid == kid).first()
+        } else {
+            found = try await BusinessAPIKeyRecord.query(on: db).filter(\.$keyHash == hash).first()
+        }
+        guard let found, SecureToken.matches(parsed.token, hash: found.keyHash), found.prefix == parsed.prefix else { return nil }
+        return found
     }
 }
 

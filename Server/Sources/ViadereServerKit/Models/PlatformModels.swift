@@ -70,6 +70,14 @@ final class DashboardSessionRecord: Model, @unchecked Sendable {
     /// Last passkey assertion (login or re-authentication).
     @OptionalField(key: "reauth_at") var reauthAt: Date?
     @OptionalField(key: "revoked_at") var revokedAt: Date?
+    /// Hashed address/agent of the sign-in (session inventory and suspicious-login detection); never the raw values.
+    @OptionalField(key: "ip_hash") var ipHash: String?
+    /// The address with its host part removed (IPv4 /24, IPv6 /48), shown in the session inventory.
+    @OptionalField(key: "ip_masked") var ipMasked: String?
+    @OptionalField(key: "ua_hash") var uaHash: String?
+    /// A short, fixed-vocabulary description such as "Safari on macOS".
+    @OptionalField(key: "ua_label") var uaLabel: String?
+    @OptionalField(key: "country") var country: String?
 
     init() {}
 }

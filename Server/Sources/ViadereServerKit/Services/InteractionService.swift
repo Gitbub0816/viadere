@@ -76,8 +76,10 @@ struct InteractionService {
         if let existing = try await existing(businessId: principal.businessId, key: request.idempotencyKey) {
             return try replay(existing, requestHash: requestHash)
         }
-        // Defence in depth behind the API-key middleware: only a verified business may issue.
-        guard let business = try await BusinessRecord.find(principal.businessId.uuid, on: db), business.isVerified else {
+        // Defence in depth behind the API-key middleware: a verified business may issue (live traffic needs approved go-live), and a business
+        // still being onboarded may issue sandbox traffic once its domain control is verified.
+        guard let business = try await BusinessRecord.find(principal.businessId.uuid, on: db),
+              try await OnboardingGate.allows(business: business, livemode: principal.livemode, on: db) else {
             throw APIError(.forbidden, .forbidden, "This business is not currently active.")
         }
         let controls = try await BusinessControls.load(principal.businessId.uuid, on: db)
@@ -166,7 +168,7 @@ struct InteractionService {
         let used = try await InteractionRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid)
             .filter(\.$livemode == true).filter(\.$createdAt >= dayStart).count()
         // A throttled business (abuse thresholds or operator) gets a fraction of its quota; the tier only sets the base.
-        let quota = Int((Double(business.dailyQuota) * BusinessControls.throttleFactor(controls, settings: ctx.config.abuse)).rounded(.down))
+        let quota = Int((Double(business.dailyQuota) * BusinessControls.throttleFactor(controls, settings: await AbuseService(db: db, ctx: ctx).thresholds())).rounded(.down))
         if used >= quota {
             let retry = Int(dayStart.addingTimeInterval(86_400).timeIntervalSince(now))
             throw APIError(.tooManyRequests, .rateLimited, "Daily interaction quota exceeded.",

@@ -330,6 +330,17 @@ sheets (registration, assertion, picker, one-time codes) against real relying pa
 state and `replaceCredentialIdentities`; the `ASExtensionError` codes and `ASPasskeyCredentialRequest` property names; the camera scanner;
 two-device pairing; the iOS 26 Credential Exchange types; whether `SecureEnclave.P256` HPKE conformance could replace the Keychain agreement key.
 
+## Approve v2 (WP1): pairwise keys, E2EE requests, key directory
+
+`ViadereKit/ApproveV2` and `App/Viadere/Features/Approve`. Wire formats: `docs/SECURITY.md` 2.50 to 2.58. The feature is closed (and says so) unless the build pins the transparency-log public key: set `VIADERE_KEY_DIRECTORY_LOG_KEYS` in `Configs/*.xcconfig` (Info.plist key `ViadereKeyDirectoryLogKeys`, comma separated, public keys only; `ViadereServer key-directory-log-key` prints it).
+
+* **Keys.** One Secure Enclave approval key per business relationship (`.biometryCurrentSet` for high and critical capabilities, `.userPresence` otherwise; app-only access group `ViadereApprovalKeychainAccessGroup`, `ThisDeviceOnly`) and one HPKE key in the Keychain (`WhenUnlockedThisDeviceOnly`, never synced). Nothing derives from the device or account keys, so businesses cannot correlate them. `AppleApprovalKeyVault` wraps `SecureEnclaveKeyStore` with a per-enrollment tag prefix.
+* **Enrollment** (`ApproveEnrollmentSheet`, from a `https://viadere.com/a/{CODE}?rk=` link, QR or typed code): shows the verified business, the protection and the business root fingerprint, then signs the enrollment statement with the new key (Face ID) and waits for the business's confirmation. The key becomes active only after the phone verifies that confirmation against the transparency log and finds its own statement digest in it; otherwise the keys are deleted and revoked and the person is told.
+* **Requests** (`ApproveRequestSheet`): decrypted and verified on the phone (published business signing key, business, customer, key, request id, expiry) before anything is shown; anything that fails is hidden and listed under "Waiting for you" as a failed check. The sheet says whether the request was checked end to end or was passed on by Viadere in the clear (`server_visible`). Deny is as prominent as Approve; Face ID reads "Approve $X to Y". Prompt fatigue: warning from the third request in an hour (the relay's count or the phone's own), Approve disabled until "I started this myself" is tapped, and "Report suspicious request" signs a report.
+* **Directory pinning** (`BusinessDirectoryClient`): first contact pins the business root (out of band when the link carried `rk`); a valid root succession blocks that business and shows both fingerprints (Settings, Approvals) until the person confirms; a contradicted history blocks it until the person forgets the business; a log that shrinks, forks or goes stale is refused.
+* **Freeze:** Settings, Approvals (account) and the business page (one business). Freezing needs no Face ID; turning it off needs Face ID on a trusted device.
+* **Tests:** `Packages/ViadereKit/Tests/ViadereKitTests/ApproveV2Tests.swift` runs the real flows against an in-memory relay and log, including relay key substitution, a forged confirmation, a root change, a forked log, a rolled-back head, a request signed by an unpublished key and result verification by the business.
+
 ## Not verified by compilation
 
 This repository was authored on Linux, where there is no Xcode or iOS SDK. **Everything under `Packages/ViadereKit`
@@ -345,6 +356,7 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
 5. `@Observable` view models (compile on Linux as plain classes because Observation does not link there).
 6. Verify (WP3): `Features/Verify/*`, `PassKitWalletIdentity` (`PKIdentityAuthorizationController`, `PKIdentityError` codes) and the DiditSDK launcher
    (`DiditSdk.shared.startVerification(token:)`, `.diditVerification`); the DiditSDK package requirement and the entitlement are untested here.
+7. Approve v2 (WP1): `Features/Approve/*` (syntax-parsed only), `ApproveV2/AppleApprovalKeyVault.swift` (per-enrollment Secure Enclave tags through `SecureEnclaveKeyStore`, Keychain HPKE key) and `ApproveEnvironment.live`; the `VIADERE_KEY_DIRECTORY_LOG_KEYS` xcconfig-to-Info.plist substitution.
 7. Passkeys inside an App Clip, Live Activity push-to-start, the Dynamic Island layout, and the content-extension card.
 7. XcodeGen spec details (extension embedding, on-demand-install-capable type, watch embedding).
 8. P3 UI: everything under `Features/Rewards`, `Activity`, `Wallet`, `Household`, `Consent`, the reworked widget, and the

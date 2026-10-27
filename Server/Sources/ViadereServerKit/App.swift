@@ -59,6 +59,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         passPush = sender
     }
     let email: any EmailSender
+    let domains: any DomainChecker = overrides.domainChecker ?? NetworkDomainChecker(client: app.client, allowInsecure: config.allowInsecureWebhookURLs)
     if let override = overrides.emailSender { email = override } else if let emailConfig = config.email {
         email = HTTPEmailSender(config: emailConfig, client: app.client)
     } else {
@@ -70,7 +71,8 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms, passkeys: passkeys, webhookTransport: transport,
                             rateLimitStore: rateStore, rcs: rcs,
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
-                            integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email)
+                            integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
+                            domains: domains)
 
     // MARK: Database
     if let url = config.databaseURL {
@@ -91,13 +93,22 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     app.http.server.configuration.supportPipelining = false
     app.middleware = Middlewares()
     app.middleware.use(SecurityHeadersMiddleware())
+    app.middleware.use(MetricsMiddleware())
     app.middleware.use(RequestLoggingMiddleware())
+    // Origin lock (G-10): before routing, authentication and any database access. It answers 421 itself, so it sits outside the error mapper.
+    app.middleware.use(EdgeLockMiddleware())
     app.middleware.use(APIErrorMiddleware())
+    // Operator switches: read-only mode (G-1) and sign-up stops (G-15).
+    app.middleware.use(MaintenanceMiddleware())
+    app.middleware.use(SignupGateMiddleware())
     app.middleware.use(CORSLockdownMiddleware())
     app.middleware.use(GlobalRateLimitMiddleware())
     app.middleware.use(RequestGuardMiddleware())
     try Routes.register(app)
 
+    if let port = config.operations.metricsPort {
+        app.lifecycle.use(InternalMetricsServer(port: port) { [app] in await MetricsService(db: app.db, ctx: app.ctx).render() })
+    }
     if config.runBackgroundJobs { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
 }
 
@@ -115,12 +126,15 @@ public struct Overrides: Sendable {
     public var passPush: (any PassPushSender)?
     public var integrity: (any DeviceIntegrityVerifier)?
     public var emailSender: (any EmailSender)?
+    /// Domain checks for onboarding (DNS TXT and well-known file). `nil` = the network checker.
+    public var domainChecker: (any DomainChecker)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,
                 rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false,
                 passSigner: (any PassSigner)? = nil, passPush: (any PassPushSender)? = nil,
-                integrity: (any DeviceIntegrityVerifier)? = nil, emailSender: (any EmailSender)? = nil) {
+                integrity: (any DeviceIntegrityVerifier)? = nil, emailSender: (any EmailSender)? = nil,
+                domainChecker: (any DomainChecker)? = nil) {
         self.clock = clock
         self.apns = apns
         self.sms = sms
@@ -133,6 +147,7 @@ public struct Overrides: Sendable {
         self.passPush = passPush
         self.integrity = integrity
         self.emailSender = emailSender
+        self.domainChecker = domainChecker
     }
 }
 

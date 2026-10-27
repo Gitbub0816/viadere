@@ -78,7 +78,9 @@ struct PolicyService {
             unavailable = true
             ctx.logger.error("policy state unavailable", metadata: ["type": "\(type(of: error))"])
         }
-        return BusinessPolicyFacts(active: business?.isVerified == true, tiers: entitlements.tiers, entitlements: entitlements.capabilities,
+        var active = false
+        if let business { active = try await OnboardingGate.allows(business: business, livemode: principal.livemode, on: db) }
+        return BusinessPolicyFacts(active: active, tiers: entitlements.tiers, entitlements: entitlements.capabilities,
                                    keyScopes: principal.capabilities, keyEnvironment: principal.livemode ? .live : .test,
                                    disabled: disabled, switchesUnavailable: unavailable, rules: rules)
     }

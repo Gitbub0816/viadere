@@ -297,6 +297,33 @@ The server is a verifying store for the Authenticator's end-to-end encrypted vau
 
 Limits per account per hour: writes 120 (burst 30), reads 1,200, joins 30, recovery envelope 5; 16 devices, 2,000 items, 32 KiB per blob, 16 MiB per vault. Security notices (`vaultDeviceAdded`, `vaultDeviceRemoved`, `vaultDeleted`) and audit events (`vault.created`, `vault.updated`, `vault.device_removed`, `vault.deleted`, `vault.recovery_envelope_fetched`: counts and ids only). Account deletion wipes the vault whether or not the gate is on.
 
+### Approve v2, business key directory and E2EE (WP1; `APPROVE_V2_ENABLED`, default off in staging and production)
+
+Pairwise per-business approval keys with business-authorized enrollment, signed audience-bound results the business verifies itself, an authenticated key directory (business root key, root-signed statements, Merkle transparency log with signed tree heads), HPKE end-to-end requests and the opaque webhook v2 envelope. Wire formats, canonicalization and threat rows: `docs/SECURITY.md` sections 2.50 to 2.58. Integration guide with a full example: `docs/BUSINESS-INTEGRATION.md` section 5c.
+
+| Variable | Purpose |
+|---|---|
+| `APPROVE_V2_ENABLED` | `true`/`false`. Default `false` in `staging`/`production` (the Phase 2 independent assessment must pass first), `true` in development and tests. `false` is also the kill switch: every route below answers `404`; keys and the log are untouched. |
+| `KEY_DIRECTORY_LOG_KEY` | base64url 32-byte P-256 private scalar of the transparency log's signing key. **Required** when Approve v2 is enabled with a database (an ephemeral key would orphan every signed tree head). Interim until KMS (ADR-03); never log it. |
+| `KEY_DIRECTORY_LOG_ID` | optional log identifier (default `viadere.key-directory.v1`); part of every signed tree head. |
+
+`ViadereServer key-directory-log-key` prints the log's **public** key. Put it in the app build (`VIADERE_KEY_DIRECTORY_LOG_KEYS` in `App/Configs`) and give it to businesses for `viadere-key-monitor`.
+
+| Route | Auth | Notes |
+|---|---|---|
+| `POST /v1/business/approve/enrollments` · `GET .../{id}` · `POST .../{id}/confirm` · `POST .../{id}/cancel` | API key `approvals:manage` + capability | single-use 8-character code (40 bits), 10 minutes by default, 3 open per relationship; the business verifies the device's statement and signs a confirmation |
+| `POST /v1/approve/enrollments/lookup` · `POST /v1/approve/enrollments/{id}/complete` | device | lookup answers the same `404` for a wrong, expired or another customer's code; rate limited per consumer and globally |
+| `GET /v1/approve/keys` · `POST /v1/approve/keys/{kid}/revoke` | device | the customer's keys; revoking also notifies the business (`approve.key.revoked`) |
+| `GET /v1/business/approve/keys?subject_ref=` · `POST .../{kid}/revoke` | API key | reconciliation only; businesses authorize against their own store |
+| `POST /v1/business/approve/requests` · `GET .../{requestId}` · `POST .../{requestId}/cancel` | API key | end to end (`envelopes`) or server visible; idempotent on `request_id`; prompt-fatigue policy enforced |
+| `GET /v1/approve/requests` · `GET .../{id}` · `POST .../{id}/result` | device | the relay verifies the JWS with the stored key and rejects a frozen, expired, replayed or cool-down request |
+| `GET /v1/business/approve/results/{resultRef}` | API key | recipient-bound; the signed JWS. The `status` of a request is never sufficient |
+| `GET/POST /v1/approve/freeze` · `POST /v1/business/approve/freeze` | device / API key | customer freeze (account or relationship): freezing is one signed request, lifting needs a trusted device and a fresh biometric proof; a business lifts only its own |
+| `GET /v1/key-directory/sth` · `/consistency` · `/businesses/{id}` | none (rate limited per IP) | public; clients verify everything |
+| `POST/GET /v1/business/key-directory/entries` | API key `keydirectory:manage` | publish a signed entry; read your own with proofs |
+
+Storage: `kd_log_entries` and `kd_tree_heads` are append-only (database triggers refuse `UPDATE`/`DELETE`); the log is appended under a database advisory lock and the tree is cached in memory per process (rebuilt from the table; a scaling item). Displayed details and challenges are cleared when a request reaches a terminal state and requests are purged after 400 days. Webhook subscriptions can opt into the opaque v2 envelope (`envelopeVersion: "2026-10-27"`): ids only, with `Viadere-Delivery-Id` and a versioned `Viadere-Key-Id`. Background jobs expire due requests and enrollments. Security notices: freeze, key revoked, root change, enrollment completed, substitution suspected.
+
 ### Verify: age thresholds and identity attributes (WP3; `VERIFY_ENABLED`, default off)
 
 `POST /v1/verification-requests` (business, capability-gated, idempotent) creates a request the customer sees in the app; the customer
@@ -390,6 +417,8 @@ Policy (WP2): `contact.reachable`, `consent.request`, `age.minimum` and `identit
 rotation has no tooling (clear `relationships.subject_ref`, the job re-derives, businesses must re-fetch references); the `consumerReference`
 pseudonym is deprecated but still returned; a denial is audited on every attempt, so a flooding compromised key also floods the audit chain (the
 per-business API rate limit bounds it).
+
+Approve v2 (WP1): the log key is an environment secret until KMS (ADR-03); the Merkle tree is rebuilt in memory per process; root registration is authenticated only by the `keydirectory:manage` scope (domain/entity proof comes with the WP6 onboarding); the relay can omit trailing entries of a single business until a monitor or a later head exposes it; the Secure Enclave key origin is not attested to the business; `DecisionPayload` v2 (notification-driven interactions) is unchanged and does not use pairwise keys.
 
 ## Security operations
 

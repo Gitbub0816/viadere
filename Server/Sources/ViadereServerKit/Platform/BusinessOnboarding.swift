@@ -48,6 +48,7 @@ struct BusinessOnboarding {
         membership.role = OrgRole.owner.rawValue
         membership.createdAt = now
         try await membership.create(on: db)
+        try await OnboardingService.create(businessId: businessId, category: category.rawValue, now: now, on: db)
         _ = try await AuditService(db: db, ctx: ctx).record("organization.applied", actor: AuditActor(kind: .business, id: ownerId.uuidString.lowercased()),
             businessId: BusinessID(businessId), subjectType: "organization", subjectId: businessId.uuidString.lowercased())
         return business
@@ -107,6 +108,7 @@ struct BusinessOnboarding {
             application.reviewedBy = operatorId
             application.decisionNote = note.map { String($0.prefix(500)) }
             try await application.update(on: tx)
+            try await OnboardingService(db: tx, ctx: ctx).identityVerified(businessId: businessId, operatorId: operatorId)
             _ = try await AuditService(db: tx, ctx: ctx).record("business.verified", actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()),
                 businessId: BusinessID(businessId), subjectType: "organization", subjectId: businessId.uuidString.lowercased())
             business.verificationStatus = VerificationStatus.verified.rawValue
@@ -157,6 +159,15 @@ struct BusinessOnboarding {
                 actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()), businessId: BusinessID(businessId),
                 subjectType: "organization", subjectId: businessId.uuidString.lowercased(), metadata: ["pending_cancelled": String(pending.count)])
         }
+        ctx.metrics.count(.businessSuspended)
+        await Notifier(db: db, ctx: ctx).notifyBusiness(businessId, roles: [.owner, .orgAdmin, .securityAdmin], subject: "Your Viadere organization was suspended",
+            text: """
+            Viadere suspended your organization. API keys and interactions are blocked until it is reinstated.
+
+            Reason: \(String(reason.prefix(300)))
+
+            You can appeal in the console under Support, or reply to this message through the Support section.
+            """, kind: "suspension")
     }
 
     func unsuspend(businessId: UUID, operatorId: UUID) async throws {

@@ -12,12 +12,16 @@ public struct ConnectContext: Codable, Sendable, Hashable {
     public var issuedAt: Date
     /// Optional expiry; expired contexts are ignored (the plain code still works).
     public var expiresAt: Date?
+    /// Id of the server signing key that signed this context (`CONNECT_LINK_SIGNING_KEY_ID`), so a key can be rotated while links signed under
+    /// the previous one stay valid. Covered by the signature. `nil` on links signed before key ids existed.
+    public var keyId: String?
 
-    public init(campaign: String? = nil, action: String? = nil, issuedAt: Date, expiresAt: Date? = nil) {
+    public init(campaign: String? = nil, action: String? = nil, issuedAt: Date, expiresAt: Date? = nil, keyId: String? = nil) {
         self.campaign = campaign
         self.action = action
         self.issuedAt = ViadereDate.truncatedToMilliseconds(issuedAt)
         self.expiresAt = expiresAt.map(ViadereDate.truncatedToMilliseconds)
+        self.keyId = keyId
     }
 
     func canonicalJSON() throws -> Data {
@@ -25,13 +29,14 @@ public struct ConnectContext: Codable, Sendable, Hashable {
         if let campaign { object["cmp"] = .string(campaign) }
         if let action { object["act"] = .string(action) }
         if let expiresAt { object["exp"] = .string(ViadereDate.format(expiresAt)) }
+        if let keyId { object["kid"] = .string(keyId) }
         return try CanonicalJSON.serialize(.object(object))
     }
 
     static func fromCanonicalJSON(_ data: Data) -> ConnectContext? {
         guard case .object(let object)? = try? JSONDecoder().decode(JSONValue.self, from: data),
               let iatString = object["iat"]?.stringValue, let iat = ViadereDate.parse(iatString) else { return nil }
-        let allowed: Set<String> = ["iat", "cmp", "act", "exp"]
+        let allowed: Set<String> = ["iat", "cmp", "act", "exp", "kid"]
         guard Set(object.keys).isSubset(of: allowed) else { return nil }
         var exp: Date?
         if let value = object["exp"] {
@@ -42,7 +47,9 @@ public struct ConnectContext: Codable, Sendable, Hashable {
         let action = object["act"]?.stringValue
         if object["cmp"] != nil && campaign == nil { return nil }
         if object["act"] != nil && action == nil { return nil }
-        return ConnectContext(campaign: campaign, action: action, issuedAt: iat, expiresAt: exp)
+        let keyId = object["kid"]?.stringValue
+        if object["kid"] != nil && (keyId == nil || keyId?.isEmpty == true || (keyId?.count ?? 0) > 16) { return nil }
+        return ConnectContext(campaign: campaign, action: action, issuedAt: iat, expiresAt: exp, keyId: keyId)
     }
 }
 
@@ -174,6 +181,12 @@ public struct ConnectLink: Sendable, Hashable {
         self.code = code
         self.context = context
         self.signature = signature
+    }
+
+    /// The key id the (still **unverified**) context names, for choosing which key to verify with. Never trust anything else in it.
+    public var claimedKeyId: String? {
+        guard let context, let data = Base64URL.decode(context) else { return nil }
+        return ConnectContext.fromCanonicalJSON(data)?.keyId
     }
 
     /// Verifies `sig` with the server key and decodes the context.

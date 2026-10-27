@@ -121,6 +121,22 @@ final class BusinessAPIKeyRecord: Model, @unchecked Sendable {
     @OptionalField(key: "last_used_at") var lastUsedAt: Date?
     @OptionalField(key: "expires_at") var expiresAt: Date?
     @OptionalField(key: "revoked_at") var revokedAt: Date?
+    /// Non-secret key id (`vdk_live_<kid>.<secret>`); `nil` for keys issued before key ids existed (looked up by hash).
+    @OptionalField(key: "kid") var kid: String?
+    /// Comma-separated CIDR blocks the key may be used from; `nil` or empty = anywhere.
+    @OptionalField(key: "ip_allowlist") var ipAllowlist: String?
+    /// Versioned peppered hash of the address of the last request (SEC-API-003 "last used").
+    @OptionalField(key: "last_used_ip_hash") var lastUsedIPHash: String?
+    /// Overlap rotation: the key stops working at this time and the sweep then stamps `revoked_at`.
+    @OptionalField(key: "auto_revoke_at") var autoRevokeAt: Date?
+    @OptionalField(key: "rotated_to") var rotatedTo: UUID?
+    @OptionalField(key: "rotated_from") var rotatedFrom: UUID?
+    /// Tier E: the key works only on a connection that presented a client certificate the tenant bound (any active one, or `cert_binding`).
+    @Field(key: "requires_mtls") var requiresMTLS: Bool
+    @OptionalField(key: "cert_binding") var certBinding: UUID?
+    @OptionalField(key: "created_by") var createdBy: UUID?
+    @OptionalField(key: "revoked_by") var revokedBy: String?
+    @OptionalField(key: "revoke_reason") var revokeReason: String?
 
     init() {}
 
@@ -136,9 +152,15 @@ final class BusinessAPIKeyRecord: Model, @unchecked Sendable {
         self.capabilities = Set(capabilities.filter(\.isKnown).map(\.rawValue)).sorted().joined(separator: ",")
         createdAt = now
         self.expiresAt = expiresAt
+        requiresMTLS = false
     }
 
     var scopeSet: Set<String> { Set(scopes.split(separator: ",").map(String.init)) }
     var capabilitySet: Set<Capability> { Set(capabilities.split(separator: ",").map { Capability(rawValue: String($0)) }.filter(\.isKnown)) }
     var livemode: Bool { prefix == BusinessAPIKeys.livePrefix }
+
+    /// Not revoked, not expired and not past the end of its rotation overlap.
+    func isUsable(at now: Date) -> Bool {
+        revokedAt == nil && (expiresAt ?? .distantFuture) > now && (autoRevokeAt ?? .distantFuture) > now
+    }
 }

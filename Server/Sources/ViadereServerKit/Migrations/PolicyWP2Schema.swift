@@ -123,7 +123,10 @@ struct CreatePolicyWP2Schema: AsyncMigration {
 
         let messagingScopes: Set<String> = [BusinessAPIKeys.Scope.interactionsWrite, BusinessAPIKeys.Scope.interactionsRead,
                                             BusinessAPIKeys.Scope.messagesWrite, BusinessAPIKeys.Scope.statusesWrite]
-        for key in try await BusinessAPIKeyRecord.query(on: db).filter(\.$capabilities == "").all() {
+        // A fresh database has no keys; a model query would also select columns that later migrations (WP6) add, so look first.
+        struct KeyCount: Decodable { var c: Int }
+        let keyCount = try await sql.raw("SELECT COUNT(*) AS c FROM business_api_keys").first(decoding: KeyCount.self)?.c ?? 0
+        for key in keyCount == 0 ? [] : try await BusinessAPIKeyRecord.query(on: db).filter(\.$capabilities == "").all() {
             let scopes = key.scopeSet
             guard !scopes.isDisjoint(with: messagingScopes) else { continue }
             var capabilities = Set(Capability.messaging)

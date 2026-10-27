@@ -15,8 +15,8 @@ actor FakeRelay: ApproveAPI {
     let subject = SubjectRef("sub_" + Base64URL.encode(Data(repeating: 7, count: 32)))!
     let logKey: SoftwareP256SigningKey
     var root = SoftwareP256SigningKey()
-    let confirmationKey = SoftwareP256SigningKey()
-    let requestKey = SoftwareP256SigningKey()
+    var confirmationKey = SoftwareP256SigningKey()
+    var requestKey = SoftwareP256SigningKey()
     let summary: BusinessSummary
     var tree = MerkleTree()
     var entries: [(entry: KeyLogEntry, bytes: Data)] = []
@@ -74,6 +74,9 @@ actor FakeRelay: ApproveAPI {
         let succession = RootSuccession(businessId: businessId, oldRootKid: rootKid, newPublicKey: next.publicKey, createdAt: now)
         try append(try await KeyLogEntry.sign(.succession(succession), rootKey: root, newRootKey: next))
         root = next
+        // Keys of the old root are not inherited, and a published key can never be published again: the new root brings its own.
+        confirmationKey = SoftwareP256SigningKey()
+        requestKey = SoftwareP256SigningKey()
         try await publishOperationalKeys()
     }
 

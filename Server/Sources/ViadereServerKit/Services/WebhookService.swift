@@ -152,7 +152,7 @@ struct WebhookService {
 
     /// The exact body bytes of a delivery. Rows written before bodies were encrypted hold plaintext JSON; they are read as-is.
     func storedBody(_ delivery: WebhookDeliveryRecord) -> Data? {
-        if delivery.body.hasPrefix("v1.") || delivery.body.hasPrefix("v2.") {
+        if FieldCipher.isSealed(delivery.body) {
             return try? ctx.cipher.open(delivery.body, context: "webhook_deliveries.body", rowId: delivery.id!)
         }
         return Data(delivery.body.utf8)

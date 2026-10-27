@@ -40,6 +40,8 @@ final class AuditEventRecord: Model, @unchecked Sendable {
     @Field(key: "hash") var hash: String
     /// 1 = legacy unkeyed SHA-256; 2 = HMAC-SHA256 under `AUDIT_CHAIN_KEY` with the row id in the hashed content.
     @Field(key: "chain_version") var chainVersion: Int
+    /// The `AUDIT_CHAIN_KEY` epoch that authenticates this event (chain version 3 and later; `nil` = epoch 1).
+    @OptionalField(key: "key_epoch") var keyEpoch: Int?
 
     init() {}
 }
@@ -162,8 +164,20 @@ final class WebhookSubscriptionRecord: Model, @unchecked Sendable {
     @OptionalField(key: "envelope_version") var envelopeVersion: String?
     /// Version of the current signing secret (1, then +1 at every rotation); part of the `Viadere-Key-Id` header.
     @Field(key: "secret_version") var secretVersion: Int
+    /// Ownership of the endpoint was proven by a challenge response (WP6). Until then it receives nothing but the challenge.
+    @OptionalField(key: "verified_at") var verifiedAt: Date?
+    /// SHA-256 of the outstanding challenge (single use); the challenge itself is only in the request we sent.
+    @OptionalField(key: "verification_challenge_hash") var verificationChallengeHash: String?
+    @OptionalField(key: "verification_expires_at") var verificationExpiresAt: Date?
+    @OptionalField(key: "last_verify_error") var lastVerifyError: String?
+    /// Paused endpoints keep their queued deliveries but receive none (ops gap G-5).
+    @OptionalField(key: "paused_at") var pausedAt: Date?
+    @OptionalField(key: "paused_by") var pausedBy: String?
+    @OptionalField(key: "pause_reason") var pauseReason: String?
 
     init() {}
+
+    var isPaused: Bool { pausedAt != nil }
 }
 
 final class WebhookDeliveryRecord: Model, @unchecked Sendable {

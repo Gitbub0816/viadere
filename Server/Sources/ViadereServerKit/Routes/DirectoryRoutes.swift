@@ -53,7 +53,7 @@ enum DirectoryRoutes {
                 throw APIError.notFound
             }
             // A signed context is honoured only if its HMAC verifies and it has not expired; otherwise the plain code still resolves.
-            let context = try? link.verifiedContext(key: req.ctx.config.connectLinkKey, now: req.ctx.now)
+            let context = try? req.ctx.connectKeys.verifiedContext(of: link, now: req.ctx.now)
             return DirectoryResolveResponse(method: .link, matches: [summary], context: context)
         case .handle(let handle):
             guard let business = try await directory.verified(handle: handle), let summary = try await directory.summary(for: business) else {

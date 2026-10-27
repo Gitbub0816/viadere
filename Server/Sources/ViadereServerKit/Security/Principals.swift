@@ -172,41 +172,97 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
 }
 
 /// Business API key authentication (`AuthRequirement.businessAPIKey`) with per-business rate limiting.
+///
+/// Order of checks (each failure is the same `401` for an unknown, revoked, expired or restricted key, so a probe learns nothing): well-formed
+/// key, key id lookup and constant-time secret check, revoked/expired/end of rotation overlap, business state and onboarding (a live key needs
+/// approved go-live; a test key works once domain control is verified), the key's IP allow-list, Tier E client-certificate binding, then scope.
 struct BusinessAPIKeyMiddleware: AsyncMiddleware {
     let requiredScope: String?
 
     func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
         let ctx = request.ctx
         let db = request.db
-        guard let token = request.bearerToken, BusinessAPIKeys.looksLikeKey(token) else { throw APIError.unauthorized }
-        let hash = SecureToken.hash(token)
+        guard let token = request.bearerToken, let parsed = BusinessAPIKeys.parse(token) else { throw APIError.unauthorized }
         let now = ctx.now
-        guard let key = try await BusinessAPIKeyRecord.query(on: db).filter(\.$keyHash == hash).first(),
-              SecureToken.matches(token, hash: key.keyHash), key.revokedAt == nil, (key.expiresAt ?? .distantFuture) > now,
-              let business = try await BusinessRecord.find(key.businessId, on: db) else { throw APIError.unauthorized }
-        // Suspended or revoked businesses lose API access immediately.
-        guard business.isVerified else { throw APIError(.forbidden, .forbidden, "This business is not currently active.") }
+        guard let key = try await BusinessAPIKeys.record(for: parsed, on: db), key.isUsable(at: now),
+              let business = try await BusinessRecord.find(key.businessId, on: db) else {
+            ctx.metrics.count(.apiKeyRejected)
+            throw APIError.unauthorized
+        }
+        // Suspended or revoked businesses lose API access immediately. A business that is still being onboarded may use its sandbox (test)
+        // keys once its domain control is verified; a live key additionally needs the approved go-live (the row is created with the business;
+        // a business without one predates onboarding and is judged by its status alone).
+        guard try await OnboardingGate.allows(business: business, livemode: key.livemode, on: db) else {
+            throw APIError(.forbidden, .forbidden, "This business is not currently active.")
+        }
+        let edge = request.edge
+        let clientIP = ClientIP.rawAddress(request, trustedProxies: ctx.config.trustedProxyCount)
+        // Per-key IP allow-list (SEC-API-003).
+        if let list = key.ipAllowlist, !list.isEmpty {
+            let networks = IPNetwork.parseList(list) ?? []
+            if networks.isEmpty || !IPNetwork.allows(clientIP, in: networks) {
+                ctx.metrics.count(.apiKeyIPDenied)
+                await Self.auditDenied("apikey.ip_denied", key: key, ctx: ctx, db: db, metadata: ["source": IPNetwork.masked(clientIP)])
+                throw APIError.unauthorized
+            }
+        }
+        // Tier E: a certificate-bound key is useless without the verified client certificate it is bound to.
+        let settings = try await BusinessSecuritySettingsRecord.query(on: db).filter(\.$businessId == key.businessId).first()
+        if key.requiresMTLS || settings?.mtlsRequired == true {
+            guard try await MTLSCertificates(db: db, ctx: ctx).permits(businessId: key.businessId, certBinding: key.certBinding, edge: edge) else {
+                ctx.metrics.count(.apiKeyMTLSDenied)
+                await Self.auditDenied("apikey.mtls_denied", key: key, ctx: ctx, db: db, metadata: ["edge_verified": edge.viaEdge ? "true" : "false",
+                                                                                                     "cert_presented": edge.clientCertFingerprint == nil ? "false" : "true"])
+                throw APIError.unauthorized
+            }
+        }
         if let required = requiredScope, !key.scopeSet.contains(required) {
             throw APIError(.forbidden, .insufficientScope, "This API key does not have the required scope.", details: ["scope": required])
         }
         // A throttled business gets a fraction of its API rate; every rate-limit hit is counted for abuse review.
         let controls = try await BusinessControls.load(key.businessId, on: db)
-        let factor = BusinessControls.throttleFactor(controls, settings: ctx.config.abuse)
+        let factor = BusinessControls.throttleFactor(controls, settings: await PlatformFlags(db: db, ctx: ctx).abuse(base: ctx.config.abuse))
         let base = ctx.config.rateLimits.business
         let rule = factor < 1 ? RateRule(capacity: max(1, (base.capacity * factor).rounded(.down)),
                                          perMinute: max(1, (base.perMinute * factor).rounded(.down))) : base
         do {
             try await ctx.limiter.enforce("business", key: business.id?.uuidString ?? "", rule: rule)
         } catch let error as APIError where error.code == .rateLimited {
+            ctx.metrics.count(.rateLimited)
             await AbuseService.recordSignal("rate_limited", businessId: key.businessId, now: now, on: db)
             throw error
         }
         if key.lastUsedAt == nil || now.timeIntervalSince(key.lastUsedAt ?? now) > 300 {
-            try await BusinessAPIKeyRecord.query(on: db).filter(\.$id == key.id!).set(\.$lastUsedAt, to: now).update()
+            let ipHash = ctx.hasher.versionedHex("apikey-ip", clientIP)
+            try await BusinessAPIKeyRecord.query(on: db).filter(\.$id == key.id!).set(\.$lastUsedAt, to: now).set(\.$lastUsedIPHash, to: ipHash).update()
         }
         request.auth.login(BusinessPrincipal(businessId: business.businessID, keyId: key.id ?? UUID(), livemode: key.livemode,
                                              scopes: key.scopeSet, businessName: business.displayName, capabilities: key.capabilitySet))
         return try await next.respond(to: request)
+    }
+
+    /// At most one audit record per key per five minutes for a given denial, so a hostile client cannot flood the chain.
+    private static func auditDenied(_ action: String, key: BusinessAPIKeyRecord, ctx: ServerContext, db: any Database, metadata: [String: String]) async {
+        guard await ctx.limiter.allow("apikey-deny-audit", key: "\(action)|\(key.id?.uuidString ?? "")", rule: RateRule(capacity: 1, perMinute: 0.2)) else { return }
+        _ = try? await AuditService(db: db, ctx: ctx).record(action, outcome: .denied, actor: AuditActor(kind: .business, id: key.kid ?? "legacy"),
+                                                           businessId: BusinessID(key.businessId), subjectType: "api_key", subjectId: key.id?.uuidString.lowercased(),
+                                                           metadata: metadata)
+    }
+}
+
+extension ClientIP {
+    /// The client address as text (IPv4-mapped IPv6 collapsed to IPv4), **not** reduced to a /64 like `resolve` (which is for rate-limit keys).
+    static func rawAddress(_ request: Request, trustedProxies: Int) -> String {
+        let peer = request.remoteAddress?.ipAddress ?? "unknown"
+        var chosen = peer
+        if trustedProxies > 0, let forwarded = request.headers.first(name: "X-Forwarded-For") {
+            let hops = forwarded.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if hops.count >= trustedProxies { chosen = hops[hops.count - trustedProxies] }
+        }
+        guard let bytes = IPNetwork.addressBytes(chosen) else { return "unknown" }
+        if bytes.count == 4 { return bytes.map(String.init).joined(separator: ".") }
+        if bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xFF, bytes[11] == 0xFF { return bytes[12...15].map(String.init).joined(separator: ".") }
+        return stride(from: 0, to: 16, by: 2).map { String(format: "%x", Int(bytes[$0]) << 8 | Int(bytes[$0 + 1])) }.joined(separator: ":")
     }
 }
 

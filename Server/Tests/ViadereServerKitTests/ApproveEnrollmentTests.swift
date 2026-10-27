@@ -422,6 +422,32 @@ final class ApproveEnrollmentTests: XCTestCase {
         }
     }
 
+    func testDisconnectingTheBusinessAndDeletingTheAccountRemoveTheKeys() async throws {
+        try await withHarness { h in
+            // Disconnecting the business revokes the relationship's keys, and a request has nobody left to answer it.
+            let f = try await h.approveFixture()
+            let (created, _) = try await h.createRequest(f)
+            XCTAssertEqual(created.status, .created, created.text)
+            let disconnect = try await h.signed(f.phone.consumer, .DELETE, "/v1/relationships/\(f.relationship.id)")
+            XCTAssertEqual(disconnect.status, .ok, disconnect.text)
+            let key = try unwrap(try await ApproveKeyRecord.query(on: h.db).filter(\.$kid == f.phone.kid).first())
+            XCTAssertEqual(key.status, "revoked")
+            atrue(try await h.pendingRequests(f.phone.consumer).isEmpty)
+            XCTAssertEqual(try await h.createRequest(f).0.status, .conflict, "no active key and no relationship")
+            aeq(try await h.approvalAudit("approve.key_revoked").count, 1)
+
+            // Deleting the account wipes every key, request, delivery and freeze row of this customer.
+            let g = try await h.approveFixture(name: "Contoso Bank", handle: "contosobank")
+            _ = try await h.signedPost(g.phone.consumer, "/v1/approve/freeze", ApproveFreezeRequest(scope: .account, frozen: true))
+            let deleted = try await h.signed(g.phone.consumer, .DELETE, "/v1/account")
+            XCTAssertEqual(deleted.status, .ok, deleted.text)
+            let owner = g.phone.consumer.id.uuid
+            aeq(try await ApproveKeyRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
+            aeq(try await ApproveRequestRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
+            aeq(try await ApproveFreezeRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
+        }
+    }
+
     // MARK: Unlinkability (ADR-06, A3)
 
     func testTwoBusinessesNeverSeeTheSameKeySubjectOrDevice() async throws {

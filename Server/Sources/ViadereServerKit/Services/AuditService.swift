@@ -30,6 +30,30 @@ enum AuditRedactor {
     }
 }
 
+/// The chain keys by epoch (G-8). Epoch 1 is `AUDIT_CHAIN_KEY` as first deployed; rotating it means setting `AUDIT_CHAIN_KEY_EPOCH` to the next
+/// number, `AUDIT_CHAIN_KEY` to the new key and listing every earlier key in `AUDIT_CHAIN_KEYS_PREVIOUS`. Events written under epoch N record
+/// N (chain version 3), so the chain stays verifiable end to end and an attacker cannot re-label an event with an older, weaker epoch: epochs
+/// may never decrease along the chain.
+struct AuditKeyring: Sendable {
+    var currentEpoch: Int
+    var keys: [Int: SymmetricKey]
+
+    init(currentEpoch: Int, keys: [Int: SymmetricKey]) {
+        self.currentEpoch = currentEpoch
+        self.keys = keys
+    }
+
+    init(key: SymmetricKey) { self.init(currentEpoch: 1, keys: [1: key]) }
+
+    init(config: ServerConfig) {
+        var keys = config.operations.previousAuditKeys
+        keys[config.operations.auditKeyEpoch] = config.auditChainKey
+        self.init(currentEpoch: config.operations.auditKeyEpoch, keys: keys)
+    }
+
+    var current: SymmetricKey { keys[currentEpoch] ?? keys.values.first! }
+}
+
 /// Appends to the hash-chained audit log. Each event's hash covers the previous event's hash and the
 /// canonical JSON of the event, so any later modification or deletion breaks the chain.
 ///
@@ -75,8 +99,11 @@ struct AuditService {
                     record.correlationId = correlationId
                     record.metadataJSON = metadataJSON
                     record.prevHash = head?.hash ?? Self.genesisHash
-                    record.chainVersion = 2
-                    record.hash = try Self.hash(of: record, key: ctx.config.auditChainKey)
+                    let keyring = AuditKeyring(config: ctx.config)
+                    // Epoch 1 keeps the version 2 form; a rotated key records its epoch (version 3).
+                    record.chainVersion = keyring.currentEpoch > 1 ? 3 : 2
+                    record.keyEpoch = keyring.currentEpoch > 1 ? keyring.currentEpoch : nil
+                    record.hash = try Self.hash(of: record, key: keyring.current)
                     try await record.create(on: tx)
                     return record
                 }
@@ -115,6 +142,7 @@ struct AuditService {
         if let v = record.correlationId { object["correlationId"] = .string(v) }
         if record.chainVersion >= 2 {
             object["v"] = .integer(Int64(record.chainVersion))
+            if record.chainVersion >= 3, let epoch = record.keyEpoch { object["ke"] = .integer(Int64(epoch)) }
             if let id = record.id { object["id"] = .string(id.uuidString.lowercased()) }
             let mac = HMAC<SHA256>.authenticationCode(for: try CanonicalJSON.serialize(.object(object)), using: key)
             return Hex.encode(mac)
@@ -129,17 +157,28 @@ struct AuditService {
     }
 
     /// Recomputes the whole chain. Any edited, removed, reordered or downgraded event is reported.
-    /// Events at or below `legacyThroughSeq` may be version 1 (unkeyed); every later event must be version 2.
+    /// Events at or below `legacyThroughSeq` may be version 1 (unkeyed); every later event must be version 2 or later, and the key epoch
+    /// of version 3 events may never decrease.
     static func verifyChain(on db: any Database, key: SymmetricKey, legacyThroughSeq: Int = 0) async throws -> ChainVerification {
+        try await verifyChain(on: db, keyring: AuditKeyring(key: key), legacyThroughSeq: legacyThroughSeq)
+    }
+
+    static func verifyChain(on db: any Database, keyring: AuditKeyring, legacyThroughSeq: Int = 0) async throws -> ChainVerification {
         let events = try await AuditEventRecord.query(on: db).sort(\.$seq, .ascending).all()
         var expectedPrev = genesisHash
         var expectedSeq = 1
         var sawKeyed = false
+        var lastEpoch = 1
         for event in events {
             if event.chainVersion >= 2 { sawKeyed = true } else if sawKeyed || event.seq > legacyThroughSeq {
                 // Only the pre-upgrade prefix may be unkeyed, and a keyed event can never be followed by an unkeyed one: a downgrade.
                 return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
             }
+            let epoch = event.chainVersion >= 3 ? (event.keyEpoch ?? 0) : 1
+            guard let key = keyring.keys[epoch], epoch >= lastEpoch else {
+                return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
+            }
+            lastEpoch = epoch
             let recomputed = try hash(of: event, key: key)
             if event.seq != expectedSeq || event.prevHash != expectedPrev || !ConstantTime.equals(recomputed, event.hash) {
                 return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
@@ -156,23 +195,39 @@ struct AuditService {
         var hash: String
         var occurredAt: String
         var exportedAt: String
-        /// `HMAC-SHA256(AUDIT_CHAIN_KEY, "VIADERE-AUDIT-HEAD-V1\n{seq}\n{hash}\n{occurredAt}\n{exportedAt}")`, hex.
+        /// The `AUDIT_CHAIN_KEY` epoch that signed this head; absent for epoch 1 (the original, version 1 form).
+        var keyEpoch: Int?
+        /// `HMAC-SHA256(key, "VIADERE-AUDIT-HEAD-V1\n{seq}\n{hash}\n{occurredAt}\n{exportedAt}")`, hex; for a head signed under epoch N > 1
+        /// `"VIADERE-AUDIT-HEAD-V2\n{N}\n{seq}..."`.
         var mac: String
+
+        func message() -> Data {
+            if let keyEpoch, keyEpoch > 1 { return Data("VIADERE-AUDIT-HEAD-V2\n\(keyEpoch)\n\(seq)\n\(hash)\n\(occurredAt)\n\(exportedAt)".utf8) }
+            return Data("VIADERE-AUDIT-HEAD-V1\n\(seq)\n\(hash)\n\(occurredAt)\n\(exportedAt)".utf8)
+        }
     }
 
     static func signedHead(on db: any Database, key: SymmetricKey, now: Date) async throws -> SignedHead? {
+        try await signedHead(on: db, keyring: AuditKeyring(key: key), now: now)
+    }
+
+    static func signedHead(on db: any Database, keyring: AuditKeyring, now: Date) async throws -> SignedHead? {
         guard let head = try await AuditEventRecord.query(on: db).sort(\.$seq, .descending).first() else { return nil }
-        let at = ViadereDate.format(head.occurredAt)
-        let exported = ViadereDate.format(now)
-        let message = Data("VIADERE-AUDIT-HEAD-V1\n\(head.seq)\n\(head.hash)\n\(at)\n\(exported)".utf8)
-        return SignedHead(seq: head.seq, hash: head.hash, occurredAt: at, exportedAt: exported,
-                          mac: Hex.encode(HMAC<SHA256>.authenticationCode(for: message, using: key)))
+        let epoch = keyring.currentEpoch
+        var signed = SignedHead(seq: head.seq, hash: head.hash, occurredAt: ViadereDate.format(head.occurredAt), exportedAt: ViadereDate.format(now),
+                                keyEpoch: epoch > 1 ? epoch : nil, mac: "")
+        signed.mac = Hex.encode(HMAC<SHA256>.authenticationCode(for: signed.message(), using: keyring.current))
+        return signed
     }
 
     /// Checks an exported head against the chain: the event at `seq` must still have that hash (and the MAC must be ours).
     static func verify(head: SignedHead, on db: any Database, key: SymmetricKey) async throws -> Bool {
-        let message = Data("VIADERE-AUDIT-HEAD-V1\n\(head.seq)\n\(head.hash)\n\(head.occurredAt)\n\(head.exportedAt)".utf8)
-        guard ConstantTime.equals(Hex.encode(HMAC<SHA256>.authenticationCode(for: message, using: key)), head.mac),
+        try await verify(head: head, on: db, keyring: AuditKeyring(key: key))
+    }
+
+    static func verify(head: SignedHead, on db: any Database, keyring: AuditKeyring) async throws -> Bool {
+        guard let key = keyring.keys[head.keyEpoch ?? 1],
+              ConstantTime.equals(Hex.encode(HMAC<SHA256>.authenticationCode(for: head.message(), using: key)), head.mac),
               let event = try await AuditEventRecord.query(on: db).filter(\.$seq == head.seq).first() else { return false }
         return ConstantTime.equals(event.hash, head.hash)
     }
