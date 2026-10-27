@@ -25,19 +25,15 @@ public struct LiveViadereAPI: ViadereAPI {
 
     // MARK: Devices
     public func beginDeviceEnrollment() async throws -> DeviceEnrollmentChallenge { try await client.call(APIRoutes.deviceEnrollBegin) }
-    public func enrollDevice(_ request: DeviceEnrollmentPayload) async throws -> Device {
-        try await client.call(Self.deviceEnroll, body: request)
+    public func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device {
+        try await client.call(APIRoutes.deviceEnroll, body: request)
     }
-    public func clipDeviceIDs() async throws -> [DeviceID] {
-        let flags = try await client.call(Self.deviceFlags)
-        return flags.filter { $0.clipDevice == true && $0.revokedAt == nil }.map(\.id)
-    }
-    /// Same route as `APIRoutes.deviceEnroll` with the Kit body that can carry the App Clip marker.
-    static let deviceEnroll = Endpoint<DeviceEnrollmentPayload, Device>("devices.enroll", .POST, "/v1/devices", auth: .bearer)
-    static let deviceFlags = Endpoint<EmptyBody, [DeviceClipFlag]>("devices.flags", .GET, "/v1/devices", auth: .deviceSignedBearer)
     public func devices() async throws -> [Device] { try await client.call(APIRoutes.devicesList) }
     public func revokeDevice(_ id: DeviceID) async throws {
         _ = try await client.call(APIRoutes.deviceRevoke, params: ["deviceId": id.description])
+    }
+    public func confirmDevice(_ id: DeviceID, proof: ConfirmationProof) async throws -> Device {
+        try await client.call(APIRoutes.deviceConfirm, params: ["deviceId": id.description], body: ConfirmationRequest(proof: proof))
     }
 
     // MARK: Phones & sessions
@@ -47,19 +43,18 @@ public struct LiveViadereAPI: ViadereAPI {
     public func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink {
         try await client.call(APIRoutes.phoneLinkVerify, body: PhoneLinkVerifyRequest(phoneLinkId: id, code: code))
     }
-    /// Kit-local route mirroring the server's `GET /v1/sms/link-tokens/{token}/preview` (device-signed). Switch to
-    /// `APIRoutes.smsLinkPreview` once the Core DTO is adopted.
-    static let linkPreview = Endpoint<EmptyBody, PhoneLinkPreview>(
-        "sms.linkTokens.preview", .GET, "/v1/sms/link-tokens/{token}/preview", auth: .deviceSignedBearer)
-    public func previewPhoneLink(token: String) async throws -> PhoneLinkPreview {
-        try await client.call(Self.linkPreview, params: ["token": token])
+    public func previewPhoneLink(token: String) async throws -> SMSLinkPreview {
+        try await client.call(APIRoutes.smsLinkPreview, params: ["token": token])
     }
-    public func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink {
-        try await client.call(APIRoutes.smsLinkRedeem, body: SMSLinkRedeemRequest(token: token, confirmPhoneLast4: confirmPhoneLast4))
+    public func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink {
+        try await client.call(APIRoutes.smsLinkRedeem, body: request)
     }
     public func phoneLinks() async throws -> [PhoneLink] { try await client.call(APIRoutes.phoneLinksList) }
     public func removePhoneLink(_ id: PhoneLinkID) async throws {
         _ = try await client.call(APIRoutes.phoneLinkDelete, params: ["phoneLinkId": id.description])
+    }
+    public func confirmPhoneLink(_ id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink {
+        try await client.call(APIRoutes.phoneLinkConfirm, params: ["phoneLinkId": id.description], body: ConfirmationRequest(proof: proof))
     }
     public func sessions() async throws -> [ConsumerSession] { try await client.call(APIRoutes.sessionsList).map(ConsumerSession.init(_:)) }
     public func revokeSession(_ id: String) async throws {

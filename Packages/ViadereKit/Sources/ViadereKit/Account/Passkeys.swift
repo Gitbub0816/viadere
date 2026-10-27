@@ -33,10 +33,14 @@ public struct MockPasskeyService: PasskeyService {
                                              transports: ["internal"])
     }
 
+    /// A WebAuthn-shaped assertion: client data `{"type":"webauthn.get","challenge":…}` and authenticator data with the
+    /// user-present and user-verified flags, so the mock server can check the challenge binding and user verification.
     public func assert(options: PasskeyAssertionOptions) async throws -> PasskeyAssertionCredential {
         if let fail { throw fail }
         let id = SecureToken.generate(byteCount: 16)
-        return PasskeyAssertionCredential(id: id, rawId: id, authenticatorData: SecureToken.generate(), clientDataJSON: SecureToken.generate(),
-                                          signature: SecureToken.generate(), userHandle: nil)
+        let clientData = Data("{\"type\":\"webauthn.get\",\"challenge\":\"\(options.challenge)\",\"origin\":\"https://\(options.relyingPartyId)\"}".utf8)
+        let authenticatorData = Data(repeating: 0, count: 32) + Data([0x05, 0, 0, 0, 1])
+        return PasskeyAssertionCredential(id: id, rawId: id, authenticatorData: Base64URL.encode(authenticatorData),
+                                          clientDataJSON: Base64URL.encode(clientData), signature: SecureToken.generate(), userHandle: nil)
     }
 }

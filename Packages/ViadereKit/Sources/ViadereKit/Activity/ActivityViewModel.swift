@@ -83,7 +83,7 @@ public final class ActivityViewModel {
             if error == .userCancelled { return .cancelled }
             // Handled elsewhere or expired: refresh so the item reflects reality.
             switch error {
-            case .notActionable, .expired: await load()
+            case .notActionable, .expired, .contextChanged: await load()
             default: break
             }
             message = error.userMessage

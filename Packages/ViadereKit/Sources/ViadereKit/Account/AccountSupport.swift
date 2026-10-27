@@ -59,36 +59,3 @@ public final class DeviceRevocationNotifier: @unchecked Sendable {
         handler?()
     }
 }
-
-/// Kit-side enrollment body: ViadereCore's `DeviceEnrollRequest` plus the App Clip marker.
-///
-/// `clipDevice: true` tells the server this is a request-key-only, short-lived device created by the App Clip:
-/// it may sign API requests but the server refuses approvals from it and expires it (documented in
-/// docs/SECURITY.md). The key is omitted entirely for a normal device, so the body is unchanged for the full app.
-public struct DeviceEnrollmentPayload: Codable, Sendable, Hashable {
-    public var name: String
-    public var platform: DevicePlatform
-    public var challenge: String
-    public var keys: [DeviceKeyRegistration]
-    public var clipDevice: Bool?
-
-    public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration], clipDevice: Bool = false) {
-        self.name = name
-        self.platform = platform
-        self.challenge = challenge
-        self.keys = keys
-        self.clipDevice = clipDevice ? true : nil
-    }
-
-    public var isClipDevice: Bool { clipDevice == true }
-
-    /// The body ViadereCore's server model understands (no clip marker).
-    public var base: DeviceEnrollRequest { DeviceEnrollRequest(name: name, platform: platform, challenge: challenge, keys: keys) }
-}
-
-/// Reads only the fields needed to find App Clip devices in `GET /v1/devices`.
-struct DeviceClipFlag: Decodable, Sendable {
-    var id: DeviceID
-    var clipDevice: Bool?
-    var revokedAt: Date?
-}

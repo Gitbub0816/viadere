@@ -401,8 +401,11 @@ struct ClipAndConfigTests {
         let record = try await services.account.enrollThisDevice(name: "iPhone")
         #expect(record.purposes == [.request])
         #expect(await services.keys.availablePurposes() == [.request])
-        #expect(await api.clipDevices.contains(record.deviceId))
         let device = try #require(try await api.devices().first)
+        #expect(device.id == record.deviceId)
+        #expect(device.clipDevice && device.clientKind == .appClip)
+        #expect(device.expiresAt != nil)
+        #expect(device.approvalsLockedUntil == nil)
         #expect(device.maxAssurance == DecisionAssurance.none)
     }
 
@@ -411,17 +414,30 @@ struct ClipAndConfigTests {
         let services = await ViadereServices.mock(api: api)
         let record = try #require(try await services.records.load())
         #expect(Set(record.purposes) == Set(DeviceKeyPurpose.allCases))
-        #expect(await api.clipDevices.isEmpty)
+        #expect(try await api.devices().allSatisfy { !$0.clipDevice })
     }
 
-    @Test func enrollBodyCarriesTheMarkerOnlyForClips() throws {
-        let normal = DeviceEnrollmentPayload(name: "a", platform: .iOS, challenge: "c", keys: [])
-        let clip = DeviceEnrollmentPayload(name: "a", platform: .iOS, challenge: "c", keys: [], clipDevice: true)
+    @Test func enrollBodyUsesCoresFieldsForClips() throws {
+        let normal = DeviceEnrollRequest(name: "a", platform: .iOS, challenge: "c", keys: [])
+        let clip = DeviceEnrollRequest(name: "a", platform: .iOS, challenge: "c", keys: [], clientKind: .appClip)
+        let flagged = DeviceEnrollRequest(name: "a", platform: .iOS, challenge: "c", keys: [], clipDevice: true)
         let normalJSON = String(decoding: try ViadereJSON.encode(normal), as: UTF8.self)
         let clipJSON = String(decoding: try ViadereJSON.encode(clip), as: UTF8.self)
-        #expect(!normalJSON.contains("clipDevice"))
-        #expect(clipJSON.contains("\"clipDevice\":true"))
-        #expect(clip.base.name == "a")
+        #expect(!normalJSON.contains("clipDevice") && normalJSON.contains("\"clientKind\":\"app\""))
+        #expect(clipJSON.contains("\"clientKind\":\"appClip\""))
+        #expect(normal.effectiveClientKind == .app && clip.effectiveClientKind == .appClip && flagged.effectiveClientKind == .appClip)
+    }
+
+    @Test func theMockRefusesAClipDeviceWithApprovalKeys() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api, signedIn: false)
+        let challenge = try await api.beginDeviceEnrollment()
+        let provisioned = try await DeviceKeyProvisioner(store: services.keys).provision(
+            consumerId: api.consumerId, challenge: challenge.challenge, purposes: DeviceKeyPurpose.allCases)
+        await #expect(throws: APIError.server(status: 422, code: .validationFailed, message: "An App Clip device can only register a request key.")) {
+            _ = try await api.enrollDevice(DeviceEnrollRequest(name: "c", platform: .iOS, challenge: challenge.challenge,
+                                                               keys: provisioned.registrations, clientKind: .appClip))
+        }
     }
 
     @Test func fullAppRevokesClipDevicesOnFirstSignIn() async throws {
@@ -431,14 +447,14 @@ struct ClipAndConfigTests {
         clipServices.isAppClip = true
         try await clipServices.sessions.set(TokenSet(consumerId: api.consumerId, accessToken: "t", accessExpiresAt: Date().addingTimeInterval(900)))
         let clipRecord = try await clipServices.account.enrollThisDevice(name: "iPhone")
-        #expect(try await api.clipDeviceIDs() == [clipRecord.deviceId])
+        #expect(try await api.devices().filter { $0.clipDevice && $0.revokedAt == nil }.map(\.id) == [clipRecord.deviceId])
         // 2. the full app signs in and enrolls: the clip device is revoked, the new one is not
         let full = await ViadereServices.mock(api: api)
         let fullRecord = try #require(try await full.records.load())
         let devices = try await api.devices()
         #expect(devices.first { $0.id == clipRecord.deviceId }?.revokedAt != nil)
         #expect(devices.first { $0.id == fullRecord.deviceId }?.revokedAt == nil)
-        #expect(try await api.clipDeviceIDs().isEmpty)
+        #expect(try await api.devices().filter { $0.clipDevice && $0.revokedAt == nil }.isEmpty)
     }
 
     @Test func approvalKeysUseTheAppOnlyGroup() {

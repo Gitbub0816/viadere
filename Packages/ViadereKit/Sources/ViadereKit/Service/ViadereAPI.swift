@@ -24,17 +24,7 @@ public struct ConsumerSession: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// What an SMS account-link token would link: the masked number and when the token expires.
-/// (Kit mirror of the server's `{maskedPhone, expiresAt}` preview; switch to the ViadereCore type when it is published.)
-public struct PhoneLinkPreview: Codable, Sendable, Hashable {
-    public var maskedPhone: String
-    public var expiresAt: Date
-
-    public init(maskedPhone: String, expiresAt: Date) {
-        self.maskedPhone = maskedPhone
-        self.expiresAt = expiresAt
-    }
-
+extension SMSLinkPreview {
     /// The last four digits shown in `maskedPhone`, or `nil` if the server's mask doesn't end in four digits.
     public var last4: String? {
         let digits = maskedPhone.filter { $0.isASCII && $0.isNumber }
@@ -55,20 +45,25 @@ public protocol ViadereAPI: Sendable {
 
     // MARK: Devices
     func beginDeviceEnrollment() async throws -> DeviceEnrollmentChallenge
-    func enrollDevice(_ request: DeviceEnrollmentPayload) async throws -> Device
-    /// Ids of this person's active App Clip devices (request-key-only, short-lived). The full app revokes them on first sign-in.
-    func clipDeviceIDs() async throws -> [DeviceID]
+    /// `POST /v1/devices`. Unless the begin response said `assertionOptional`, `request.assertion` must carry a user-verified
+    /// passkey assertion over the enrollment challenge.
+    func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device
     func devices() async throws -> [Device]
     func revokeDevice(_ id: DeviceID) async throws
+    /// `POST /v1/devices/{id}/confirm`: a trusted device lifts the new-device cool-down of another one (`ConfirmationProof`, subject `device`).
+    func confirmDevice(_ id: DeviceID, proof: ConfirmationProof) async throws -> Device
 
     // MARK: Phones & sessions
     func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse
     func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink
     /// Read-only preview of what a `/l/{token}` link would link (`GET /v1/sms/link-tokens/{token}/preview`). Does not consume the token.
-    func previewPhoneLink(token: String) async throws -> PhoneLinkPreview
-    func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink
+    func previewPhoneLink(token: String) async throws -> SMSLinkPreview
+    /// Redeems the token after the person confirmed the previewed number: sends the last four digits and the exact masked number.
+    func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink
     func phoneLinks() async throws -> [PhoneLink]
     func removePhoneLink(_ id: PhoneLinkID) async throws
+    /// `POST /v1/phone-links/{id}/confirm`: makes a newly linked phone usable now (`ConfirmationProof`, subject `phoneLink`).
+    func confirmPhoneLink(_ id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink
     func sessions() async throws -> [ConsumerSession]
     func revokeSession(_ id: String) async throws
 

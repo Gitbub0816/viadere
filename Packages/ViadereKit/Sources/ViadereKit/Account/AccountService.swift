@@ -63,21 +63,30 @@ public struct AccountService: Sendable {
 
     // MARK: Device enrollment
 
-    /// Creates this device's Secure Enclave keys and registers them with proof of possession.
+    /// Creates this device's Secure Enclave keys and registers them with proof of possession **and of the account's passkey**.
+    ///
+    /// 1. `POST /v1/devices/enroll/begin` returns the challenge and WebAuthn assertion options over that same challenge.
+    /// 2. Unless the server said `assertionOptional` (a session minted by sign-up or sign-in minutes ago, usable once),
+    ///    the person performs a user-verified passkey assertion over it. `.setUpAgain` **always** does, whatever the server
+    ///    says: a re-enrollment is an ordinary enrollment and a stolen session must not be able to replace a device.
+    ///    `explain` is shown first, so the system sheet is never a surprise; answering `false` cancels (nothing is created).
+    /// 3. Keys are created and registered (`POST /v1/devices`) with the assertion.
     ///
     /// The App Clip registers a **request key only** and marks the device as a clip device; the full app registers
     /// all keys and then (best effort) revokes the person's clip devices, which are meant to be short-lived.
     @discardableResult
-    public func enrollThisDevice(name: String) async throws -> DeviceRecord {
+    public func enrollThisDevice(name: String, purpose: EnrollmentPurpose = .firstDevice,
+                                 explain: PasskeyExplainer? = nil) async throws -> DeviceRecord {
         guard let tokens = await sessions.tokens() else { throw APIError.sessionExpired }
         let challenge = try await api.beginDeviceEnrollment()
+        let assertion = try await assertionIfNeeded(for: challenge, purpose: purpose, explain: explain)
         let purposes: [DeviceKeyPurpose] = isAppClip ? [.request] : DeviceKeyPurpose.allCases
         let provisioned = try await DeviceKeyProvisioner(store: keys).provision(
             consumerId: tokens.consumerId, challenge: challenge.challenge, purposes: purposes)
         guard provisioned.registrations.contains(where: { $0.purpose == .request }) else { throw KeyStoreError.unavailable }
-        let device = try await api.enrollDevice(DeviceEnrollmentPayload(
-            name: String(name.prefix(64)), platform: platform, challenge: challenge.challenge,
-            keys: provisioned.registrations, clipDevice: isAppClip))
+        let device = try await api.enrollDevice(DeviceEnrollRequest(
+            name: String(name.prefix(64)), platform: platform, challenge: challenge.challenge, keys: provisioned.registrations,
+            assertion: assertion, clientKind: isAppClip ? .appClip : .app))
         let record = DeviceRecord(deviceId: device.id, consumerId: tokens.consumerId, name: device.name,
                                   purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
         try await records.save(record)
@@ -85,23 +94,42 @@ public struct AccountService: Sendable {
         return record
     }
 
+    /// The passkey assertion for this enrollment, or `nil` when the server allows enrolling without one (never for a re-enrollment).
+    private func assertionIfNeeded(for challenge: DeviceEnrollmentChallenge, purpose: EnrollmentPurpose,
+                                   explain: PasskeyExplainer?) async throws -> PasskeyAssertionCredential? {
+        let mustAssert = purpose == .setUpAgain || !challenge.assertionOptional
+        guard mustAssert else { return nil }
+        // A server that sent no options cannot be satisfied: say what is missing instead of enrolling without proof.
+        guard let options = challenge.assertion else { throw APIError.server(status: 401, code: .passkeyAssertionRequired, message: "") }
+        // The authenticator signs these bytes: they must be this enrollment's challenge, and verification must be required.
+        guard options.challenge == challenge.challenge, options.userVerification == "required" else { throw PasskeyError.failed("options") }
+        if let explain {
+            let context: PasskeyExplanation.Context = isAppClip ? .appClip : (purpose == .setUpAgain ? .setUpAgain : .addDevice)
+            guard await explain(.make(context)) else { throw PasskeyError.cancelled }
+        }
+        return try await passkeys.assert(options: options)
+    }
+
     /// Revokes App Clip devices (best effort, bounded): the clip's session is a stop-gap, not a trusted device.
     public func revokeClipDevices(except current: DeviceID) async {
         let api = self.api
         await bestEffort {
-            guard let ids = try? await api.clipDeviceIDs() else { return }
-            for id in ids where id != current { try? await api.revokeDevice(id) }
+            guard let devices = try? await api.devices() else { return }
+            for device in devices where device.clipDevice && device.revokedAt == nil && device.id != current { try? await api.revokeDevice(device.id) }
         }
     }
 
     /// Replaces keys after invalidation (biometrics changed, restore). The old device record is revoked
-    /// best-effort *before* its request key is deleted (revocation is device-signed).
+    /// best-effort *before* its request key is deleted (revocation is device-signed). The new enrollment always needs a
+    /// passkey assertion (`EnrollmentPurpose.setUpAgain`).
     @discardableResult
-    public func reenrollThisDevice(name: String) async throws -> DeviceRecord {
+    public func reenrollThisDevice(name: String, explain: PasskeyExplainer? = nil) async throws -> DeviceRecord {
+        // Explain first, so declining leaves everything as it was; the system sheet follows during the enrollment itself.
+        if let explain { guard await explain(.make(.setUpAgain)) else { throw PasskeyError.cancelled } }
         if let old = try? await records.load() { try? await api.revokeDevice(old.deviceId) }
         try? await records.clear()
         try? await keys.deleteAllKeys()
-        return try await enrollThisDevice(name: name)
+        return try await enrollThisDevice(name: name, purpose: .setUpAgain, explain: nil)
     }
 
     public func health() async -> EnrollmentHealth {

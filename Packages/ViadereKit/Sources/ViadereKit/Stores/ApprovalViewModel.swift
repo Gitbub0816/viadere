@@ -26,6 +26,12 @@ public final class ApprovalViewModel: Identifiable {
     public private(set) var outcome: InteractionOutcome?
     /// Set when this request belongs to someone who delegated to the signed-in person ("Alex Morgan").
     public private(set) var onBehalfOf: String?
+    /// End of this device's new-device cool-down, if it is in one (high and critical approvals are paused until then).
+    public private(set) var approvalsLockedUntil: Date?
+    /// True after the request changed while it was open: the details on screen are the current ones and the person must look again.
+    public private(set) var showsChangedNotice = false
+    /// Bumped whenever the displayed request is replaced by a changed one, so the view can drop selections made on the old one.
+    public private(set) var contextRevision = 0
     /// Set by the view when the screen is being recorded or mirrored.
     public var isScreenBeingCaptured = false
     /// Called once a decision has been recorded (home refreshes, sheet dismisses).
@@ -74,6 +80,13 @@ public final class ApprovalViewModel: Identifiable {
     public var remaining: TimeInterval { max(0, interaction.expiresAt.timeIntervalSince(now)) }
     public var totalLifetime: TimeInterval { max(1, interaction.expiresAt.timeIntervalSince(interaction.createdAt)) }
 
+    /// The new-device cool-down pauses approving this request (deny and report still work).
+    public var approvalPausedByCoolDown: Bool {
+        CoolDownPolicy.pauses(approveDecision, on: interaction, until: approvalsLockedUntil, now: now)
+    }
+    public var coolDownMessage: String { CoolDownPolicy.message(until: approvalsLockedUntil, now: now) }
+    public var coolDownStillAvailable: String { CoolDownPolicy.stillAvailable }
+
     /// Approving is blocked while the screen is being recorded (the notice explains why). Denying is never blocked.
     public var approvalBlockedByCapture: Bool { isScreenBeingCaptured && interaction.kind.isSecuritySensitive }
 
@@ -83,11 +96,21 @@ public final class ApprovalViewModel: Identifiable {
     public func load() async {
         device = try? await services.records.load()
         await resolveDelegation()
-        if let fresh = try? await services.api.interaction(interaction.id) { envelope = fresh }
+        if let fresh = try? await services.api.interaction(interaction.id) { replace(with: fresh) }
         now = services.clock()
+        approvalsLockedUntil = CoolDownPolicy.restricts(approveDecision, on: interaction) ? await services.approvalsLockedUntil() : nil
     }
 
     public func tick(_ date: Date) { now = date }
+
+    /// Re-renders from `fresh`. If what the person sees changed, they are told, and no earlier choice carries over.
+    private func replace(with fresh: InteractionEnvelope) {
+        if fresh.interaction.displayContextDigest() != interaction.displayContextDigest() {
+            showsChangedNotice = true
+            contextRevision += 1
+        }
+        envelope = fresh
+    }
 
     /// An interaction scoped to another consumer reached this person through a delegation: label it "on behalf of".
     private func resolveDelegation() async {
@@ -115,6 +138,9 @@ public final class ApprovalViewModel: Identifiable {
     public func submit(_ decision: Decision, selected: [String]? = nil, reply: String? = nil) async {
         guard !isBusy else { return }
         if decision == .approve || decision == .confirm, approvalBlockedByCapture { return }
+        // Paused by the new-device cool-down: say so instead of prompting for Face ID (deny and report are never paused).
+        if CoolDownPolicy.pauses(decision, on: interaction, until: approvalsLockedUntil, now: services.clock()) { return }
+        showsChangedNotice = false
         phase = .signing(decision)
         do {
             let outcome = try await services.approvals.submit(envelope, decision: decision, selectedOptionIds: selected, reply: reply,
@@ -142,6 +168,16 @@ public final class ApprovalViewModel: Identifiable {
             phase = .ready
         case .notActionable(let status):
             envelope.status = status
+            phase = .ready
+        case .contextChanged(let fresh):
+            // Never sign again on our own: show what the request says now and let the person decide on that.
+            if let fresh { envelope = fresh }
+            contextRevision += 1
+            showsChangedNotice = true
+            phase = .ready
+        case .deviceCoolingDown(let until):
+            // If the server didn't say until when, pause for a few minutes; the server stays the authority either way.
+            approvalsLockedUntil = until ?? approvalsLockedUntil ?? services.clock().addingTimeInterval(300)
             phase = .ready
         default:
             phase = .failed(error)

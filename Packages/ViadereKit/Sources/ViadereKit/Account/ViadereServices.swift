@@ -28,6 +28,8 @@ public struct ViadereServices: Sendable {
 
     public var approvals: ApprovalService { ApprovalService(api: api, keys: keys, records: records, clock: clock) }
 
+    public var confirmations: ConfirmationService { ConfirmationService(api: api, keys: keys, records: records, clock: clock) }
+
     public var notificationHandler: NotificationActionHandler {
         NotificationActionHandler(api: api, approvals: approvals, clock: clock)
     }

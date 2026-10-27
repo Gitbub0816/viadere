@@ -72,6 +72,9 @@ public final class APIClient: Sendable {
                 rejectedSignature = true
                 continue
             }
+            // These 401s are about the request, not the token: refreshing the session and retrying would only repeat them
+            // (and a retried confirmation would be a replay), so they are reported as they are.
+            if error.code == .passkeyAssertionRequired || error.code == .replayDetected { throw error }
             if response.status == 401, attempt == 0 {
                 attempt += 1
                 if usesBearer {

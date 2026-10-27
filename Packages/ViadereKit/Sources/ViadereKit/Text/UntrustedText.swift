@@ -17,6 +17,13 @@ import ViadereCore
 /// 3. Limits stacked combining marks (so "zalgo" text cannot overflow its line).
 /// 4. Caps the length in characters with an ellipsis. Callers cap each free-text piece on its own and put
 ///    money first, so truncating a long merchant can never hide the amount.
+///
+/// **Relationship to `DisplayTextSanitizer` (ViadereCore).** Core's sanitizer is the shared definition the server uses to
+/// *reject* hostile text, and covers the same character classes, line-break collapsing, length caps and "starts with /
+/// contains Viadere" test. Kit keeps this stricter presenter on top of it, because it additionally limits stacked combining
+/// marks, bounds how much of any input is examined, drops U+FFFC and folds digit/leetspeak look-alikes in the impersonation
+/// test. Consistency is enforced here, not assumed: every scalar Core disallows is dropped by `classify`, and anything Core
+/// calls impersonation is impersonation here too (`UntrustedTextTests` scans the whole BMP to prove it).
 public enum UntrustedText {
     public static let ellipsis = "\u{2026}"
     /// Hard bound on how much of any input is even examined.
@@ -118,7 +125,7 @@ public enum UntrustedText {
     /// Whether `raw` contains "viadere" after removing separators and folding case, width, accents and
     /// common look-alikes (digits for letters, Cyrillic and Greek homoglyphs).
     public static func looksLikeViadere(_ raw: String) -> Bool {
-        skeleton(raw).contains("viadere")
+        skeleton(raw).contains("viadere") || DisplayTextSanitizer.impersonatesViadere(String(raw.unicodeScalars.prefix(maxInputScalars)), anywhere: true)
     }
 
     static func skeleton(_ raw: String) -> String {
@@ -163,6 +170,9 @@ public enum UntrustedText {
         default:
             break
         }
+        // Whatever the shared definition (and therefore the server) refuses is never displayed.
+        if DisplayTextSanitizer.isDisallowed(scalar, allowNewlines: true) { return .drop }
+        if v == 0xFFFC { return .drop } // object replacement character: renders as an arbitrary box
         switch scalar.properties.generalCategory {
         case .control, .format, .surrogate, .privateUse, .unassigned, .lineSeparator, .paragraphSeparator:
             return .drop

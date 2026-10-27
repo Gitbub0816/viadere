@@ -16,7 +16,15 @@ public actor MockViadereAPI: ViadereAPI {
     private var consentStore: [RelationshipID: [ConsentGrant]] = [:]
     var deviceList: [Device] = []
     var deviceKeys: [DeviceID: [DeviceKeyPurpose: DevicePublicKey]] = [:]
-    private var enrollmentChallenges: Set<String> = []
+    private var enrollmentChallenges: [String: PasskeyAssertionOptions] = [:]
+    private let replayGuard = InMemoryReplayGuard()
+    /// The session was minted by sign-up or sign-in and has not enrolled a device: it may enroll once without a passkey assertion.
+    private var freshSession = true
+    /// Tests can make the begin response claim `assertionOptional` (or not) whatever the session state is.
+    private var assertionOptionalOverride: Bool?
+    /// One entry per enrollment: whether it carried a passkey assertion.
+    public private(set) var enrollmentLog: [(deviceId: DeviceID, hadAssertion: Bool)] = []
+    public private(set) var confirmationLog: [(subject: ConfirmationProof.Subject, id: String)] = []
     private var conversationList: [ConversationSummary] = []
     private var messageStore: [SessionID: [ConversationMessage]] = [:]
     private var phones: [PhoneLink] = []
@@ -125,12 +133,18 @@ public actor MockViadereAPI: ViadereAPI {
                                           relyingPartyName: "Viadere", userId: SecureToken.generate(byteCount: 16),
                                           userName: displayName, userDisplayName: displayName)
     }
-    public func finishRegistration(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession { grant() }
+    public func finishRegistration(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession {
+        freshSession = true
+        return grant()
+    }
     public func beginLogin() async throws -> PasskeyAssertionOptions {
         await pause()
         return PasskeyAssertionOptions(ceremonyId: CeremonyID(), challenge: SecureToken.generate(), relyingPartyId: ViadereCore.domain)
     }
-    public func finishLogin(_ request: PasskeyLoginFinishRequest) async throws -> AuthSession { grant() }
+    public func finishLogin(_ request: PasskeyLoginFinishRequest) async throws -> AuthSession {
+        freshSession = true
+        return grant()
+    }
     public func logout() async throws {}
     public func deleteAccount() async throws { accountDeleted = true }
 
@@ -141,47 +155,127 @@ public actor MockViadereAPI: ViadereAPI {
 
     // MARK: Devices
 
+    /// The server rule: after `lockHours` a new device with approval keys may approve high-risk requests (when another trusted device exists).
+    static let newDeviceCoolDown: TimeInterval = 24 * 3_600
+    static let appClipLifetime: TimeInterval = 7 * 24 * 3_600
+
+    /// Makes the next `beginDeviceEnrollment` claim `assertionOptional` (or not) regardless of the session; `nil` restores the real rule.
+    public func setAssertionOptional(_ value: Bool?) { assertionOptionalOverride = value }
+
     public func beginDeviceEnrollment() async throws -> DeviceEnrollmentChallenge {
         let challenge = SecureToken.generate()
-        enrollmentChallenges.insert(challenge)
-        return DeviceEnrollmentChallenge(challenge: challenge, expiresAt: clock().addingTimeInterval(300))
+        let options = PasskeyAssertionOptions(ceremonyId: CeremonyID(), challenge: challenge, relyingPartyId: ViadereCore.domain,
+                                              timeoutMilliseconds: 300_000)
+        enrollmentChallenges[challenge] = options
+        return DeviceEnrollmentChallenge(challenge: challenge, expiresAt: clock().addingTimeInterval(300), assertion: options,
+                                         assertionOptional: assertionOptionalOverride ?? freshSession)
     }
 
-    public func enrollDevice(_ request: DeviceEnrollmentPayload) async throws -> Device {
-        guard enrollmentChallenges.remove(request.challenge) != nil else {
-            throw APIError.server(status: 400, code: .badRequest, message: "Unknown or reused challenge")
+    /// Verifies like the server: one key per purpose with proof of possession, an App Clip registers a request key only, and a
+    /// user-verified passkey assertion over this very challenge is required unless the session is a fresh sign-in (once).
+    public func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device {
+        let purposes = request.keys.map(\.purpose)
+        guard purposes.contains(.request), Set(purposes).count == purposes.count else {
+            throw APIError.server(status: 422, code: .validationFailed, message: "Provide exactly one key per purpose, including a request key.")
         }
-        guard request.keys.contains(where: { $0.purpose == .request }) else {
-            throw APIError.server(status: 400, code: .validationFailed, message: "A request key is required")
+        let kind = request.effectiveClientKind
+        if kind == .appClip, purposes != [.request] {
+            throw APIError.server(status: 422, code: .validationFailed, message: "An App Clip device can only register a request key.")
+        }
+        guard let options = enrollmentChallenges[request.challenge] else {
+            throw APIError.server(status: 401, code: .unauthorized, message: "The enrollment challenge is invalid or expired.")
         }
         for registration in request.keys where !DeviceEnrollment.verify(registration, consumerId: consumerId, challenge: request.challenge) {
-            throw APIError.server(status: 400, code: .signatureInvalid, message: "Invalid key proof")
+            throw APIError.server(status: 401, code: .signatureInvalid, message: "Key proof of possession failed.")
         }
-        let deviceId = DeviceID()
+        let required = APIError.server(status: 401, code: .passkeyAssertionRequired, message: "Confirm with your passkey to add this device.")
+        if let assertion = request.assertion {
+            guard Self.assertionIsUserVerified(assertion, challenge: options.challenge) else { throw required }
+        } else if !freshSession {
+            throw required
+        }
+        enrollmentChallenges[request.challenge] = nil
         let now = clock()
+        // A device that can approve and joins an account that already has a trusted app device starts in its cool-down.
+        let others = deviceList.filter { $0.revokedAt == nil && $0.clientKind == .app && !$0.isExpired(at: now) }
+        let coolDown = kind == .app && purposes.contains { $0 != .request } && !others.isEmpty
+        let deviceId = DeviceID()
         let keys = request.keys.map {
             DeviceKey(id: DeviceKeyID(), purpose: $0.purpose, publicKey: $0.publicKey, hardwareBacked: $0.hardwareBacked, createdAt: now)
         }
         let device = Device(id: deviceId, consumerId: consumerId, name: request.name, platform: request.platform, keys: keys,
-                            createdAt: now, lastSeenAt: now)
+                            createdAt: now, lastSeenAt: now, clientKind: kind,
+                            approvalsLockedUntil: coolDown ? now.addingTimeInterval(Self.newDeviceCoolDown) : nil,
+                            expiresAt: kind == .appClip ? now.addingTimeInterval(Self.appClipLifetime) : nil)
         deviceList.append(device)
-        if request.isClipDevice { clipDevices.insert(deviceId) }
+        enrollmentLog.append((deviceId, request.assertion != nil))
+        freshSession = false
         deviceKeys[deviceId] = Dictionary(uniqueKeysWithValues: keys.map { ($0.purpose, $0.publicKey) })
         return device
     }
 
-    public func devices() async throws -> [Device] { deviceList }
-
-    /// Devices enrolled with the App Clip marker (the server would also refuse their approvals).
-    public private(set) var clipDevices: Set<DeviceID> = []
-
-    public func clipDeviceIDs() async throws -> [DeviceID] {
-        deviceList.filter { clipDevices.contains($0.id) && $0.revokedAt == nil }.map(\.id)
+    /// A WebAuthn-shaped check: the client data carries this challenge and the authenticator data has the user-present and
+    /// user-verified flags (what `MockPasskeyService` produces; the real server also checks the signature, RP id and sign count).
+    static func assertionIsUserVerified(_ assertion: PasskeyAssertionCredential, challenge: String) -> Bool {
+        guard let clientData = Base64URL.decode(assertion.clientDataJSON),
+              let object = try? JSONSerialization.jsonObject(with: clientData) as? [String: Any],
+              object["type"] as? String == "webauthn.get", object["challenge"] as? String == challenge,
+              let authData = Base64URL.decode(assertion.authenticatorData), authData.count >= 37 else { return false }
+        let flags = authData[authData.startIndex + 32]
+        return flags & 0x01 != 0 && flags & 0x04 != 0
     }
+
+    public func devices() async throws -> [Device] { deviceList }
 
     public func revokeDevice(_ id: DeviceID) async throws {
         guard let index = deviceList.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
         deviceList[index].revokedAt = clock()
+    }
+
+    /// Test hook: puts a device into (or out of) its new-device cool-down.
+    public func setApprovalsLockedUntil(_ date: Date?, for id: DeviceID) {
+        guard let index = deviceList.firstIndex(where: { $0.id == id }) else { return }
+        deviceList[index].approvalsLockedUntil = date
+    }
+
+    /// Same rules as the server: the confirming device is another, trusted (not cooling down) app device of this account, and the
+    /// proof is a fresh, single-use signature by its user-verified approval key for exactly this device.
+    public func confirmDevice(_ id: DeviceID, proof: ConfirmationProof) async throws -> Device {
+        let confirmer = try trustedConfirmer(for: proof, target: id)
+        guard let index = deviceList.firstIndex(where: { $0.id == id && $0.revokedAt == nil }) else { throw APIError.server(status: 403, code: .forbidden, message: "") }
+        if deviceList[index].approvalsLockedUntil != nil {
+            try await verify(proof, subject: .device, subjectId: id.description, confirmer: confirmer)
+            deviceList[index].approvalsLockedUntil = nil
+            confirmationLog.append((.device, id.description))
+        }
+        return deviceList[index]
+    }
+
+    private func trustedConfirmer(for proof: ConfirmationProof, target: String?) throws -> Device {
+        let forbidden = APIError.server(status: 403, code: .forbidden, message: "")
+        guard let confirmer = deviceList.first(where: { $0.id == proof.deviceId }), confirmer.revokedAt == nil, confirmer.clientKind == .app,
+              !confirmer.isExpired(at: clock()), !confirmer.isCoolingDown(at: clock()) else { throw forbidden }
+        return confirmer
+    }
+
+    private func trustedConfirmer(for proof: ConfirmationProof, target: DeviceID) throws -> Device {
+        guard proof.deviceId != target else { throw APIError.server(status: 403, code: .forbidden, message: "") }
+        return try trustedConfirmer(for: proof, target: target.description)
+    }
+
+    private func verify(_ proof: ConfirmationProof, subject: ConfirmationProof.Subject, subjectId: String, confirmer: Device) async throws {
+        guard let purpose = proof.requiredKeyPurpose, let key = deviceKeys[confirmer.id]?[purpose] else {
+            throw APIError.server(status: 403, code: .insufficientAssurance, message: "Confirm with Face ID or your passcode.")
+        }
+        do {
+            try await proof.verify(subject: subject, subjectId: subjectId, publicKey: key, now: clock(), replayGuard: replayGuard)
+        } catch ConfirmationProof.Failure.replayed {
+            throw APIError.server(status: 401, code: .replayDetected, message: "This confirmation was already used.")
+        } catch ConfirmationProof.Failure.assuranceTooLow {
+            throw APIError.server(status: 403, code: .insufficientAssurance, message: "Confirm with Face ID or your passcode.")
+        } catch {
+            throw APIError.server(status: 401, code: .signatureInvalid, message: "Invalid signature")
+        }
     }
 
     // MARK: Phones & sessions
@@ -205,19 +299,39 @@ public actor MockViadereAPI: ViadereAPI {
     /// What the mock's link preview reports (tests change it).
     public private(set) var linkPreviewPhone = "+1 ••• ••• 0123"
     public private(set) var previewedLinkTokens: [String] = []
+    public private(set) var redeemRequests: [SMSLinkRedeemRequest] = []
     public func setLinkPreview(_ masked: String) { linkPreviewPhone = masked }
 
-    public func previewPhoneLink(token: String) async throws -> PhoneLinkPreview {
+    public func previewPhoneLink(token: String) async throws -> SMSLinkPreview {
         guard token.count >= 8 else { throw APIError.server(status: 404, code: .notFound, message: "This link isn't valid anymore.") }
         previewedLinkTokens.append(token)
-        return PhoneLinkPreview(maskedPhone: linkPreviewPhone, expiresAt: clock().addingTimeInterval(600))
+        return SMSLinkPreview(maskedPhone: linkPreviewPhone, expiresAt: clock().addingTimeInterval(600))
     }
 
-    public func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink {
-        guard confirmPhoneLast4.count == 4 else { throw APIError.server(status: 400, code: .validationFailed, message: "Enter the last 4 digits") }
-        let link = PhoneLink(id: PhoneLinkID(), maskedPhone: "+1 ••• ••• \(confirmPhoneLast4)", verifiedAt: clock())
+    /// Like the server: the confirmation must match the number the token is bound to, and a number linked from a token is not
+    /// usable for 24 hours unless a trusted device confirms it.
+    public func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink {
+        let digits = linkPreviewPhone.filter { $0.isASCII && $0.isNumber }
+        guard request.confirmPhoneLast4 == String(digits.suffix(4)),
+              request.confirmMaskedPhone.map({ $0 == linkPreviewPhone }) ?? true else {
+            throw APIError.server(status: 403, code: .forbidden, message: "That doesn't match the number this link is for.")
+        }
+        redeemRequests.append(request)
+        let now = clock()
+        let link = PhoneLink(id: PhoneLinkID(), maskedPhone: linkPreviewPhone, verifiedAt: now, usableFrom: now.addingTimeInterval(Self.newDeviceCoolDown))
         phones.append(link)
         return link
+    }
+
+    public func confirmPhoneLink(_ id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink {
+        let confirmer = try trustedConfirmer(for: proof, target: nil)
+        guard let index = phones.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
+        if phones[index].usableFrom != nil {
+            try await verify(proof, subject: .phoneLink, subjectId: id.description, confirmer: confirmer)
+            phones[index].usableFrom = nil
+            confirmationLog.append((.phoneLink, id.description))
+        }
+        return phones[index]
     }
 
     public func phoneLinks() async throws -> [PhoneLink] { phones }
@@ -337,8 +451,14 @@ public actor MockViadereAPI: ViadereAPI {
         do {
             let claimed = try verifier.decodeUnverified(request.signedDecision)
             guard let key = deviceKeys[claimed.deviceId]?[DeviceKeyPurpose.required(for: claimed.assurance)],
-                  deviceList.first(where: { $0.id == claimed.deviceId })?.isRevoked == false else {
+                  let device = deviceList.first(where: { $0.id == claimed.deviceId }), !device.isRevoked else {
                 throw DecisionVerificationError.deviceMismatch
+            }
+            // App Clip devices can request but never decide. A device in its new-device cool-down cannot approve high or critical
+            // requests (deny, report and decline stay available).
+            guard device.clientKind == .app else { throw APIError.server(status: 403, code: .forbidden, message: "This device can't respond to requests.") }
+            if device.isCoolingDown(at: now), CoolDownPolicy.restricts(claimed.decision, on: envelope.interaction) {
+                throw APIError.server(status: 403, code: .deviceCoolDown, message: "This device was added recently. Confirm it from another device you trust before approving this request.")
             }
             let payload = try verifier.verify(request.signedDecision, for: envelope.interaction, deviceId: claimed.deviceId,
                                               publicKey: key, channel: request.channel, now: now)
@@ -356,6 +476,8 @@ public actor MockViadereAPI: ViadereAPI {
             case .replayed: throw APIError.server(status: 409, code: .conflict, message: "Already decided")
             case .insufficientAssurance: throw APIError.server(status: 403, code: .insufficientAssurance, message: "Stronger verification required")
             case .badSignature, .deviceMismatch: throw APIError.server(status: 401, code: .signatureInvalid, message: "Invalid signature")
+            case .contextDigestRequired: throw APIError.server(status: 400, code: .contextDigestRequired, message: "The decision must be signed over what was shown.")
+            case .contextMismatch: throw APIError.server(status: 409, code: .contextMismatch, message: "This request changed. Review it again.")
             default: throw APIError.server(status: 400, code: .validationFailed, message: "Invalid decision")
             }
         }

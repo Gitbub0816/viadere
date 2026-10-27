@@ -60,7 +60,7 @@ public struct NotificationActionHandler: Sendable {
         let reply = decision == .reply ? text?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
         do {
             let outcome = try await approvals.submit(envelope, decision: decision, selectedOptionIds: selected, reply: reply,
-                                                     channel: .nativePush, assuranceOverride: lowAssurance)
+                                                     channel: .nativePush, assuranceOverride: lowAssurance, verifyFresh: false)
             return .submitted(id, outcome.status)
         } catch let error as ApprovalError {
             switch error {
@@ -68,6 +68,8 @@ public struct NotificationActionHandler: Sendable {
             case .notActionable(let status): return .stale(id, status)
             case .deviceCannotSatisfy, .keyInvalidated, .keysUnavailable, .notEnrolled, .userCancelled, .authenticationFailed: return .requiresApp(id)
             case .invalidSelection, .decisionNotAllowed: return .requiresApp(id)
+            // The request changed or this device is in its cool-down: the secure sheet shows the current details and the reason.
+            case .contextChanged, .deviceCoolingDown: return .requiresApp(id)
             default: return .failed(id, error.userMessage)
             }
         } catch {

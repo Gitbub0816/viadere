@@ -17,16 +17,26 @@ public enum ApprovalError: Error, Equatable, Sendable {
     case authenticationFailed
     case invalidSelection
     case replyTooLong
+    /// The request changed after it was displayed (the displayed details no longer match the server's). Nothing was signed.
+    /// Carries the current version to show again, or `nil` if it couldn't be fetched.
+    case contextChanged(InteractionEnvelope?)
+    /// This device is inside its new-device cool-down and may not approve high-risk requests yet (`until` may be unknown).
+    case deviceCoolingDown(until: Date?)
     case api(APIError)
 }
 
 /// Builds, signs and submits decisions.
 ///
 /// 1. Checks the interaction is still pending, unexpired and the decision is allowed for its kind.
-/// 2. Chooses the key from `AssurancePolicy` (never weaker than required).
-/// 3. Signs `DecisionPayload` (canonical JSON, `VIADERE-DECISION-V1`) with that key; Face ID / Touch ID / passcode
-///    appears for the approval keys, with a reason that names the business and amount.
-/// 4. Submits `DecideInteractionRequest`.
+/// 2. For a decision the new-device cool-down pauses, checks this device is out of it.
+/// 3. Re-fetches the interaction and compares its context digest with the one of the interaction that was **displayed**.
+///    If they differ, nothing is signed: `ApprovalError.contextChanged` carries the current version to show again.
+/// 4. Chooses the key from `AssurancePolicy` (never weaker than required).
+/// 5. Signs a v2 `DecisionPayload` (canonical JSON, `VIADERE-DECISION-V1`) whose `contextDigest` is
+///    `displayed.displayContextDigest()`: the exact interaction instance the caller passed in, never a re-fetched one.
+///    Face ID / Touch ID / passcode appears for the approval keys, with a reason that names the business and amount.
+/// 6. Submits `DecideInteractionRequest`. On `context_mismatch` it fetches the current version and reports
+///    `contextChanged`; a signature is never retried automatically.
 public struct ApprovalService: Sendable {
     private let api: any ViadereAPI
     private let keys: any DeviceKeyStore
@@ -41,11 +51,14 @@ public struct ApprovalService: Sendable {
         self.clock = clock
     }
 
-    /// - Parameter assuranceOverride: a deliberately lower claim (used only for inline `deny`/`report` from a
-    ///   notification, where no biometric UI can appear). The server decides whether that is acceptable.
+    /// - Parameters:
+    ///   - envelope: exactly what the person was shown. Its interaction's context digest is what gets signed.
+    ///   - assuranceOverride: a deliberately lower claim (used only for inline `deny`/`report` from a
+    ///     notification, where no biometric UI can appear). The server decides whether that is acceptable.
+    ///   - verifyFresh: re-fetch and compare before signing (callers that fetched the envelope a moment ago may skip it).
     public func submit(_ envelope: InteractionEnvelope, decision: Decision, selectedOptionIds: [String]? = nil, reply: String? = nil,
                        channel: Channel = .inApp, assuranceOverride: DecisionAssurance? = nil,
-                       onBehalfOf: String? = nil) async throws -> InteractionOutcome {
+                       onBehalfOf: String? = nil, verifyFresh: Bool = true) async throws -> InteractionOutcome {
         let interaction = envelope.interaction
         let now = clock()
         guard !interaction.kind.isUnknown else { throw ApprovalError.unsupportedKind }
@@ -59,6 +72,22 @@ public struct ApprovalService: Sendable {
             guard let loaded = try await records.load() else { throw ApprovalError.notEnrolled }
             record = loaded
         } catch let error as ApprovalError { throw error } catch { throw ApprovalError.notEnrolled }
+
+        // New-device cool-down: pause what the server would refuse, before any Face ID prompt. If the server can't be asked
+        // the attempt goes on and the server decides.
+        if CoolDownPolicy.restricts(decision, on: interaction),
+           let device = try? await api.devices().first(where: { $0.id == record.deviceId }), device.isCoolingDown(at: now) {
+            throw ApprovalError.deviceCoolingDown(until: device.approvalsLockedUntil)
+        }
+
+        // What the person saw is what gets signed. The digest comes from `interaction` (the displayed instance); a fresh
+        // copy is only used to notice that it has changed.
+        let digest = interaction.displayContextDigest()
+        guard Interaction.isValidContextDigest(digest) else { throw ApprovalError.unsupportedKind }
+        if verifyFresh, let fresh = try? await api.interaction(interaction.id) {
+            guard fresh.status == .pending else { throw ApprovalError.notActionable(fresh.status) }
+            guard fresh.interaction.displayContextDigest() == digest else { throw ApprovalError.contextChanged(fresh) }
+        }
 
         let plan: SigningPlan
         if let assuranceOverride {
@@ -75,7 +104,7 @@ public struct ApprovalService: Sendable {
         let payload = DecisionPayload(
             interactionId: interaction.id, businessId: interaction.businessId, decision: decision,
             selectedOptionIds: selectedOptionIds, reply: reply, challenge: interaction.challenge,
-            signedAt: now, deviceId: record.deviceId, assurance: plan.assurance)
+            signedAt: now, deviceId: record.deviceId, assurance: plan.assurance, contextDigest: digest)
         let prompt = SigningPrompt(reason: ApprovalPolicy.promptReason(for: envelope, decision: decision, onBehalfOf: onBehalfOf))
         let signed: SignedDecision
         do {
@@ -88,7 +117,16 @@ public struct ApprovalService: Sendable {
         do {
             return try await api.decide(interaction.id, DecideInteractionRequest(signedDecision: signed, channel: channel))
         } catch let error as APIError {
-            throw Self.map(error)
+            switch error.code {
+            case .contextMismatch?:
+                // The server holds a different version than the one displayed. Show the current one; never re-sign on our own.
+                throw ApprovalError.contextChanged(try? await api.interaction(interaction.id))
+            case .deviceCoolDown?:
+                let until = try? await api.devices().first(where: { $0.id == record.deviceId })?.approvalsLockedUntil
+                throw ApprovalError.deviceCoolingDown(until: until ?? nil)
+            default:
+                throw Self.map(error)
+            }
         }
     }
 
@@ -144,6 +182,8 @@ extension ApprovalError {
         case .userCancelled: "Not approved. You can try again."
         case .authenticationFailed: "We couldn't verify it's you. Try again."
         case .replyTooLong: "That reply is too long."
+        case .contextChanged: "This request changed while you were looking at it. Review the updated details before deciding."
+        case .deviceCoolingDown(let until): CoolDownPolicy.message(until: until, now: Date())
         case .api(let error): error.userMessage
         }
     }
