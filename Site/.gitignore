@@ -1,0 +1,4 @@
+dist/
+.build/
+.swiftpm/
+__pycache__/

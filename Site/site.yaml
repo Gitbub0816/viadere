@@ -1,0 +1,12 @@
+# Site configuration. Placeholders below must be replaced before launch.
+name: Viadere
+tagline: A trusted way to connect.
+base_url: https://viadere.com
+openapi: ../docs/openapi.yaml
+# Hosts that may be linked with <a href>. Nothing is ever loaded from them.
+allowed_link_hosts: [www.rfc-editor.org]
+# security.txt (RFC 9116). Both values are placeholders until the security mailbox exists.
+security_contact: "mailto:[SECURITY-CONTACT-PLACEHOLDER]"
+security_expires: "[EXPIRES-PLACEHOLDER: RFC 3339 date-time, at most 12 months ahead]"
+security_policy: https://viadere.com/legal/vulnerability-disclosure-policy/
+security_canonical: https://viadere.com/.well-known/security.txt

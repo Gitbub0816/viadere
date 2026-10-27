@@ -42,23 +42,23 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Component | Required | Notes |
 |---|---|---|
 | Swift toolchain | 6.4.1 | `swift-tools-version` stays at the lowest version that supports the features used; the toolchain itself is current |
-| Vapor | 4.122.x | Vapor 5 is pre-release (see exceptions) |
-| Fluent / postgres driver / sqlite driver | 4.13.x / 2.14.x / 4.9.x | |
-| swift-crypto | 5.0.x | |
-| swift-certificates / swift-asn1 | 1.21.x / 1.7.x | |
-| async-http-client | 1.36.x | |
-| APNSwift | 8.0.x | |
-| PostgreSQL | 18.x | Docker Compose and production |
-| Container base | official Swift image for the current toolchain on the latest Ubuntu LTS it supports | build and runtime stages on the same LTS |
+| Vapor | 4.122.3 | Vapor 5 is pre-release (see exceptions) |
+| Fluent / postgres driver / sqlite driver | 4.13.0 / 2.14.0 / 4.9.0 | |
+| swift-crypto | 5.0.3 | |
+| swift-certificates / swift-asn1 / swift-nio-ssl | 1.21.1 / 1.7.3 / 2.37.5 | |
+| async-http-client | 1.36.2 | |
+| APNSwift | 8.0.0 | |
+| PostgreSQL | 18.6 | Docker Compose (`postgres:18-alpine`) and production; server suite verified on 18.6 |
+| Container base | `swift:6.4.1-resolute` (build) / `ubuntu:26.04` (runtime) | Ubuntu 26.04 LTS is the newest LTS the Swift image supports; both stages on the same LTS |
 | Python (tooling only) | 3.15.x | |
-| Xcode / iOS SDK | latest stable | |
+| Xcode / iOS SDK | Xcode 27.1 (latest stable; 27.2 is RC) | `App/project.yml` `xcodeVersion: "2710"` |
 
 ### Exceptions
 
 | Component | Allowed version | Why | Remove when |
 |---|---|---|---|
-| webauthn-swift | 1.0.0 pre-release | No stable 1.x release exists; the passkey verifier depends on it | A stable 1.x ships — upgrade the same week |
 | Vapor | 4.x (not 5) | Vapor 5 is still beta | Vapor 5 has a stable release — plan the migration |
+| webauthn-swift (revision pin) | `main` @ `030acd1e` (after 1.0.0-beta.1) | The latest tagged release (1.0.0-beta.1) caps swift-crypto below 5.0.0; only an untagged main commit allows swift-crypto 5. `Server/Package.swift` pins that exact revision | A stable 1.x (or a tag allowing swift-crypto 5) ships — switch to `from:` the same week |
 | iOS / watchOS deployment target | iOS 17 / watchOS 10 | Product decision for device reach | The product owner raises the minimum |
 
 ## Working in this repo
