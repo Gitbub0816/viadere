@@ -1,0 +1,70 @@
+# CLAUDE.md
+
+Guidance for Claude Code (and humans) working in this repository.
+
+## Project context
+
+Viadere — *A trusted way to connect* — is a verified, privacy-conscious business↔consumer connection layer: sign-in approvals (MFA), transaction authorization, messaging, orders, rewards and Wallet passes, delivered mostly through actionable notifications. Requirements live in `docs/COMPLETE-PRODUCT-SPEC.md` and `docs/MESSAGING-GATEWAY-SPEC.md`; architecture in `docs/ARCHITECTURE.md`; the threat model, residual risks and **normative wire formats** in `docs/SECURITY.md`.
+
+The stack is Swift end to end:
+
+| Path | Role |
+|---|---|
+| `Packages/ViadereCore` | Shared contract (Linux + Apple): identifiers, interaction protocol, assurance policy, signing, SMS state machine, DTOs, route catalog |
+| `Packages/ViadereKit` | iOS app logic (tested on Linux) and Apple-only security code |
+| `Packages/ViadereBusinessSDK` | Swift SDK for business integrations |
+| `Server` | Vapor backend, business dashboard, operator console (PostgreSQL; SQLite in tests) |
+| `App` | XcodeGen project: app, notification extensions, Live Activities, App Clip, watchOS |
+| `Design` | Brand assets and brand guide |
+
+Security is the top priority. Never weaken a control from `docs/SECURITY.md` to make something build or pass; never put model identifiers in commits, PRs or code.
+
+## Versioning policy
+
+### Context
+
+Viadere handles authentication and payment approvals. Outdated runtimes, SDKs and libraries are the most common source of unpatched vulnerabilities, and falling several versions behind turns routine upgrades into risky migrations. The policy is therefore **stay on the current stable release of everything, continuously**, and treat any deviation as a tracked exception — not a default.
+
+### Rules
+
+1. **Current stable, always.** Every toolchain, runtime, SDK, framework, library, database, base image and OS used to build, test or run Viadere ("nodes": every piece of the build and runtime chain) must be on the **latest stable release**. Before adding or changing a dependency, check the upstream release list — never rely on memory or on the version already in the repo.
+2. **Partners too.** Third-party services and providers (APNs, Apple Wallet/PassKit, App Attest, SMS/RCS providers, the email provider, hosting/cloud services) must be integrated on their **current API version** and current SDKs. When a partner announces a deprecation, migrating is a priority task, not a backlog item.
+3. **Stable, not pre-release.** "Current" means the newest *stable* release. Betas, release candidates and alphas are not allowed unless no stable release of a required component exists — then it is an exception (see below).
+4. **No Node.js and no PHP — anywhere.** Not in the product, not in the server, not in build scripts, design tooling, CI, code generation or local dev utilities. Use Swift first; Python (current stable) is acceptable for tooling and scripts. JavaScript that runs **in the browser** (e.g. the embeddable Connect button, the passkey ceremony script) is allowed only as plain, dependency-free files that need no Node-based build step.
+5. **Pin precisely, upgrade promptly.** Use `from:` (up-to-next-major) requirements in `Package.swift` with the floor set to the current release, and commit `Package.resolved`. Run `swift package update` and refresh base images at least monthly and whenever a security release appears; adopt a new major version within one release cycle unless it is blocked (then record an exception).
+6. **Upgrades are verified, never blind.** An upgrade is done only when every suite passes: `Packages/ViadereCore`, `Packages/ViadereKit`, `Packages/ViadereBusinessSDK`, and `Server` on **both** SQLite and PostgreSQL (`TEST_DATABASE_URL=… TEST_RATE_LIMIT_STORE=database swift test`), with no new warnings. The app is built in the current Xcode before release.
+7. **Build with the newest Apple SDK.** Always build the app with the latest stable Xcode and SDK. The *minimum deployment target* (currently iOS 17 / watchOS 10) is a product decision and changes only deliberately — record it in the exceptions table.
+8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
+9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
+
+### Current versions (checked 2026-10-27)
+
+| Component | Required | Notes |
+|---|---|---|
+| Swift toolchain | 6.4.1 | `swift-tools-version` stays at the lowest version that supports the features used; the toolchain itself is current |
+| Vapor | 4.122.x | Vapor 5 is pre-release (see exceptions) |
+| Fluent / postgres driver / sqlite driver | 4.13.x / 2.14.x / 4.9.x | |
+| swift-crypto | 5.0.x | |
+| swift-certificates / swift-asn1 | 1.21.x / 1.7.x | |
+| async-http-client | 1.36.x | |
+| APNSwift | 8.0.x | |
+| PostgreSQL | 18.x | Docker Compose and production |
+| Container base | official Swift image for the current toolchain on the latest Ubuntu LTS it supports | build and runtime stages on the same LTS |
+| Python (tooling only) | 3.15.x | |
+| Xcode / iOS SDK | latest stable | |
+
+### Exceptions
+
+| Component | Allowed version | Why | Remove when |
+|---|---|---|---|
+| webauthn-swift | 1.0.0 pre-release | No stable 1.x release exists; the passkey verifier depends on it | A stable 1.x ships — upgrade the same week |
+| Vapor | 4.x (not 5) | Vapor 5 is still beta | Vapor 5 has a stable release — plan the migration |
+| iOS / watchOS deployment target | iOS 17 / watchOS 10 | Product decision for device reach | The product owner raises the minimum |
+
+## Working in this repo
+
+- Toolchain: `export PATH=/opt/swift/usr/bin:$PATH` in the cloud container (keep `/opt/swift` on the current release).
+- Shared logic belongs in `ViadereCore` — never duplicate it in the server or the app. Core changes stay additive unless both sides are updated in the same change.
+- Every security fix starts with a test that reproduces the exploit path.
+- The app cannot be compiled on Linux: keep platform-neutral logic in `ViadereKit` with tests, guard Apple-only code with `#if canImport(…)`, and run `swiftc -parse` on touched app files.
+- UI follows the brand (`Design/brand-guide.html`): custom design-system components, charcoal/ivory/champagne, no shield imagery, stock Apple controls only when necessary.
