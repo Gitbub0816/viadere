@@ -86,6 +86,8 @@ public struct ServerConfig: Sendable {
     /// Origin the business dashboard / operator console passkeys are scoped to. `nil` = `relyingPartyOrigin`.
     /// The RP ID stays `relyingPartyID`, so a sub-domain origin such as `https://business.viadere.com` also works.
     public var dashboardOrigin: String?
+    /// Wallet pass signing material. `nil` disables pass issuance (the pass endpoints answer `501`).
+    public var passes: PassConfig?
 
     public var isProduction: Bool { environment == .production }
 
@@ -174,6 +176,7 @@ public struct ServerConfig: Sendable {
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
         try config.applyPlatformEnvironment(env, production: production)
+        try config.applyPassEnvironment(env)
         return config
     }
 
@@ -215,6 +218,22 @@ public struct RateLimitSettings: Sendable {
     public var dashboardAuth: RateRule = .perMinute(30, burst: 20)
     /// Inbound RCS events per phone.
     public var rcsInboundPerPhone: RateRule = .perMinute(20, burst: 10)
+    /// Redemption codes a business validates per minute (the brute-force bound on the 50-bit code space).
+    public var redemptionConsume: RateRule = .perMinute(60, burst: 30)
+    /// Redemption codes a consumer can request per minute.
+    public var rewardRedeem: RateRule = .perMinute(10, burst: 5)
+    /// Household invitation lookups (preview / accept) per consumer. A wrong code costs a token; the budget is small.
+    public var inviteAttemptPerConsumer: RateRule = .perHour(10, burst: 5)
+    /// Household invitation lookups across all consumers, against distributed guessing.
+    public var inviteAttemptGlobal: RateRule = .perMinute(120, burst: 60)
+    /// Sensitive delegation invitations a consumer can create per hour.
+    public var inviteCreatePerConsumer: RateRule = .perHour(20, burst: 10)
+    /// PassKit `log` posts per client IP.
+    public var walletLogPerIP: RateRule = .perMinute(10, burst: 10)
+    /// PassKit web service calls per client IP.
+    public var walletWebServicePerIP: RateRule = .perMinute(120, burst: 60)
+    /// Failed PassKit authentications per pass.
+    public var walletAuthFailurePerPass: RateRule = .perMinute(10, burst: 10)
 
     public static let standard = RateLimitSettings(
         globalIP: .perMinute(300), authCeremony: .perMinute(20, burst: 10), refresh: .perMinute(30, burst: 10),

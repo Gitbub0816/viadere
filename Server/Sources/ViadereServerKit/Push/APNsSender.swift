@@ -44,9 +44,78 @@ public enum PushOutcome: Sendable, Equatable {
     case failed
 }
 
+/// An ActivityKit push (`apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivity`).
+///
+/// The only content is `LiveActivityStatus` (an order, delivery, flight or appointment state), so it is never marketing and
+/// never carries more than the Live Activity already shows. `start` also carries the generic attributes and a neutral alert.
+public struct LiveActivityPush: Sendable, Equatable {
+    public enum Event: String, Sendable { case start, update, end }
+
+    /// The static attributes of `ViadereActivityAttributes` (a push-to-start must supply them).
+    public struct Attributes: Sendable, Equatable, Encodable {
+        public var businessName: String
+        public var businessId: String
+        public var interactionId: String
+        public init(businessName: String, businessId: String, interactionId: String) {
+            self.businessName = businessName
+            self.businessId = businessId
+            self.interactionId = interactionId
+        }
+    }
+
+    /// The Swift type name of the app's `ActivityAttributes`, required by push-to-start.
+    public static let attributesType = "ViadereActivityAttributes"
+
+    public var deviceToken: String
+    public var environment: APNsTokenRegistration.Environment
+    public var bundleId: String
+    public var event: Event
+    public var content: LiveActivityStatus
+    /// Seconds since 1970 when the server produced this state (ActivityKit ignores out-of-order updates).
+    public var timestamp: Int
+    public var attributes: Attributes?
+    /// Neutral alert shown when an activity is started remotely.
+    public var alertTitle: String?
+    public var alertBody: String?
+
+    public var topic: String { bundleId + ".push-type.liveactivity" }
+
+    public init(deviceToken: String, environment: APNsTokenRegistration.Environment, bundleId: String, event: Event,
+                content: LiveActivityStatus, timestamp: Int, attributes: Attributes? = nil, alertTitle: String? = nil,
+                alertBody: String? = nil) {
+        self.deviceToken = deviceToken
+        self.environment = environment
+        self.bundleId = bundleId
+        self.event = event
+        self.content = content
+        self.timestamp = timestamp
+        self.attributes = attributes
+        self.alertTitle = alertTitle
+        self.alertBody = alertBody
+    }
+}
+
 /// Abstraction over APNs so the real client can be replaced by a recording fake in tests.
 public protocol APNsSender: Sendable {
     func send(_ message: PushMessage) async -> PushOutcome
+    /// Sends an ActivityKit push. Implementations that cannot (development, test fakes) report `.failed`.
+    func sendLiveActivity(_ push: LiveActivityPush) async -> PushOutcome
+}
+
+extension APNsSender {
+    public func sendLiveActivity(_ push: LiveActivityPush) async -> PushOutcome { .failed }
+}
+
+/// Sends the empty "your pass changed" push that makes Wallet re-download a pass from the web service. APNs authenticates
+/// these with the **Pass Type ID certificate** (not the token key used for the app), topic = the pass type identifier.
+public protocol PassPushSender: Sendable {
+    func notify(pushToken: String, passTypeIdentifier: String) async -> PushOutcome
+}
+
+/// Used when no pass certificate is configured: nothing to update.
+public struct DisabledPassPushSender: PassPushSender {
+    public init() {}
+    public func notify(pushToken: String, passTypeIdentifier: String) async -> PushOutcome { .failed }
 }
 
 /// Builds push messages from interactions. Sensitive content (amounts, merchants, devices, locations,

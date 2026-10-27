@@ -52,32 +52,18 @@ public struct DelegationWarning: Equatable, Sendable, Identifiable {
     public var message: String
 }
 
-/// Pure delegation rules (spec §12: scoped roles, expiration, revocation, never silently inherit sensitive
-/// permissions). The server enforces them; this lets the screen explain and block early.
-public enum DelegationScopePolicy {
-    /// Purposes that can be shared at all. Offers and news (marketing consent) stay personal.
-    public static let delegablePurposes: [InteractionPurpose] = [.transactional, .support, .rewards, .accountService, .security]
-
-    /// Purposes that need a biometric step-up and a clear warning before they can be granted.
-    public static let sensitivePurposes: Set<InteractionPurpose> = [.security, .accountService]
-
-    public static let minimumLifetime: TimeInterval = 3_600
-    /// Core's cap (`DelegationGrant.maxLifetime`, one year).
-    public static let maximumLifetime: TimeInterval = DelegationGrant.maxLifetime
-    /// Sensitive scopes are limited to 30 days and must be renewed deliberately.
-    public static let sensitiveMaximumLifetime: TimeInterval = 30 * 86_400
-
-    public static func isSensitive(_ purpose: InteractionPurpose) -> Bool { sensitivePurposes.contains(purpose) }
-
+/// Draft-based rules and copy on top of ViadereCore's `DelegationScopePolicy` (constants, canonical scope and digest,
+/// which the server shares). The server enforces them; this lets the screen explain and block early.
+extension DelegationScopePolicy {
     public static func includesSensitiveScope(_ draft: DelegationDraft) -> Bool {
-        !draft.purposes.isDisjoint(with: sensitivePurposes)
+        includesSensitiveScope(purposes: draft.purposes)
     }
 
     /// Creating a grant with a sensitive scope requires a fresh biometric step-up.
     public static func requiresStepUp(_ draft: DelegationDraft) -> Bool { includesSensitiveScope(draft) }
 
     public static func maximumLifetime(for draft: DelegationDraft) -> TimeInterval {
-        includesSensitiveScope(draft) ? sensitiveMaximumLifetime : maximumLifetime
+        maximumLifetime(includesSensitive: includesSensitiveScope(draft))
     }
 
     public static func validate(_ draft: DelegationDraft, now: Date) -> [DelegationIssue] {
@@ -136,21 +122,6 @@ public enum DelegationScopePolicy {
             expiresAt: ViadereDate.truncatedToMilliseconds(draft.expiresAt),
             includesSensitiveScope: includesSensitiveScope(draft),
             stepUp: stepUp)
-    }
-
-    /// Deterministic text of the scope the biometric signature covers. The server rebuilds it from the request body.
-    public static func canonicalScope(of request: DelegationInvitationRequest) -> String {
-        [
-            "role=\(request.role.rawValue)",
-            "purposes=" + request.purposes.map(\.rawValue).sorted().joined(separator: ","),
-            "businesses=" + request.businessIds.map(\.description).sorted().joined(separator: ","),
-            "expires=" + ViadereDate.format(request.expiresAt),
-            "label=" + request.delegateLabel,
-        ].joined(separator: "\n")
-    }
-
-    public static func scopeDigest(of request: DelegationInvitationRequest) -> String {
-        SecureToken.sha256Hex(Data(canonicalScope(of: request).utf8))
     }
 
     // MARK: Copy

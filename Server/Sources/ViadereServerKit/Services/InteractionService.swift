@@ -123,7 +123,11 @@ struct InteractionService {
             }
             throw error
         }
-        if principal.livemode { await push(record: record, interaction: issued) }
+        if principal.livemode {
+            await push(record: record, interaction: issued)
+            // Ongoing statuses can also drive a Live Activity (only when `LiveActivityPolicy` allows; never marketing).
+            await LiveActivityService(db: db, ctx: ctx).push(record: record, interaction: issued)
+        }
         return IssueResult(interaction: try businessView(record), created: true)
     }
 
@@ -162,7 +166,7 @@ struct InteractionService {
         let synthetic = IssueInteractionRequest(
             relationshipId: request.relationshipId, purpose: request.purpose, payload: .status(request.status),
             requestedActions: [], priority: .normal, sensitivity: .low, allowedChannels: [.nativePush, .inApp],
-            ttlSeconds: 24 * 3600, idempotencyKey: request.idempotencyKey, correlationId: nil, accountReference: nil)
+            ttlSeconds: 24 * 3600, idempotencyKey: request.idempotencyKey, correlationId: request.correlationId, accountReference: nil)
         guard request.activityKey.count <= 64, !request.activityKey.isEmpty else {
             throw APIError.validation("activityKey is required (max 64 characters).", details: ["activityKey": "invalid"])
         }
@@ -248,10 +252,27 @@ struct InteractionService {
         }
     }
 
+    /// The consumer's own interactions plus those of anyone who delegated to them, limited to each grant's purposes and businesses.
+    /// A delegate never sees an interaction outside every active grant's scope.
+    private func accessible(_ consumer: ConsumerID, grants: [DelegationGrantRecord], on query: QueryBuilder<InteractionRecord>) -> QueryBuilder<InteractionRecord> {
+        guard !grants.isEmpty else { return query.filter(\.$consumerId == consumer.uuid) }
+        return query.group(.or) { or in
+            or.filter(\.$consumerId == consumer.uuid)
+            for grant in grants {
+                or.group(.and) { and in
+                    and.filter(\.$consumerId == grant.grantorId)
+                    and.filter(\.$purpose ~~ grant.purposeSet.map(\.rawValue))
+                    and.filter(\.$businessId ~~ grant.businessIdSet)
+                }
+            }
+        }
+    }
+
     func list(consumer: ConsumerID, status: String?, cursor: String?, limit: Int) async throws -> Page<InteractionEnvelope> {
         let limit = min(max(limit, 1), 50)
         let offset = cursor.flatMap { Int($0) }.map { max(0, $0) } ?? 0
-        var query = InteractionRecord.query(on: db).filter(\.$consumerId == consumer.uuid)
+        let grants = try await HouseholdService(db: db, ctx: ctx).activeReceivedGrants(delegate: consumer)
+        var query = accessible(consumer, grants: grants, on: InteractionRecord.query(on: db))
         let wanted = status.flatMap { InteractionStatus(rawValue: $0) } ?? .pending
         if status != nil, InteractionStatus(rawValue: status!) == nil { throw APIError.validation("Unknown status.", details: ["status": "invalid"]) }
         query = query.filter(\.$status == wanted.rawValue)
@@ -262,8 +283,9 @@ struct InteractionService {
     }
 
     func get(consumer: ConsumerID, id: InteractionID) async throws -> InteractionEnvelope {
-        guard let record = try await InteractionRecord.query(on: db).filter(\.$id == id.uuid)
-            .filter(\.$consumerId == consumer.uuid).first(), let envelope = try await envelopes([record]).first else {
+        let grants = try await HouseholdService(db: db, ctx: ctx).activeReceivedGrants(delegate: consumer)
+        guard let record = try await accessible(consumer, grants: grants, on: InteractionRecord.query(on: db).filter(\.$id == id.uuid)).first(),
+              let envelope = try await envelopes([record]).first else {
             throw APIError.notFound
         }
         return envelope
@@ -273,9 +295,19 @@ struct InteractionService {
 
     func decide(principal: ConsumerPrincipal, id: InteractionID, request: DecideInteractionRequest) async throws -> InteractionOutcome {
         guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
-        guard let record = try await InteractionRecord.query(on: db).filter(\.$id == id.uuid)
-            .filter(\.$consumerId == principal.consumerId.uuid).first() else { throw APIError.notFound }
+        guard let record = try await InteractionRecord.find(id.uuid, on: db) else { throw APIError.notFound }
         let now = ctx.now
+        // Someone else's interaction is reachable only through an active grant that covers its purpose and business.
+        // Out of scope is a plain 404: a delegate learns nothing about what lies outside their grant.
+        var matchedGrant: DelegationGrantRecord?
+        if record.consumerId != principal.consumerId.uuid {
+            guard let purpose = InteractionPurpose(rawValue: record.purpose) else { throw APIError.notFound }
+            matchedGrant = try await HouseholdService(db: db, ctx: ctx).activeReceivedGrants(delegate: principal.consumerId).first {
+                $0.grantorId == record.consumerId && $0.permits(purpose: purpose, businessId: record.businessId, now: now)
+            }
+            guard matchedGrant != nil else { throw APIError.notFound }
+        }
+        let delegation = matchedGrant
         let audit = AuditService(db: db, ctx: ctx)
         func deny(_ code: String, error: APIError) async throws -> Never {
             _ = try? await audit.record("interaction.decision_rejected", outcome: .denied, principal: principal,
@@ -300,6 +332,17 @@ struct InteractionService {
             try await deny("malformed", error: .badRequest("The decision could not be read."))
         }
         guard claimed.deviceId == deviceId else { try await deny("device_mismatch", error: .forbidden) }
+        // A delegate can never approve authenticate/authorize, and only a manager may confirm, decline or choose. Server-enforced.
+        if let delegation {
+            guard DelegationScopePolicy.delegateMayDecide(role: delegation.roleValue, kind: interaction.kind, decision: claimed.decision) else {
+                _ = try? await audit.record("delegation.denied", outcome: .denied, actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
+                    consumerId: ConsumerID(record.consumerId), businessId: BusinessID(record.businessId), subjectType: "delegation",
+                    subjectId: delegation.id!.uuidString.lowercased(),
+                    metadata: ["delegateId": principal.consumerId.description, "grantorId": ConsumerID(record.consumerId).description,
+                               "reason": interaction.kind.isSecuritySensitive ? "kind_not_delegable" : "role_or_decision"])
+                throw APIError(.forbidden, .forbidden, "You can't respond to this request on someone else's behalf.")
+            }
+        }
         guard let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == deviceId.uuid)
             .filter(\.$purpose == DeviceKeyPurpose.required(for: claimed.assurance).rawValue).first(),
               let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else {
@@ -361,6 +404,13 @@ struct InteractionService {
             _ = try await auditService.record("interaction.decided", principal: principal, businessId: outcome.businessId,
                 subjectType: "interaction", subjectId: id.description,
                 metadata: ["decision": payload.decision.rawValue, "assurance": payload.assurance.rawValue, "channel": request.channel.rawValue])
+            if let delegation {
+                _ = try await auditService.record("delegation.used", actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
+                    consumerId: ConsumerID(record.consumerId), businessId: outcome.businessId, subjectType: "delegation",
+                    subjectId: delegation.id!.uuidString.lowercased(),
+                    metadata: ["delegateId": principal.consumerId.description, "grantorId": ConsumerID(record.consumerId).description,
+                               "decision": payload.decision.rawValue])
+            }
             if payload.decision == .report {
                 _ = try await auditService.record("interaction.reported_suspicious", principal: principal, businessId: outcome.businessId,
                     subjectType: "interaction", subjectId: id.description)

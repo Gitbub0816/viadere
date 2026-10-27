@@ -101,10 +101,28 @@ public enum APIRoutes {
         "conversations.send", .POST, "/v1/conversations/{sessionId}/messages", auth: .deviceSignedBearer)
 
     // MARK: Rewards & Wallet
+    /// Bare rewards without eligibility. `rewardsOverview` supersedes it for the app; kept for older clients.
     public static let rewardsList = Endpoint<EmptyBody, [Reward]>(
         "rewards.list", .GET, "/v1/rewards", auth: .deviceSignedBearer)
+    /// Accounts and rewards across every connected business, each reward with the server's eligibility verdict.
+    public static let rewardsOverview = Endpoint<EmptyBody, RewardsOverview>(
+        "rewards.overview", .GET, "/v1/rewards/overview", auth: .deviceSignedBearer)
+    /// `404` when the business has no loyalty program.
+    public static let loyaltyProgram = Endpoint<EmptyBody, LoyaltyProgramOverview>(
+        "loyalty.program", .GET, "/v1/loyalty/{businessId}", auth: .deviceSignedBearer)
+    /// `409` when `acceptedTermsVersion` is not the program's current version.
+    public static let loyaltyEnroll = Endpoint<LoyaltyEnrollRequest, LoyaltyAccount>(
+        "loyalty.enroll", .POST, "/v1/loyalty/{businessId}/enroll", auth: .deviceSignedBearer)
+    /// `409` when the reward is not claimable right now.
+    public static let rewardClaim = Endpoint<EmptyBody, RewardEntry>(
+        "rewards.claim", .POST, "/v1/rewards/{rewardId}/claim", auth: .deviceSignedBearer)
+    /// Re-checks eligibility (`409` when not eligible) and returns a single-use code valid for about two minutes.
     public static let rewardRedeem = Endpoint<RedeemRewardRequest, RewardRedemption>(
         "rewards.redeem", .POST, "/v1/rewards/{rewardId}/redeem", auth: .deviceSignedBearer)
+    public static let walletPasses = Endpoint<EmptyBody, [WalletPassMetadata]>(
+        "wallet.passes.list", .GET, "/v1/wallet/passes", auth: .deviceSignedBearer)
+    public static let walletPassIssue = Endpoint<WalletPassIssueRequest, WalletPassMetadata>(
+        "wallet.passes.issue", .POST, "/v1/wallet/passes", auth: .deviceSignedBearer)
     /// Response is the binary `.pkpass` (`application/vnd.apple.pkpass`).
     public static let walletPass = Endpoint<EmptyBody, Data>(
         "wallet.pass", .GET, "/v1/wallet/passes/{passId}", auth: .deviceSignedBearer)
@@ -116,6 +134,22 @@ public enum APIRoutes {
         "liveActivities.token", .POST, "/v1/live-activities/tokens", auth: .deviceSignedBearer)
 
     // MARK: Delegation (household)
+    public static let household = Endpoint<EmptyBody, HouseholdOverview>(
+        "household.overview", .GET, "/v1/household", auth: .deviceSignedBearer)
+    public static let householdInvite = Endpoint<DelegationInvitationRequest, DelegationInvitation>(
+        "household.invitations.create", .POST, "/v1/household/invitations", auth: .deviceSignedBearer)
+    public static let householdInvitationPreview = Endpoint<DelegationInvitationRedeemRequest, DelegationInvitationPreview>(
+        "household.invitations.preview", .POST, "/v1/household/invitations/preview", auth: .deviceSignedBearer)
+    public static let householdInvitationAccept = Endpoint<DelegationInvitationRedeemRequest, HouseholdGrant>(
+        "household.invitations.accept", .POST, "/v1/household/invitations/accept", auth: .deviceSignedBearer)
+    public static let householdAudit = Endpoint<EmptyBody, [HouseholdAuditEntry]>(
+        "household.audit", .GET, "/v1/household/audit", auth: .deviceSignedBearer)
+
+    // MARK: Acknowledgments
+    public static let acknowledgments = Endpoint<EmptyBody, [AcknowledgmentRecord]>(
+        "acknowledgments.list", .GET, "/v1/acknowledgments", auth: .deviceSignedBearer)
+
+    /// Direct (id-based) delegation. Kept for completeness; the app uses the invitation flow.
     public static let delegationCreate = Endpoint<CreateDelegationRequest, DelegationGrant>(
         "delegations.create", .POST, "/v1/delegations", auth: .deviceSignedBearer)
     public static let delegationsList = Endpoint<EmptyBody, [DelegationGrant]>(
@@ -136,6 +170,19 @@ public enum APIRoutes {
         "business.statuses.update", .POST, "/v1/business/statuses", auth: .businessAPIKey)
     public static let businessIssueReward = Endpoint<IssueRewardRequest, Reward>(
         "business.rewards.issue", .POST, "/v1/business/rewards", auth: .businessAPIKey)
+    public static let businessRewardsList = Endpoint<EmptyBody, [Reward]>(
+        "business.rewards.list", .GET, "/v1/business/rewards", auth: .businessAPIKey)
+    public static let businessRewardRevoke = Endpoint<EmptyBody, Reward>(
+        "business.rewards.revoke", .POST, "/v1/business/rewards/{rewardId}/revoke", auth: .businessAPIKey)
+    public static let businessLoyaltyProgramGet = Endpoint<EmptyBody, BusinessLoyaltyProgram>(
+        "business.loyalty.program.get", .GET, "/v1/business/loyalty/program", auth: .businessAPIKey)
+    public static let businessLoyaltyProgramPut = Endpoint<UpsertLoyaltyProgramRequest, BusinessLoyaltyProgram>(
+        "business.loyalty.program.put", .PUT, "/v1/business/loyalty/program", auth: .businessAPIKey)
+    public static let businessAdjustPoints = Endpoint<AdjustLoyaltyPointsRequest, LoyaltyPointsResult>(
+        "business.loyalty.points", .POST, "/v1/business/loyalty/points", auth: .businessAPIKey)
+    /// Validates and consumes a redemption code atomically: exactly one caller can ever succeed per code.
+    public static let businessConsumeRedemption = Endpoint<ConsumeRedemptionRequest, RedemptionReceipt>(
+        "business.redemptions.consume", .POST, "/v1/business/redemptions/consume", auth: .businessAPIKey)
     public static let businessWebhooksList = Endpoint<EmptyBody, [WebhookSubscription]>(
         "business.webhooks.list", .GET, "/v1/business/webhooks", auth: .businessAPIKey)
     public static let businessWebhookCreate = Endpoint<CreateWebhookRequest, WebhookSecretResponse>(
@@ -169,11 +216,16 @@ public enum APIRoutes {
         consentsGet.descriptor, consentsUpdate.descriptor,
         interactionsList.descriptor, interactionGet.descriptor, interactionDecide.descriptor,
         conversationsList.descriptor, conversationStart.descriptor, conversationMessages.descriptor, conversationSend.descriptor,
-        rewardsList.descriptor, rewardRedeem.descriptor, walletPass.descriptor,
+        rewardsList.descriptor, rewardsOverview.descriptor, loyaltyProgram.descriptor, loyaltyEnroll.descriptor,
+        rewardClaim.descriptor, rewardRedeem.descriptor, walletPasses.descriptor, walletPassIssue.descriptor, walletPass.descriptor,
+        household.descriptor, householdInvite.descriptor, householdInvitationPreview.descriptor,
+        householdInvitationAccept.descriptor, householdAudit.descriptor, acknowledgments.descriptor,
         apnsTokenRegister.descriptor, liveActivityTokenRegister.descriptor,
         delegationCreate.descriptor, delegationsList.descriptor, delegationRevoke.descriptor,
         businessIssueInteraction.descriptor, businessInteractionOutcome.descriptor, businessCancelInteraction.descriptor,
         businessSendMessage.descriptor, businessUpdateStatus.descriptor, businessIssueReward.descriptor,
+        businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
+        businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
         businessWebhookRotate.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,

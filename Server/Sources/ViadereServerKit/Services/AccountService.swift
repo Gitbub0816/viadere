@@ -66,6 +66,8 @@ struct AccountService {
         for relationship in relationships {
             try await RelationshipService(db: db, ctx: ctx).disconnect(consumer: consumer, relationshipId: RelationshipID(relationship.id!))
         }
+        // Household access ends with the account, in both directions.
+        try await HouseholdService(db: db, ctx: ctx).endAll(for: consumer)
         try await db.transaction { tx in
             try await ConsumerTokenService(db: tx, ctx: ctx).revokeAll(consumerId: id, now: now)
             let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == id).all()
@@ -89,6 +91,18 @@ struct AccountService {
                 link.phoneHash = SecureToken.hash("deleted:" + (link.id?.uuidString ?? ""))
                 try await link.update(on: tx)
             }
+            // Loyalty: the business-side member reference is personal data; balances stay as pseudonymous records.
+            try await LoyaltyAccountRecord.query(on: tx).filter(\.$consumerId == id)
+                .set(\.$memberReferenceCiphertext, to: nil).set(\.$memberReferenceMasked, to: nil).update()
+            // Wallet: passes are voided and devices unregistered, so nothing keeps updating a deleted person's cards.
+            let passes = try await WalletPassRecord.query(on: tx).filter(\.$consumerId == id).all()
+            for pass in passes {
+                try await WalletRegistrationRecord.query(on: tx).filter(\.$passId == pass.id!).delete()
+                try await WalletPassRecord.query(on: tx).filter(\.$id == pass.id!).set(\.$voided, to: true).set(\.$updatedAt, to: now).update()
+            }
+            // Redemption codes in flight are released (slots and points are moot now, but no live code survives).
+            try await RewardRedemptionRecord.query(on: tx).filter(\.$consumerId == id).filter(\.$status == "issued")
+                .set(\.$status, to: "expired").set(\.$slot, to: nil).set(\.$releasedAt, to: now).update()
             // Message history: bodies erased; rows kept so business-side ids stay consistent.
             let blank = try ctx.cipher.seal("[deleted]", context: "conversation_messages.body")
             try await ConversationMessageRecord.query(on: tx).filter(\.$consumerId == id).set(\.$bodyCiphertext, to: blank).update()

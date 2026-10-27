@@ -21,7 +21,7 @@ public struct LiveViadereAPI: ViadereAPI {
         try await client.call(APIRoutes.loginFinish, body: request)
     }
     public func logout() async throws { _ = try await client.call(APIRoutes.logout) }
-    public func deleteAccount() async throws { _ = try await client.call(ProvisionalRoutes.accountDelete) }
+    public func deleteAccount() async throws { _ = try await client.call(APIRoutes.accountDelete) }
 
     // MARK: Devices
     public func beginDeviceEnrollment() async throws -> DeviceEnrollmentChallenge { try await client.call(APIRoutes.deviceEnrollBegin) }
@@ -43,13 +43,13 @@ public struct LiveViadereAPI: ViadereAPI {
     public func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink {
         try await client.call(APIRoutes.smsLinkRedeem, body: SMSLinkRedeemRequest(token: token, confirmPhoneLast4: confirmPhoneLast4))
     }
-    public func phoneLinks() async throws -> [PhoneLink] { try await client.call(ProvisionalRoutes.phoneLinks) }
+    public func phoneLinks() async throws -> [PhoneLink] { try await client.call(APIRoutes.phoneLinksList) }
     public func removePhoneLink(_ id: PhoneLinkID) async throws {
-        _ = try await client.call(ProvisionalRoutes.phoneLinkDelete, params: ["phoneLinkId": id.description])
+        _ = try await client.call(APIRoutes.phoneLinkDelete, params: ["phoneLinkId": id.description])
     }
-    public func sessions() async throws -> [ConsumerSession] { try await client.call(ProvisionalRoutes.sessions) }
+    public func sessions() async throws -> [ConsumerSession] { try await client.call(APIRoutes.sessionsList).map(ConsumerSession.init(_:)) }
     public func revokeSession(_ id: String) async throws {
-        _ = try await client.call(ProvisionalRoutes.sessionRevoke, params: ["sessionId": id])
+        _ = try await client.call(APIRoutes.sessionRevoke, params: ["sessionId": id])
     }
 
     // MARK: Directory
@@ -116,45 +116,45 @@ public struct LiveViadereAPI: ViadereAPI {
     }
 
     // MARK: Rewards, loyalty and Wallet
-    public func rewardsOverview() async throws -> RewardsOverview { try await client.call(ProvisionalRoutes.rewardsOverview) }
+    public func rewardsOverview() async throws -> RewardsOverview { try await client.call(APIRoutes.rewardsOverview) }
     public func loyaltyProgram(business: BusinessID) async throws -> LoyaltyProgramOverview {
-        try await client.call(ProvisionalRoutes.loyaltyProgram, params: ["businessId": business.description])
+        try await client.call(APIRoutes.loyaltyProgram, params: ["businessId": business.description])
     }
     public func enrollLoyalty(business: BusinessID, _ request: LoyaltyEnrollRequest) async throws -> LoyaltyAccount {
-        try await client.call(ProvisionalRoutes.loyaltyEnroll, params: ["businessId": business.description], body: request)
+        try await client.call(APIRoutes.loyaltyEnroll, params: ["businessId": business.description], body: request)
     }
     public func claimReward(_ id: RewardID) async throws -> RewardEntry {
-        try await client.call(ProvisionalRoutes.rewardClaim, params: ["rewardId": id.description])
+        try await client.call(APIRoutes.rewardClaim, params: ["rewardId": id.description])
     }
     public func redeemReward(_ id: RewardID, _ request: RedeemRewardRequest) async throws -> RewardRedemption {
         try await client.call(APIRoutes.rewardRedeem, params: ["rewardId": id.description], body: request)
     }
-    public func walletPasses() async throws -> [WalletPassMetadata] { try await client.call(ProvisionalRoutes.walletPasses) }
+    public func walletPasses() async throws -> [WalletPassMetadata] { try await client.call(APIRoutes.walletPasses) }
     public func issueWalletPass(_ request: WalletPassIssueRequest) async throws -> WalletPassMetadata {
-        try await client.call(ProvisionalRoutes.walletPassIssue, body: request)
+        try await client.call(APIRoutes.walletPassIssue, body: request)
     }
     public func walletPass(_ id: WalletPassID) async throws -> Data {
         try await client.data(APIRoutes.walletPass, params: ["passId": id.description])
     }
 
     // MARK: Household
-    public func household() async throws -> HouseholdOverview { try await client.call(ProvisionalRoutes.household) }
+    public func household() async throws -> HouseholdOverview { try await client.call(APIRoutes.household) }
     public func createDelegationInvitation(_ request: DelegationInvitationRequest) async throws -> DelegationInvitation {
-        try await client.call(ProvisionalRoutes.householdInvite, body: request)
+        try await client.call(APIRoutes.householdInvite, body: request)
     }
     public func previewDelegationInvitation(code: String) async throws -> DelegationInvitationPreview {
-        try await client.call(ProvisionalRoutes.householdInvitationPreview, body: DelegationInvitationRedeemRequest(code: code))
+        try await client.call(APIRoutes.householdInvitationPreview, body: DelegationInvitationRedeemRequest(code: code))
     }
     public func acceptDelegationInvitation(code: String) async throws -> HouseholdGrant {
-        try await client.call(ProvisionalRoutes.householdInvitationAccept, body: DelegationInvitationRedeemRequest(code: code))
+        try await client.call(APIRoutes.householdInvitationAccept, body: DelegationInvitationRedeemRequest(code: code))
     }
     public func revokeDelegation(_ id: DelegationID) async throws {
         _ = try await client.call(APIRoutes.delegationRevoke, params: ["delegationId": id.description])
     }
-    public func householdAudit() async throws -> [HouseholdAuditEntry] { try await client.call(ProvisionalRoutes.householdAudit) }
+    public func householdAudit() async throws -> [HouseholdAuditEntry] { try await client.call(APIRoutes.householdAudit) }
 
     // MARK: Acknowledgments
-    public func acknowledgments() async throws -> [AcknowledgmentRecord] { try await client.call(ProvisionalRoutes.acknowledgments) }
+    public func acknowledgments() async throws -> [AcknowledgmentRecord] { try await client.call(APIRoutes.acknowledgments) }
 
     // MARK: Push
     public func registerAPNsToken(_ registration: APNsTokenRegistration) async throws {

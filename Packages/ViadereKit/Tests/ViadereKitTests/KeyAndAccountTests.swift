@@ -110,7 +110,7 @@ struct StorageTests {
         #expect(await services.sessions.tokens() == nil)
         #expect(try await services.records.load() == nil)
         #expect(await services.keys.availablePurposes().isEmpty)
-        #expect(try (services.secrets as? InMemorySecretStore)?.count == 0)
+        #expect((services.secrets as? InMemorySecretStore)?.count == 0)
     }
 
     @Test func deleteAccountCallsServerThenWipes() async throws {

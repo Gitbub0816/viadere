@@ -61,13 +61,9 @@ enum Routes {
         DashboardRoutes.register(app)
         OperatorRoutes.register(app)
         ConnectButtonRoutes.register(app)
-        // P3–P5 features: the catalog routes exist and are authenticated but not implemented yet.
-        api.unavailable(APIRoutes.rewardsList)
-        api.unavailable(APIRoutes.rewardRedeem)
-        api.unavailable(APIRoutes.walletPass)
-        api.unavailable(APIRoutes.delegationCreate)
-        api.unavailable(APIRoutes.delegationsList)
-        api.unavailable(APIRoutes.delegationRevoke)
-        api.unavailable(APIRoutes.businessIssueReward)
+        RewardRoutes.register(api)
+        WalletRoutes.register(api)
+        HouseholdRoutes.register(api)
+        BusinessRewardRoutes.register(api)
     }
 }

@@ -5,6 +5,7 @@ import Foundation
 import Logging
 import NIOPosix
 import NIOCore
+import NIOSSL
 import ViadereCore
 
 /// Real APNs delivery through APNSwift with token-based (.p8) authentication.
@@ -45,6 +46,35 @@ public final class APNSwiftSender: APNsSender, Sendable {
         }
     }
 
+    public func sendLiveActivity(_ push: LiveActivityPush) async -> PushOutcome {
+        guard (push.environment == .sandbox) == useSandbox else { return .failed }
+        let expiration = APNSNotificationExpiration.timeIntervalSince1970InSeconds(push.timestamp + 3600)
+        do {
+            switch push.event {
+            case .start:
+                guard let attributes = push.attributes else { return .failed }
+                let notification = APNSStartLiveActivityNotification(
+                    expiration: expiration, priority: .immediately, appID: push.bundleId, contentState: push.content,
+                    timestamp: push.timestamp, attributes: attributes, attributesType: LiveActivityPush.attributesType,
+                    alert: .init(title: .raw(push.alertTitle ?? "Viadere"), body: .raw(push.alertBody ?? "There is an update.")))
+                try await client.sendStartLiveActivityNotification(notification, pushToStartToken: push.deviceToken)
+            case .update, .end:
+                let notification = APNSLiveActivityNotification(
+                    expiration: expiration, priority: .immediately, topic: push.topic, contentState: push.content,
+                    event: push.event == .end ? .end : .update, timestamp: push.timestamp)
+                try await client.sendLiveActivityNotification(notification, deviceToken: push.deviceToken)
+            }
+            return .delivered
+        } catch let error as APNSError {
+            if error.responseStatus == 410 || error.reason == .badDeviceToken || error.reason == .unregistered { return .tokenInvalid }
+            logger.warning("apns live activity failed", metadata: ["status": "\(error.responseStatus)"])
+            return .failed
+        } catch {
+            logger.warning("apns live activity failed", metadata: ["error": "\(type(of: error))"])
+            return .failed
+        }
+    }
+
     struct Custom: Encodable, Sendable { var iid: String? }
 
     /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
@@ -62,5 +92,42 @@ public final class APNSwiftSender: APNsSender, Sendable {
             priority: message.highPriority ? .immediately : .consideringDevicePower,
             topic: message.topic, payload: Custom(iid: message.interactionId), threadID: message.threadID,
             category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
+    }
+}
+
+/// Wallet pass update pushes over APNs with the Pass Type ID certificate (TLS client authentication).
+public final class APNSwiftPassPushSender: PassPushSender, Sendable {
+    private struct Empty: APNSMessage {}
+
+    private let client: APNSClient<JSONDecoder, JSONEncoder>
+    private let logger: Logger
+
+    public init(config: PassConfig, logger: Logger) throws {
+        let key = try NIOSSLPrivateKey(bytes: Array(config.privateKeyPEM.utf8), format: .pem)
+        let certificate = try NIOSSLCertificate(bytes: Array(config.certificatePEM.utf8), format: .pem)
+        let configuration = APNSClientConfiguration(
+            authenticationMethod: .tls(privateKey: .privateKey(key), certificateChain: [.certificate(certificate)]),
+            environment: .production)
+        client = APNSClient(configuration: configuration, eventLoopGroupProvider: .shared(MultiThreadedEventLoopGroup.singleton),
+                            responseDecoder: JSONDecoder(), requestEncoder: JSONEncoder())
+        self.logger = logger
+    }
+
+    public func shutdown() async { try? await client.shutdown() }
+
+    public func notify(pushToken: String, passTypeIdentifier: String) async -> PushOutcome {
+        let request = APNSRequest(message: Empty(), deviceToken: pushToken, pushType: .alert, expiration: nil, priority: .immediately,
+                                  apnsID: nil, topic: passTypeIdentifier, collapseID: nil)
+        do {
+            _ = try await client.send(request)
+            return .delivered
+        } catch let error as APNSError {
+            if error.responseStatus == 410 || error.reason == .badDeviceToken || error.reason == .unregistered { return .tokenInvalid }
+            logger.warning("apns pass push failed", metadata: ["status": "\(error.responseStatus)"])
+            return .failed
+        } catch {
+            logger.warning("apns pass push failed", metadata: ["error": "\(type(of: error))"])
+            return .failed
+        }
     }
 }

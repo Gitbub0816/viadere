@@ -146,7 +146,7 @@ extension MockViadereAPI {
         let alphabet = Array("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
         let code = String((0..<8).map { _ in alphabet[Int.random(in: 0..<alphabet.count)] })
         p3.issuedRedemptionCodes[code] = id
-        return RewardRedemption(reward: stored.reward, redemptionCode: code, expiresAt: now.addingTimeInterval(120))
+        return RewardRedemption(reward: stored.reward, redemptionCode: code, expiresAt: now.addingTimeInterval(120), validForSeconds: 120, serverTime: now)
     }
 
     // MARK: Wallet

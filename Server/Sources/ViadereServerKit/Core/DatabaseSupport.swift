@@ -10,8 +10,29 @@ extension Error {
     }
 }
 
+extension Error {
+    /// A lock or serialization failure that succeeds when simply tried again: SQLite `busy` (tests) and PostgreSQL deadlocks.
+    var isTransientDatabaseFailure: Bool {
+        let text = String(describing: self).lowercased()
+        return text.contains("database is locked") || text.contains("busy") || text.contains("deadlock") || text.contains("could not serialize")
+    }
+}
+
 /// Database helpers shared by services.
 enum DB {
+    /// Runs `body`, retrying with a short jittered pause when the database reports a transient lock or serialization failure.
+    /// Business rules still decide the outcome on every attempt (each attempt re-reads state), so a retry can never double-apply.
+    static func retryingTransient<T>(attempts: Int = 10, _ body: () async throws -> T) async throws -> T {
+        var attempt = 0
+        while true {
+            do { return try await body() } catch {
+                attempt += 1
+                guard error.isTransientDatabaseFailure, attempt < attempts else { throw error }
+                try await Task.sleep(nanoseconds: UInt64.random(in: 5_000_000...40_000_000) * UInt64(attempt))
+            }
+        }
+    }
+
     /// Whether the connected dialect is PostgreSQL.
     static func isPostgres(_ db: any Database) -> Bool {
         (db as? any SQLDatabase)?.dialect.name == "postgresql"

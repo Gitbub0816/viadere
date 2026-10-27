@@ -83,8 +83,30 @@ final class DelegationGrantRecord: Model, @unchecked Sendable {
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date
     @OptionalField(key: "revoked_at") var revokedAt: Date?
+    /// The grantor's own label for the delegate (AES-GCM; a name is personal data).
+    @OptionalField(key: "label_ciphertext") var labelCiphertext: String?
+    /// Set once the `delegation.expired` audit event has been written.
+    @Field(key: "expiry_recorded") var expiryRecorded: Bool
 
     init() {}
+
+    var purposeSet: [InteractionPurpose] { purposes.split(separator: ",").compactMap { InteractionPurpose(rawValue: String($0)) } }
+    var businessIdSet: [UUID] { businessIds.split(separator: ",").compactMap { UUID(uuidString: String($0)) } }
+    var roleValue: DelegationGrant.Role { DelegationGrant.Role(rawValue: role) ?? .viewer }
+
+    func isActive(at now: Date) -> Bool { revokedAt == nil && now < expiresAt }
+
+    /// Whether the grant covers `purpose` at `businessId` right now.
+    func permits(purpose: InteractionPurpose, businessId: UUID, now: Date) -> Bool {
+        isActive(at: now) && purposeSet.contains(purpose) && businessIdSet.contains(businessId)
+    }
+
+    var dto: DelegationGrant? {
+        guard let id else { return nil }
+        return DelegationGrant(id: DelegationID(id), grantorId: ConsumerID(grantorId), delegateId: ConsumerID(delegateId),
+                               role: roleValue, purposes: purposeSet, businessIds: businessIdSet.map { BusinessID($0) },
+                               createdAt: createdAt, expiresAt: expiresAt, revokedAt: revokedAt)
+    }
 }
 
 final class APNsTokenRecord: Model, @unchecked Sendable {

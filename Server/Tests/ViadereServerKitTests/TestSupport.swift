@@ -32,9 +32,18 @@ struct FakePasskeyVerifier: PasskeyVerifier {
 final class RecordingAPNsSender: APNsSender, @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [PushMessage] = []
+    private var liveStorage: [LiveActivityPush] = []
     private var outcome: PushOutcome = .delivered
     var sent: [PushMessage] { lock.withLock { storage } }
+    /// ActivityKit pushes (`apns-push-type: liveactivity`).
+    var liveActivities: [LiveActivityPush] { lock.withLock { liveStorage } }
     func setOutcome(_ value: PushOutcome) { lock.withLock { outcome = value } }
+    func sendLiveActivity(_ push: LiveActivityPush) async -> PushOutcome {
+        lock.withLock {
+            liveStorage.append(push)
+            return outcome
+        }
+    }
     func send(_ message: PushMessage) async -> PushOutcome {
         lock.withLock {
             storage.append(message)
@@ -71,6 +80,35 @@ final class RecordingSMSProvider: SMSProvider, @unchecked Sendable {
             storage.append(Sent(to: request.to.e164, body: request.body))
             counter += 1
             return OutboundSMSResult(providerMessageId: "twilio:SMOUT\(counter)")
+        }
+    }
+}
+
+/// Signs manifests with a recognizable fake so tests can check exactly what was signed.
+final class FakePassSigner: PassSigner, @unchecked Sendable {
+    let passTypeIdentifier = "pass.com.viadere.test"
+    let teamIdentifier = "TEAMID1234"
+    private let lock = NSLock()
+    private var manifests: [Data] = []
+    var signedManifests: [Data] { lock.withLock { manifests } }
+    static let prefix = Data("FAKE-PKCS7:".utf8)
+    func sign(manifest: Data, at date: Date) throws -> Data {
+        lock.withLock { manifests.append(manifest) }
+        return Self.prefix + Data(SHA256.hash(data: manifest))
+    }
+}
+
+final class RecordingPassPush: PassPushSender, @unchecked Sendable {
+    struct Sent: Equatable { var token: String; var passType: String }
+    private let lock = NSLock()
+    private var storage: [Sent] = []
+    private var outcomes: [String: PushOutcome] = [:]
+    var sent: [Sent] { lock.withLock { storage } }
+    func setOutcome(_ outcome: PushOutcome, for token: String) { lock.withLock { outcomes[token] = outcome } }
+    func notify(pushToken: String, passTypeIdentifier: String) async -> PushOutcome {
+        lock.withLock {
+            storage.append(Sent(token: pushToken, passType: passTypeIdentifier))
+            return outcomes[pushToken] ?? .delivered
         }
     }
 }
@@ -137,14 +175,18 @@ final class TestHarness: @unchecked Sendable {
     let sms = RecordingSMSProvider()
     let transport = ScriptedWebhookTransport()
     var config: ServerConfig
+    let signer: FakePassSigner
+    let passPush: RecordingPassPush
 
-    init(app: Application, clock: ManualClock, config: ServerConfig) {
+    init(app: Application, clock: ManualClock, config: ServerConfig, signer: FakePassSigner, passPush: RecordingPassPush) {
         self.app = app
         self.clock = clock
         self.config = config
+        self.signer = signer
+        self.passPush = passPush
     }
 
-    static func make(rcs: (any RCSProvider)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
+    static func make(rcs: (any RCSProvider)? = nil, passes: Bool = true, _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
         var config = ServerConfig.testing()
         adjust(&config)
         // Set TEST_DATABASE_URL to run the whole suite against a real PostgreSQL instance.
@@ -154,9 +196,12 @@ final class TestHarness: @unchecked Sendable {
         let apns = RecordingAPNsSender()
         let sms = RecordingSMSProvider()
         let transport = ScriptedWebhookTransport()
+        let signer = FakePassSigner()
+        let passPush = RecordingPassPush()
         let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
-            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil))
-        let harness = TestHarness(app: app, clock: clock, config: config)
+            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil,
+            passSigner: passes ? signer : nil, passPush: passPush))
+        let harness = TestHarness(app: app, clock: clock, config: config, signer: signer, passPush: passPush)
         harness.bind(apns: apns, sms: sms, transport: transport)
         return harness
     }
@@ -335,8 +380,8 @@ final class TestHarness: @unchecked Sendable {
 }
 
 /// Runs a test body with a fresh application, always shutting it down.
-func withHarness(rcs: (any RCSProvider)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in }, _ body: (TestHarness) async throws -> Void) async throws {
-    let harness = try await TestHarness.make(rcs: rcs, adjust)
+func withHarness(rcs: (any RCSProvider)? = nil, passes: Bool = true, _ adjust: (inout ServerConfig) -> Void = { _ in }, _ body: (TestHarness) async throws -> Void) async throws {
+    let harness = try await TestHarness.make(rcs: rcs, passes: passes, adjust)
     do {
         try await body(harness)
     } catch {

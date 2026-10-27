@@ -21,11 +21,16 @@ public final class ServerContext: Sendable {
     public let channels: ChannelRegistry
     /// Passkey verifier for the business dashboard / operator console (RP origin may differ from consumers').
     public let dashboardPasskeys: any PasskeyVerifier
+    /// Signs Wallet passes. `nil` when no pass certificate is configured.
+    public let passSigner: (any PassSigner)?
+    /// Pushes "pass changed" notifications to registered Wallet devices.
+    public let passPush: any PassPushSender
 
     public init(config: ServerConfig, clock: any ServerClock = SystemClock(), apns: any APNsSender, sms: any SMSProvider,
                 passkeys: any PasskeyVerifier, webhookTransport: any WebhookTransport,
                 rateLimitStore: any RateLimitStore = InMemoryRateLimitStore(), rcs: (any RCSProvider)? = nil,
-                dashboardPasskeys: (any PasskeyVerifier)? = nil) {
+                dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
+                passPush: any PassPushSender = DisabledPassPushSender()) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey)
@@ -39,6 +44,8 @@ public final class ServerContext: Sendable {
         channels = ChannelRegistry(sms: SMSChannelAdapter(provider: sms), rcs: RCSChannelAdapter(provider: rcs),
                                    appleMessagesForBusiness: AppleMessagesForBusinessAdapter(flagEnabled: config.channelFlags.appleMessagesForBusiness))
         self.dashboardPasskeys = dashboardPasskeys ?? passkeys
+        self.passSigner = passSigner
+        self.passPush = passPush
     }
 
     public var now: Date { clock.now() }

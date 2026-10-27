@@ -101,6 +101,52 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         try decode(Interaction.self, try await perform(APIRoutes.businessUpdateStatus.descriptor, body: request, idempotencyKey: request.idempotencyKey))
     }
 
+    // MARK: Loyalty and rewards (scope `rewards:write`)
+
+    /// Creates a reward (`POST /v1/business/rewards`). Without `relationshipId` it joins your program and every connected
+    /// customer sees it, each with their own server-computed eligibility; with one, only that customer does.
+    /// Idempotent on `request.idempotencyKey`. The returned flag is `false` when the key was already used.
+    public func createReward(_ request: IssueRewardRequest) async throws -> (reward: Reward, wasCreated: Bool) {
+        let response = try await perform(APIRoutes.businessIssueReward.descriptor, body: request, idempotencyKey: request.idempotencyKey)
+        return (try decode(Reward.self, response), response.status == 201)
+    }
+
+    /// Your rewards, newest first.
+    public func listRewards() async throws -> [Reward] {
+        try decode([Reward].self, try await perform(APIRoutes.businessRewardsList.descriptor))
+    }
+
+    /// Withdraws a reward. Outstanding redemption codes stop validating and held points return to customers. Safe to repeat.
+    public func revokeReward(id: RewardID) async throws -> Reward {
+        try decode(Reward.self, try await perform(APIRoutes.businessRewardRevoke.descriptor, parameters: ["rewardId": id.description], naturallyIdempotent: true))
+    }
+
+    /// Your loyalty program (`404` until you create one).
+    public func loyaltyProgram() async throws -> BusinessLoyaltyProgram {
+        try decode(BusinessLoyaltyProgram.self, try await perform(APIRoutes.businessLoyaltyProgramGet.descriptor))
+    }
+
+    /// Creates or replaces your loyalty program. Changing `termsVersion` makes customers accept the new terms to join.
+    public func saveLoyaltyProgram(_ program: UpsertLoyaltyProgramRequest) async throws -> BusinessLoyaltyProgram {
+        try decode(BusinessLoyaltyProgram.self, try await perform(APIRoutes.businessLoyaltyProgramPut.descriptor, body: program, naturallyIdempotent: true))
+    }
+
+    /// Adds or removes points for an enrolled customer. Idempotent on `request.idempotencyKey`: a replay returns the current
+    /// balance with `applied == false` and changes nothing.
+    public func adjustPoints(_ request: AdjustLoyaltyPointsRequest) async throws -> LoyaltyPointsResult {
+        try decode(LoyaltyPointsResult.self, try await perform(APIRoutes.businessAdjustPoints.descriptor, body: request, idempotencyKey: request.idempotencyKey))
+    }
+
+    /// Validates the code a customer shows at the till and consumes it in one atomic step.
+    ///
+    /// Exactly one call can ever succeed for a code. A code that was already used answers `409` (with `redeemedAt` in the error
+    /// details), an expired or withdrawn one `410`, and an unknown one `404`. This call is **not** retried automatically:
+    /// if the response is lost, a repeat reports "already used", so check with the customer instead of consuming twice.
+    public func consumeRedemption(code: String, locationCode: String? = nil) async throws -> RedemptionReceipt {
+        try decode(RedemptionReceipt.self, try await perform(APIRoutes.businessConsumeRedemption.descriptor,
+                                                              body: ConsumeRedemptionRequest(code: code, locationCode: locationCode)))
+    }
+
     // MARK: Webhooks (scope `webhooks:manage`)
 
     public func listWebhooks() async throws -> [WebhookSubscription] {

@@ -9,13 +9,15 @@ enum UsageMeter {
         case interaction
         case smsSegment = "sms_segment"
         case rcsMessage = "rcs_message"
+        case rewardRedemption = "reward_redemption"
 
-        var category: String { self == .interaction ? "platform" : "transport" }
+        var category: String { self == .smsSegment || self == .rcsMessage ? "transport" : "platform" }
         var title: String {
             switch self {
             case .interaction: "Interactions issued"
             case .smsSegment: "SMS segments"
             case .rcsMessage: "RCS messages"
+            case .rewardRedemption: "Reward redemptions"
             }
         }
     }
@@ -48,6 +50,8 @@ enum UsageMeter {
         var interactions = 0
         var smsSegments = 0
         var rcsMessages = 0
+        /// Metered for visibility only; not part of the invoice preview.
+        var redemptions = 0
     }
 
     /// Live usage in `[from, to)`.
@@ -60,6 +64,7 @@ enum UsageMeter {
             case .interaction: out.interactions += event.quantity
             case .smsSegment: out.smsSegments += event.quantity
             case .rcsMessage: out.rcsMessages += event.quantity
+            case .rewardRedemption: out.redemptions += event.quantity
             case nil: break
             }
         }

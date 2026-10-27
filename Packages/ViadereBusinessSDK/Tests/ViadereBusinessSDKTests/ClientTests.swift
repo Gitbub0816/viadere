@@ -88,9 +88,10 @@ struct ClientTests {
     @Test func everyBusinessRouteInTheCatalogIsCoveredByTheClient() {
         let business = APIRoutes.all.filter { $0.auth == .businessAPIKey }.map(\.name)
         let covered: Set<String> = ["business.interactions.issue", "business.interactions.outcome", "business.interactions.cancel", "business.messages.send",
-                                    "business.statuses.update", "business.webhooks.list", "business.webhooks.create", "business.webhooks.delete", "business.webhooks.rotate"]
-        // Rewards are not available yet (the server answers 501), so the client intentionally has no method for them.
-        #expect(Set(business).subtracting(covered) == ["business.rewards.issue"])
+                                    "business.statuses.update", "business.webhooks.list", "business.webhooks.create", "business.webhooks.delete", "business.webhooks.rotate",
+                                    "business.rewards.issue", "business.rewards.list", "business.rewards.revoke", "business.loyalty.program.get",
+                                    "business.loyalty.program.put", "business.loyalty.points", "business.redemptions.consume"]
+        #expect(Set(business).subtracting(covered).isEmpty)
     }
 
     // MARK: Errors

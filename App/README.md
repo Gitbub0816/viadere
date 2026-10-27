@@ -163,8 +163,7 @@ via `project.yml` and the pass type ids in the Developer portal.
 
 ### Server contract
 
-All `deviceSignedBearer`. Routes marked **Core** already exist in `APIRoutes`; the rest are provisional
-(`ProvisionalRoutes`, ViadereKit `Rewards/RewardModels.swift`) and `404` hides the feature in the app.
+All `deviceSignedBearer`. Every route below lives in ViadereCore's `APIRoutes` (shared with the server); a `404` still means "the business has no such feature" and hides it.
 
 | Route | Returns |
 |---|---|

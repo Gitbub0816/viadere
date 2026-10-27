@@ -43,9 +43,24 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     } else {
         dashboardPasskeys = passkeys
     }
+    // Wallet: the signer is validated here, so a bad certificate fails the deploy instead of the first pass request.
+    var passSigner: (any PassSigner)?
+    var passPush: any PassPushSender = DisabledPassPushSender()
+    if let override = overrides.passSigner {
+        passSigner = override
+    } else if let passes = config.passes {
+        passSigner = try X509PassSigner(config: passes, teamIdentifier: config.appleTeamID, now: clock.now())
+    }
+    if let override = overrides.passPush {
+        passPush = override
+    } else if let passes = config.passes {
+        let sender = try APNSwiftPassPushSender(config: passes, logger: app.logger)
+        app.lifecycle.use(PassPushShutdown(sender: sender))
+        passPush = sender
+    }
     app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms, passkeys: passkeys, webhookTransport: transport,
                             rateLimitStore: overrides.rateLimitStore ?? InMemoryRateLimitStore(), rcs: rcs,
-                            dashboardPasskeys: dashboardPasskeys)
+                            dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush)
 
     // MARK: Database
     if let url = config.databaseURL {
@@ -84,10 +99,13 @@ public struct Overrides: Sendable {
     public var rateLimitStore: (any RateLimitStore)?
     public var rcs: (any RCSProvider)?
     public var autoMigrate: Bool = false
+    public var passSigner: (any PassSigner)?
+    public var passPush: (any PassPushSender)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,
-                rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false) {
+                rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false,
+                passSigner: (any PassSigner)? = nil, passPush: (any PassPushSender)? = nil) {
         self.clock = clock
         self.apns = apns
         self.sms = sms
@@ -96,6 +114,8 @@ public struct Overrides: Sendable {
         self.rateLimitStore = rateLimitStore
         self.rcs = rcs
         self.autoMigrate = autoMigrate
+        self.passSigner = passSigner
+        self.passPush = passPush
     }
 }
 
@@ -114,6 +134,13 @@ public func makeApplication(environment: Environment, config: ServerConfig, over
 /// Closes the APNs HTTP/2 client when the application shuts down.
 struct APNsShutdown: LifecycleHandler {
     let sender: APNSwiftSender
+    func shutdown(_ application: Application) {}
+    func shutdownAsync(_ application: Application) async { await sender.shutdown() }
+}
+
+/// Closes the pass-push APNs client when the application shuts down.
+struct PassPushShutdown: LifecycleHandler {
+    let sender: APNSwiftPassPushSender
     func shutdown(_ application: Application) {}
     func shutdownAsync(_ application: Application) async { await sender.shutdown() }
 }

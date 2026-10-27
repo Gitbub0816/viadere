@@ -98,12 +98,16 @@ public struct AcknowledgePayload: Codable, Sendable, Hashable {
     public var body: String
     public var documentURL: URL?
     public var documentVersion: String?
+    /// Lowercase hex SHA-256 of the document the person is shown, so the acknowledgment record can prove which text
+    /// was acknowledged. Optional; absent in payloads from older senders.
+    public var documentDigest: String?
 
-    public init(title: String, body: String, documentURL: URL? = nil, documentVersion: String? = nil) {
+    public init(title: String, body: String, documentURL: URL? = nil, documentVersion: String? = nil, documentDigest: String? = nil) {
         self.title = title
         self.body = body
         self.documentURL = documentURL
         self.documentVersion = documentVersion
+        self.documentDigest = documentDigest
     }
 }
 
@@ -160,15 +164,25 @@ public struct TicketPayload: Codable, Sendable, Hashable {
     public var validFrom: Date?
     public var validUntil: Date?
     public var walletPassId: WalletPassID?
+    /// Where the event takes place, e.g. "Orpheum Theatre" (≤ 80). Absent in payloads from older senders.
+    public var venue: String?
+    /// Seat, row or gate, e.g. "Row F · Seat 12" (≤ 80).
+    public var seat: String?
+    /// When the event, flight or admission starts. `validFrom` remains the earliest valid entry time.
+    public var startsAt: Date?
 
     public init(title: String, ticketType: String, holderName: String? = nil, validFrom: Date? = nil,
-                validUntil: Date? = nil, walletPassId: WalletPassID? = nil) {
+                validUntil: Date? = nil, walletPassId: WalletPassID? = nil, venue: String? = nil, seat: String? = nil,
+                startsAt: Date? = nil) {
         self.title = title
         self.ticketType = ticketType
         self.holderName = holderName
         self.validFrom = validFrom
         self.validUntil = validUntil
         self.walletPassId = walletPassId
+        self.venue = venue
+        self.seat = seat
+        self.startsAt = startsAt
     }
 }
 

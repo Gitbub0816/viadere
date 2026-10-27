@@ -64,4 +64,29 @@ struct P3RouteTests {
             #expect(error.code == .notFound)
         }
     }
+
+    @Test func remainingP3CallsUseTheCoreCatalog() async throws {
+        let env = try await ClientEnv()
+        let transport = FakeTransport { request, _ in
+            if request.url.path == "/v1/sessions" {
+                return json(#"[{"id":"7b1d3c7e-0d3a-4d3e-9d4b-1f3f4c2a9a10","createdAt":"2026-10-27T12:00:00.000Z","expiresAt":"2026-11-27T12:00:00.000Z","current":true}]"#)
+            }
+            return json("{}")
+        }
+        let (client, _) = env.client(transport: transport)
+        let api = LiveViadereAPI(client: client)
+        let business = BusinessID()
+        let sessions = try await api.sessions()
+        #expect(sessions.count == 1 && sessions[0].isCurrent && sessions[0].id == "7b1d3c7e-0d3a-4d3e-9d4b-1f3f4c2a9a10")
+        _ = try? await api.loyaltyProgram(business: business)
+        _ = try? await api.enrollLoyalty(business: business, LoyaltyEnrollRequest(acceptedTermsVersion: "v1"))
+        _ = try? await api.previewDelegationInvitation(code: "K7M2-9QXP")
+        _ = try? await api.acceptDelegationInvitation(code: "K7M2-9QXP")
+        let seen = transport.requests.map { "\($0.method) \($0.url.path)" }
+        #expect(seen == ["GET /v1/sessions", "GET /v1/loyalty/\(business)", "POST /v1/loyalty/\(business)/enroll",
+                         "POST /v1/household/invitations/preview", "POST /v1/household/invitations/accept"])
+        // the Kit and Core agree on one definition of every P3 route
+        #expect(APIRoutes.rewardsOverview.auth == .deviceSignedBearer)
+        #expect(APIRoutes.household.auth == .deviceSignedBearer)
+    }
 }

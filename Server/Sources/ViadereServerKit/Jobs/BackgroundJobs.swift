@@ -12,6 +12,8 @@ struct BackgroundJobs {
         var smsSent = 0
         var interactionsExpired = 0
         var channelMessages = 0
+        var redemptionsReleased = 0
+        var passPushes = 0
     }
 
     @discardableResult
@@ -23,12 +25,17 @@ struct BackgroundJobs {
         report.smsSent = try await OutboundSMS(db: db, ctx: ctx).sendDue()
         report.channelMessages = try await ChannelRouter(db: db, ctx: ctx).deliverDue()
         report.webhooksAttempted = try await WebhookService(db: db, ctx: ctx).deliverDue()
+        // Redemption codes that expired unused give their per-day slot and points back.
+        report.redemptionsReleased = try await RewardsService(db: db, ctx: ctx).releaseExpired()
+        report.passPushes = try await WalletService(db: db, ctx: ctx).deliverDue()
+        try await HouseholdService(db: db, ctx: ctx).recordExpired()
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
         if await ctx.limiter.allow("abuse-sweep", key: "all", rule: .perMinute(1, burst: 1)) {
             try await AbuseService(db: db, ctx: ctx).sweep()
         }
         if await ctx.limiter.allow("dashboard-purge", key: "all", rule: .perMinute(1, burst: 1)) {
             try await DashboardSessionStore.purge(on: db, now: ctx.now)
+            try await WalletService(db: db, ctx: ctx).purge()
         }
         try await DatabaseReplayGuard.purge(on: db, now: ctx.now)
         let now = ctx.now

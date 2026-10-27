@@ -18,6 +18,10 @@ let package = Package(
         .package(url: "https://github.com/swift-server-community/APNSwift.git", from: "6.0.0"),
         // 5.x does not compile with Swift 6.2; ViadereCore pins the same range.
         .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0" ..< "5.0.0"),
+        // PKCS#7 (CMS) signing of Wallet passes, and the TLS identity APNs needs for pass-update pushes.
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.5.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.2.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.25.0"),
     ],
     targets: [
         .target(
@@ -31,6 +35,10 @@ let package = Package(
                 .product(name: "WebAuthn", package: "webauthn-swift"),
                 .product(name: "APNS", package: "APNSwift"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
             ]
         ),
         .executableTarget(
@@ -42,6 +50,10 @@ let package = Package(
             dependencies: [
                 "ViadereServerKit",
                 .product(name: "XCTVapor", package: "vapor"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
             ]
         ),
     ],

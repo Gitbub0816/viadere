@@ -1,22 +1,6 @@
 import Foundation
 import ViadereCore
 
-/// Provisional consumer routes that ViadereCore's `APIRoutes` does not describe yet. They keep the same
-/// conventions (paths under `/v1`, `deviceSignedBearer`). Until the server implements them the app treats
-/// `404` as "not available yet" and hides the feature gracefully.
-public enum ProvisionalRoutes {
-    public static let phoneLinks = Endpoint<EmptyBody, [PhoneLink]>(
-        "phoneLinks.list", .GET, "/v1/phone-links", auth: .deviceSignedBearer)
-    public static let phoneLinkDelete = Endpoint<EmptyBody, EmptyBody>(
-        "phoneLinks.delete", .DELETE, "/v1/phone-links/{phoneLinkId}", auth: .deviceSignedBearer)
-    public static let sessions = Endpoint<EmptyBody, [ConsumerSession]>(
-        "sessions.list", .GET, "/v1/sessions", auth: .deviceSignedBearer)
-    public static let sessionRevoke = Endpoint<EmptyBody, EmptyBody>(
-        "sessions.revoke", .DELETE, "/v1/sessions/{sessionId}", auth: .deviceSignedBearer)
-    public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
-        "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
-}
-
 /// A signed-in session (a bearer-token family), shown under Settings → Signed-in sessions.
 public struct ConsumerSession: Codable, Sendable, Hashable, Identifiable {
     public var id: String
@@ -31,6 +15,12 @@ public struct ConsumerSession: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.lastSeenAt = lastSeenAt
         self.isCurrent = isCurrent
+    }
+
+    /// The server's `SessionInfo` carries no device name (a session is a token family, not a device), so the label is generic.
+    public init(_ info: SessionInfo) {
+        self.init(id: info.id.uuidString.lowercased(), deviceName: info.current ? "This iPhone" : "Signed-in session",
+                  createdAt: info.createdAt, lastSeenAt: nil, isCurrent: info.current)
     }
 }
 

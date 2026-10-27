@@ -18,6 +18,10 @@ public enum LogRedactor {
             (#"/(invite|enroll)/[A-Za-z0-9_-]{20,}"#, "/$1/[token]"),
             (#"vds_[A-Za-z0-9_-]{16,}"#, "[redacted-session]"),
             (#"vrp1\.[A-Za-z0-9_.-]{20,}"#, "[redacted-postback]"),
+            // Reward redemption codes (XXXXX-XXXXX), household invitation codes (XXXX-XXXX) and Wallet authentication tokens.
+            (#"\b[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}\b"#, "[redacted-code]"),
+            (#"\b[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}\b"#, "[redacted-code]"),
+            (#"ApplePass\s+[A-Za-z0-9_-]{16,}"#, "ApplePass [redacted]"),
         ]
         return specs.compactMap { spec in (try? NSRegularExpression(pattern: spec.0)).map { ($0, spec.1) } }
     }()

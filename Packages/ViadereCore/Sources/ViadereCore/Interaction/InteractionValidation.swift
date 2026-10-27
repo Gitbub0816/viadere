@@ -138,6 +138,10 @@ public enum InteractionValidation {
             if let url = p.documentURL, url.scheme?.lowercased() != "https" {
                 issues.append(Issue(.invalidValue, "payload.documentURL"))
             }
+            text(p.documentVersion, "payload.documentVersion", max: 40)
+            if let digest = p.documentDigest, !(digest.count == 64 && digest.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isUppercase }) {
+                issues.append(Issue(.invalidValue, "payload.documentDigest"))
+            }
         case .reply(let p):
             text(p.prompt, "payload.prompt", max: Limits.mediumText, required: true)
             if !(1...Limits.longText).contains(p.maxLength) { issues.append(Issue(.invalidValue, "payload.maxLength")) }
@@ -153,6 +157,8 @@ public enum InteractionValidation {
             text(p.title, "payload.title", max: Limits.shortText, required: true)
             identifier(p.ticketType, "payload.ticketType", max: 40)
             text(p.holderName, "payload.holderName", max: Limits.shortText)
+            text(p.venue, "payload.venue", max: 80)
+            text(p.seat, "payload.seat", max: 80)
         case .message(let p):
             text(p.text, "payload.text", max: Limits.longText, required: true)
         case .unknown:

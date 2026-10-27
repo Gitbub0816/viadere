@@ -114,20 +114,7 @@ enum DeviceRoutes {
         }
         routes.api(APIRoutes.liveActivityTokenRegister) { req in
             let body: LiveActivityTokenRegistration = try req.decodeBody()
-            let principal = try req.consumer
-            guard let deviceId = principal.deviceId, (16...400).contains(body.pushToken.count),
-                  body.pushToken.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw APIError.validation("The push token is not valid.") }
-            let record = LiveActivityTokenRecord()
-            record.id = UUID()
-            record.consumerId = principal.consumerId.uuid
-            record.deviceId = deviceId.uuid
-            record.kind = body.kind.rawValue
-            record.activityId = body.activityId.map { String($0.prefix(128)) }
-            record.businessId = body.businessId?.uuid
-            record.interactionId = body.interactionId?.uuid
-            record.pushToken = body.pushToken.lowercased()
-            record.updatedAt = req.ctx.now
-            try await record.create(on: req.db)
+            try await LiveActivityService(db: req.db, ctx: req.ctx).register(principal: try req.consumer, body: body)
             return try req.emptyOK()
         }
     }

@@ -194,13 +194,19 @@ public struct RedeemRewardRequest: Codable, Sendable, Hashable {
 
 public struct RewardRedemption: Codable, Sendable, Hashable {
     public var reward: Reward
-    /// Short code the business validates (single-use).
+    /// Short code the business validates (single-use). Shown on screen; never cached.
     public var redemptionCode: String
     public var expiresAt: Date
-    public init(reward: Reward, redemptionCode: String, expiresAt: Date) {
+    /// Seconds the code stays valid, counted from `serverTime` (about 120). Absent from older servers.
+    public var validForSeconds: Int?
+    /// Server clock when the code was issued, so the countdown does not depend on the device clock.
+    public var serverTime: Date?
+    public init(reward: Reward, redemptionCode: String, expiresAt: Date, validForSeconds: Int? = nil, serverTime: Date? = nil) {
         self.reward = reward
         self.redemptionCode = redemptionCode
         self.expiresAt = expiresAt
+        self.validForSeconds = validForSeconds
+        self.serverTime = serverTime
     }
 }
 
