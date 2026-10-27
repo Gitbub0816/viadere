@@ -28,7 +28,8 @@ final class PasskeyInteropTests: XCTestCase {
         let registration = PasskeyRegistrationCredential(id: credentialId, rawId: credentialId, attestationObject: Base64URL.encode(created.attestationObject),
                                                          clientDataJSON: create.json)
         let verified = try await verifier.verifyRegistration(registration, challenge: challenge, credentialAlreadyRegistered: { _ in false })
-        XCTAssertEqual(verified.credentialId, credentialId)
+        // webauthn-swift reports the id as padded standard base64; it must be the same bytes.
+        XCTAssertEqual(Data(base64Encoded: verified.credentialId), created.credential.credentialId)
         XCTAssertEqual(verified.signCount, 0)
         XCTAssertTrue(verified.backupEligible)
 
@@ -70,7 +71,15 @@ final class PasskeyInteropTests: XCTestCase {
         try await roundTrip(attestation: .none)
     }
 
-    func testPackedSelfAttestationVerifiesWithAnIndependentWebAuthnImplementation() async throws {
-        try await roundTrip(attestation: .packedSelf)
+    /// `packed` self attestation is spec-conformant (the Core tests verify it independently), but `webauthn-swift`'s packed support is an unfinished
+    /// work in progress and refuses it. The authenticator therefore defaults to `none` (what a synced-passkey provider should send anyway) and the
+    /// extension never asks for `packed`; this test records the library's behaviour so a future upgrade is noticed.
+    func testPackedSelfAttestationIsNotAcceptedByWebauthnSwiftSoTheExtensionUsesNone() async throws {
+        do {
+            try await roundTrip(attestation: .packedSelf)
+            XCTFail("webauthn-swift now accepts packed self attestation: consider offering it")
+        } catch {
+            // Expected today.
+        }
     }
 }
