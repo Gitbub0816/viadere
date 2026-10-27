@@ -132,8 +132,8 @@ public struct GenericRBMProvider: RCSProvider {
     }
 
     public func checkCapability(for phone: PhoneNumber) async throws -> Bool {
-        let encoded = phone.e164.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
-        let url = config.baseURL.appendingPathComponent("phones").appendingPathComponent(encoded).appendingPathComponent("capabilities")
+        // E.164 (`+` and digits only, validated by `PhoneNumber`) is path-safe as is.
+        let url = config.baseURL.appendingPathComponent("phones").appendingPathComponent(phone.e164).appendingPathComponent("capabilities")
         let response: RCSHTTPResponse
         do { response = try await http.send(RCSHTTPRequest(method: "GET", url: url, headers: headers(), body: nil)) } catch {
             throw ChannelError.transient("network")

@@ -13,6 +13,7 @@ do {
     let config = try ServerConfig.fromEnvironment()
     app = try await makeApplication(environment: environment, config: config)
     app.asyncCommands.use(SeedCommand(), as: "seed")
+    app.asyncCommands.use(CreateOperatorCommand(), as: "create-operator")
 } catch {
     // Configuration errors are safe to print (they name variables, never values).
     FileHandle.standardError.write(Data("Startup failed: \(error)\n".utf8))

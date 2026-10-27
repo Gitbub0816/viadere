@@ -144,7 +144,7 @@ final class TestHarness: @unchecked Sendable {
         self.config = config
     }
 
-    static func make(_ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
+    static func make(rcs: (any RCSProvider)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
         var config = ServerConfig.testing()
         adjust(&config)
         // Set TEST_DATABASE_URL to run the whole suite against a real PostgreSQL instance.
@@ -155,7 +155,7 @@ final class TestHarness: @unchecked Sendable {
         let sms = RecordingSMSProvider()
         let transport = ScriptedWebhookTransport()
         let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
-            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, autoMigrate: postgres != nil))
+            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil))
         let harness = TestHarness(app: app, clock: clock, config: config)
         harness.bind(apns: apns, sms: sms, transport: transport)
         return harness
@@ -335,8 +335,8 @@ final class TestHarness: @unchecked Sendable {
 }
 
 /// Runs a test body with a fresh application, always shutting it down.
-func withHarness(_ adjust: (inout ServerConfig) -> Void = { _ in }, _ body: (TestHarness) async throws -> Void) async throws {
-    let harness = try await TestHarness.make(adjust)
+func withHarness(rcs: (any RCSProvider)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in }, _ body: (TestHarness) async throws -> Void) async throws {
+    let harness = try await TestHarness.make(rcs: rcs, adjust)
     do {
         try await body(harness)
     } catch {

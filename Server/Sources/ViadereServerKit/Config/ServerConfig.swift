@@ -212,7 +212,7 @@ public struct RateLimitSettings: Sendable {
     /// Dashboard / operator state-changing actions per signed-in user.
     public var dashboardAction: RateRule = .perMinute(60, burst: 30)
     /// Dashboard sign-in and sign-up ceremonies per IP.
-    public var dashboardAuth: RateRule = .perMinute(15, burst: 8)
+    public var dashboardAuth: RateRule = .perMinute(30, burst: 20)
     /// Inbound RCS events per phone.
     public var rcsInboundPerPhone: RateRule = .perMinute(20, burst: 10)
 

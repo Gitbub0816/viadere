@@ -58,6 +58,9 @@ enum Routes {
         ConversationRoutes.register(api)
         BusinessRoutes.register(api)
         ProviderRoutes.register(api)
+        DashboardRoutes.register(app)
+        OperatorRoutes.register(app)
+        ConnectButtonRoutes.register(app)
         // P3–P5 features: the catalog routes exist and are authenticated but not implemented yet.
         api.unavailable(APIRoutes.rewardsList)
         api.unavailable(APIRoutes.rewardRedeem)

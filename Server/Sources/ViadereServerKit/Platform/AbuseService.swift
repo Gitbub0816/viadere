@@ -56,8 +56,12 @@ struct AbuseService {
     // MARK: Metrics
 
     func metrics(for businessId: UUID) async throws -> Metrics {
+        try await metrics(for: businessId, window: ctx.config.abuse.window)
+    }
+
+    func metrics(for businessId: UUID, window: TimeInterval) async throws -> Metrics {
         let now = ctx.now
-        let start = now.addingTimeInterval(-ctx.config.abuse.window)
+        let start = now.addingTimeInterval(-window)
         var m = Metrics(businessId: businessId, windowStart: start)
         m.issued = try await InteractionRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$livemode == true)
             .filter(\.$createdAt >= start).count()
