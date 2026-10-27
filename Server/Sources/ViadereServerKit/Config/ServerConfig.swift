@@ -106,6 +106,10 @@ public struct ServerConfig: Sendable {
     /// HMAC key of the audit hash chain (`AUDIT_CHAIN_KEY`). Keeping it out of the database means an attacker who can
     /// write the database cannot recompute a forged chain.
     public var auditChainKey: SymmetricKey = SymmetricKey(data: Data(repeating: 0x44, count: 32))
+    /// HMAC key of the pairwise `subject_ref` derivation (`SUBJECT_REF_KEY`). A dedicated secret, distinct from every other one: it
+    /// makes business-facing customer references non-enumerable and unlinkable across businesses. Rotating it changes every
+    /// `subject_ref` (see docs/SECURITY.md).
+    public var subjectRefKey: SymmetricKey = SymmetricKey(data: Data(repeating: 0x55, count: 32))
     /// Destination countries (ISO 3166 regions) for verification codes. Default US and CA.
     public var otpAllowedCountries: [String] = ["US", "CA"]
     /// Digits of the E.164 number (after `+`) that identify a destination prefix for the per-prefix OTP budget.
@@ -235,11 +239,13 @@ public struct ServerConfig: Sendable {
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
         config.auditChainKey = SymmetricKey(data: try secretBytes("AUDIT_CHAIN_KEY", minimum: 32))
+        config.subjectRefKey = SymmetricKey(data: try secretBytes("SUBJECT_REF_KEY", minimum: 32))
         if production {
             // Independent secrets: one leaked value must not unlock the others.
             let keys: [(String, Data)] = [("CONNECT_LINK_SIGNING_KEY", config.connectLinkKey.withUnsafeBytes { Data($0) }), ("SERVER_PEPPER", config.pepper),
                                           ("DATA_ENCRYPTION_KEY", config.dataEncryptionKey.withUnsafeBytes { Data($0) }),
-                                          ("AUDIT_CHAIN_KEY", config.auditChainKey.withUnsafeBytes { Data($0) })]
+                                          ("AUDIT_CHAIN_KEY", config.auditChainKey.withUnsafeBytes { Data($0) }),
+                                          ("SUBJECT_REF_KEY", config.subjectRefKey.withUnsafeBytes { Data($0) })]
             for (index, first) in keys.enumerated() {
                 for second in keys[(index + 1)...] where first.1.prefix(32) == second.1.prefix(32) {
                     throw ServerConfigError.invalid("\(first.0) and \(second.0) must be different values")

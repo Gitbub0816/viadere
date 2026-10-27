@@ -30,6 +30,10 @@ public enum Capability: Hashable, Sendable, Codable, CustomStringConvertible {
     /// `identity.*` exist in the catalog and the policy engine; their endpoints ship with the Verify work package.
     public static let operational: [Capability] = messaging + [.authChallenge, .transactionApprove]
 
+    /// Capabilities exercised through the interaction endpoints, whose payload is validated by `InteractionValidation` rather than by
+    /// catalog parameters.
+    public static let interactionPath: Set<Capability> = [.messageSend, .authChallenge, .transactionApprove]
+
     public init(rawValue: String) {
         self = Self.known.first { $0.rawValue == rawValue } ?? .unknown(rawValue)
     }
@@ -83,7 +87,7 @@ public enum Capability: Hashable, Sendable, Codable, CustomStringConvertible {
 
 /// Business risk tiers (spec §8.2). A business holds a **set** of tiers; a tier never implies capabilities by itself, it is only a
 /// precondition for being granted the capabilities that name it as their minimum.
-public enum BusinessRiskTier: String, Sendable, Codable, CaseIterable, Hashable, Comparable {
+public enum BusinessRiskTier: String, Sendable, Codable, CaseIterable, Hashable {
     /// Messaging: basic verified business and messaging policies.
     case m = "M"
     /// Approvals: stronger integration security, enrollment controls, approval-specific review.
@@ -92,8 +96,6 @@ public enum BusinessRiskTier: String, Sendable, Codable, CaseIterable, Hashable,
     case v = "V"
     /// Enterprise / regulated: mTLS or private connectivity, audit exports, contractual controls.
     case e = "E"
-
-    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 
     /// What every verified business holds without any grant.
     public static let baseline: Set<BusinessRiskTier> = [.m]

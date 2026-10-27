@@ -23,12 +23,15 @@ enum BusinessAPIKeys {
         let record: BusinessAPIKeyRecord
     }
 
-    static func issue(businessId: UUID, name: String, live: Bool, scopes: [String], now: Date, expiresAt: Date? = nil,
-                      on db: any Database) async throws -> Issued {
+    /// `scopes` are the operational scopes of the key; `capabilities` are what it may ever do (SEC-API-003), bounded **at use time**
+    /// by the business's entitlements. The default is Tier M (messaging) only: a key never carries approval or verification
+    /// capabilities unless the caller names them, and the dashboard only offers what the business is entitled to.
+    static func issue(businessId: UUID, name: String, live: Bool, scopes: [String], capabilities: [Capability] = Capability.messaging,
+                      now: Date, expiresAt: Date? = nil, on db: any Database) async throws -> Issued {
         let key = (live ? livePrefix : testPrefix) + SecureToken.generate(byteCount: 32)
         let record = BusinessAPIKeyRecord(businessId: businessId, keyHash: SecureToken.hash(key), prefix: live ? livePrefix : testPrefix,
-                                          last4: String(key.suffix(4)), name: String(name.prefix(64)), scopes: scopes, now: now,
-                                          expiresAt: expiresAt)
+                                          last4: String(key.suffix(4)), name: String(name.prefix(64)), scopes: scopes,
+                                          capabilities: capabilities, now: now, expiresAt: expiresAt)
         try await record.create(on: db)
         return Issued(key: key, record: record)
     }

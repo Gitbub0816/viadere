@@ -234,6 +234,9 @@ public enum APIRoutes {
     /// Test-mode keys only: creates a sandbox consumer connected to the business. Test keys can target nothing else.
     public static let businessSandboxRelationship = Endpoint<EmptyBody, SandboxRelationship>(
         "business.sandbox.relationships.create", .POST, "/v1/business/sandbox/relationships", auth: .businessAPIKey)
+    /// What the calling key can do right now (`BusinessCapabilitiesResponse`): tiers, entitlements, key scopes and the catalog.
+    public static let businessCapabilities = Endpoint<EmptyBody, BusinessCapabilitiesResponse>(
+        "business.capabilities.get", .GET, "/v1/business/capabilities", auth: .businessAPIKey)
     public static let businessWebhooksList = Endpoint<EmptyBody, [WebhookSubscription]>(
         "business.webhooks.list", .GET, "/v1/business/webhooks", auth: .businessAPIKey)
     public static let businessWebhookCreate = Endpoint<CreateWebhookRequest, WebhookSecretResponse>(
@@ -282,7 +285,7 @@ public enum APIRoutes {
         businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
         businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
-        businessWebhookRotate.descriptor, businessSandboxRelationship.descriptor,
+        businessWebhookRotate.descriptor, businessSandboxRelationship.descriptor, businessCapabilities.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
     ]
 

@@ -123,6 +123,14 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case expired
     case insufficientAssurance = "insufficient_assurance"
     case consentRequired = "consent_required"
+    /// The API key does not carry the capability the request needs (SEC-API-003).
+    case insufficientScope = "insufficient_scope"
+    /// The business holds no current entitlement for the capability (it was never granted, or it was revoked).
+    case notEntitled = "not_entitled"
+    /// The capability is switched off by Viadere (operator kill switch) or blocked by a law/policy rule.
+    case capabilityDisabled = "capability_disabled"
+    /// A policy check other than scope, entitlement, consent or a kill switch denied the request (`details.reason`).
+    case policyDenied = "policy_denied"
     case rateLimited = "rate_limited"
     case idempotencyConflict = "idempotency_conflict"
     case internalError = "internal_error"

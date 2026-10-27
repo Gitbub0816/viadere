@@ -11,6 +11,10 @@ public final class ServerContext: Sendable {
     public let clock: any ServerClock
     public let cipher: FieldCipher
     public let hasher: Hasher256
+    /// Pairwise `subject_ref` derivation (`SUBJECT_REF_KEY`).
+    public let subjects: SubjectRefDeriver
+    /// Short-lived cache of the operator-controlled policy state (kill switches and law/policy rules).
+    let policyCache = PolicyStateCache()
     public let limiter: RateLimiter
     public let apns: any APNsSender
     public let sms: any SMSProvider
@@ -43,6 +47,7 @@ public final class ServerContext: Sendable {
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey)
         hasher = Hasher256(pepper: config.pepper)
+        subjects = SubjectRefDeriver(key: config.subjectRefKey)
         limiter = RateLimiter(store: rateLimitStore, clock: clock)
         self.apns = apns
         self.sms = sms

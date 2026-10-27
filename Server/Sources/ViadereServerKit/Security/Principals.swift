@@ -184,7 +184,7 @@ struct BusinessAPIKeyMiddleware: AsyncMiddleware {
         // Suspended or revoked businesses lose API access immediately.
         guard business.isVerified else { throw APIError(.forbidden, .forbidden, "This business is not currently active.") }
         if let required = requiredScope, !key.scopeSet.contains(required) {
-            throw APIError(.forbidden, .forbidden, "This API key does not have the required scope.")
+            throw APIError(.forbidden, .insufficientScope, "This API key does not have the required scope.", details: ["scope": required])
         }
         // A throttled business gets a fraction of its API rate; every rate-limit hit is counted for abuse review.
         let controls = try await BusinessControls.load(key.businessId, on: db)
@@ -202,7 +202,7 @@ struct BusinessAPIKeyMiddleware: AsyncMiddleware {
             try await BusinessAPIKeyRecord.query(on: db).filter(\.$id == key.id!).set(\.$lastUsedAt, to: now).update()
         }
         request.auth.login(BusinessPrincipal(businessId: business.businessID, keyId: key.id ?? UUID(), livemode: key.livemode,
-                                             scopes: key.scopeSet, businessName: business.displayName))
+                                             scopes: key.scopeSet, businessName: business.displayName, capabilities: key.capabilitySet))
         return try await next.respond(to: request)
     }
 }

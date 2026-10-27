@@ -14,6 +14,9 @@ final class RelationshipRecord: Model, @unchecked Sendable {
     @Field(key: "connected_at") var connectedAt: Date
     @OptionalField(key: "disconnected_at") var disconnectedAt: Date?
     @Field(key: "last_activity_at") var lastActivityAt: Date
+    /// `subject_ref` of this (business, consumer) pair: the only customer identifier a business can address. Set when the row is
+    /// created (`SubjectRefMiddleware`) or by the backfill job for older rows; unique per business.
+    @OptionalField(key: "subject_ref") var subjectRef: String?
 
     init() {}
 

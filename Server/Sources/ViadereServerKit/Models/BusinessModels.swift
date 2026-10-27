@@ -112,8 +112,11 @@ final class BusinessAPIKeyRecord: Model, @unchecked Sendable {
     /// Last four characters, for display only.
     @Field(key: "last4") var last4: String
     @Field(key: "name") var name: String
-    /// Comma-separated scopes.
+    /// Comma-separated operational scopes (`interactions:write`, `webhooks:manage`, ...). Capability access is `capabilities`.
     @Field(key: "scopes") var scopes: String
+    /// Comma-separated capability IDs (`message.send`, `auth.challenge`, ...): what this key may ever do. Never exceeds the
+    /// business's entitlements **at use time** (SEC-API-003): the policy engine intersects the two on every request.
+    @Field(key: "capabilities") var capabilities: String
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "last_used_at") var lastUsedAt: Date?
     @OptionalField(key: "expires_at") var expiresAt: Date?
@@ -121,8 +124,8 @@ final class BusinessAPIKeyRecord: Model, @unchecked Sendable {
 
     init() {}
 
-    init(businessId: UUID, keyHash: String, prefix: String, last4: String, name: String, scopes: [String], now: Date,
-         expiresAt: Date? = nil) {
+    init(businessId: UUID, keyHash: String, prefix: String, last4: String, name: String, scopes: [String], capabilities: [Capability] = Capability.messaging,
+         now: Date, expiresAt: Date? = nil) {
         id = UUID()
         self.businessId = businessId
         self.keyHash = keyHash
@@ -130,10 +133,12 @@ final class BusinessAPIKeyRecord: Model, @unchecked Sendable {
         self.last4 = last4
         self.name = name
         self.scopes = scopes.joined(separator: ",")
+        self.capabilities = Set(capabilities.filter(\.isKnown).map(\.rawValue)).sorted().joined(separator: ",")
         createdAt = now
         self.expiresAt = expiresAt
     }
 
     var scopeSet: Set<String> { Set(scopes.split(separator: ",").map(String.init)) }
+    var capabilitySet: Set<Capability> { Set(capabilities.split(separator: ",").map { Capability(rawValue: String($0)) }.filter(\.isKnown)) }
     var livemode: Bool { prefix == BusinessAPIKeys.livePrefix }
 }

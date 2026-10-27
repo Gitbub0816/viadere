@@ -1,11 +1,45 @@
 import Foundation
 
+extension TypedID where Tag == IDTag.Relationship {
+    /// Placeholder carried by a request that addresses its customer by `subjectRef` only. It is never sent on the wire and never
+    /// matches a stored relationship (relationship ids are random v4 UUIDs): the server resolves `subjectRef` to the real relationship
+    /// of the calling business before doing anything else.
+    public static var unaddressed: RelationshipID { RelationshipID(UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))) }
+    public var isUnaddressed: Bool { uuid == Self.unaddressed.uuid }
+}
+
+/// A business request that names its customer by `relationshipId`, by `subjectRef` (SEC §3.2), or by both (which must agree).
+public protocol SubjectAddressedRequest: Sendable {
+    var relationshipId: RelationshipID { get set }
+    var subjectRef: SubjectRef? { get set }
+}
+
+enum SubjectAddressing {
+    /// Reads the addressing pair of a request body: at least one of the two must be present.
+    static func decode<K: CodingKey>(_ c: KeyedDecodingContainer<K>, relationshipKey: K, subjectKey: K) throws -> (RelationshipID, SubjectRef?) {
+        let relationship = try c.decodeIfPresent(RelationshipID.self, forKey: relationshipKey)
+        let subject = try c.decodeIfPresent(SubjectRef.self, forKey: subjectKey)
+        guard relationship != nil || subject != nil else {
+            throw DecodingError.keyNotFound(relationshipKey, .init(codingPath: c.codingPath, debugDescription: "relationshipId or subjectRef is required"))
+        }
+        return (relationship ?? .unaddressed, subject)
+    }
+
+    static func encode<K: CodingKey>(_ c: inout KeyedEncodingContainer<K>, relationship: RelationshipID, subject: SubjectRef?,
+                                     relationshipKey: K, subjectKey: K) throws {
+        if !relationship.isUnaddressed { try c.encode(relationship, forKey: relationshipKey) }
+        try c.encodeIfPresent(subject, forKey: subjectKey)
+    }
+}
+
 /// Business request to issue an interaction. The server fills id, businessId (from the API key),
 /// scope, challenge and timestamps, then validates with `InteractionValidation`.
 ///
 /// Wire: same `kind` + `payload` convention as `Interaction`.
-public struct IssueInteractionRequest: Codable, Sendable, Hashable {
+public struct IssueInteractionRequest: Codable, Sendable, Hashable, SubjectAddressedRequest {
     public var relationshipId: RelationshipID
+    /// The customer's pairwise reference. Either this or `relationshipId` is required.
+    public var subjectRef: SubjectRef?
     public var kind: InteractionKind
     public var purpose: InteractionPurpose
     public var payload: InteractionPayload
@@ -22,8 +56,9 @@ public struct IssueInteractionRequest: Codable, Sendable, Hashable {
     public init(relationshipId: RelationshipID, purpose: InteractionPurpose, payload: InteractionPayload,
                 requestedActions: [RequestedAction] = [], priority: InteractionPriority = .normal, sensitivity: Sensitivity = .standard,
                 allowedChannels: [Channel] = [.nativePush, .inApp], ttlSeconds: Int, idempotencyKey: String,
-                correlationId: String? = nil, accountReference: String? = nil) {
+                correlationId: String? = nil, accountReference: String? = nil, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.kind = payload.kind ?? .unknown("unknown")
         self.purpose = purpose
         self.payload = payload
@@ -37,14 +72,24 @@ public struct IssueInteractionRequest: Codable, Sendable, Hashable {
         self.accountReference = accountReference
     }
 
+    /// Addresses the customer by `subjectRef` alone.
+    public init(subjectRef: SubjectRef, purpose: InteractionPurpose, payload: InteractionPayload,
+                requestedActions: [RequestedAction] = [], priority: InteractionPriority = .normal, sensitivity: Sensitivity = .standard,
+                allowedChannels: [Channel] = [.nativePush, .inApp], ttlSeconds: Int, idempotencyKey: String,
+                correlationId: String? = nil, accountReference: String? = nil) {
+        self.init(relationshipId: .unaddressed, purpose: purpose, payload: payload, requestedActions: requestedActions, priority: priority,
+                  sensitivity: sensitivity, allowedChannels: allowedChannels, ttlSeconds: ttlSeconds, idempotencyKey: idempotencyKey,
+                  correlationId: correlationId, accountReference: accountReference, subjectRef: subjectRef)
+    }
+
     enum CodingKeys: String, CodingKey {
-        case relationshipId, kind, purpose, payload, requestedActions, priority, sensitivity, allowedChannels
+        case relationshipId, subjectRef, kind, purpose, payload, requestedActions, priority, sensitivity, allowedChannels
         case ttlSeconds, idempotencyKey, correlationId, accountReference
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        relationshipId = try c.decode(RelationshipID.self, forKey: .relationshipId)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
         kind = try c.decode(InteractionKind.self, forKey: .kind)
         purpose = try c.decode(InteractionPurpose.self, forKey: .purpose)
         payload = try InteractionPayload.decode(kind: kind, from: c, forKey: .payload)
@@ -60,7 +105,7 @@ public struct IssueInteractionRequest: Codable, Sendable, Hashable {
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(relationshipId, forKey: .relationshipId)
+        try SubjectAddressing.encode(&c, relationship: relationshipId, subject: subjectRef, relationshipKey: .relationshipId, subjectKey: .subjectRef)
         try c.encode(kind, forKey: .kind)
         try c.encode(purpose, forKey: .purpose)
         try payload.encode(to: &c, forKey: .payload)
@@ -86,24 +131,53 @@ public struct IssueInteractionRequest: Codable, Sendable, Hashable {
     }
 }
 
-public struct BusinessSendMessageRequest: Codable, Sendable, Hashable {
+public struct BusinessSendMessageRequest: Codable, Sendable, Hashable, SubjectAddressedRequest {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     /// Reply within an existing session; `nil` starts/uses the current one.
     public var sessionId: SessionID?
     public var body: String
     public var agentName: String?
     public var idempotencyKey: String
-    public init(relationshipId: RelationshipID, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String) {
+    public init(relationshipId: RelationshipID, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String,
+                subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.sessionId = sessionId
         self.body = body
         self.agentName = agentName
         self.idempotencyKey = idempotencyKey
     }
+    /// Addresses the customer by `subjectRef` alone.
+    public init(subjectRef: SubjectRef, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String) {
+        self.init(relationshipId: .unaddressed, sessionId: sessionId, body: body, agentName: agentName, idempotencyKey: idempotencyKey,
+                  subjectRef: subjectRef)
+    }
+
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, sessionId, body, agentName, idempotencyKey }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        sessionId = try c.decodeIfPresent(SessionID.self, forKey: .sessionId)
+        body = try c.decode(String.self, forKey: .body)
+        agentName = try c.decodeIfPresent(String.self, forKey: .agentName)
+        idempotencyKey = try c.decode(String.self, forKey: .idempotencyKey)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try SubjectAddressing.encode(&c, relationship: relationshipId, subject: subjectRef, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        try c.encodeIfPresent(sessionId, forKey: .sessionId)
+        try c.encode(body, forKey: .body)
+        try c.encodeIfPresent(agentName, forKey: .agentName)
+        try c.encode(idempotencyKey, forKey: .idempotencyKey)
+    }
 }
 
-public struct BusinessStatusUpdateRequest: Codable, Sendable, Hashable {
+public struct BusinessStatusUpdateRequest: Codable, Sendable, Hashable, SubjectAddressedRequest {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     public var purpose: InteractionPurpose
     public var status: StatusPayload
     /// Stable key for the ongoing event (e.g. order id) so updates replace earlier ones.
@@ -113,13 +187,42 @@ public struct BusinessStatusUpdateRequest: Codable, Sendable, Hashable {
     /// shows them as one Activity row. Optional; absent from older senders.
     public var correlationId: String?
     public init(relationshipId: RelationshipID, purpose: InteractionPurpose, status: StatusPayload, activityKey: String,
-                idempotencyKey: String, correlationId: String? = nil) {
+                idempotencyKey: String, correlationId: String? = nil, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.purpose = purpose
         self.status = status
         self.activityKey = activityKey
         self.idempotencyKey = idempotencyKey
         self.correlationId = correlationId
+    }
+    /// Addresses the customer by `subjectRef` alone.
+    public init(subjectRef: SubjectRef, purpose: InteractionPurpose, status: StatusPayload, activityKey: String,
+                idempotencyKey: String, correlationId: String? = nil) {
+        self.init(relationshipId: .unaddressed, purpose: purpose, status: status, activityKey: activityKey, idempotencyKey: idempotencyKey,
+                  correlationId: correlationId, subjectRef: subjectRef)
+    }
+
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, purpose, status, activityKey, idempotencyKey, correlationId }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        purpose = try c.decode(InteractionPurpose.self, forKey: .purpose)
+        status = try c.decode(StatusPayload.self, forKey: .status)
+        activityKey = try c.decode(String.self, forKey: .activityKey)
+        idempotencyKey = try c.decode(String.self, forKey: .idempotencyKey)
+        correlationId = try c.decodeIfPresent(String.self, forKey: .correlationId)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try SubjectAddressing.encode(&c, relationship: relationshipId, subject: subjectRef, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        try c.encode(purpose, forKey: .purpose)
+        try c.encode(status, forKey: .status)
+        try c.encode(activityKey, forKey: .activityKey)
+        try c.encode(idempotencyKey, forKey: .idempotencyKey)
+        try c.encodeIfPresent(correlationId, forKey: .correlationId)
     }
 }
 
@@ -128,6 +231,8 @@ public struct BusinessStatusUpdateRequest: Codable, Sendable, Hashable {
 /// per consumer whether it is eligible).
 public struct IssueRewardRequest: Codable, Sendable, Hashable {
     public var relationshipId: RelationshipID?
+    /// Alternative to `relationshipId`: issues the reward to that one customer. Sending both requires that they agree.
+    public var subjectRef: SubjectRef?
     public var title: String
     /// `coupon` and `offer` are claimed before use; `perk` and `pointsReward` are redeemed directly. Defaults to `perk`.
     public var kind: RewardKind?
@@ -141,8 +246,9 @@ public struct IssueRewardRequest: Codable, Sendable, Hashable {
     public var idempotencyKey: String
     public init(relationshipId: RelationshipID? = nil, title: String, kind: RewardKind? = nil, details: String? = nil,
                 validFrom: Date? = nil, validUntil: Date? = nil, recurrence: RewardRecurrence? = nil, pointsCost: Int? = nil,
-                issueWalletPass: Bool = false, idempotencyKey: String) {
+                issueWalletPass: Bool = false, idempotencyKey: String, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.title = title
         self.kind = kind
         self.details = details
@@ -203,29 +309,55 @@ public struct BusinessLoyaltyProgram: Codable, Sendable, Hashable {
 }
 
 /// `POST /v1/business/loyalty/points`: adds or removes points for an enrolled member. Idempotent per key.
-public struct AdjustLoyaltyPointsRequest: Codable, Sendable, Hashable {
+public struct AdjustLoyaltyPointsRequest: Codable, Sendable, Hashable, SubjectAddressedRequest {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     /// Non-zero, at most 1,000,000 in magnitude. A balance never goes below zero.
     public var delta: Int
     /// A short machine-readable reason such as `purchase` or `goodwill` (≤ 40).
     public var reason: String?
     public var idempotencyKey: String
-    public init(relationshipId: RelationshipID, delta: Int, reason: String? = nil, idempotencyKey: String) {
+    public init(relationshipId: RelationshipID, delta: Int, reason: String? = nil, idempotencyKey: String, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.delta = delta
         self.reason = reason
         self.idempotencyKey = idempotencyKey
+    }
+    /// Addresses the customer by `subjectRef` alone.
+    public init(subjectRef: SubjectRef, delta: Int, reason: String? = nil, idempotencyKey: String) {
+        self.init(relationshipId: .unaddressed, delta: delta, reason: reason, idempotencyKey: idempotencyKey, subjectRef: subjectRef)
+    }
+
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, delta, reason, idempotencyKey }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        delta = try c.decode(Int.self, forKey: .delta)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        idempotencyKey = try c.decode(String.self, forKey: .idempotencyKey)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try SubjectAddressing.encode(&c, relationship: relationshipId, subject: subjectRef, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        try c.encode(delta, forKey: .delta)
+        try c.encodeIfPresent(reason, forKey: .reason)
+        try c.encode(idempotencyKey, forKey: .idempotencyKey)
     }
 }
 
 public struct LoyaltyPointsResult: Codable, Sendable, Hashable {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     public var pointsBalance: Int
     public var statusName: String?
     /// False when this call replayed an earlier request with the same idempotency key.
     public var applied: Bool
-    public init(relationshipId: RelationshipID, pointsBalance: Int, statusName: String? = nil, applied: Bool = true) {
+    public init(relationshipId: RelationshipID, pointsBalance: Int, statusName: String? = nil, applied: Bool = true, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.pointsBalance = pointsBalance
         self.statusName = statusName
         self.applied = applied
@@ -250,12 +382,15 @@ public struct RedemptionReceipt: Codable, Sendable, Hashable {
     public var rewardId: RewardID
     public var rewardTitle: String
     public var kind: RewardKind
+    /// Legacy per-business pseudonym. Prefer `subjectRef`; `consumerReference` is kept for compatibility and is not derived from it.
     public var consumerReference: ConsumerID
+    public var subjectRef: SubjectRef?
     public var redeemedAt: Date
     public var pointsSpent: Int?
     public var locationCode: String?
     public init(redemptionId: RedemptionID, rewardId: RewardID, rewardTitle: String, kind: RewardKind, consumerReference: ConsumerID,
-                redeemedAt: Date, pointsSpent: Int? = nil, locationCode: String? = nil) {
+                redeemedAt: Date, pointsSpent: Int? = nil, locationCode: String? = nil, subjectRef: SubjectRef? = nil) {
+        self.subjectRef = subjectRef
         self.redemptionId = redemptionId
         self.rewardId = rewardId
         self.rewardTitle = rewardTitle
@@ -355,9 +490,11 @@ public struct WebhookEvent: Codable, Sendable, Hashable {
 /// no phone, so test traffic cannot reach, be decided by, or be billed as a real consumer.
 public struct SandboxRelationship: Codable, Sendable, Hashable {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     public var createdAt: Date
-    public init(relationshipId: RelationshipID, createdAt: Date) {
+    public init(relationshipId: RelationshipID, createdAt: Date, subjectRef: SubjectRef? = nil) {
         self.relationshipId = relationshipId
+        self.subjectRef = subjectRef
         self.createdAt = createdAt
     }
 }

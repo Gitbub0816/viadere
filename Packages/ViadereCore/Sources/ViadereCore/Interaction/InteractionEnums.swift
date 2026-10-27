@@ -149,11 +149,15 @@ public struct RelationshipScope: Codable, Sendable, Hashable {
     public var relationshipId: RelationshipID
     /// Optional business-side account reference shown to the user, e.g. "Checking ••1234" (≤ 64 chars).
     public var accountReference: String?
+    /// The business-facing pairwise reference of the customer (`SubjectRef`). Set only on what a **business** sees; the
+    /// consumer's own copy of an interaction never carries it.
+    public var subjectRef: SubjectRef?
 
-    public init(consumerId: ConsumerID, relationshipId: RelationshipID, accountReference: String? = nil) {
+    public init(consumerId: ConsumerID, relationshipId: RelationshipID, accountReference: String? = nil, subjectRef: SubjectRef? = nil) {
         self.consumerId = consumerId
         self.relationshipId = relationshipId
         self.accountReference = accountReference
+        self.subjectRef = subjectRef
     }
 }
 
