@@ -537,7 +537,7 @@ struct PendingReplacementTests {
         let before = try #require(await services.sessions.tokens())
         _ = try await services.account.reenrollThisDevice(name: "New phone")
         #expect(await api.replacementSessions.isEmpty)
-        #expect(try await services.sessions.tokens() == before)
+        #expect(await services.sessions.tokens() == before)
     }
 
     /// The old device (in hand) and a new iPhone replacing it.
