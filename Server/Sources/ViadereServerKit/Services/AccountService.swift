@@ -18,6 +18,7 @@ struct AccountService {
     }
 
     func removePhoneLink(principal: ConsumerPrincipal, id: PhoneLinkID) async throws {
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         guard let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid)
             .filter(\.$consumerId == principal.consumerId.uuid).first() else { throw APIError.notFound }
         guard link.state != "revoked" else { return }

@@ -260,12 +260,12 @@ struct AuthService {
         let attestation = await ctx.integrity.verifyEnrollment(request.appAttest, challenge: request.challenge, keys: request.keys)
         // Cool-down: an account that had any app device in the last 30 days (revoked ones included, so deleting the owner's devices does
         // not make a thief's device the "first") cannot approve high-risk requests from this new device for 24 h, unless confirmed.
-        let hasApprovalKey = request.keys.contains { $0.purpose != .request }
+        // It applies whatever keys the device registers: a request-key-only device must not count as trusted (DeviceTrust) on day one.
         let lookback = now.addingTimeInterval(-Self.coolDownLookback)
         let priorDevices = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid)
             .filter(\.$clientKind == DeviceClientKind.app.rawValue).all()
             .filter { $0.revokedAt.map { $0 > lookback } ?? !$0.isExpired(at: now) }
-        let coolDown = request.effectiveClientKind == .app && hasApprovalKey && !priorDevices.isEmpty
+        let coolDown = request.effectiveClientKind == .app && !priorDevices.isEmpty
         let device = DeviceRecord(consumerId: principal.consumerId.uuid, name: name, platform: request.platform, now: now, clientKind: request.effectiveClientKind)
         device.familyId = principal.familyId
         device.enrollmentMethod = method

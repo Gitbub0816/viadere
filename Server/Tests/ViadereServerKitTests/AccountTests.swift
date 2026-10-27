@@ -104,7 +104,7 @@ final class AccountTests: XCTestCase {
             let rel = try await h.connect(consumer, to: b)
             _ = try await h.signedPost(consumer, "/v1/push/apns-token", APNsTokenRegistration(token: String(repeating: "ab", count: 32), environment: .sandbox, bundleId: "com.viadere.app"))
             let pending = try await h.issue(b, relationship: rel, payload: .authorize(.sample())).json(Interaction.self)
-            _ = try await h.businessPost(b, "/v1/business/messages", BusinessSendMessageRequest(relationshipId: rel.id, body: "private note 4417", idempotencyKey: "m"))
+            _ = try await h.businessPost(b, "/v1/business/messages", BusinessSendMessageRequest(relationshipId: rel.id, body: "private note QZ4417", idempotencyKey: "m"))
             let phone = PhoneNumber("+14805550123")!
             let link = try PhoneLinkRecord(consumerId: consumer.id.uuid, phone: phone, hasher: h.ctx.hasher, cipher: h.ctx.cipher, now: h.clock.now())
             link.state = "verified"

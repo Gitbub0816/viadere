@@ -625,7 +625,7 @@ final class HardeningTests: XCTestCase {
             let i = try r.json(Interaction.self)
             try await h.runJobs()
             let real = try await h.consumerInteraction(consumer, id: i.id)
-            let decided = try await h.decide(consumer, id: i.id, signed: try await h.decision(consumer, interaction: real, decision: .reply, assurance: .none, reply: "My door code is 4417"))
+            let decided = try await h.decide(consumer, id: i.id, signed: try await h.decision(consumer, interaction: real, decision: .reply, assurance: .none, reply: "My door code is QZ4417"))
             XCTAssertEqual(decided.status, .ok, decided.text)
             _ = try await OutboundSMS(db: h.db, ctx: h.ctx).enqueue(to: PhoneNumber(RCSFixture.phone)!, body: "Viadere: pending secret 998877")
             let device = try await DeviceRecord.find(consumer.device!.id.uuid, on: h.db)!
@@ -654,13 +654,13 @@ final class HardeningTests: XCTestCase {
             let decisions = try await DecisionRecord.query(on: h.db).all()
             XCTAssertEqual(decisions.count, 1, "the signed decision row stays (pseudonymous security record)")
             XCTAssertEqual(decisions[0].signedPayload, CreateSecurityHardeningSchema.erased)
-            XCTAssertFalse(decisions[0].signedPayload.contains("4417"))
+            XCTAssertFalse(decisions[0].signedPayload.contains("QZ4417"))
             let interaction = try await InteractionRecord.find(i.id.uuid, on: h.db)!
-            XCTAssertFalse((interaction.outcomeJSON ?? "").contains("4417"), "the reply is gone from the stored outcome")
+            XCTAssertFalse((interaction.outcomeJSON ?? "").contains("QZ4417"), "the reply is gone from the stored outcome")
             // Webhook deliveries that held the reply are scrubbed too.
             for delivery in try await WebhookDeliveryRecord.query(on: h.db).all() {
                 let body = String(decoding: try XCTUnwrap(WebhookService(db: h.db, ctx: h.ctx).deliveryBody(delivery)), as: UTF8.self)
-                XCTAssertFalse(body.contains("4417"), body)
+                XCTAssertFalse(body.contains("QZ4417"), body)
             }
             // The append-only guard still refuses every other edit of a decision.
             let sql = h.db as! any SQLDatabase
@@ -725,13 +725,13 @@ final class HardeningTests: XCTestCase {
             let r = try await h.issue(b, relationship: rel, payload: .reply(ReplyPayload(prompt: "Notes?")), purpose: .support, sensitivity: .low)
             let i = try r.json(Interaction.self)
             let real = try await h.consumerInteraction(consumer, id: i.id)
-            _ = try await h.decide(consumer, id: i.id, signed: try await h.decision(consumer, interaction: real, decision: .reply, assurance: .none, reply: "gate code 8120"))
+            _ = try await h.decide(consumer, id: i.id, signed: try await h.decision(consumer, interaction: real, decision: .reply, assurance: .none, reply: "gate code QZ8120"))
             let row = try await WebhookDeliveryRecord.query(on: h.db).first()!
             XCTAssertTrue(row.body.hasPrefix("v2."))
-            XCTAssertFalse(row.body.contains("8120") || row.body.contains("interaction"))
+            XCTAssertFalse(row.body.contains("QZ8120") || row.body.contains("interaction"))
             try await h.runJobs()
             let delivered = try XCTUnwrap(h.webhooks.received.last)
-            XCTAssertTrue(String(decoding: delivered.body, as: UTF8.self).contains("gate code 8120"))
+            XCTAssertTrue(String(decoding: delivered.body, as: UTF8.self).contains("gate code QZ8120"))
             XCTAssertNoThrow(try WebhookSignature.verify(header: delivered.headers[ViadereHeader.signature]!, body: delivered.body, secrets: [secret], now: h.clock.now()))
             // The ciphertext cannot be moved to another delivery row.
             let other = WebhookDeliveryRecord()

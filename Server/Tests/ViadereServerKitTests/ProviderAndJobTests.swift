@@ -188,11 +188,11 @@ final class PushAndSchemaTests: XCTestCase {
         let scope = RelationshipScope(consumerId: ConsumerID(), relationshipId: RelationshipID())
         let token = APNsTokenRegistrationRecord(token: String(repeating: "ab", count: 32), environment: .sandbox, bundleId: "com.viadere.app")
         for payload in [InteractionPayload.authorize(.sample()), .authenticate(AuthenticatePayload(service: "Bank of Fictionland", device: "Chrome", approximateLocation: "Paris", attemptedAt: Date())),
-                        .message(MessagePayload(text: "your secret number is 9981")), .confirm(ConfirmPayload(title: "Dentist at 3pm", details: "Dr. Strange"))] {
+                        .message(MessagePayload(text: "your secret number is Q9981Z")), .confirm(ConfirmPayload(title: "Dentist at 3pm", details: "Dr. Strange"))] {
             let interaction = Interaction(businessId: business.id, scope: scope, purpose: .transactional, payload: payload, createdAt: Date(), expiresAt: Date().addingTimeInterval(300), idempotencyKey: "k")
             let message = PushPayloadBuilder.message(for: interaction, business: business, token: token, topic: "com.viadere.app")
             let blob = [message.title, message.body, message.category, message.threadID, message.interactionId ?? ""].joined(separator: "|")
-            for secret in ["285.28", "Walmart", "Mesa", "Fictionland", "Paris", "9981", "Dentist", "Strange", "Chrome", "Northwind"] {
+            for secret in ["285.28", "Walmart", "Mesa", "Fictionland", "Paris", "Q9981Z", "Dentist", "Strange", "Chrome", "Northwind"] {
                 XCTAssertFalse(blob.contains(secret), "\(secret) leaked into \(blob)")
             }
             XCTAssertEqual(message.interactionId, interaction.id.description)

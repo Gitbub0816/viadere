@@ -307,6 +307,7 @@ struct HouseholdService {
     func revoke(principal: ConsumerPrincipal, id: DelegationID) async throws {
         let consumer = principal.consumerId
         let now = ctx.now
+        try await DeviceTrust.require(principal, db: db, now: now)
         if let grant = try await DelegationGrantRecord.find(id.uuid, on: db), grant.grantorId == consumer.uuid || grant.delegateId == consumer.uuid {
             guard grant.revokedAt == nil else { return }
             try await db.transaction { tx in

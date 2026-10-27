@@ -359,11 +359,11 @@ final class DashboardPagesTests: XCTestCase {
             let delivery = try await WebhookDeliveryRecord.query(on: h.db).first()!
             let id = delivery.id!.uuidString.lowercased()
             // The stored body keeps the text (the receiver needs it); the dashboard never shows it.
-            XCTAssertFalse(delivery.body.contains("4111"), "the stored body is encrypted at rest")
+            XCTAssertFalse(delivery.body.contains("4111 1111"), "the stored body is encrypted at rest")
             let storedBody = String(decoding: try XCTUnwrap(WebhookService(db: h.db, ctx: h.ctx).deliveryBody(delivery)), as: UTF8.self)
             XCTAssertTrue(storedBody.contains("4111 1111 1111 1111"))
             let view = try await h.page("/dashboard/webhooks/deliveries/\(id)", owner).text
-            XCTAssertFalse(view.contains("4111"))
+            XCTAssertFalse(view.contains("4111 1111"))
             XCTAssertTrue(view.contains("[redacted]"))
             XCTAssertTrue(view.contains("message.received"))
             // Fail every attempt until the delivery is dead-lettered.

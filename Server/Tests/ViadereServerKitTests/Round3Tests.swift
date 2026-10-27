@@ -26,7 +26,7 @@ final class Round3Tests: XCTestCase {
             let ask = try await h.issue(b, relationship: rel, payload: .reply(ReplyPayload(prompt: "Any notes?")), purpose: .support, sensitivity: .low)
             let askId = try ask.json(Interaction.self).id
             let askSeen = try await h.consumerInteraction(consumer, id: askId)
-            let replied = try await h.decide(consumer, id: askId, signed: try await h.decision(consumer, interaction: askSeen, decision: .reply, assurance: .none, reply: "My door code is 4417"))
+            let replied = try await h.decide(consumer, id: askId, signed: try await h.decision(consumer, interaction: askSeen, decision: .reply, assurance: .none, reply: "My door code is QZ4417"))
             XCTAssertEqual(replied.status, .ok, replied.text)
 
             let before = try await ExportDisputeCommand.export(interactionId: approval.id.uuid, db: h.db, ctx: h.ctx)
@@ -38,7 +38,7 @@ final class Round3Tests: XCTestCase {
             let erased = try XCTUnwrap(decisions.first { $0.interactionId == askId.uuid })
             XCTAssertEqual(erased.signedPayload, CreateSecurityHardeningSchema.erased, "the free-text reply is erased")
             XCTAssertNotEqual(kept.signedPayload, CreateSecurityHardeningSchema.erased, "an id-and-digest-only decision stays")
-            XCTAssertFalse(kept.signedPayload.contains("4417"))
+            XCTAssertFalse(kept.signedPayload.contains("QZ4417"))
             // The dispute export still works for the kept decision, with a verifiable signature and the same evidence.
             let afterOpt = try await ExportDisputeCommand.export(interactionId: approval.id.uuid, db: h.db, ctx: h.ctx)
             let after = try XCTUnwrap(afterOpt)
@@ -293,6 +293,26 @@ final class Round3Tests: XCTestCase {
             h.clock.advance(by: 31 * 86_400)
             let c = try await h.enrollDevice(b)
             try await isNil(try await DeviceRecord.find(c.device!.id.uuid, on: h.db)?.approvalsLockedUntil)
+        }
+    }
+
+    func testARequestKeyOnlyAppDeviceStillCoolsDownAndIsUntrusted() async throws {
+        try await withHarness { h in
+            let a = try await h.readyConsumer()
+            // An attacker with a synced passkey enrolls an app device without approval keys, hoping to skip the cool-down.
+            let b = try await h.enrollDevice(a, purposes: [.request])
+            let record = try await XCTUnwrapAsync(try await DeviceRecord.find(b.device!.id.uuid, on: h.db))
+            XCTAssertNotNil(record.approvalsLockedUntil, "a request-key-only app device must still cool down")
+            func refused(_ result: HTTPResult, _ what: String) {
+                XCTAssertEqual(result.status, .forbidden, "\(what): \(result.text)")
+                XCTAssertEqual(result.errorCode, .deviceCoolDown, what)
+            }
+            refused(try await h.signed(b, .DELETE, "/v1/devices/\(a.device!.id)"), "revoke the owner's device")
+            refused(try await h.signedPost(b, "/v1/phone-links/start", PhoneLinkStartRequest(phone: PhoneNumber("+14805550123")!)), "phone link start")
+            refused(try await h.signed(b, .DELETE, "/v1/account"), "account deletion")
+            refused(try await h.signed(b, .DELETE, "/v1/phone-links/\(PhoneLinkID())"), "remove a phone link")
+            refused(try await h.signed(b, .DELETE, "/v1/delegations/\(DelegationID())"), "end a household grant")
+            try await isNil(try await DeviceRecord.find(a.device!.id.uuid, on: h.db)?.revokedAt)
         }
     }
 

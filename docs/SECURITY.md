@@ -83,6 +83,10 @@ Security is the top priority. This document has two parts:
 - Wallet passes are reachable offline once added; voiding takes effect when the device next refreshes the pass.
 - A redemption code shown on a screen can be photographed within its 2-minute life.
 - Account recovery is out of scope for v1.
+- "Set up again" (`replacesDeviceId`) revokes the session's own old device without requiring that device to be trusted. An attacker who holds both a stolen session bound to the owner's device and the owner's passkey can swap the owner's device for their own; the new device still cools down and the owner gets a notice. Planned: delay revoking a still-live old device until the replacement is confirmed.
+- The platform-wide household invitation budget can be drained by many accounts previewing codes, temporarily blocking invitations for everyone (availability only).
+- Dashboard sign-up does not verify email ownership, so pre-registering someone's address blocks them from accepting an invite to it. Planned: email verification at sign-up.
+- Every app device, whatever keys it registers, cools down for 24 h when the account had any app device in the last 30 days, and is not a trusted device until then (it cannot revoke devices or sessions, remove phone links, end household grants, link phones, or delete the account).
 
 ## 2. Normative wire formats
 

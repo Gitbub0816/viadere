@@ -147,6 +147,10 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             guard bound == headers.deviceId.uuid else { throw APIError.forbidden }
         } else if try await DB.swapFromNull(db, table: TokenFamilyRecord.schema, id: tokenRecord.familyId, column: "device_id", newValue: headers.deviceId.uuid) {
             try await TokenFamilyRecord.query(on: db).filter(\.$id == tokenRecord.familyId).set(\.$enrollUntil, to: nil).update()
+        } else {
+            // Lost the binding race: another device bound the family first. Only that device may use it.
+            let current = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db)
+            guard current?.deviceId == headers.deviceId.uuid else { throw APIError.forbidden }
         }
         // 5. Rate limit per device after authentication.
         try await ctx.limiter.enforce("device", key: headers.deviceId.description, rule: ctx.config.rateLimits.device)
