@@ -60,6 +60,8 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Vapor | 4.x (not 5) | Vapor 5 is still beta | Vapor 5 has a stable release — plan the migration |
 | webauthn-swift (revision pin) | `main` @ `030acd1e` (after 1.0.0-beta.1) | The latest tagged release (1.0.0-beta.1) caps swift-crypto below 5.0.0; only an untagged main commit allows swift-crypto 5. `Server/Package.swift` pins that exact revision | A stable 1.x (or a tag allowing swift-crypto 5) ships — switch to `from:` the same week |
 | iOS / watchOS deployment target | iOS 17 / watchOS 10 | Product decision for device reach | The product owner raises the minimum |
+| GitHub-hosted JavaScript actions (`actions/checkout`, `upload-artifact`, `download-artifact`, `attest-build-provenance`, `github/codeql-action/upload-sarif`) | Current stable, pinned to full commit SHAs | GitHub's own platform actions run on the Node runtime bundled with GitHub-hosted runners — GitHub infrastructure, not our code or tooling. No third-party JavaScript actions; scanners are checksum-pinned Go/Rust binaries | GitHub ships non-Node equivalents, or CI moves to a self-hosted runner without them |
+| TLS 1.2 client compatibility | Minimum TLS 1.2 at Cloudflare, ECDHE + AEAD suites only; TLS 1.3 preferred | SEC-TR-001 allows modern TLS 1.2 under a reviewed compatibility policy (`docs/ops/TLS-COMPATIBILITY-POLICY.md`) | That policy's telemetry gate shows TLS 1.2 traffic can be dropped |
 
 ## Working in this repo
 
