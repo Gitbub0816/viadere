@@ -11,6 +11,7 @@ struct BackgroundJobs {
         var webhooksAttempted = 0
         var smsSent = 0
         var interactionsExpired = 0
+        var channelMessages = 0
     }
 
     @discardableResult
@@ -20,7 +21,13 @@ struct BackgroundJobs {
         var report = Report()
         report.interactionsExpired = try await InteractionService(db: db, ctx: ctx).expireDue()
         report.smsSent = try await OutboundSMS(db: db, ctx: ctx).sendDue()
+        report.channelMessages = try await ChannelRouter(db: db, ctx: ctx).deliverDue()
         report.webhooksAttempted = try await WebhookService(db: db, ctx: ctx).deliverDue()
+        // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
+        if await ctx.limiter.allow("abuse-sweep", key: "all", rule: .perMinute(1, burst: 1)) {
+            try await AbuseService(db: db, ctx: ctx).sweep()
+        }
+        try await DashboardSessionStore.purge(on: db, now: ctx.now)
         try await DatabaseReplayGuard.purge(on: db, now: ctx.now)
         let now = ctx.now
         try await PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()

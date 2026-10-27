@@ -104,6 +104,10 @@ struct GatewayService {
                     for effect in transition.effects {
                         if case .sendSMS(let body) = effect {
                             try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: transition.context.phone, body: body, messageId: messageId)
+                            // Transport metering is attributed to the business whose reply this is.
+                            try await UsageMeter.record(.smsSegment, businessId: businessId.uuid, quantity: SMSEncoding.analyze(body).segments,
+                                                        livemode: true, ref: "msg:" + (messageId?.uuidString.lowercased() ?? UUID().uuidString.lowercased()),
+                                                        at: ctx.now, on: tx)
                             queued = true
                         }
                     }
@@ -263,6 +267,8 @@ struct GatewayService {
         message.createdAt = now
         message.providerMessageId = providerMessageId
         try await message.create(on: db)
+        try await UsageMeter.record(.smsSegment, businessId: businessId.uuid, quantity: SMSEncoding.analyze(text).segments, livemode: true,
+                                    ref: "in:" + providerMessageId, at: now, on: db)
         session.lastMessageAt = now
         try await session.update(on: db)
         relationship.lastActivityAt = now

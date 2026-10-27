@@ -140,19 +140,24 @@ struct RCSInbound {
               let target = RCSPostbackTarget(storageValue: postback.target) else {
             return try await reject(.notPermitted, interaction: interactionId, business: businessId)
         }
-        var decision: Decision
-        var selected: [String]?
-        var reply: String?
+        let decision: Decision
+        let selected: [String]?
+        let reply: String?
         switch target {
-        case .decision(let d): decision = d
+        case .decision(let d):
+            decision = d
+            selected = nil
+            reply = nil
         case .option(let id):
             decision = .select
             selected = [id]
+            reply = nil
         case .suggestedReply(let index):
             guard case .reply(let payload) = interaction.payload, payload.suggestedReplies.indices.contains(index) else {
                 return try await reject(.notPermitted, interaction: interactionId, business: businessId)
             }
             decision = .reply
+            selected = nil
             reply = payload.suggestedReplies[index]
         }
         do {

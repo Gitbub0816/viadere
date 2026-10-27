@@ -134,7 +134,18 @@ struct BusinessAPIKeyMiddleware: AsyncMiddleware {
         if let required = requiredScope, !key.scopeSet.contains(required) {
             throw APIError(.forbidden, .forbidden, "This API key does not have the required scope.")
         }
-        try await ctx.limiter.enforce("business", key: business.id?.uuidString ?? "", rule: ctx.config.rateLimits.business)
+        // A throttled business gets a fraction of its API rate; every rate-limit hit is counted for abuse review.
+        let controls = try await BusinessControls.load(key.businessId, on: db)
+        let factor = BusinessControls.throttleFactor(controls, settings: ctx.config.abuse)
+        let base = ctx.config.rateLimits.business
+        let rule = factor < 1 ? RateRule(capacity: max(1, (base.capacity * factor).rounded(.down)),
+                                         perMinute: max(1, (base.perMinute * factor).rounded(.down))) : base
+        do {
+            try await ctx.limiter.enforce("business", key: business.id?.uuidString ?? "", rule: rule)
+        } catch let error as APIError where error.code == .rateLimited {
+            await AbuseService.recordSignal("rate_limited", businessId: key.businessId, now: now, on: db)
+            throw error
+        }
         if key.lastUsedAt == nil || now.timeIntervalSince(key.lastUsedAt ?? now) > 300 {
             try await BusinessAPIKeyRecord.query(on: db).filter(\.$id == key.id!).set(\.$lastUsedAt, to: now).update()
         }
