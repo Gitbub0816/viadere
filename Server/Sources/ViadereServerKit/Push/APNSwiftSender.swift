@@ -29,19 +29,7 @@ public final class APNSwiftSender: APNsSender, Sendable {
     public func send(_ message: PushMessage) async -> PushOutcome {
         // A token minted for the other APNs environment would be rejected; skip rather than leak it.
         guard (message.environment == .sandbox) == useSandbox else { return .failed }
-        struct Custom: Encodable, Sendable { var i: String? }
-        let level: APNSAlertNotificationInterruptionLevel
-        switch message.interruptionLevel {
-        case "passive": level = .passive
-        case "time-sensitive": level = .timeSensitive
-        default: level = .active
-        }
-        let notification = APNSAlertNotification(
-            alert: .init(title: .raw(message.title), body: .raw(message.body)),
-            expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
-            priority: message.highPriority ? .immediately : .consideringDevicePower,
-            topic: message.topic, payload: Custom(i: message.interactionId), threadID: message.threadID,
-            category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
+        let notification = Self.notification(for: message)
         do {
             try await client.sendAlertNotification(notification, deviceToken: message.deviceToken)
             return .delivered
@@ -55,5 +43,24 @@ public final class APNSwiftSender: APNsSender, Sendable {
             logger.warning("apns send failed", metadata: ["error": "\(type(of: error))"])
             return .failed
         }
+    }
+
+    struct Custom: Encodable, Sendable { var iid: String? }
+
+    /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
+    /// top-level opaque `iid`.
+    static func notification(for message: PushMessage) -> APNSAlertNotification<Custom> {
+        let level: APNSAlertNotificationInterruptionLevel
+        switch message.interruptionLevel {
+        case "passive": level = .passive
+        case "time-sensitive": level = .timeSensitive
+        default: level = .active
+        }
+        return APNSAlertNotification(
+            alert: .init(title: .raw(message.title), body: .raw(message.body)),
+            expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
+            priority: message.highPriority ? .immediately : .consideringDevicePower,
+            topic: message.topic, payload: Custom(iid: message.interactionId), threadID: message.threadID,
+            category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
     }
 }

@@ -120,13 +120,20 @@ public enum AssurancePolicy {
     /// a push can be acted on inside the app), the channel can carry the evidence,
     /// security-sensitive kinds never arrive via text messaging, and the achieved assurance meets
     /// `requiredAssurance(for:)`.
-    public static func canSatisfy(_ interaction: Interaction, channel: Channel, provided: ProvidedAssurance) -> Bool {
+    public static func canSatisfy(_ interaction: Interaction, channel: Channel, provided: ProvidedAssurance,
+                                  decision: Decision? = nil) -> Bool {
         let appFamily: Set<Channel> = [.nativePush, .inApp]
         let allowed = interaction.allowedChannels.contains(channel)
             || (appFamily.contains(channel) && !appFamily.isDisjoint(with: interaction.allowedChannels))
         guard allowed else { return false }
         guard self.channel(channel, canCarry: provided) else { return false }
         if interaction.kind.isSecuritySensitive && channel.isTextMessaging { return false }
+        // Deny / report are the safe directions: any valid device signature suffices (a lock-screen Deny must
+        // not need Face ID). An unauthenticated channel reply or a web passkey-less call still cannot deny.
+        if decision == .deny || decision == .report {
+            if case .deviceSignature = provided { return true }
+            return false
+        }
         return achievedAssurance(provided) >= requiredAssurance(for: interaction)
     }
 

@@ -68,6 +68,26 @@ enum DeviceRoutes {
             let body: HandoffRedeemRequest = try req.decodeBody()
             return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).redeemHandoff(principal: try req.consumer, token: body.token))
         }
+        routes.api(APIRoutes.phoneLinksList) { req in
+            try req.jsonResponse(try await AccountService(db: req.db, ctx: req.ctx).phoneLinks(for: try req.consumer.consumerId))
+        }
+        routes.api(APIRoutes.phoneLinkDelete) { req in
+            let id: PhoneLinkID = try req.uuidParameter("phoneLinkId")
+            try await AccountService(db: req.db, ctx: req.ctx).removePhoneLink(principal: try req.consumer, id: id)
+            return try req.emptyOK()
+        }
+        routes.api(APIRoutes.sessionsList) { req in
+            try req.jsonResponse(try await AccountService(db: req.db, ctx: req.ctx).sessions(principal: try req.consumer))
+        }
+        routes.api(APIRoutes.sessionRevoke) { req in
+            guard let raw = req.parameters.get("sessionId"), let id = UUID(uuidString: raw) else { throw APIError.notFound }
+            try await AccountService(db: req.db, ctx: req.ctx).revokeSession(principal: try req.consumer, id: id)
+            return try req.emptyOK()
+        }
+        routes.api(APIRoutes.accountDelete) { req in
+            try await AccountService(db: req.db, ctx: req.ctx).deleteAccount(principal: try req.consumer)
+            return try req.emptyOK()
+        }
         routes.api(APIRoutes.apnsTokenRegister) { req in
             let body: APNsTokenRegistration = try req.decodeBody()
             let principal = try req.consumer

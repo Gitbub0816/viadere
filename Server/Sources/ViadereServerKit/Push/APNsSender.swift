@@ -14,7 +14,7 @@ public struct PushMessage: Sendable, Equatable {
     /// `passive`, `active` or `time-sensitive`.
     public var interruptionLevel: String
     public var mutableContent: Bool
-    /// Opaque id the app uses to fetch the interaction (`i` in the payload).
+    /// Opaque id the app uses to fetch the interaction (`iid` at the top level of the payload).
     public var interactionId: String?
     public var highPriority: Bool
     public var collapseID: String?

@@ -159,3 +159,33 @@ struct AssuranceTests {
         #expect(!AssurancePolicy.canSatisfy(push, channel: .web, provided: .passkeyAssertion))
     }
 }
+
+
+@Suite("Deny and report assurance")
+struct DenyAssuranceTests {
+    @Test("Deny/report need only a valid device signature; approve keeps the full requirement")
+    func denyIsAlwaysSafe() {
+        for sensitivity in [Sensitivity.standard, .high, .critical] {
+            let i = Fixtures.interaction(.authorize(AuthorizePayload(actionDescription: "Pay")), sensitivity: sensitivity)
+            for decision in [Decision.deny, .report] {
+                #expect(AssurancePolicy.canSatisfy(i, channel: .nativePush, provided: .deviceSignature(.none), decision: decision))
+                #expect(AssurancePolicy.canSatisfy(i, channel: .inApp, provided: .deviceSignature(.devicePasscode), decision: decision))
+            }
+        }
+        let high = Fixtures.interaction(.authorize(AuthorizePayload(actionDescription: "Pay")), sensitivity: .high)
+        #expect(!AssurancePolicy.canSatisfy(high, channel: .nativePush, provided: .deviceSignature(.none), decision: .approve))
+        #expect(!AssurancePolicy.canSatisfy(high, channel: .nativePush, provided: .deviceSignature(.devicePasscode), decision: .approve))
+        #expect(AssurancePolicy.canSatisfy(high, channel: .nativePush, provided: .deviceSignature(.biometric), decision: .approve))
+        let critical = Fixtures.interaction(.authorize(AuthorizePayload(actionDescription: "Pay")), sensitivity: .critical)
+        #expect(!AssurancePolicy.canSatisfy(critical, channel: .nativePush, provided: .deviceSignature(.devicePasscode), decision: .approve))
+    }
+
+    @Test("An unauthenticated SMS/RCS reply or passkey-less channel can never deny an authorize")
+    func channelRepliesCannotDeny() {
+        let i = Fixtures.interaction(.authorize(AuthorizePayload(actionDescription: "Pay")), sensitivity: .standard)
+        for channel in [Channel.sms, .rcs, .appleMessagesForBusiness, .web] {
+            #expect(!AssurancePolicy.canSatisfy(i, channel: channel, provided: .unauthenticatedReply, decision: .deny))
+            #expect(!AssurancePolicy.canSatisfy(i, channel: channel, provided: .unauthenticatedReply, decision: .report))
+        }
+    }
+}

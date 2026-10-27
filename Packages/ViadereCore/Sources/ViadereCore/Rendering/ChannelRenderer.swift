@@ -60,6 +60,14 @@ public struct NotificationActionSpec: Sendable, Hashable, Codable {
     public var requiresAuthentication: Bool
     /// `.foreground`: opens the app (needed for biometric signing).
     public var opensApp: Bool
+
+    public init(identifier: String, title: String, style: Style, requiresAuthentication: Bool, opensApp: Bool) {
+        self.identifier = identifier
+        self.title = title
+        self.style = style
+        self.requiresAuthentication = requiresAuthentication
+        self.opensApp = opensApp
+    }
 }
 
 /// A notification category (register with `UNUserNotificationCenter` — dynamic `choose`
@@ -67,6 +75,11 @@ public struct NotificationActionSpec: Sendable, Hashable, Codable {
 public struct NotificationCategorySpec: Sendable, Hashable, Codable {
     public var identifier: String
     public var actions: [NotificationActionSpec]
+
+    public init(identifier: String, actions: [NotificationActionSpec]) {
+        self.identifier = identifier
+        self.actions = actions
+    }
 }
 
 /// Native notification rendering.
@@ -84,6 +97,18 @@ public struct NotificationRendering: Sendable, Hashable {
     public var userInfo: [String: String]
     /// True when approval must happen in the app (secure step-up).
     public var requiresSecureFlow: Bool
+
+    public init(category: NotificationCategorySpec, title: String, subtitle: String, body: String, threadIdentifier: String,
+                interruptionLevel: InterruptionLevel, userInfo: [String: String], requiresSecureFlow: Bool) {
+        self.category = category
+        self.title = title
+        self.subtitle = subtitle
+        self.body = body
+        self.threadIdentifier = threadIdentifier
+        self.interruptionLevel = interruptionLevel
+        self.userInfo = userInfo
+        self.requiresSecureFlow = requiresSecureFlow
+    }
 }
 
 /// Pure, transport-agnostic rendering of interactions into channel formats.

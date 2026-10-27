@@ -287,6 +287,23 @@ public struct SMSLinkRedeemRequest: Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - Sessions & account
+
+/// A signed-in session (one refresh-token family) as shown in security settings.
+public struct SessionInfo: Codable, Sendable, Hashable, Identifiable {
+    public var id: UUID
+    public var createdAt: Date
+    public var expiresAt: Date
+    /// True for the session making this request.
+    public var current: Bool
+    public init(id: UUID, createdAt: Date, expiresAt: Date, current: Bool) {
+        self.id = id
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.current = current
+    }
+}
+
 // MARK: - Push
 
 public struct APNsTokenRegistration: Codable, Sendable, Hashable {

@@ -35,6 +35,20 @@ public enum APIRoutes {
         "phoneLinks.start", .POST, "/v1/phone-links/start", auth: .deviceSignedBearer)
     public static let phoneLinkVerify = Endpoint<PhoneLinkVerifyRequest, PhoneLink>(
         "phoneLinks.verify", .POST, "/v1/phone-links/verify", auth: .deviceSignedBearer)
+    public static let phoneLinksList = Endpoint<EmptyBody, [PhoneLink]>(
+        "phoneLinks.list", .GET, "/v1/phone-links", auth: .deviceSignedBearer)
+    public static let phoneLinkDelete = Endpoint<EmptyBody, EmptyBody>(
+        "phoneLinks.delete", .DELETE, "/v1/phone-links/{phoneLinkId}", auth: .deviceSignedBearer)
+
+    // MARK: Sessions & account
+    public static let sessionsList = Endpoint<EmptyBody, [SessionInfo]>(
+        "sessions.list", .GET, "/v1/sessions", auth: .deviceSignedBearer)
+    public static let sessionRevoke = Endpoint<EmptyBody, EmptyBody>(
+        "sessions.revoke", .DELETE, "/v1/sessions/{sessionId}", auth: .deviceSignedBearer)
+    /// Revokes every device and token, erases/anonymizes personal data, keeps a redacted audit record.
+    public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
+        "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
+
     /// Web flow: the one-time SMS link token is redeemed after passkey sign-in.
     public static let smsLinkRedeem = Endpoint<SMSLinkRedeemRequest, PhoneLink>(
         "sms.linkTokens.redeem", .POST, "/v1/sms/link-tokens/redeem", auth: .bearer)
@@ -145,6 +159,7 @@ public enum APIRoutes {
         authRefresh.descriptor, logout.descriptor,
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
         phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
+        phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
         relationshipConnect.descriptor, relationshipsList.descriptor, relationshipDisconnect.descriptor,
         consentsGet.descriptor, consentsUpdate.descriptor,

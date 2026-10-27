@@ -214,7 +214,8 @@ public struct DecisionVerifier: Sendable {
         guard !interaction.isExpired(at: now) else { throw DecisionVerificationError.expired }
         guard payload.signedAt <= now.addingTimeInterval(allowedFutureSkew) else { throw DecisionVerificationError.signedInFuture }
         guard now.timeIntervalSince(payload.signedAt) <= maxAge else { throw DecisionVerificationError.stale }
-        guard AssurancePolicy.canSatisfy(interaction, channel: channel, provided: .deviceSignature(payload.assurance)) else {
+        guard AssurancePolicy.canSatisfy(interaction, channel: channel, provided: .deviceSignature(payload.assurance),
+                                        decision: payload.decision) else {
             throw DecisionVerificationError.insufficientAssurance
         }
         if case .choose(let choose) = interaction.payload {

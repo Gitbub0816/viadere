@@ -125,7 +125,8 @@ struct InteractionService {
         guard ConstantTime.equals(existing.requestHash, requestHash) else {
             throw APIError(.conflict, .idempotencyConflict, "This Idempotency-Key was already used with a different request.")
         }
-        return IssueResult(interaction: try businessView(existing), created: false)
+        guard let view = try? businessView(existing) else { throw APIError.gone("The consumer's data has been erased.") }
+        return IssueResult(interaction: view, created: false)
     }
 
     private func enforceQuota(principal: BusinessPrincipal, now: Date) async throws {

@@ -22,7 +22,7 @@ Server/
     Push/                       APNsSender protocol + APNSwift implementation
     Routes/ Web/                route registration from `APIRoutes`; /c /l /h pages, AASA, health
     Jobs/                       background runner (webhooks, SMS queue, expiry sweeps), seed command
-  Tests/ViadereServerKitTests   98+ end-to-end tests over HTTP (SQLite by default, PostgreSQL optional)
+  Tests/ViadereServerKitTests   110 end-to-end tests over HTTP (SQLite by default, PostgreSQL optional)
   Dockerfile  docker-compose.yml  .env.example
 ```
 
@@ -111,6 +111,9 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | device+bearer | list / revoke |
 | `POST /v1/phone-links/start` · `/verify` | device+bearer | SMS OTP (HMAC-hashed, 5 attempts, rate-limited) |
 | `POST /v1/sms/link-tokens/redeem` | bearer | link token + explicit last-4 confirmation |
+| `GET /v1/phone-links` · `DELETE /v1/phone-links/{id}` | device+bearer | list / unlink verified phones |
+| `GET /v1/sessions` · `DELETE /v1/sessions/{id}` | device+bearer | signed-in sessions (token families) |
+| `DELETE /v1/account` | device+bearer | revokes all devices/tokens, erases personal data, keeps pseudonymous audit |
 | `POST /v1/handoff/redeem` | device+bearer | redeem `/h/{token}` in the app (added to `APIRoutes`) |
 | `GET /v1/directory/search` · `/handles/{h}` · `/codes/{c}` · `POST /resolve` | none | verified businesses only |
 | `POST/GET /v1/relationships` · `DELETE /v1/relationships/{id}` | device+bearer | connect / list / disconnect |
