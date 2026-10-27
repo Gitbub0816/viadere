@@ -74,7 +74,6 @@ actor FakeRelay: ApproveAPI {
         let succession = RootSuccession(businessId: businessId, oldRootKid: rootKid, newPublicKey: next.publicKey, createdAt: now)
         try append(try await KeyLogEntry.sign(.succession(succession), rootKey: root, newRootKey: next))
         root = next
-        serial = 0
         try await publishOperationalKeys()
     }
 
@@ -439,8 +438,14 @@ struct ApproveRequestDeviceTests {
 @Suite("Approve v2 on the device: routing and controller")
 struct ApproveControllerTests {
     @Test func enrollmentLinksRouteWithTheRootKeyId() {
-        let route = DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=bk_abc")
-        #expect(route == .approveEnrollment(code: "ABCD2345", rootKid: "bk_abc"))
+        let kid = KeyIdentifier.make(try! SoftwareP256SigningKey().publicKey.signingKey())
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)") == .approveEnrollment(code: "ABCD2345", rootKid: kid))
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345") == .approveEnrollment(code: "ABCD2345", rootKid: nil))
+        // Anything else on that path is refused: extra segments, a fragment, odd query items, another host.
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345/x") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)&x=1") == nil)
+        #expect(DeepLinkRouter.route("https://evil.example/a/ABCD2345") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345#f") == nil)
     }
 
     @MainActor
