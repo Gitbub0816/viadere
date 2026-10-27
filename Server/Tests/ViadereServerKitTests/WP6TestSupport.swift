@@ -92,7 +92,8 @@ extension TestHarness {
     func verifyDomain(_ session: DashSession, businessId: UUID, domain: String = "acme.example.com", method: String = "dns") async throws -> String {
         let add = try await formPost("/dashboard/organization/domains", session, [("domain", domain)])
         XCTAssertEqual(add.status, .seeOther, add.text)
-        let record = try XCTUnwrap(await BusinessDomainRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$domain == domain).first())
+        let found = try await BusinessDomainRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$domain == domain).first()
+        let record = try XCTUnwrap(found)
         if method == "dns" { domainChecker.publishTXT(domain: domain, token: record.token) } else { domainChecker.publishFile(domain: domain, token: record.token) }
         let check = try await formPost("/dashboard/organization/domains/\(record.id!.uuidString.lowercased())/check", session)
         XCTAssertEqual(check.status, .seeOther, check.text)

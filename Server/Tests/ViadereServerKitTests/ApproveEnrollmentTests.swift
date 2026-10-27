@@ -433,17 +433,25 @@ final class ApproveEnrollmentTests: XCTestCase {
             let key = try unwrap(try await ApproveKeyRecord.query(on: h.db).filter(\.$kid == f.phone.kid).first())
             XCTAssertEqual(key.status, "revoked")
             atrue(try await h.pendingRequests(f.phone.consumer).isEmpty)
-            XCTAssertEqual(try await h.createRequest(f).0.status, .conflict, "no active key and no relationship")
+            let late = try await h.createRequest(f)
+            XCTAssertEqual(late.0.status, .conflict, "no active key and no relationship")
             aeq(try await h.approvalAudit("approve.key_revoked").count, 1)
 
-            // Deleting the account wipes every key, request, delivery and freeze row of this customer.
+            // Deleting the account revokes every key (the revoked rows stay as audit evidence, with no personal data), forgets the displayed
+            // details and challenges, and removes deliveries and freezes.
             let g = try await h.approveFixture(name: "Contoso Bank", handle: "contosobank")
+            let (made, _) = try await h.createRequest(g)
             _ = try await h.signedPost(g.phone.consumer, "/v1/approve/freeze", ApproveFreezeRequest(scope: .account, frozen: true))
+            XCTAssertEqual(made.status, .created, made.text)
             let deleted = try await h.signed(g.phone.consumer, .DELETE, "/v1/account")
             XCTAssertEqual(deleted.status, .ok, deleted.text)
             let owner = g.phone.consumer.id.uuid
-            aeq(try await ApproveKeyRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
-            aeq(try await ApproveRequestRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
+            let keys = try await ApproveKeyRecord.query(on: h.db).filter(\.$consumerId == owner).all()
+            XCTAssertFalse(keys.isEmpty)
+            XCTAssertTrue(keys.allSatisfy { $0.status == "revoked" })
+            let requests = try await ApproveRequestRecord.query(on: h.db).filter(\.$consumerId == owner).all()
+            XCTAssertTrue(requests.allSatisfy { $0.detailsSealed == nil && $0.challenge == nil })
+            aeq(try await ApproveDeliveryRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
             aeq(try await ApproveFreezeRecord.query(on: h.db).filter(\.$consumerId == owner).count(), 0)
         }
     }

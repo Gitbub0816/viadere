@@ -19,6 +19,13 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   max_unavailable = 1
 
 [env]
+  VERIFY_ENABLED = "false"   # Phase 3 gate (legal validation per market, privacy assessment) must pass first
+  VERIFY_GATE_REFERENCE = ""
+  WALLET_MERCHANT_ID = ""
+  WALLET_IACA_DIR = "/app/trust/iaca"
+  WALLET_IACA_SHA256 = ""
+  DIDIT_API_BASE = "https://verification.didit.me"
+  DIDIT_WORKFLOW_ID_IDENTITY = ""
   VAULT_SYNC_ENABLED = "true"
   # ---- runtime / mode -------------------------------------------------------------------------------
   ENVIRONMENT = "staging"               # production rules: every secret mandatory, https only, `seed` refused

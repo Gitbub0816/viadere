@@ -19,6 +19,7 @@ EXEMPT = {
     "PASS_CERTIFICATE_PATH": "alternative to PASS_CERTIFICATE_PEM; use the inline PEM secrets on Fly",
     "PASS_PRIVATE_KEY_PATH": "alternative to PASS_PRIVATE_KEY_PEM; use the inline PEM secrets on Fly",
     "PASS_WWDR_CERTIFICATE_PATH": "alternative to PASS_WWDR_CERTIFICATE_PEM; use the inline PEM secrets on Fly",
+    "WALLET_ENCRYPTION_KEY_PATHS": "development only; refused in staging/production (use WALLET_ENCRYPTION_KEY_WRAPPED)",
 }
 # Names the server reads that are not in .env.example (documented in Server/README.md).
 EXTRA_KNOWN = {"AUDIT_CHAIN_LEGACY_THROUGH_SEQ", "EDGE_TOKEN", "PASS_CERTIFICATE_PEM", "PASS_PRIVATE_KEY_PEM", "PASS_WWDR_CERTIFICATE_PEM",
