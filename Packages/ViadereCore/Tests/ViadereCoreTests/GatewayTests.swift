@@ -258,8 +258,8 @@ struct GatewayTests {
         await h.send("1")
         #expect(h.state == .linkPending)
         await h.send("Hi", advance: 16 * 60)
-        #expect(h.state != .linkPending)
-        #expect(h.context.menu?.kind == .unlinkedMain || h.state == .searchPending)
+        #expect(h.state == .unlinked)
+        #expect(h.context.menu?.kind == .unlinkedMain)
     }
 
     @Test func accountHelpIsHandedOffSecurely() async {

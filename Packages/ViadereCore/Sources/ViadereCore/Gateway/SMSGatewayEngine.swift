@@ -236,6 +236,8 @@ public struct SMSGatewayEngine: Sendable {
             case .unlinked, .linkPending, .idleMenu, .recentMenu, .disambiguation, .sessionMenu, .expired:
                 if let digit = Self.menuDigit(text) {
                     await handleDigit(digit, inbound: inbound)
+                } else if Self.isGreeting(text) {
+                    if let session = context.session, context.state == .sessionMenu { showSessionMenu(session) } else { showMainMenu(header: nil) }
                 } else {
                     await resolve(text, inbound: inbound, isSearch: true)
                 }
@@ -694,6 +696,11 @@ public struct SMSGatewayEngine: Sendable {
             if let last = s.last, last == "." || last == ")" { s = s.dropLast() }
             guard (1...2).contains(s.count), s.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
             return Int(s)
+        }
+
+        /// Greetings re-display the menu instead of being searched.
+        static func isGreeting(_ text: String) -> Bool {
+            ["HI", "HELLO", "HEY", "HOLA", "YO", "HIYA"].contains(GatewayKeyword.normalize(text))
         }
 
         /// `@handle …` or `CODE …` at the start of the message.
