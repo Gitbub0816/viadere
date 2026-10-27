@@ -200,7 +200,7 @@ final class SecurityTests: XCTestCase {
             let consumer = try await h.readyConsumer()
             let b = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             _ = try await h.connect(consumer, to: b)
-            let verification = try await AuditService.verifyChain(on: h.db)
+            let verification = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(verification.valid)
             XCTAssertGreaterThanOrEqual(verification.checked, 3)
             let events = try await AuditEventRecord.query(on: h.db).sort(\.$seq).all()
@@ -221,7 +221,7 @@ final class SecurityTests: XCTestCase {
             // Even if an attacker with schema privileges removes the triggers, the chain exposes the edit.
             try await dropAuditTriggers(sql)
             try await sql.raw("UPDATE audit_events SET outcome = 'denied' WHERE seq = 2").run()
-            let broken = try await AuditService.verifyChain(on: h.db)
+            let broken = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertFalse(broken.valid)
             XCTAssertEqual(broken.firstBrokenSeq, 2)
         }
@@ -245,7 +245,7 @@ final class SecurityTests: XCTestCase {
             let sql = h.db as! any SQLDatabase
             try await dropAuditTriggers(sql)
             try await sql.raw("DELETE FROM audit_events WHERE seq = 2").run()
-            let result = try await AuditService.verifyChain(on: h.db)
+            let result = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertFalse(result.valid)
         }
     }
@@ -260,7 +260,7 @@ final class SecurityTests: XCTestCase {
                 }
                 try await group.waitForAll()
             }
-            let result = try await AuditService.verifyChain(on: h.db)
+            let result = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(result.valid)
             XCTAssertEqual(result.checked, 10)
         }
@@ -321,17 +321,26 @@ final class SecurityTests: XCTestCase {
 
     // MARK: Crypto helpers
 
-    func testFieldCipherRoundTripsBindsContextAndRejectsTampering() throws {
+    func testFieldCipherRoundTripsBindsContextAndRowAndRejectsTampering() throws {
         let cipher = FieldCipher(key: SymmetricKey(data: Data(repeating: 9, count: 32)))
-        let sealed = try cipher.seal("+14805550123", context: "phone")
+        let row = UUID()
+        let sealed = try cipher.seal("+14805550123", context: "phone", rowId: row)
+        XCTAssertTrue(sealed.hasPrefix("v2."))
         XCTAssertFalse(sealed.contains("4805550123"))
-        XCTAssertEqual(try cipher.openString(sealed, context: "phone"), "+14805550123")
-        XCTAssertThrowsError(try cipher.open(sealed, context: "other-column"))
-        XCTAssertThrowsError(try cipher.open(sealed + "A", context: "phone"))
-        XCTAssertThrowsError(try cipher.open("garbage", context: "phone"))
+        XCTAssertEqual(try cipher.openString(sealed, context: "phone", rowId: row), "+14805550123")
+        XCTAssertThrowsError(try cipher.open(sealed, context: "other-column", rowId: row))
+        // A2-style swap: the same ciphertext moved to another row of the same column no longer opens.
+        XCTAssertThrowsError(try cipher.open(sealed, context: "phone", rowId: UUID()))
+        XCTAssertThrowsError(try cipher.open(sealed + "A", context: "phone", rowId: row))
+        XCTAssertThrowsError(try cipher.open("garbage", context: "phone", rowId: row))
         let otherKey = FieldCipher(key: SymmetricKey(data: Data(repeating: 8, count: 32)))
-        XCTAssertThrowsError(try otherKey.open(sealed, context: "phone"))
-        XCTAssertNotEqual(try cipher.seal("x", context: "c"), try cipher.seal("x", context: "c"), "fresh nonce per encryption")
+        XCTAssertThrowsError(try otherKey.open(sealed, context: "phone", rowId: row))
+        XCTAssertNotEqual(try cipher.seal("x", context: "c", rowId: row), try cipher.seal("x", context: "c", rowId: row), "fresh nonce per encryption")
+        // Rows written before row binding (v1) still open, with the column context, for any row id.
+        let legacy = try cipher.sealLegacy("+14805550123", context: "phone")
+        XCTAssertTrue(FieldCipher.isLegacy(legacy))
+        XCTAssertEqual(try cipher.openString(legacy, context: "phone", rowId: row), "+14805550123")
+        XCTAssertThrowsError(try cipher.open(legacy, context: "other-column", rowId: row))
     }
 
     // MARK: Configuration
@@ -341,10 +350,10 @@ final class SecurityTests: XCTestCase {
         var env = [
             "ENVIRONMENT": "production", "DATABASE_URL": "postgres://u:p@db/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(), "SERVER_PEPPER": SecureToken.generate(),
             "DATA_ENCRYPTION_KEY": SecureToken.generate(), "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG",
-            "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
+            "AUDIT_CHAIN_KEY": SecureToken.generate(), "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
         ]
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(env))
-        for key in ["DATABASE_URL", "CONNECT_LINK_SIGNING_KEY", "SERVER_PEPPER", "DATA_ENCRYPTION_KEY", "TWILIO_AUTH_TOKEN", "APNS_KEY_P8", "APPLE_TEAM_ID"] {
+        for key in ["DATABASE_URL", "CONNECT_LINK_SIGNING_KEY", "SERVER_PEPPER", "DATA_ENCRYPTION_KEY", "AUDIT_CHAIN_KEY", "TWILIO_AUTH_TOKEN", "APNS_KEY_P8", "APPLE_TEAM_ID"] {
             var broken = env
             broken[key] = nil
             XCTAssertThrowsError(try ServerConfig.fromEnvironment(broken), "\(key) must be required in production")
@@ -355,7 +364,7 @@ final class SecurityTests: XCTestCase {
         env["PUBLIC_BASE_URL"] = "http://viadere.com"
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(env), "production must use https")
         // Development works with nothing but defaults and never has production-only toggles on.
-        let dev = try? ServerConfig.fromEnvironment([:])
+        let dev = try? ServerConfig.fromEnvironment(["ENVIRONMENT": "development"])
         XCTAssertNotNil(dev)
         XCTAssertFalse(dev?.isProduction ?? true)
         XCTAssertNil(dev?.databaseURL)

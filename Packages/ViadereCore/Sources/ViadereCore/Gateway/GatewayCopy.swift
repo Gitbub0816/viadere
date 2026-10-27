@@ -77,6 +77,13 @@ public enum GatewayCopy {
         "Viadere: You're connected to \(safeName(business)). Reply MENU for options, or \\BACK to send the word BACK."
     }
 
+    /// Content-free notice sent instead of a business's text while the shared SMS thread is connected to a *different* business, so
+    /// the person's natural reply cannot be forwarded to the wrong tenant (and the other business's words never appear as if
+    /// replies would reach it).
+    public static func newMessageNotice(from sender: BusinessSummary, whileConnectedTo active: BusinessSummary) -> String {
+        "Viadere: You have a new message from \(safeName(sender)) in the Viadere app. Don't reply here: replies in this chat go to \(safeName(active)). Reply MENU to switch."
+    }
+
     /// Sent by the server for `.sendAccountLink`.
     public static func accountLink(url: URL, ttlMinutes: Int) -> String {
         "Viadere: Link your account: \(url.absoluteString) Expires in \(ttlMinutes) min. Don't share this link."

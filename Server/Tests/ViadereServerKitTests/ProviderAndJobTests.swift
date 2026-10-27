@@ -81,7 +81,7 @@ final class ProviderAndJobTests: XCTestCase {
             let message = ConversationMessageRecord()
             message.id = UUID(); message.sessionId = try await ConversationSessionRecord.query(on: h.db).first()!.id!
             message.businessId = b.id.uuid; message.consumerId = consumer.id.uuid; message.direction = "businessToConsumer"; message.senderType = "business"
-            message.displayName = "Northwind Air"; message.bodyCiphertext = try h.ctx.cipher.seal("x", context: "conversation_messages.body")
+            message.displayName = "Northwind Air"; message.bodyCiphertext = try h.ctx.cipher.seal("x", context: "conversation_messages.body", rowId: message.id!)
             message.channel = "sms"; message.deliveryStatus = "queued"; message.createdAt = h.clock.now()
             try await message.create(on: h.db)
             try await OutboundSMS(db: h.db, ctx: h.ctx).enqueue(to: phone, body: "hello", allowWhenOptedOut: true, messageId: message.id)

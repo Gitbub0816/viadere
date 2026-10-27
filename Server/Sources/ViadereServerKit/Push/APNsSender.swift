@@ -141,6 +141,14 @@ public enum PushPayloadBuilder {
             highPriority: rendering.interruptionLevel != .passive, collapseID: nil)
     }
 
+    /// A generic account-security notice ("a device was added"). Carries no names, numbers or other details.
+    public static func securityNotice(body: String, token: APNsTokenRegistrationRecord, topic: String) -> PushMessage {
+        PushMessage(deviceToken: token.token, environment: token.environment,
+                    topic: token.bundleId.isEmpty ? topic : token.bundleId, title: genericTitle, body: body,
+                    category: "viadere.security.notice", threadID: "viadere.security", interruptionLevel: "time-sensitive",
+                    mutableContent: true, interactionId: nil, highPriority: true)
+    }
+
     /// Generic notification for a business message in a conversation (no text).
     public static func messageNotice(business: BusinessSummary, token: APNsTokenRegistrationRecord, topic: String) -> PushMessage {
         PushMessage(deviceToken: token.token, environment: token.environment,

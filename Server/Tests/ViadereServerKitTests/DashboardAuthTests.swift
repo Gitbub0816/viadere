@@ -183,7 +183,8 @@ final class DashboardAuthTests: XCTestCase {
             }
             try await h.dashSignup(email: "dup@example.com")
             let again = try await h.jsonPost("/dashboard/auth/signup/begin", SignupBeginBody(email: "DUP@example.com", displayName: "B", organizationName: "Other Org"))
-            XCTAssertEqual(again.status, .conflict)
+            // Not an oracle for which addresses exist: the same answer as for a free address (the duplicate fails later, generically).
+            XCTAssertEqual(again.status, .ok)
         }
     }
 

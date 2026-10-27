@@ -62,6 +62,11 @@ struct ChannelRouter {
                 consumerId: ConsumerID(record.consumerId), businessId: BusinessID(record.businessId), subjectType: "interaction",
                 subjectId: record.id?.uuidString.lowercased(), metadata: ["reason": reason])
         }
+        // A phone linked from an SMS link token is not a delivery target until its cool-down ends or a trusted device confirms it.
+        if let usableFrom = link.usableFrom, usableFrom > ctx.now {
+            try await skip("phone_link_cool_down")
+            return
+        }
         if let context = try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == phoneHash).first(), context.optedOut {
             try await skip("opted_out")
             return
@@ -350,6 +355,32 @@ struct ChannelRouter {
     private func sendSMS(_ row: ChannelOutboundRecord, interaction: Interaction, summary: BusinessSummary, phone: PhoneNumber,
                          audit: AuditService) async throws {
         let adapter = ctx.channels.sms
+        // The phone's SMS thread is shared by every business. While it is connected to another business, that business's reply
+        // handling would receive the person's answer to *this* text, so only a content-free notice is sent.
+        if let active = try await activeOtherBusiness(phoneHash: row.phoneHash, sender: row.businessId) {
+            let notice = GatewayCopy.newMessageNotice(from: summary, whileConnectedTo: active)
+            let environment = ChannelEnvironment(db: db, ctx: ctx, reference: row.id?.uuidString.lowercased() ?? "", sensitive: false,
+                                                 businessId: BusinessID(row.businessId))
+            do {
+                let result = try await adapter.send(OutboundChannelMessage(text: notice), to: phone, environment: environment)
+                row.channel = "sms"
+                row.providerMessageId = result.providerMessageId
+                row.sentAt = ctx.now
+                row.attempts += 1
+                row.status = "sent"
+                row.fallbackReason = "thread_connected_elsewhere"
+                try await row.update(on: db)
+                try await UsageMeter.record(.smsSegment, businessId: row.businessId, quantity: max(1, SMSEncoding.analyze(notice).segments), livemode: true,
+                                            ref: "sms:" + (row.id?.uuidString.lowercased() ?? ""), at: ctx.now, on: db)
+                _ = try await audit.record("channel.sms_notice_only", actor: AuditActor(kind: .gateway, id: phone.masked),
+                    consumerId: ConsumerID(row.consumerId), businessId: BusinessID(row.businessId), subjectType: "interaction",
+                    subjectId: row.interactionId.uuidString.lowercased(), metadata: ["reason": "thread_connected_elsewhere"])
+            } catch {
+                row.channel = "sms"
+                try await finish(row, status: "failed", error: "sms_enqueue_failed")
+            }
+            return
+        }
         let preview = Self.smsRendering(for: interaction, business: summary, handoffURL: nil)
         var url: URL?
         let wantsLink = interaction.kind.isSecuritySensitive || interaction.requiredAssurance > .channelReply || isLinkKind(interaction)
@@ -380,6 +411,16 @@ struct ChannelRouter {
             row.channel = "sms"
             try await finish(row, status: "failed", error: "sms_enqueue_failed")
         }
+    }
+
+    /// The business the phone's SMS thread is currently connected to, if it is not `sender`.
+    private func activeOtherBusiness(phoneHash: String, sender: UUID) async throws -> BusinessSummary? {
+        guard let record = try await SMSContextRecord.query(on: db).filter(\.$phoneHash == phoneHash).first(),
+              let data = try? ctx.cipher.open(record.contextCiphertext, context: "sms_contexts.context", rowId: record.id!),
+              let thread = try? ViadereJSON.decode(ConversationContext.self, from: data),
+              thread.state == .connected || thread.state == .sessionMenu, let session = thread.session,
+              session.business.id.uuid != sender else { return nil }
+        return session.business
     }
 
     // MARK: Receipts

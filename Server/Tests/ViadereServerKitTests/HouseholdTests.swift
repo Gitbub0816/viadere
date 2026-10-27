@@ -62,7 +62,7 @@ final class HouseholdTests: XCTestCase {
             XCTAssertEqual(row.codeHash.count, 64)
             XCTAssertFalse(row.codeHash.contains(invitation.code.replacingOccurrences(of: "-", with: "").lowercased()))
             XCTAssertFalse(row.labelCiphertext.contains("Sam"))
-            XCTAssertEqual(try h.ctx.cipher.openString(row.labelCiphertext, context: "delegation.label"), "Sam")
+            XCTAssertEqual(try h.ctx.cipher.openString(row.labelCiphertext, context: "delegation.label", rowId: row.id!), "Sam")
             // The inviter sees a pending grant under their own label for the delegate.
             let pending = try await h.household(s.alex)
             XCTAssertEqual(pending.given.count, 1)
@@ -515,7 +515,7 @@ final class HouseholdTests: XCTestCase {
             for event in try await AuditEventRecord.query(on: h.db).filter(\.$subjectType == "delegation").all() {
                 XCTAssertFalse(event.metadataJSON.contains("Sam"))
             }
-            let chain = try await AuditService.verifyChain(on: h.db)
+            let chain = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(chain.valid)
         }
     }

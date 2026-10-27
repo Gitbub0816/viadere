@@ -37,6 +37,9 @@ struct BackgroundJobs {
             try await DashboardSessionStore.purge(on: db, now: ctx.now)
             try await WalletService(db: db, ctx: ctx).purge()
         }
+        if await ctx.limiter.allow("retention-purge", key: "all", rule: .perMinute(1, burst: 1)) {
+            try await RetentionService(db: db, ctx: ctx).purge()
+        }
         try await DatabaseReplayGuard.purge(on: db, now: ctx.now)
         let now = ctx.now
         let staleCeremonies = PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600))

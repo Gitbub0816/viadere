@@ -18,7 +18,7 @@ public struct SeedCommand: AsyncCommand {
     public func run(using context: CommandContext, signature: Signature) async throws {
         let app = context.application
         let ctx = app.ctx
-        guard !ctx.config.isProduction, app.environment != .production,
+        guard !ctx.config.isStrict, app.environment != .production,
               (ProcessInfo.processInfo.environment["ENVIRONMENT"] ?? "").lowercased() != "production" else {
             context.console.error("Refusing to seed: ENVIRONMENT=production.")
             throw Abort(.forbidden)

@@ -228,9 +228,14 @@ public struct GatewayConfiguration: Sendable, Hashable {
     public var dedupMemory: Int
     /// Max characters of a forwarded message.
     public var maxForwardLength: Int
+    /// A menu digit received less than this many seconds after the menu was issued is treated as a reply to the menu before it
+    /// (the menu is shown again). `0` disables the guard.
+    public var menuRaceWindow: TimeInterval
 
     public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, linkTTL: TimeInterval = 15 * 60,
-                requireLinkForRouting: Bool = true, dedupMemory: Int = 50, maxForwardLength: Int = 1600) {
+                requireLinkForRouting: Bool = true, dedupMemory: Int = 50, maxForwardLength: Int = 1600,
+                menuRaceWindow: TimeInterval = 0) {
+        self.menuRaceWindow = menuRaceWindow
         self.menuTTL = menuTTL
         self.sessionIdleTTL = sessionIdleTTL
         self.linkTTL = linkTTL

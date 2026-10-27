@@ -130,9 +130,9 @@ final class AccountTests: XCTestCase {
             let phoneRow = try await PhoneLinkRecord.find(link.id!, on: h.db)!
             XCTAssertEqual(phoneRow.state, "revoked")
             XCTAssertNil(phoneRow.verifiedPhoneHash)
-            XCTAssertEqual(try h.ctx.cipher.openString(phoneRow.phoneCiphertext, context: "phone_links.phone"), "[deleted]")
+            XCTAssertEqual(try h.ctx.cipher.openString(phoneRow.phoneCiphertext, context: "phone_links.phone", rowId: phoneRow.id!), "[deleted]")
             for message in try await ConversationMessageRecord.query(on: h.db).all() {
-                XCTAssertEqual(try h.ctx.cipher.openString(message.bodyCiphertext, context: "conversation_messages.body"), "[deleted]")
+                XCTAssertEqual(try h.ctx.cipher.openString(message.bodyCiphertext, context: "conversation_messages.body", rowId: message.id!), "[deleted]")
             }
             let interaction = try await InteractionRecord.find(pending.id.uuid, on: h.db)!
             XCTAssertEqual(interaction.status, InteractionStatus.cancelled.rawValue)
@@ -143,7 +143,7 @@ final class AccountTests: XCTestCase {
             let audit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "account.deleted").all()
             XCTAssertEqual(audit.count, 1)
             XCTAssertFalse(audit[0].metadataJSON.contains("Ana"))
-            let chain = try await AuditService.verifyChain(on: h.db)
+            let chain = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(chain.valid)
             // The consumer cannot sign in again with the deleted passkey.
             try await eq(try await PasskeyCredentialRecord.query(on: h.db).count(), 0)

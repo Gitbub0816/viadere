@@ -67,7 +67,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     if let url = config.databaseURL {
         try app.databases.use(.postgres(url: url), as: .psql)
     } else {
-        guard !config.isProduction else { throw ServerConfigError.missing("DATABASE_URL") }
+        guard !config.isStrict else { throw ServerConfigError.missing("DATABASE_URL") }
         app.databases.use(.sqlite(.memory), as: .sqlite)
     }
     app.migrations.add(Migrations.all)

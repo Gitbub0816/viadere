@@ -28,7 +28,7 @@ struct GatewayService {
     static let handoffTTL: TimeInterval = 10 * 60
     static let maxConflictRetries = 6
 
-    var configuration: GatewayConfiguration { GatewayConfiguration() }
+    var configuration: GatewayConfiguration { GatewayConfiguration(menuRaceWindow: ctx.config.smsMenuRaceWindow) }
 
     func engine(on db: any Database) -> SMSGatewayEngine {
         SMSGatewayEngine(configuration: configuration, directory: DBDirectoryLookup(db: db))
@@ -90,7 +90,7 @@ struct GatewayService {
     /// Renders a business reply into the consumer's SMS thread if (and only if) it belongs to the active
     /// session; otherwise it stays in history. Returns true when an SMS was queued.
     @discardableResult
-    func deliverBusinessMessage(businessId: BusinessID, sessionId: SessionID, text: String, messageId: UUID?) async throws -> Bool {
+    func deliverBusinessMessage(businessId: BusinessID, sessionId: SessionID, text: String, messageId: UUID?, livemode: Bool = true) async throws -> Bool {
         for _ in 0..<Self.maxConflictRetries {
             do {
                 return try await db.transaction { tx in
@@ -106,7 +106,7 @@ struct GatewayService {
                             try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: transition.context.phone, body: body, messageId: messageId)
                             // Transport metering is attributed to the business whose reply this is.
                             try await UsageMeter.record(.smsSegment, businessId: businessId.uuid, quantity: SMSEncoding.analyze(body).segments,
-                                                        livemode: true, ref: "msg:" + (messageId?.uuidString.lowercased() ?? UUID().uuidString.lowercased()),
+                                                        livemode: livemode, ref: "msg:" + (messageId?.uuidString.lowercased() ?? UUID().uuidString.lowercased()),
                                                         at: ctx.now, on: tx)
                             queued = true
                         }

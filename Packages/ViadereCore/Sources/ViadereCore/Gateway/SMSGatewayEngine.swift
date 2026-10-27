@@ -267,6 +267,13 @@ public struct SMSGatewayEngine: Sendable {
                 audit("gateway.menu_stale")
                 return
             }
+            // SMS carries no timestamp from the sender, so `receivedAt` is the time we got it. A digit that arrives within the race
+            // window of a menu being shown was most likely typed for the *previous* menu: never act on it, show the menu again.
+            if config.menuRaceWindow > 0, now.timeIntervalSince(menu.issuedAt) < config.menuRaceWindow {
+                reissue(menu, header: GatewayCopy.staleReply)
+                audit("gateway.menu_race")
+                return
+            }
             guard let option = menu.options.first(where: { $0.number == digit }) else {
                 reissue(menu, header: GatewayCopy.invalidChoice)
                 audit("gateway.menu_invalid")

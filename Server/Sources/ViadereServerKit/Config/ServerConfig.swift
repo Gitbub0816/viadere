@@ -114,6 +114,11 @@ public struct ServerConfig: Sendable {
     /// timestamp): the menu is shown again instead of acting on the digit. `0` disables the guard.
     public var smsMenuRaceWindow: TimeInterval = 3
     public var retention = RetentionSettings()
+    /// Audit events up to this sequence number may be legacy (unkeyed SHA-256, written before `AUDIT_CHAIN_KEY` existed). Set
+    /// `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` once, to the last event sequence of the pre-upgrade chain; the default 0 means every event
+    /// must be keyed. It lives in the environment, not the database, so a database writer cannot downgrade the chain to an
+    /// unkeyed one and recompute it.
+    public var auditLegacyThroughSeq = 0
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -238,6 +243,10 @@ public struct ServerConfig: Sendable {
                 throw ServerConfigError.invalid("OTP_ALLOWED_COUNTRIES (comma-separated ISO regions Viadere knows: \(PhoneRegions.callingCodes.keys.sorted().joined(separator: ", ")))")
             }
             config.otpAllowedCountries = countries
+        }
+        if let raw = env["AUDIT_CHAIN_LEGACY_THROUGH_SEQ"], !raw.isEmpty {
+            guard let seq = Int(raw), seq >= 0 else { throw ServerConfigError.invalid("AUDIT_CHAIN_LEGACY_THROUGH_SEQ") }
+            config.auditLegacyThroughSeq = seq
         }
         if let seconds = env["SMS_MENU_RACE_SECONDS"].flatMap(Double.init), seconds >= 0, seconds <= 30 { config.smsMenuRaceWindow = seconds }
         try config.retention.apply(env)

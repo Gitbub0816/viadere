@@ -103,12 +103,41 @@ struct WebhookService {
             delivery.subscriptionId = subscription.id!
             delivery.businessId = businessId.uuid
             delivery.eventType = type.rawValue
-            delivery.body = String(decoding: try ViadereJSON.encode(event), as: UTF8.self)
+            // The body can contain a consumer's message text: encrypted at rest (bound to this row) and purged after the retention window.
+            delivery.body = try ctx.cipher.seal(try ViadereJSON.encode(event), context: "webhook_deliveries.body", rowId: delivery.id!)
             delivery.status = "pending"
             delivery.attempts = 0
             delivery.nextAttemptAt = now
             delivery.createdAt = now
             try await delivery.create(on: db)
+        }
+    }
+
+    // MARK: Bodies at rest
+
+    /// The exact body bytes of a delivery. Rows written before bodies were encrypted hold plaintext JSON; they are read as-is.
+    func deliveryBody(_ delivery: WebhookDeliveryRecord) -> Data? {
+        if delivery.body.hasPrefix("v1.") || delivery.body.hasPrefix("v2.") {
+            return try? ctx.cipher.open(delivery.body, context: "webhook_deliveries.body", rowId: delivery.id!)
+        }
+        return Data(delivery.body.utf8)
+    }
+
+    /// Account deletion: replaces the body of every delivery that mentions this consumer's relationships, sessions or interactions.
+    func scrubDeliveries(forConsumer consumer: UUID) async throws {
+        var needles: [String] = []
+        needles += try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer).all().compactMap { $0.id?.uuidString.lowercased() }
+        needles += try await ConversationSessionRecord.query(on: db).filter(\.$consumerId == consumer).all().compactMap { $0.id?.uuidString.lowercased() }
+        needles += try await InteractionRecord.query(on: db).filter(\.$consumerId == consumer).all().compactMap { $0.id?.uuidString.lowercased() }
+        guard !needles.isEmpty else { return }
+        let businesses = Set(try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer).all().map(\.businessId))
+        // Only events that carry what the person wrote or decided; lifecycle events hold opaque ids and stay deliverable.
+        let carrying = [WebhookEventType.messageReceived, .interactionDecided].map(\.rawValue)
+        for delivery in try await WebhookDeliveryRecord.query(on: db).filter(\.$businessId ~~ Array(businesses)).filter(\.$eventType ~~ carrying).all() {
+            guard let data = deliveryBody(delivery), let text = String(data: data, encoding: .utf8), needles.contains(where: { text.contains($0) }) else { continue }
+            delivery.body = try ctx.cipher.seal(Data(#"{"erased":true}"#.utf8), context: "webhook_deliveries.body", rowId: delivery.id!)
+            if ["pending", "sending"].contains(delivery.status) { delivery.status = "dead"; delivery.lastError = "account_deleted" }
+            try await delivery.update(on: db)
         }
     }
 
@@ -151,7 +180,12 @@ struct WebhookService {
             try await delivery.update(on: db)
             return
         }
-        let body = Data(delivery.body.utf8)
+        guard let body = deliveryBody(delivery) else {
+            delivery.status = "dead"
+            delivery.lastError = "body_unavailable"
+            try await delivery.update(on: db)
+            return
+        }
         var secrets: [String] = []
         if let current = try? ctx.cipher.openString(subscription.secretCiphertext, context: "webhook_subscriptions.secret", rowId: subscription.id!) {
             secrets.append(current)

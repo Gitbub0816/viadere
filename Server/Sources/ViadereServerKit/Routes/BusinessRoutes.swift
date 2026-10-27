@@ -34,6 +34,10 @@ enum BusinessRoutes {
             let result = try await InteractionService(db: req.db, ctx: req.ctx).updateStatus(principal: try req.business, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }
+        routes.api(APIRoutes.businessSandboxRelationship, scope: Scope.interactionsWrite) { req in
+            let result = try await Sandbox(db: req.db).create(principal: try req.business, now: req.ctx.now, ctx: req.ctx)
+            return try req.jsonResponse(result, status: .created)
+        }
         routes.api(APIRoutes.businessWebhooksList, scope: Scope.webhooksManage) { req in
             try req.jsonResponse(try await WebhookService(db: req.db, ctx: req.ctx).list(businessId: try req.business.businessId))
         }

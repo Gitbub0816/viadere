@@ -69,11 +69,13 @@ final class DecisionTests: XCTestCase {
             XCTAssertEqual(outcome.status, .approved)
             XCTAssertEqual(outcome.assurance, .biometric)
 
-            // The business reads the outcome (with the device-signed decision for its audit trail).
+            // The business reads the outcome: a per-business device pseudonym and the server's attestation, never the raw signed decision.
             let fetched = try await h.business(s.business, .GET, "/v1/business/interactions/\(real.id)")
             let businessOutcome = try fetched.json(InteractionOutcome.self)
             XCTAssertEqual(businessOutcome.status, .approved)
-            XCTAssertEqual(businessOutcome.signedDecision, signedDecision)
+            XCTAssertNil(businessOutcome.signedDecision)
+            XCTAssertNotNil(businessOutcome.deviceRef)
+            XCTAssertEqual(businessOutcome.verification?.contextBound, true)
             // No longer pending for the consumer.
             let after = try await h.signed(s.consumer, .GET, "/v1/interactions")
             XCTAssertEqual(try after.json(Page<InteractionEnvelope>.self).items.count, 0)

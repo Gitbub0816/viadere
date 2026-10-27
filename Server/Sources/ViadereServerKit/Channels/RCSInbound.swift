@@ -61,6 +61,7 @@ struct RCSInbound {
         case notPending = "not_pending"
         case notPermitted = "not_permitted"
         case notLinked = "not_linked"
+        case linkCoolDown = "link_cool_down"
         case unavailable
     }
 
@@ -148,6 +149,10 @@ struct RCSInbound {
         // The phone must be the verified phone of the consumer the interaction was issued to.
         guard let link = try await PhoneLinkRecord.query(on: db).filter(\.$verifiedPhoneHash == phoneHash).first(),
               link.consumerId == record.consumerId else { return try await reject(.notLinked, interaction: interactionId, business: businessId) }
+        // A newly linked phone cannot answer on the person's behalf until its cool-down ends or a trusted device confirms it.
+        if let usableFrom = link.usableFrom, usableFrom > now {
+            return try await reject(.linkCoolDown, interaction: interactionId, business: businessId)
+        }
         guard let interaction = try? record.interaction(), interaction.allowedChannels.contains(.rcs),
               let target = RCSPostbackTarget(storageValue: postback.target) else {
             return try await reject(.notPermitted, interaction: interactionId, business: businessId)

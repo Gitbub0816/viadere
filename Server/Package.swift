@@ -22,6 +22,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.5.0"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.2.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.25.0"),
+        // Webhook delivery pins the vetted IP address with `dnsOverride` (the SSRF defence against DNS rebinding).
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.20.0"),
     ],
     targets: [
         .target(
@@ -39,6 +41,7 @@ let package = Package(
                 .product(name: "X509", package: "swift-certificates"),
                 .product(name: "SwiftASN1", package: "swift-asn1"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
             ]
         ),
         .executableTarget(

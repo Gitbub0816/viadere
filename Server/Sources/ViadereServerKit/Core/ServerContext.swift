@@ -27,6 +27,8 @@ public final class ServerContext: Sendable {
     public let passPush: any PassPushSender
     /// App Attest / DeviceCheck hook (a stub until Apple credentials are configured).
     public let integrity: any DeviceIntegrityVerifier
+    /// Security alerts (budget exhaustion, ...) that operators should be able to alert on.
+    public let logger = Logger(label: "viadere.security")
 
     public init(config: ServerConfig, clock: any ServerClock = SystemClock(), apns: any APNsSender, sms: any SMSProvider,
                 passkeys: any PasskeyVerifier, webhookTransport: any WebhookTransport,

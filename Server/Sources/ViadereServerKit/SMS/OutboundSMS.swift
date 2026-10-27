@@ -88,7 +88,7 @@ struct OutboundSMS {
             row.attempts += 1
             switch error {
             case .permanent(let code, let optedOut):
-                if optedOut { try await markOptedOut(row.phoneHash, now: now) }
+                if optedOut { try await markOptedOut(row.phoneHash, phone: phone, now: now) }
                 try await finish(row, status: "failed", error: code, wipe: true)
                 _ = try await AuditService(db: db, ctx: ctx).record("gateway.sms_failed", outcome: .failure, actor: AuditActor(kind: .gateway),
                     subjectType: "sms_outbound", subjectId: row.id?.uuidString.lowercased(), metadata: ["reason": "permanent", "provider_error": code])
@@ -119,9 +119,31 @@ struct OutboundSMS {
         try await row.update(on: db)
     }
 
-    private func markOptedOut(_ phoneHash: String, now: Date) async throws {
-        try await SMSContextRecord.query(on: db).filter(\.$phoneHash == phoneHash).set(\.$optedOut, to: true).update()
-        try await SMSConsentEventRecord(phoneHash: phoneHash, optedOut: true, keyword: "carrier", at: now).create(on: db)
+    /// A carrier-level opt-out (Twilio 21610) is recorded in the thread's **encrypted context** (revision-checked, like every other
+    /// change) as well as in the `opted_out` column, so the next inbound message cannot overwrite it from stale state.
+    private func markOptedOut(_ phoneHash: String, phone: PhoneNumber, now: Date) async throws {
+        let gateway = GatewayService(db: db, ctx: ctx)
+        for _ in 0..<GatewayService.maxConflictRetries {
+            do {
+                try await db.transaction { tx in
+                    let (context, record) = try await gateway.loadContext(phone: phone, on: tx)
+                    var updated = context
+                    if let session = context.session {
+                        try await ConversationSessionRecord.query(on: tx).filter(\.$id == session.sessionId.uuid).filter(\.$state != "closed")
+                            .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
+                    }
+                    updated.consent = SMSConsentState(optedOut: true, consentVersion: context.consent.consentVersion, updatedAt: now)
+                    updated.state = .optedOut
+                    updated.session = nil
+                    updated.menu = nil
+                    updated.pending = nil
+                    updated.revision += 1
+                    try await gateway.persist(updated, previous: record, on: tx)
+                    try await SMSConsentEventRecord(phoneHash: phoneHash, optedOut: true, keyword: "carrier", at: now).create(on: tx)
+                }
+                return
+            } catch is ConcurrencyConflict { continue }
+        }
     }
 
     /// Applies a provider delivery receipt.

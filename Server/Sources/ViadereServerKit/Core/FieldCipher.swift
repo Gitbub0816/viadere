@@ -91,6 +91,16 @@ public struct Hasher256: Sendable {
     /// Stable lookup hash for a phone number (the database never needs to index plaintext numbers).
     public func phoneHash(_ phone: PhoneNumber) -> String { hmacHex("phone", phone.e164) }
 
+    /// Per-business pseudonym of a device: stable for one business, unlinkable across businesses and to the device id.
+    public func deviceReference(businessId: BusinessID, deviceId: DeviceID) -> String {
+        String(hmacHex("device-ref", "\(businessId)\n\(deviceId)").prefix(32))
+    }
+
+    /// Opaque reference to a stored signed decision, quoted in disputes.
+    public func evidenceReference(decisionId: UUID) -> String {
+        String(hmacHex("decision-evidence", decisionId.uuidString.lowercased()).prefix(32))
+    }
+
     /// Per-business pseudonymous reference for a consumer: the same consumer looks different to every business.
     public func consumerReference(businessId: BusinessID, consumerId: ConsumerID) -> ConsumerID {
         let digest = HMAC<SHA256>.authenticationCode(for: Data("ref\n\(businessId)\n\(consumerId)".utf8), using: pepper)

@@ -60,6 +60,20 @@ enum DeviceRoutes {
             let body: PhoneLinkVerifyRequest = try req.decodeBody()
             return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).verify(principal: try req.consumer, request: body))
         }
+        routes.api(APIRoutes.deviceConfirm) { req in
+            let id: DeviceID = try req.uuidParameter("deviceId")
+            let body: ConfirmationRequest = try req.decodeBody()
+            return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).confirm(try req.consumer, target: id, proof: body.proof))
+        }
+        routes.api(APIRoutes.phoneLinkConfirm) { req in
+            let id: PhoneLinkID = try req.uuidParameter("phoneLinkId")
+            let body: ConfirmationRequest = try req.decodeBody()
+            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).confirmLink(principal: try req.consumer, id: id, proof: body.proof))
+        }
+        routes.api(APIRoutes.smsLinkPreview) { req in
+            guard let token = req.parameters.get("token") else { throw APIError.notFound }
+            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).previewAccountLink(principal: try req.consumer, token: token))
+        }
         routes.api(APIRoutes.smsLinkRedeem) { req in
             let body: SMSLinkRedeemRequest = try req.decodeBody()
             return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).redeemAccountLink(principal: try req.consumer, request: body))

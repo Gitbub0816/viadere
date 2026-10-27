@@ -156,6 +156,8 @@ struct TestConsumer {
     var id: ConsumerID
     var session: AuthSession
     var device: TestDevice?
+    /// The id of the passkey registered with the account (the fake verifier accepts `signature == "valid"` over the challenge).
+    var credentialId: String = ""
     var token: String { session.accessToken }
 }
 
@@ -255,14 +257,40 @@ final class TestHarness: @unchecked Sendable {
         let finish = try await post(APIRoutes.registerFinish.template, PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: credential))
         XCTAssertEqual(finish.status, .created, finish.text)
         let session = try finish.json(AuthSession.self)
-        return TestConsumer(id: session.consumerId, session: session, device: nil)
+        return TestConsumer(id: session.consumerId, session: session, device: nil, credentialId: credential.id)
     }
 
-    func enrollDevice(_ consumer: TestConsumer, name: String = "Test iPhone", purposes: [DeviceKeyPurpose] = DeviceKeyPurpose.allCases) async throws -> TestConsumer {
+    /// A fresh passkey sign-in (new session / token family) for an existing account.
+    func login(_ consumer: TestConsumer) async throws -> TestConsumer {
         var consumer = consumer
+        let begin = try await post(APIRoutes.loginBegin.template, PasskeyLoginBeginRequest())
+        XCTAssertEqual(begin.status, .ok, begin.text)
+        let options = try begin.json(PasskeyAssertionOptions.self)
+        let credential = PasskeyAssertionCredential(id: consumer.credentialId, rawId: consumer.credentialId, authenticatorData: "AA",
+                                                    clientDataJSON: options.challenge, signature: "valid", userHandle: nil)
+        let finish = try await post(APIRoutes.loginFinish.template, PasskeyLoginFinishRequest(ceremonyId: options.ceremonyId, credential: credential))
+        XCTAssertEqual(finish.status, .ok, finish.text)
+        consumer.session = try finish.json(AuthSession.self)
+        return consumer
+    }
+
+    /// The assertion the app would send for an enrollment challenge.
+    func enrollmentAssertion(_ consumer: TestConsumer, challenge: String) -> PasskeyAssertionCredential {
+        PasskeyAssertionCredential(id: consumer.credentialId, rawId: consumer.credentialId, authenticatorData: "AA",
+                                   clientDataJSON: challenge, signature: "valid", userHandle: nil)
+    }
+
+    /// Enrolls a device with a fresh passkey assertion (the normal path). A consumer that already has a device first signs in again,
+    /// as a second phone would: a session is bound to the device it enrolled.
+    func enrollDevice(_ consumer: TestConsumer, name: String = "Test iPhone", purposes: [DeviceKeyPurpose] = DeviceKeyPurpose.allCases,
+                      clientKind: DeviceClientKind = .app, assertion: Bool = true) async throws -> TestConsumer {
+        var consumer = consumer
+        if consumer.device != nil { consumer = try await login(consumer) }
         let begin = try await request(.POST, APIRoutes.deviceEnrollBegin.template, headers: ["Authorization": "Bearer \(consumer.token)"])
         XCTAssertEqual(begin.status, .ok, begin.text)
-        let challenge = try begin.json(DeviceEnrollmentChallenge.self).challenge
+        let challengeResponse = try begin.json(DeviceEnrollmentChallenge.self)
+        let challenge = challengeResponse.challenge
+        XCTAssertEqual(challengeResponse.assertion?.challenge, challenge)
         let keys = (request: SoftwareP256SigningKey(), passcode: SoftwareP256SigningKey(), biometric: SoftwareP256SigningKey())
         var registrations: [DeviceKeyRegistration] = []
         for purpose in purposes {
@@ -275,7 +303,9 @@ final class TestHarness: @unchecked Sendable {
             registrations.append(try await DeviceEnrollment.register(key: key, purpose: purpose, hardwareBacked: true, consumerId: consumer.id, challenge: challenge))
         }
         let response = try await post(APIRoutes.deviceEnroll.template,
-                                      DeviceEnrollRequest(name: name, platform: .iOS, challenge: challenge, keys: registrations),
+                                      DeviceEnrollRequest(name: name, platform: .iOS, challenge: challenge, keys: registrations,
+                                                          assertion: assertion ? enrollmentAssertion(consumer, challenge: challenge) : nil,
+                                                          clientKind: clientKind),
                                       headers: ["Authorization": "Bearer \(consumer.token)"])
         XCTAssertEqual(response.status, .created, response.text)
         let device = try response.json(Device.self)
@@ -333,6 +363,14 @@ final class TestHarness: @unchecked Sendable {
         try await business(b, .POST, path, body: try ViadereJSON.encode(value), idempotencyKey: idempotencyKey, key: key)
     }
 
+    /// A sandbox consumer connected to `business` (test-mode keys can only address these).
+    func sandboxRelationship(_ business: TestBusiness) async throws -> Relationship {
+        let created = try await self.business(business, .POST, "/v1/business/sandbox/relationships")
+        XCTAssertEqual(created.status, .created, created.text)
+        let sandbox = try created.json(SandboxRelationship.self)
+        return Relationship(id: sandbox.relationshipId, consumerId: ConsumerID(), business: business.summary, status: .active, source: .link, connectedAt: clock.now())
+    }
+
     @discardableResult
     func connect(_ consumer: TestConsumer, to business: TestBusiness, optIn: [InteractionPurpose] = []) async throws -> Relationship {
         let response = try await signedPost(consumer, APIRoutes.relationshipConnect.template,
@@ -351,7 +389,7 @@ final class TestHarness: @unchecked Sendable {
 
     func decision(_ consumer: TestConsumer, interaction: Interaction, decision: Decision = .approve, assurance: DecisionAssurance = .biometric,
                   signedAt: Date? = nil, signWith: SoftwareP256SigningKey? = nil, selected: [String]? = nil, reply: String? = nil,
-                  challenge: ChallengeNonce? = nil) async throws -> SignedDecision {
+                  challenge: ChallengeNonce? = nil, context: Bool = true) async throws -> SignedDecision {
         let device = consumer.device!
         let key: SoftwareP256SigningKey
         switch assurance {
@@ -361,7 +399,8 @@ final class TestHarness: @unchecked Sendable {
         }
         let payload = DecisionPayload(interactionId: interaction.id, businessId: interaction.businessId, decision: decision,
                                       selectedOptionIds: selected, reply: reply, challenge: challenge ?? interaction.challenge,
-                                      signedAt: signedAt ?? clock.now(), deviceId: device.id, assurance: assurance)
+                                      signedAt: signedAt ?? clock.now(), deviceId: device.id, assurance: assurance,
+                                      contextDigest: context ? interaction.displayContextDigest() : nil)
         return try await DecisionSigner(key: signWith ?? key).sign(payload)
     }
 

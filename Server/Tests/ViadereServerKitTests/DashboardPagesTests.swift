@@ -311,7 +311,7 @@ final class DashboardPagesTests: XCTestCase {
             // The audit trail never contains the secret.
             let all = try await AuditEventRecord.query(on: h.db).all()
             XCTAssertFalse(all.contains { $0.metadataJSON.contains(secret) || $0.metadataJSON.contains("vdk_") })
-            let chain = try await AuditService.verifyChain(on: h.db)
+            let chain = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(chain.valid)
         }
     }
@@ -359,7 +359,9 @@ final class DashboardPagesTests: XCTestCase {
             let delivery = try await WebhookDeliveryRecord.query(on: h.db).first()!
             let id = delivery.id!.uuidString.lowercased()
             // The stored body keeps the text (the receiver needs it); the dashboard never shows it.
-            XCTAssertTrue(delivery.body.contains("4111 1111 1111 1111"))
+            XCTAssertFalse(delivery.body.contains("4111"), "the stored body is encrypted at rest")
+            let storedBody = String(decoding: try XCTUnwrap(WebhookService(db: h.db, ctx: h.ctx).deliveryBody(delivery)), as: UTF8.self)
+            XCTAssertTrue(storedBody.contains("4111 1111 1111 1111"))
             let view = try await h.page("/dashboard/webhooks/deliveries/\(id)", owner).text
             XCTAssertFalse(view.contains("4111"))
             XCTAssertTrue(view.contains("[redacted]"))
@@ -558,7 +560,7 @@ final class DashboardPagesTests: XCTestCase {
             try await eq(try await h.issue(business, relationship: relationship, payload: .confirm(ConfirmPayload(title: "t")), purpose: .transactional, key: "b0").status, .ok)
             // Test-mode traffic is not billable usage.
             let testKey = try await h.testBusiness(aId, live: false)
-            try await eq(try await h.issue(testKey, relationship: relationship, payload: .confirm(ConfirmPayload(title: "t")), purpose: .transactional, key: "t0").status, .created)
+            try await eq(try await h.issue(testKey, relationship: try await h.sandboxRelationship(testKey), payload: .confirm(ConfirmPayload(title: "t")), purpose: .transactional, key: "t0").status, .created)
             let page = try await h.page("/dashboard/billing", owner).text
             XCTAssertTrue(page.contains(">5</div><div class=\"l\">Interactions this month"))
             XCTAssertTrue(page.contains("Platform fees"))

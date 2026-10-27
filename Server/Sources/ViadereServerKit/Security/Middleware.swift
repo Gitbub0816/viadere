@@ -117,6 +117,7 @@ public struct RequestLoggingMiddleware: AsyncMiddleware {
             // Single-use dashboard invitation and operator enrollment links.
             if ["invite", "enroll"].contains(parts[i - 1]) && (parts.first == "" && parts.count > 2 && ["dashboard", "operator"].contains(parts[1])) { out[i] = ":token" }
             if parts[i - 1] == "handles" || parts[i - 1] == "codes" { out[i] = ":id" }
+            if parts[i - 1] == "link-tokens" { out[i] = ":token" }
             // PassKit web service: device library ids and pass serials identify a person's device and card.
             if parts.count > 4, parts[1] == "wallet", parts[2] == "v1", ["devices", "passes"].contains(parts[3]), i >= 4, parts[i] != "registrations" {
                 out[i] = ":id"

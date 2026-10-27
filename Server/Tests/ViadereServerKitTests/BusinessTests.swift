@@ -280,7 +280,10 @@ final class BusinessTests: XCTestCase {
             XCTAssertTrue(b.key.hasPrefix("vdk_test_"))
             let consumer = try await h.readyConsumer()
             _ = try await h.signedPost(consumer, "/v1/push/apns-token", APNsTokenRegistration(token: String(repeating: "cd", count: 32), environment: .sandbox, bundleId: "com.viadere.app"))
-            let rel = try await h.connect(consumer, to: b)
+            let real = try await h.connect(consumer, to: b)
+            // A test key cannot even address a real person (it used to deliver real, decidable interactions).
+            try await eq(try await h.issue(b, relationship: real, payload: .authorize(.sample())).status, .forbidden)
+            let rel = try await h.sandboxRelationship(b)
             try await eq(try await h.issue(b, relationship: rel, payload: .authorize(.sample())).status, .created)
             XCTAssertTrue(h.push.sent.isEmpty)
         }

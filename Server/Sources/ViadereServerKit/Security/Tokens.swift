@@ -150,6 +150,12 @@ struct ConsumerTokenService {
             .set(\.$revokedAt, to: now).update()
     }
 
+    /// The token record for a presented access token whatever its state (revoked and expired included). Never an authentication.
+    static func lookup(accessToken: String, db: any Database) async throws -> AccessTokenRecord? {
+        guard accessToken.hasPrefix(accessPrefix), accessToken.count <= 80 else { return nil }
+        return try await AccessTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(accessToken)).first()
+    }
+
     /// Looks up a presented access token. Returns `nil` for unknown, expired or revoked tokens.
     static func authenticate(accessToken: String, db: any Database, now: Date) async throws -> AccessTokenRecord? {
         guard accessToken.hasPrefix(accessPrefix), accessToken.count <= 80 else { return nil }

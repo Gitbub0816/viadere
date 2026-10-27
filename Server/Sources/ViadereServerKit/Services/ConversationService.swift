@@ -160,6 +160,7 @@ struct ConversationService {
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == request.relationshipId.uuid)
             .filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
         guard relationship.isActive else { throw APIError.conflict("The consumer is not connected to your business.") }
+        try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
         guard try await ConsentService(db: db, ctx: ctx).permits(purpose: .support, relationshipId: relationship.id!) else {
             throw APIError(.forbidden, .consentRequired, "The consumer has not consented to support messages.")
         }
@@ -218,8 +219,9 @@ struct ConversationService {
             throw error
         }
         // Delivery: SMS thread if this session is the active SMS session, otherwise a generic push.
-        let viaSMS = try await GatewayService(db: db, ctx: ctx).deliverBusinessMessage(
-            businessId: principal.businessId, sessionId: SessionID(session.id!), text: body, messageId: record.id)
+        // Test-mode messages never reach a real SMS thread (and sandbox consumers have none).
+        let viaSMS = principal.livemode ? try await GatewayService(db: db, ctx: ctx).deliverBusinessMessage(
+            businessId: principal.businessId, sessionId: SessionID(session.id!), text: body, messageId: record.id) : false
         if !viaSMS {
             // In-app / history-only messages are "delivered" once stored; SMS ones follow provider receipts.
             record.deliveryStatus = DeliveryStatus.delivered.rawValue

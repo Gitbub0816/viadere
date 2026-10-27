@@ -37,7 +37,11 @@ struct InteractionService {
     }
 
     func outcome(_ record: InteractionRecord) throws -> InteractionOutcome {
-        if let json = record.outcomeJSON { return try ViadereJSON.decode(InteractionOutcome.self, from: Data(json.utf8)) }
+        if var stored = record.outcomeJSON.flatMap({ try? ViadereJSON.decode(InteractionOutcome.self, from: Data($0.utf8)) }) {
+            // Rows written before pseudonymous outcomes still carry the raw signed decision; a business never sees it.
+            stored.signedDecision = nil
+            return stored
+        }
         var status = record.statusValue
         if status == .pending && record.expiresAt <= ctx.now { status = .expired }
         return InteractionOutcome(interactionId: InteractionID(record.id!), businessId: BusinessID(record.businessId), status: status,
@@ -74,6 +78,9 @@ struct InteractionService {
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == request.relationshipId.uuid)
             .filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
         guard relationship.isActive else { throw APIError.conflict("The consumer is not connected to your business.") }
+        // Test-mode keys reach sandbox consumers only, and live keys never reach them: test traffic cannot land on a real person,
+        // bypass quota or abuse accounting, or be decided by a real device.
+        try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
         let now = ctx.now
         var interaction = request.makeInteraction(businessId: principal.businessId, consumerId: ConsumerID(relationship.consumerId), now: now)
         interaction.priority = TrustEngine.clampPriority(requested: request.priority, kind: interaction.kind, purpose: interaction.purpose)
@@ -272,7 +279,7 @@ struct InteractionService {
         let limit = min(max(limit, 1), 50)
         let offset = cursor.flatMap { Int($0) }.map { max(0, $0) } ?? 0
         let grants = try await HouseholdService(db: db, ctx: ctx).activeReceivedGrants(delegate: consumer)
-        var query = accessible(consumer, grants: grants, on: InteractionRecord.query(on: db))
+        var query = accessible(consumer, grants: grants, on: InteractionRecord.query(on: db)).filter(\.$livemode == true)
         let wanted = status.flatMap { InteractionStatus(rawValue: $0) } ?? .pending
         if status != nil, InteractionStatus(rawValue: status!) == nil { throw APIError.validation("Unknown status.", details: ["status": "invalid"]) }
         query = query.filter(\.$status == wanted.rawValue)
@@ -284,7 +291,7 @@ struct InteractionService {
 
     func get(consumer: ConsumerID, id: InteractionID) async throws -> InteractionEnvelope {
         let grants = try await HouseholdService(db: db, ctx: ctx).activeReceivedGrants(delegate: consumer)
-        guard let record = try await accessible(consumer, grants: grants, on: InteractionRecord.query(on: db).filter(\.$id == id.uuid)).first(),
+        guard let record = try await accessible(consumer, grants: grants, on: InteractionRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$livemode == true)).first(),
               let envelope = try await envelopes([record]).first else {
             throw APIError.notFound
         }
@@ -295,7 +302,7 @@ struct InteractionService {
 
     func decide(principal: ConsumerPrincipal, id: InteractionID, request: DecideInteractionRequest) async throws -> InteractionOutcome {
         guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
-        guard let record = try await InteractionRecord.find(id.uuid, on: db) else { throw APIError.notFound }
+        guard let record = try await InteractionRecord.find(id.uuid, on: db), record.livemode else { throw APIError.notFound }
         let now = ctx.now
         // Someone else's interaction is reachable only through an active grant that covers its purpose and business.
         // Out of scope is a plain 404: a delegate learns nothing about what lies outside their grant.
@@ -325,6 +332,12 @@ struct InteractionService {
             try await deny("expired", error: .gone("This request has expired."))
         }
         let interaction = try record.interaction()
+        // App Clip devices can request but never decide; a device in its new-device cool-down cannot approve high or critical
+        // requests (deny/report/decline stay available: they are the safe directions).
+        guard let device = try await DeviceRecord.find(deviceId.uuid, on: db) else { throw APIError.signatureInvalid }
+        guard device.kind == .app else {
+            try await deny("clip_device", error: APIError(.forbidden, .forbidden, "This device can't respond to requests."))
+        }
         let verifier = DecisionVerifier()
         // 1. Claimed device and assurance → which registered key must have signed.
         let claimed: DecisionPayload
@@ -332,6 +345,11 @@ struct InteractionService {
             try await deny("malformed", error: .badRequest("The decision could not be read."))
         }
         guard claimed.deviceId == deviceId else { try await deny("device_mismatch", error: .forbidden) }
+        if device.isCoolingDown(at: now), interaction.effectiveSensitivity >= .high,
+           ![Decision.deny, .report, .decline].contains(claimed.decision) {
+            try await deny("device_cool_down", error: APIError(.forbidden, .deviceCoolDown,
+                "This device was added recently. Confirm it from another device you trust before approving this request."))
+        }
         // A delegate can never approve authenticate/authorize, and only a manager may confirm, decline or choose. Server-enforced.
         if let delegation {
             guard DelegationScopePolicy.delegateMayDecide(role: delegation.roleValue, kind: interaction.kind, decision: claimed.decision) else {
@@ -370,14 +388,30 @@ struct InteractionService {
             case .invalidSelection, .invalidDecision:
                 try await deny("invalid_decision", error: .validation("The decision is not valid for this request."))
             case .replayed: try await deny("replayed", error: APIError(.conflict, .replayDetected, "This request was already decided."))
+            case .contextDigestRequired:
+                try await deny("context_digest_required", error: APIError(.badRequest, .contextDigestRequired,
+                    "Update Viadere to respond to this request: the decision must be signed over what was shown."))
+            case .contextMismatch:
+                try await deny("context_mismatch", error: APIError(.conflict, .contextMismatch, "This request changed. Review it again."))
             }
         }
         // 3. Record the outcome atomically; the status swap makes the decision single-use even across instances.
-        let outcome = InteractionOutcome(
+        let decisionId = UUID()
+        // What the business gets: a per-business device pseudonym and the server's attestation, never the signed decision.
+        let businessOutcome = InteractionOutcome(
             interactionId: id, businessId: BusinessID(record.businessId), status: InteractionStatus(decision: payload.decision),
             decision: payload.decision, selectedOptionIds: payload.selectedOptionIds, reply: payload.reply, assurance: payload.assurance,
-            channel: request.channel, decidedAt: now, correlationId: record.correlationId, signedDecision: request.signedDecision)
-        let outcomeJSON = String(decoding: try ViadereJSON.encode(outcome), as: UTF8.self)
+            channel: request.channel, decidedAt: now, correlationId: record.correlationId, signedDecision: nil,
+            deviceRef: ctx.hasher.deviceReference(businessId: BusinessID(record.businessId), deviceId: deviceId),
+            verification: DecisionVerification(keyPurpose: DeviceKeyPurpose.required(for: payload.assurance),
+                                               contextBound: payload.contextDigest != nil, verifiedAt: now,
+                                               evidenceRef: ctx.hasher.evidenceReference(decisionId: decisionId)))
+        let outcome: InteractionOutcome = {
+            var own = businessOutcome
+            own.signedDecision = request.signedDecision   // the consumer's own response keeps it
+            return own
+        }()
+        let outcomeJSON = String(decoding: try ViadereJSON.encode(businessOutcome), as: UTF8.self)
         try await db.transaction { tx in
             let swapped = try await DB.swap(tx, table: InteractionRecord.schema, id: id.uuid, column: "status",
                                             expected: InteractionStatus.pending.rawValue, newValue: outcome.status.rawValue)
@@ -385,7 +419,7 @@ struct InteractionService {
             try await InteractionRecord.query(on: tx).filter(\.$id == id.uuid).set(\.$decidedAt, to: now)
                 .set(\.$outcomeJSON, to: outcomeJSON).update()
             let decision = DecisionRecord()
-            decision.id = UUID()
+            decision.id = decisionId
             decision.interactionId = id.uuid
             decision.businessId = record.businessId
             decision.consumerId = record.consumerId
@@ -399,7 +433,7 @@ struct InteractionService {
             try await decision.create(on: tx)
             try await InteractionChallengeRecord.query(on: tx).filter(\.$interactionId == id.uuid)
                 .set(\.$consumedAt, to: now).set(\.$consumedByDevice, to: deviceId.uuid).update()
-            try await WebhookService(db: tx, ctx: ctx).enqueue(.interactionDecided, businessId: outcome.businessId, payload: outcome)
+            try await WebhookService(db: tx, ctx: ctx).enqueue(.interactionDecided, businessId: outcome.businessId, payload: businessOutcome)
             let auditService = AuditService(db: tx, ctx: ctx)
             _ = try await auditService.record("interaction.decided", principal: principal, businessId: outcome.businessId,
                 subjectType: "interaction", subjectId: id.description,

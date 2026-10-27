@@ -157,7 +157,7 @@ final class SMSGatewayTests: XCTestCase {
             XCTAssertEqual(Set(conversation.items.map(\.direction)), [.consumerToBusiness, .businessToConsumer])
             // Message bodies are encrypted at rest.
             let stored = try await ConversationMessageRecord.query(on: h.db).all()
-            XCTAssertTrue(stored.allSatisfy { !$0.bodyCiphertext.contains("shipped") && $0.bodyCiphertext.hasPrefix("v1.") })
+            XCTAssertTrue(stored.allSatisfy { !$0.bodyCiphertext.contains("shipped") && $0.bodyCiphertext.hasPrefix("v2.") })
         }
     }
 
@@ -313,7 +313,7 @@ final class SMSGatewayTests: XCTestCase {
             // The link SMS body is wiped after sending.
             let outbound = try await SMSOutboundRecord.query(on: h.db).filter(\.$sensitive == true).all()
             XCTAssertFalse(outbound.isEmpty)
-            for row in outbound { XCTAssertEqual(try h.ctx.cipher.openString(row.bodyCiphertext, context: "sms_outbound.body"), "[removed]") }
+            for row in outbound { XCTAssertEqual(try h.ctx.cipher.openString(row.bodyCiphertext, context: "sms_outbound.body", rowId: row.id!), "[removed]") }
 
             // The landing page is minimal, strict-CSP, and does not consume the token.
             let page = try await h.request(.GET, "/l/\(token)")
@@ -328,22 +328,23 @@ final class SMSGatewayTests: XCTestCase {
             try await eq(try await h.request(.GET, "/l/\(token)").status, .ok)
             try await eq(try await h.request(.GET, "/l/\(SecureToken.generate())").status, .notFound)
 
-            // Redemption needs an authenticated consumer AND explicit phone confirmation.
+            // Redemption needs the signed-in device AND explicit phone confirmation (the masked number from the preview).
             let unauthenticated = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
             XCTAssertEqual(unauthenticated.status, .unauthorized)
-            let auth = ["Authorization": "Bearer \(consumer.token)"]
-            let wrong = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "9999"), headers: auth)
+            let bearerOnly = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"), headers: ["Authorization": "Bearer \(consumer.token)"])
+            XCTAssertEqual(bearerOnly.status, .unauthorized, "a bearer token alone no longer links a phone")
+            let preview = try await h.signed(consumer, .GET, "/v1/sms/link-tokens/\(token)/preview").json(SMSLinkPreview.self)
+            let wrong = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "9999"))
             XCTAssertEqual(wrong.status, .forbidden)
-            let redeemed = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"), headers: auth)
+            let redeemed = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123", confirmMaskedPhone: preview.maskedPhone))
             XCTAssertEqual(redeemed.status, .ok, redeemed.text)
             let link = try redeemed.json(PhoneLink.self)
             XCTAssertFalse(link.maskedPhone.contains("48055501"), link.maskedPhone)
             XCTAssertTrue(link.maskedPhone.hasSuffix("0123"))
-            // Replay fails — for the same user and for anybody else.
-            let replay = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"), headers: auth)
+            let replay = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
             XCTAssertEqual(replay.status, .gone)
-            let mallory = try await h.registerConsumer(name: "Mallory")
-            let stolen = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"), headers: ["Authorization": "Bearer \(mallory.token)"])
+            let mallory = try await h.readyConsumer(name: "Mallory")
+            let stolen = try await h.signedPost(mallory, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
             XCTAssertEqual(stolen.status, .gone)
             try await h.runJobs()
             let confirmation = h.texts.sent.map(\.body)
@@ -370,27 +371,27 @@ final class SMSGatewayTests: XCTestCase {
             let first = try await requestLink(from: "+14805550111")
             h.clock.advance(by: 16 * 60)
             try await eq(try await h.request(.GET, "/l/\(first)").status, .gone)
-            let fresh = try await h.registerConsumer(name: "Fresh")
-            let expired = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: first, confirmPhoneLast4: "0111"), headers: ["Authorization": "Bearer \(fresh.token)"])
+            let fresh = try await h.readyConsumer(name: "Fresh")
+            let expired = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: first, confirmPhoneLast4: "0111"))
             XCTAssertEqual(expired.status, .gone)
             // Brute-forcing the last four digits burns the token after five wrong tries.
             let second = try await requestLink(from: "+14805550222")
             for guess in ["0000", "0001", "0002", "0003", "0004"] {
-                let wrong = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: guess), headers: ["Authorization": "Bearer \(fresh.token)"])
+                let wrong = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: guess))
                 XCTAssertTrue([403, 429].contains(wrong.status.code), "\(wrong.status)")
                 h.clock.advance(by: 10)
             }
-            let right = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: "0222"), headers: ["Authorization": "Bearer \(fresh.token)"])
+            let right = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: "0222"))
             XCTAssertEqual(right.status, .gone, "token is burned after repeated wrong confirmations")
             // A new link text revokes the previous token.
-            let auth = ["Authorization": "Bearer \(try await h.registerConsumer(name: "Late").token)"]
+            let late = try await h.readyConsumer(name: "Late")
             let a = try await requestLink(from: "+14805550333")
             _ = try await say(h, "MENU", from: "+14805550333")
             _ = try await say(h, "Northwind", from: "+14805550333")
             let sms = try await say(h, "1", from: "+14805550333")
             if let b = sms.first(where: { $0.contains("/l/") }).flatMap({ extractToken(in: $0, prefix: "l") }) {
                 XCTAssertNotEqual(a, b)
-                try await eq(try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: a, confirmPhoneLast4: "0333"), headers: auth).status, .gone)
+                try await eq(try await h.signedPost(late, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: a, confirmPhoneLast4: "0333")).status, .gone)
             }
         }
     }
@@ -521,7 +522,7 @@ final class SMSGatewayTests: XCTestCase {
                 XCTAssertFalse(blob.contains("99887"), event.action)
                 XCTAssertFalse(blob.contains("secret message"), event.action)
             }
-            let verification = try await AuditService.verifyChain(on: h.db)
+            let verification = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(verification.valid)
             _ = airline
         }
@@ -548,7 +549,7 @@ final class SMSGatewayTests: XCTestCase {
             XCTAssertEqual(row.otpHash?.count, 64)
             XCTAssertFalse(row.phoneCiphertext.contains("4805550177"))
             let wiped = try await SMSOutboundRecord.query(on: h.db).first()!
-            XCTAssertEqual(try h.ctx.cipher.openString(wiped.bodyCiphertext, context: "sms_outbound.body"), "[removed]")
+            XCTAssertEqual(try h.ctx.cipher.openString(wiped.bodyCiphertext, context: "sms_outbound.body", rowId: wiped.id!), "[removed]")
             // Wrong codes are counted; the right one is refused once the attempt limit is hit.
             let wrong = code == "000000" ? "111111" : "000000"
             for _ in 0..<5 {

@@ -474,9 +474,9 @@ final class RCSTests: XCTestCase {
             let handoff = try await XCTUnwrapAsync(await LinkTokenRecord.query(on: h.db).filter(\.$kind == "handoff").first())
             XCTAssertEqual(handoff.interactionId, first.id.uuid)
             let sentRow = try await XCTUnwrapAsync(await SMSOutboundRecord.query(on: h.db).first())
-            XCTAssertEqual(sentRow.bodyCiphertext.hasPrefix("v1."), true)
+            XCTAssertEqual(sentRow.bodyCiphertext.hasPrefix("v2."), true)
             // The secret link is wiped from the queue after sending.
-            XCTAssertEqual(try h.ctx.cipher.openString(sentRow.bodyCiphertext, context: "sms_outbound.body"), "[removed]")
+            XCTAssertEqual(try h.ctx.cipher.openString(sentRow.bodyCiphertext, context: "sms_outbound.body", rowId: sentRow.id!), "[removed]")
             // Capability is cached for 24 h per phone; after that it is looked up again.
             _ = try await issue(h, s, .confirm(ConfirmPayload(title: "Second")))
             try await h.runJobs()

@@ -68,9 +68,17 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
         let db = request.db
         let now = ctx.now
         // 1. Bearer token.
-        guard let token = request.bearerToken,
-              let tokenRecord = try await ConsumerTokenService.authenticate(accessToken: token, db: db, now: now),
-              let tokenId = tokenRecord.id else { throw APIError.unauthorized }
+        guard let token = request.bearerToken else { throw APIError.unauthorized }
+        guard let tokenRecord = try await ConsumerTokenService.authenticate(accessToken: token, db: db, now: now), let tokenId = tokenRecord.id else {
+            // Revoking a device also ends the sessions bound to it, so a revoked device usually arrives with a dead bearer token. It
+            // must still be told *the device* was rejected (not that its session expired): that is what makes the app wipe its keys.
+            if let known = try await ConsumerTokenService.lookup(accessToken: token, db: db),
+               let named = request.headers.first(name: ViadereHeader.device).flatMap(DeviceID.init),
+               let device = try await DeviceRecord.find(named.uuid, on: db), device.consumerId == known.consumerId, device.revokedAt != nil {
+                throw APIError(.unauthorized, .signatureInvalid, "This device has been revoked.")
+            }
+            throw APIError.unauthorized
+        }
         // 2. Signature headers.
         let headers: SignedRequestHeaders
         do {
@@ -86,6 +94,24 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             throw APIError(.unauthorized, .signatureInvalid, "This device has been revoked.")
         }
         guard device.consumerId == tokenRecord.consumerId else { throw APIError.forbidden }
+        // A suspended or deleted account loses device-signed access immediately, not only bearer access.
+        guard let consumer = try await ConsumerRecord.find(tokenRecord.consumerId, on: db), consumer.status == "active" else { throw APIError.unauthorized }
+        // Devices with their own lifetime (App Clips) stop working when it ends, and take their session with them.
+        if device.isExpired(at: now) {
+            try? await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: [headers.deviceId.uuid], now: now)
+            throw APIError(.unauthorized, .signatureInvalid, "This device has expired.")
+        }
+        // A session is bound to the device it enrolled: a stolen bearer token is useless without that device's key.
+        if let family = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db) {
+            if family.revokedAt != nil { throw APIError.unauthorized }
+            if let bound = family.deviceId {
+                guard bound == headers.deviceId.uuid else {
+                    _ = try? await AuditService(db: db, ctx: ctx).record("auth.session_device_mismatch", outcome: .denied,
+                        actor: AuditActor(kind: .device, id: headers.deviceId.description), consumerId: ConsumerID(tokenRecord.consumerId))
+                    throw APIError.forbidden
+                }
+            }
+        }
         guard let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == headers.deviceId.uuid)
             .filter(\.$purpose == DeviceKeyPurpose.request.rawValue).first(),
               let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else { throw APIError.signatureInvalid }
@@ -103,6 +129,13 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
                     actor: AuditActor(kind: .device, id: headers.deviceId.description), consumerId: ConsumerID(tokenRecord.consumerId))
                 throw APIError(.unauthorized, .replayDetected, "This request was already used.")
             default: throw APIError.signatureInvalid
+            }
+        }
+        // An unbound session (signed in on this device without re-enrolling) binds to the first device that proves its key.
+        // It also stops being an "unused sign-in" that could enroll a new device.
+        if let family = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db), family.deviceId == nil {
+            if try await DB.swapFromNull(db, table: TokenFamilyRecord.schema, id: tokenRecord.familyId, column: "device_id", newValue: headers.deviceId.uuid) {
+                try await TokenFamilyRecord.query(on: db).filter(\.$id == tokenRecord.familyId).set(\.$enrollUntil, to: nil).update()
             }
         }
         // 5. Rate limit per device after authentication.

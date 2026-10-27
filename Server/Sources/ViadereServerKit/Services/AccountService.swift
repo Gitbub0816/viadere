@@ -72,25 +72,53 @@ struct AccountService {
             try await ConsumerTokenService(db: tx, ctx: ctx).revokeAll(consumerId: id, now: now)
             let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == id).all()
             let deviceIds = devices.compactMap(\.id)
-            try await DeviceRecord.query(on: tx).filter(\.$consumerId == id).filter(\.$revokedAt == nil).set(\.$revokedAt, to: now).update()
-            if !deviceIds.isEmpty { try await APNsTokenRecord.query(on: tx).filter(\.$deviceId ~~ deviceIds).delete() }
+            try await DeviceLifecycle(db: tx, ctx: ctx).revoke(deviceIds: deviceIds, now: now)
+            // A device name ("Ana's iPhone") is personal data.
+            try await DeviceRecord.query(on: tx).filter(\.$consumerId == id).set(\.$name, to: "Deleted device").update()
             try await LiveActivityTokenRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await DeviceEnrollChallengeRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await PasskeyCredentialRecord.query(on: tx).filter(\.$consumerId == id).delete()
-            // Phone numbers: unlink, and overwrite the encrypted number and masked display.
+            // Phone numbers: unlink, and overwrite the encrypted number and masked display. Everything that holds the same number
+            // (outbound queues, link tokens, SMS thread state) is found by its phone hash *before* the hash is replaced.
             let links = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == id).all()
-            let erased = try ctx.cipher.seal("[deleted]", context: "phone_links.phone")
             for link in links {
-                try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == link.phoneHash).set(\.$consumerId, to: nil).update()
+                try await Self.erasePhoneTraces(phoneHash: link.phoneHash, ctx: ctx, on: tx)
                 link.state = "revoked"
                 link.verifiedPhoneHash = nil
                 link.otpHash = nil
-                link.phoneCiphertext = erased
+                link.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "phone_links.phone", rowId: link.id!)
                 link.phoneMasked = "deleted"
                 link.phoneLast4 = "0000"
                 link.phoneHash = SecureToken.hash("deleted:" + (link.id?.uuidString ?? ""))
                 try await link.update(on: tx)
             }
+            // Queued or delivered channel messages addressed to this person.
+            for row in try await ChannelOutboundRecord.query(on: tx).filter(\.$consumerId == id).all() {
+                row.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "channel_outbound.phone", rowId: row.id!)
+                row.phoneHash = SecureToken.hash("deleted:" + row.id!.uuidString)
+                if ["queued", "sending"].contains(row.status) { row.status = "cancelled"; row.errorCode = "account_deleted" }
+                try await row.update(on: tx)
+            }
+            // Link tokens minted for this consumer (handoffs) hold the number too.
+            for token in try await LinkTokenRecord.query(on: tx).filter(\.$consumerId == id).all() {
+                token.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "link_tokens.phone", rowId: token.id!)
+                token.phoneLast4 = "0000"
+                token.phoneHash = SecureToken.hash("deleted:" + token.id!.uuidString)
+                token.state = "revoked"
+                try await token.update(on: tx)
+            }
+            // Delegation labels are names the account holder chose for other people.
+            for grant in try await DelegationGrantRecord.query(on: tx).filter(\.$grantorId == id).all() where grant.labelCiphertext != nil {
+                grant.labelCiphertext = try ctx.cipher.seal("Someone", context: "delegation.label", rowId: grant.id!)
+                try await grant.update(on: tx)
+            }
+            for invitation in try await DelegationInvitationRecord.query(on: tx).filter(\.$grantorId == id).all() {
+                invitation.labelCiphertext = try ctx.cipher.seal("Someone", context: "delegation.label", rowId: invitation.id!)
+                try await invitation.update(on: tx)
+            }
+            // Signed decisions are append-only; the only permitted edit erases the payload, which carries any free-text reply.
+            // The signature, decision, assurance, channel and ids stay (pseudonymous security record).
+            try await DecisionRecord.query(on: tx).filter(\.$consumerId == id).set(\.$signedPayload, to: CreateSecurityHardeningSchema.erased).update()
             // Loyalty: the business-side member reference is personal data; balances stay as pseudonymous records.
             try await LoyaltyAccountRecord.query(on: tx).filter(\.$consumerId == id)
                 .set(\.$memberReferenceCiphertext, to: nil).set(\.$memberReferenceMasked, to: nil).update()
@@ -104,8 +132,10 @@ struct AccountService {
             try await RewardRedemptionRecord.query(on: tx).filter(\.$consumerId == id).filter(\.$status == "issued")
                 .set(\.$status, to: "expired").set(\.$slot, to: nil).set(\.$releasedAt, to: now).update()
             // Message history: bodies erased; rows kept so business-side ids stay consistent.
-            let blank = try ctx.cipher.seal("[deleted]", context: "conversation_messages.body")
-            try await ConversationMessageRecord.query(on: tx).filter(\.$consumerId == id).set(\.$bodyCiphertext, to: blank).update()
+            for message in try await ConversationMessageRecord.query(on: tx).filter(\.$consumerId == id).all() {
+                message.bodyCiphertext = try ctx.cipher.seal("[deleted]", context: "conversation_messages.body", rowId: message.id!)
+                try await message.update(on: tx)
+            }
             try await ConversationSessionRecord.query(on: tx).filter(\.$consumerId == id).filter(\.$state != "closed")
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
             // Interaction payloads can contain personal context (devices, locations, amounts): erase them.
@@ -113,8 +143,17 @@ struct AccountService {
             let owned = try await InteractionRecord.query(on: tx).filter(\.$consumerId == id).all()
             for interaction in owned {
                 interaction.interactionJSON = placeholder
+                // The outcome carries the free-text reply and the selected options.
+                if var outcome = interaction.outcomeJSON.flatMap({ try? ViadereJSON.decode(InteractionOutcome.self, from: Data($0.utf8)) }) {
+                    outcome.reply = nil
+                    outcome.selectedOptionIds = nil
+                    outcome.signedDecision = nil
+                    interaction.outcomeJSON = String(decoding: try ViadereJSON.encode(outcome), as: UTF8.self)
+                }
                 try await interaction.update(on: tx)
             }
+            // Webhook deliveries that still hold this person's message text or replies.
+            try await WebhookService(db: tx, ctx: ctx).scrubDeliveries(forConsumer: id)
             guard let record = try await ConsumerRecord.find(id, on: tx) else { throw APIError.notFound }
             record.displayName = "Deleted account"
             record.userHandle = SecureToken.generate(byteCount: 32)
@@ -123,6 +162,43 @@ struct AccountService {
             _ = try await AuditService(db: tx, ctx: ctx).record("account.deleted", actor: AuditActor(kind: .consumer, id: consumer.description),
                 consumerId: consumer, subjectType: "consumer", subjectId: consumer.description,
                 metadata: ["relationships_closed": String(relationships.count), "devices_revoked": String(deviceIds.count)])
+        }
+    }
+
+    /// Removes the number from the SMS queue and the thread state of `phoneHash`. An opted-out number stays suppressed (a fresh thread
+    /// that keeps only the opt-out), because forgetting a STOP would allow texting it again.
+    private static func erasePhoneTraces(phoneHash: String, ctx: ServerContext, on tx: any Database) async throws {
+        for row in try await SMSOutboundRecord.query(on: tx).filter(\.$phoneHash == phoneHash).all() {
+            row.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "sms_outbound.phone", rowId: row.id!)
+            row.bodyCiphertext = try ctx.cipher.seal("[removed]", context: "sms_outbound.body", rowId: row.id!)
+            row.phoneHash = SecureToken.hash("deleted:" + row.id!.uuidString)
+            if ["queued", "sending"].contains(row.status) { row.status = "cancelled"; row.errorCode = "account_deleted" }
+            try await row.update(on: tx)
+        }
+        for token in try await LinkTokenRecord.query(on: tx).filter(\.$phoneHash == phoneHash).all() {
+            token.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "link_tokens.phone", rowId: token.id!)
+            token.phoneLast4 = "0000"
+            token.phoneHash = SecureToken.hash("deleted:" + token.id!.uuidString)
+            token.state = "revoked"
+            try await token.update(on: tx)
+        }
+        for thread in try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == phoneHash).all() {
+            if thread.optedOut {
+                // Keep only the suppression.
+                guard let data = try? ctx.cipher.open(thread.contextCiphertext, context: "sms_contexts.context", rowId: thread.id!),
+                      let old = try? ViadereJSON.decode(ConversationContext.self, from: data) else { try await thread.delete(on: tx); continue }
+                var fresh = ConversationContext(phone: old.phone, consentVersion: old.consent.consentVersion)
+                fresh.consent = old.consent
+                fresh.state = .optedOut
+                fresh.revision = old.revision + 1
+                thread.contextCiphertext = try ctx.cipher.seal(try ViadereJSON.encode(fresh), context: "sms_contexts.context", rowId: thread.id!)
+                thread.revision = fresh.revision
+                thread.consumerId = nil
+                thread.activeSessionId = nil
+                try await thread.update(on: tx)
+            } else {
+                try await thread.delete(on: tx)
+            }
         }
     }
 }

@@ -14,6 +14,10 @@ do {
     app = try await makeApplication(environment: environment, config: config)
     app.asyncCommands.use(SeedCommand(), as: "seed")
     app.asyncCommands.use(CreateOperatorCommand(), as: "create-operator")
+    app.asyncCommands.use(AuditHeadCommand(), as: "audit-head")
+    app.asyncCommands.use(AuditVerifyCommand(), as: "audit-verify")
+    app.asyncCommands.use(ExportDisputeCommand(), as: "export-dispute")
+    app.asyncCommands.use(ReencryptFieldsCommand(), as: "reencrypt-fields")
 } catch {
     // Configuration errors are safe to print (they name variables, never values).
     FileHandle.standardError.write(Data("Startup failed: \(error)\n".utf8))

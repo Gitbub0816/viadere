@@ -412,7 +412,7 @@ final class RewardFlowTests: XCTestCase {
             XCTAssertFalse(joined.text.contains("ACCT-77123456"))
             let record = try await LoyaltyAccountRecord.query(on: h.db).first().unwrap()
             XCTAssertFalse(try XCTUnwrap(record.memberReferenceCiphertext).contains("77123456"))
-            XCTAssertEqual(try h.ctx.cipher.openString(try XCTUnwrap(record.memberReferenceCiphertext), context: "loyalty_accounts.member_reference"), "ACCT-77123456")
+            XCTAssertEqual(try h.ctx.cipher.openString(try XCTUnwrap(record.memberReferenceCiphertext), context: "loyalty_accounts.member_reference", rowId: record.id!), "ACCT-77123456")
             // Joining twice is the same account.
             try await eq(try await h.enroll(s.consumer, s.business).status, .ok)
             let members = try await LoyaltyAccountRecord.query(on: h.db).count()
@@ -539,7 +539,7 @@ final class RewardFlowTests: XCTestCase {
                 XCTAssertEqual(anonymous.status, .unauthorized, path)
             }
             // The audit chain recorded the business actions and still verifies.
-            let chain = try await AuditService.verifyChain(on: h.db)
+            let chain = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(chain.valid)
         }
     }
