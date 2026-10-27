@@ -2,7 +2,8 @@
 import SwiftUI
 import ViadereKit
 
-/// Builds an in-memory world (mock API, software keys) and hands it to a preview.
+/// Builds an in-memory world (mock API seeded with loyalty, Wallet, orders, travel, events and household; software keys)
+/// and hands it to a preview.
 struct PreviewHost<Content: View>: View {
     let signedIn: Bool
     let unsupportedKeys: Set<DeviceKeyPurpose>
@@ -25,7 +26,7 @@ struct PreviewHost<Content: View>: View {
         }
         .viadereScreenBackground()
         .task {
-            services = await ViadereServices.mock(signedIn: signedIn, unsupportedKeys: unsupportedKeys)
+            services = await ViadereServices.mock(api: MockViadereAPI.p3Demo(), signedIn: signedIn, unsupportedKeys: unsupportedKeys)
         }
     }
 }

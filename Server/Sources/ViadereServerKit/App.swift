@@ -30,9 +30,22 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         app.http.client.configuration.timeout = .init(connect: .seconds(5), read: .seconds(10))
         transport = VaporWebhookTransport(client: app.client, allowInsecure: config.allowInsecureWebhookURLs)
     }
-    app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms,
-                            passkeys: overrides.passkeys ?? WebAuthnPasskeyVerifier(config: config), webhookTransport: transport,
-                            rateLimitStore: overrides.rateLimitStore ?? InMemoryRateLimitStore())
+    let rcs: (any RCSProvider)?
+    if let override = overrides.rcs { rcs = override } else if let rcsConfig = config.rcs {
+        rcs = GenericRBMProvider(config: rcsConfig, http: VaporRCSHTTPClient(client: app.client))
+    } else {
+        rcs = nil
+    }
+    let passkeys = overrides.passkeys ?? WebAuthnPasskeyVerifier(config: config)
+    let dashboardPasskeys: any PasskeyVerifier
+    if overrides.passkeys == nil, let origin = config.dashboardOrigin, origin != config.relyingPartyOrigin {
+        dashboardPasskeys = WebAuthnPasskeyVerifier(config: config, origin: origin)
+    } else {
+        dashboardPasskeys = passkeys
+    }
+    app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms, passkeys: passkeys, webhookTransport: transport,
+                            rateLimitStore: overrides.rateLimitStore ?? InMemoryRateLimitStore(), rcs: rcs,
+                            dashboardPasskeys: dashboardPasskeys)
 
     // MARK: Database
     if let url = config.databaseURL {
@@ -69,17 +82,19 @@ public struct Overrides: Sendable {
     public var passkeys: (any PasskeyVerifier)?
     public var webhookTransport: (any WebhookTransport)?
     public var rateLimitStore: (any RateLimitStore)?
+    public var rcs: (any RCSProvider)?
     public var autoMigrate: Bool = false
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,
-                rateLimitStore: (any RateLimitStore)? = nil, autoMigrate: Bool = false) {
+                rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false) {
         self.clock = clock
         self.apns = apns
         self.sms = sms
         self.passkeys = passkeys
         self.webhookTransport = webhookTransport
         self.rateLimitStore = rateLimitStore
+        self.rcs = rcs
         self.autoMigrate = autoMigrate
     }
 }

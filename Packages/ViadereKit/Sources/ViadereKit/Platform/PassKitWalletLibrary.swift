@@ -1,6 +1,6 @@
 import Foundation
 
-#if canImport(PassKit)
+#if canImport(PassKit) && !os(watchOS)
 import PassKit
 
 /// `WalletLibrary` over PassKit. Reading Wallet state needs no entitlement for passes this app added; seeing passes

@@ -5,7 +5,7 @@ import ViadereKit
 /// The calm home: what needs you first (and unmistakably), then what's in progress, then recent businesses.
 struct HomeView: View {
     @Bindable var model: AppModel
-    @State private var path: [Relationship] = []
+    @State private var path = NavigationPath()
 
     private var home: HomeViewModel { model.home }
 
@@ -23,6 +23,7 @@ struct HomeView: View {
                     } else {
                         pendingSection
                         statusSection
+                        rewardsSection
                         recentSection
                     }
                     if case .failed(let message) = home.phase {
@@ -32,13 +33,21 @@ struct HomeView: View {
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.bottom, ViadereSpace.xl)
             }
-            .task { await home.load() }
+            .task {
+                await home.load()
+                await model.rewards.load()
+            }
             .refreshable { await home.load() }
             .scrollIndicators(.hidden)
             .viadereScreenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Relationship.self) { relationship in
                 BusinessDetailView(relationship: relationship, model: model)
+            }
+            .navigationDestination(for: HomeRoute.self) { route in
+                switch route {
+                case .rewards: RewardsView(model: model)
+                }
             }
         }
     }
@@ -85,6 +94,21 @@ struct HomeView: View {
         }
     }
 
+    /// One quiet row; it only appears once the server has rewards to show.
+    @ViewBuilder private var rewardsSection: some View {
+        if model.rewards.phase == .loaded, !model.rewards.accounts.isEmpty || !model.rewards.overview.rewards.isEmpty {
+            let ready = model.rewards.availableCount
+            ViadereSectionHeader("Rewards")
+            ViadereRowGroup {
+                Button { path.append(HomeRoute.rewards) } label: {
+                    ViadereRow("Rewards", subtitle: ready == 0 ? "Points, perks and offers" : (ready == 1 ? "1 ready to use" : "\(ready) ready to use"),
+                               leading: { ViadereIconTile(systemName: "star") })
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     @ViewBuilder private var recentSection: some View {
         if !home.content.recent.isEmpty {
             ViadereSectionHeader("Your businesses", actionTitle: "Add") { model.selectedTab = .connect }
@@ -105,6 +129,8 @@ struct HomeView: View {
         }
     }
 }
+
+enum HomeRoute: Hashable { case rewards }
 
 /// A request waiting on the person. Prominent by design: champagne edge, large headline, live countdown.
 struct PendingActionCard: View {
@@ -176,8 +202,7 @@ struct StatusRow: View {
 #if DEBUG
 #Preview("Home") {
     PreviewHost { services in
-        HomeView(model: AppModel(services: services))
-            .task { }
+        HomeView(model: AppModel(services: services, walletLibrary: MockWalletLibrary()))
     }
 }
 #endif

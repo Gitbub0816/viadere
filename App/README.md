@@ -14,10 +14,11 @@ App/
   Shared/LiveActivity/        ActivityKit attributes (app + widgets)
   Shared/UI/                  Pieces shared by the app and the App Clip (connect review, key window)
   Shared/Privacy/             PrivacyInfo.xcprivacy (app, clip, watch)
-  Viadere/                    The app (Onboarding, Home, Approval, Connect, Business, Messages, Settings, Security, Push)
+  Viadere/                    The app (Onboarding, Home, Activity, Rewards, Wallet, Approval, Connect, Business, Messages,
+                              Household, Consent, Settings, Security, Push)
   ViadereNotificationService/ UNNotificationServiceExtension: opaque push -> rich, actionable notification
   ViadereNotificationContent/ Custom compact approval card for sign-in / approval notifications
-  ViadereWidgets/             Live Activities + Dynamic Island (order, delivery, flight, appointment)
+  ViadereWidgets/             Live Activities + Dynamic Island (order, delivery, flight, appointment), branded compact/expanded/lock layouts
   ViadereClip/                App Clip com.viadere.app.Clip: quick connect for /c/{code}
   ViadereWatch/               watchOS companion: compact approvals list
 Packages/ViadereKit           All non-UI logic (API client, keys, approvals, notification mapping, view models). Tested on Linux.
@@ -134,10 +135,56 @@ Home · Connect (`@handle`, auto-formatted codes with I→1/O→0, name search, 
 purpose-scoped consent) · Business detail · **Approval sheet** · Messages (threads, structured `choose` chips,
 composer) · Settings/Security (devices, app lock, linked phones, consent history, sessions, sign out, delete).
 
+## P3 utility features
+
+Five tabs: Home, **Activity**, Connect, Messages, Settings. Rewards hang off Home and Business detail; Household and
+Acknowledgments live under Settings → Trust and records. Every new screen is built from `Shared/DesignSystem`
+(`ViadereRowGroup`, `ViadereRow`, `ViadereBadge`, `ViadereChip`, `ViadereProgressBar`, …); the only stock Apple UI is
+Wallet's `PKAddPassButton` / `PKAddPassesViewController`, which Apple requires for adding passes. Logic lives in
+ViadereKit (view models, eligibility display, countdowns, Live Activity eligibility, delegation validation) and is
+tested on Linux; the SwiftUI files only lay it out. All of it is driven by `MockViadereAPI.p3Demo()` in `#Preview`s.
+
+| Area | Files | Rules |
+|---|---|---|
+| **Rewards and loyalty** | `Features/Rewards/*`, Kit `Rewards/*` | Eligibility is **server-computed** (`RewardEligibility`); the client shows it and offers the single `nextAction` the server names. It never reads `RewardRecurrence`, the device clock or the points balance to decide. A verdict older than 5 minutes (device clock to device clock) is refetched before an action is offered. Claim and redeem are device-signed (`deviceSignedBearer`) and re-checked by the server (`409` refreshes the list). Redemption shows a server-issued, single-use code and QR with a countdown; the code lives only in memory, is wiped at expiry, on disappear, on backgrounding and while the screen is recorded or mirrored, and a screenshot raises a notice. Never cached (POST, ephemeral session) and copied only through `SecurePasteboard`. Loyalty enrollment and account linking start from Business detail. |
+| **Apple Wallet** | `Features/Wallet/*`, Kit `Wallet/*`, `Platform/PassKitWalletLibrary.swift` | The server signs passes. The app downloads the `.pkpass` (`GET /v1/wallet/passes/{id}`), checks its size, validates it with `PKPass(data:)`, confirms it is the pass the metadata promised (type id and serial), then presents `PKAddPassesViewController`. "In Wallet" is read from `PKPassLibrary.pass(withPassTypeIdentifier:serialNumber:)` and refreshed when the sheet closes and when the app becomes active. Loyalty cards, coupons, event tickets, boarding passes and reservations. |
+| **Activity** | `Features/Activity/*`, Kit `Activity/*` | Built from `status`, `ticket` and `confirm` interactions, merged by `correlationId`, grouped by business, filtered by category. Appointment actions (confirm, cancel, reschedule, check in) are the pending interactions the business sent, labeled by its `requestedActions`; a missing reschedule offer falls back to a message. Travel shows delays and cancellations and rebooking prompts; anything that can change money or identity, anything at sensitivity `standard` or above, and every travel prompt opens the secure approval sheet instead of answering inline (`ActivityActionRouter`). Events show tickets, schedule changes and venue notes. Live Activities start and update only for `LiveActivityPolicy`-eligible, ongoing, unexpired statuses (`ActivityLiveEligibility`), never marketing or rewards. |
+| **Live Activity / Dynamic Island** | `ViadereWidgets/ViadereLiveActivityWidget.swift` | Compact leading is the via mark; trailing is a live countdown when the ETA is within 99 minutes, otherwise a status word. Expanded shows business, headline, detail, a champagne progress line ending in the via dot, and the next step. Wording comes from `LiveActivityPresentation` (tested). |
+| **Household (delegation)** | `Features/Household/*`, Kit `Delegation/*` | Grants given and received, invite by single-use code (no account-id lookup), scoped role, per-purpose and per-business scope, expiry (max one year; sensitive scopes max 30 days), revocation and an audit trail. Nothing is preselected and sensitive access is never inherited. Granting `security` or `accountService` shows a clear warning and requires a **Face ID signature from the `approvalBiometric` key** over the exact scope (`DelegationStepUpProof`, verified by the server), so the step-up cannot be replayed on a wider grant. Delegates can never approve sign-ins or payments (SECURITY.md). Delegated requests carry "On behalf of" in the sheet, the Face ID reason and the audit trail. |
+| **Acknowledgments** | `Features/Consent/*`, Kit `Consent/*` | The `acknowledge` interaction shows the document summary, version, source and an https-only link, then a receipt with the **server's** timestamp, document version and a reference. Copy says it records a reading and is not a legal signature. Settings → Acknowledgments lists the server's records. |
+
+### Wallet entitlement
+
+Adding passes with `PKAddPassesViewController` needs **no entitlement**. The `com.apple.developer.pass-type-identifiers`
+entitlement (for example `$(TeamIdentifierPrefix)pass.com.viadere.*`) is only needed to read or update passes beyond what
+this app added, so it is **not requested**. The pass type id and its signing certificate belong to the server. If testing
+shows "In Wallet" going stale for passes added outside the app, add the entitlement to `Viadere/Viadere.entitlements`
+via `project.yml` and the pass type ids in the Developer portal.
+
+### Server contract
+
+All `deviceSignedBearer`. Routes marked **Core** already exist in `APIRoutes`; the rest are provisional
+(`ProvisionalRoutes`, ViadereKit `Rewards/RewardModels.swift`) and `404` hides the feature in the app.
+
+| Route | Returns |
+|---|---|
+| `GET /v1/rewards/overview` | `RewardsOverview` (accounts + `RewardEntry` with server `eligibility`) |
+| `GET /v1/loyalty/{businessId}` / `POST .../enroll` | `LoyaltyProgramOverview` / `LoyaltyAccount` (enroll body carries the accepted `termsVersion`) |
+| `POST /v1/rewards/{id}/claim` | `RewardEntry` (`409` if no longer claimable) |
+| `POST /v1/rewards/{id}/redeem` (**Core**) | `RewardRedemption` (single-use code, about 2 minutes; `409` if not eligible) |
+| `GET /v1/wallet/passes`, `POST /v1/wallet/passes` | `[WalletPassMetadata]`, issue a pass |
+| `GET /v1/wallet/passes/{id}` (**Core**) | signed `.pkpass` bytes |
+| `GET /v1/interactions` (**Core**) | Activity feed source (`status`, `ticket`, `confirm`, correlated by `correlationId`) |
+| `POST /v1/live-activities/tokens` (**Core**) | Live Activity push-to-start and update tokens |
+| `GET /v1/household`, `GET /v1/household/audit` | `HouseholdOverview`, `[HouseholdAuditEntry]` |
+| `POST /v1/household/invitations` (+ `/preview`, `/accept`) | `DelegationInvitation` / `DelegationInvitationPreview` / `HouseholdGrant` |
+| `DELETE /v1/delegations/{id}` (**Core**) | revoke |
+| `GET /v1/acknowledgments` | `[AcknowledgmentRecord]` (acknowledgments themselves are signed `acknowledge` decisions via **Core** `interactions/{id}/decide`) |
+
 ## Not verified by compilation
 
 This repository was authored on Linux, where there is no Xcode or iOS SDK. **Everything under `Packages/ViadereKit`
-that is platform-neutral compiles and is covered by `swift test` (124 tests).** The following were written carefully
+that is platform-neutral compiles and is covered by `swift test` (203 tests).** The following were written carefully
 against the iOS 17/18 SDK but never compiled; build them first in Xcode and expect a few mechanical fixes:
 
 1. SwiftUI/UIKit code in `Viadere/`, `Shared/`, the extensions, widgets, clip and watch (only syntax-parsed).
@@ -149,3 +196,7 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
 5. `@Observable` view models (compile on Linux as plain classes because Observation does not link there).
 6. Passkeys inside an App Clip, Live Activity push-to-start, the Dynamic Island layout, and the content-extension card.
 7. XcodeGen spec details (extension embedding, on-demand-install-capable type, watch embedding).
+8. P3 UI: everything under `Features/Rewards`, `Activity`, `Wallet`, `Household`, `Consent`, the reworked widget, and the
+   PassKit calls (`PKAddPassButton`, `PKAddPassesViewController`, `PKPass(data:)`, `PKPassLibrary`). `Text(timerInterval:)`
+   in the Dynamic Island, `NavigationLink` destinations inside the typed Home stack, and Swift 6 isolation around
+   `PKAddPassesViewControllerDelegate` (`WalletPresenter`) are the likeliest to need a mechanical fix.

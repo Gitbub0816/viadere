@@ -31,8 +31,13 @@ public struct WebAuthnPasskeyVerifier: PasskeyVerifier {
     private let manager: WebAuthnManager
 
     public init(config: ServerConfig) {
+        self.init(config: config, origin: config.relyingPartyOrigin)
+    }
+
+    /// A verifier for a different origin under the same RP ID (the business dashboard may live on a sub-domain).
+    public init(config: ServerConfig, origin: String) {
         manager = WebAuthnManager(configuration: .init(relyingPartyID: config.relyingPartyID, relyingPartyName: config.relyingPartyName,
-                                                       relyingPartyOrigin: config.relyingPartyOrigin))
+                                                       relyingPartyOrigin: origin))
     }
 
     public func makeChallenge() -> Data { SecureToken.randomBytes(32) }

@@ -72,7 +72,10 @@ public enum ApprovalPolicy {
         default:
             text = "Confirm with \(business)"
         }
-        if let onBehalfOf { return String((text + " on behalf of \(onBehalfOf)").prefix(90)) }
+        if let onBehalfOf {
+            let suffix = " on behalf of \(onBehalfOf)"
+            return String(text.prefix(max(0, 90 - suffix.count))) + String(suffix.prefix(90))
+        }
         return String(text.prefix(90))
     }
 }

@@ -125,9 +125,10 @@ public final class HouseholdViewModel {
         if draft.expiresAt > limit { draft.expiresAt = limit }
     }
 
-    /// Lifetimes offered in the picker (days). Sensitive scopes cap at 30.
+    /// Lifetimes offered in the picker (days), limited to what the scope allows (sensitive scopes cap at 30).
     public var lifetimeChoices: [Int] {
-        DelegationScopePolicy.includesSensitiveScope(draft) ? [7, 14, 30] : [7, 30, 90, 365]
+        let limit = DelegationScopePolicy.maximumLifetime(for: draft)
+        return [7, 14, 30, 90, 365].filter { Double($0) * 86_400 <= limit }
     }
 
     public var selectedLifetimeDays: Int {

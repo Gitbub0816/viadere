@@ -23,6 +23,7 @@ struct BusinessDetailView: View {
                 ViadereBackButton { dismiss() }
                 hero
                 actions
+                BusinessRewardsEntry(business: vm.business, model: model)
                 permissions
                 history
                 disconnect
@@ -163,6 +164,14 @@ struct BusinessDetailView: View {
 #Preview("Business") {
     PreviewHost { services in
         BusinessDetailView(relationship: PreviewData.relationship(PreviewData.harborBank), model: AppModel(services: services))
+    }
+}
+
+#Preview("Business · rewards") {
+    PreviewHost { services in
+        NavigationStack {
+            BusinessDetailView(relationship: PreviewData.relationship(PreviewData.juniperCoffee), model: AppModel(services: services, walletLibrary: MockWalletLibrary()))
+        }
     }
 }
 #endif

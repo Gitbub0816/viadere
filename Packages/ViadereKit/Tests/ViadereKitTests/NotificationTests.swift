@@ -54,13 +54,15 @@ struct NotificationActionTests {
         #expect(await api.decisionLog.first?.2 == DecisionAssurance.none)
     }
 
-    @Test func denyOnHighAssuranceFallsBackToAppWhenServerWantsMore() async throws {
+    /// ViadereCore (`AssurancePolicy.canSatisfy(decision:)`) now accepts any valid device signature for deny/report,
+    /// so a lock-screen Deny on a high-assurance request is recorded instead of bouncing into the app.
+    @Test func denyOnHighAssuranceRunsInlineBecauseDenyIsAlwaysSafe() async throws {
         let (services, api) = await world()
         let envelope = PreviewData.authorize(sensitivity: .high)
         await api.add(envelope)
         let outcome = await services.notificationHandler.handle(response("viadere.deny", envelope))
-        #expect(outcome == .requiresApp(envelope.id))
-        #expect(await api.decisionLog.isEmpty)
+        #expect(outcome == .submitted(envelope.id, .denied))
+        #expect(await api.decisionLog.count == 1)
     }
 
     @Test func chooseAndConfirmRunInline() async throws {

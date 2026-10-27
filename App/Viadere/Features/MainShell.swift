@@ -5,6 +5,7 @@ extension AppTab {
     var title: String {
         switch self {
         case .home: "Home"
+        case .activity: "Activity"
         case .connect: "Connect"
         case .messages: "Messages"
         case .settings: "Settings"
@@ -14,6 +15,7 @@ extension AppTab {
     var symbol: String {
         switch self {
         case .home: "house"
+        case .activity: "clock"
         case .connect: "plus.circle"
         case .messages: "bubble.left"
         case .settings: "slider.horizontal.3"
@@ -30,6 +32,7 @@ struct MainShell: View {
             Group {
                 switch model.selectedTab {
                 case .home: HomeView(model: model)
+                case .activity: ActivityView(model: model)
                 case .connect: ConnectView(model: model)
                 case .messages: MessagesView(model: model)
                 case .settings: SettingsView(model: model)
@@ -48,11 +51,16 @@ struct MainShell: View {
             environment.watchBridge.push(content)
             Task { await environment.liveActivities.sync(content.statuses) }
         }
+        .onChange(of: model.activity.liveCandidates) { _, candidates in
+            // Only statuses `LiveActivityPolicy` allows (ongoing orders, deliveries, flights, appointments; never marketing).
+            Task { await AppEnvironment.shared.liveActivities.sync(candidates) }
+        }
     }
 
     private func badge(for tab: AppTab) -> Int {
         switch tab {
         case .home: model.home.content.pending.count
+        case .activity: model.activity.needsYouCount
         case .messages: model.messages.unreadTotal
         default: 0
         }

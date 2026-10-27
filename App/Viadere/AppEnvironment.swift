@@ -22,7 +22,7 @@ final class AppEnvironment {
     let watchBridge: WatchBridge
 
     private init() {
-        model = AppModel(services: Self.services)
+        model = AppModel(services: Self.services, walletLibrary: PassKitWalletLibrary())
         liveActivities = LiveActivityManager(services: Self.services)
         watchBridge = WatchBridge(services: Self.services)
     }

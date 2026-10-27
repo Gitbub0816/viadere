@@ -102,6 +102,9 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.viadere.shared
         com.apple.developer.usernotifications.time-sensitive: true
+        # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement. The pass-type-identifiers
+        # entitlement is only needed to read passes this app did not add, so it is deliberately not requested:
+        #   com.apple.developer.pass-type-identifiers: [$(TeamIdentifierPrefix)pass.com.viadere.*]
     dependencies:
       - package: ViadereKit
         product: ViadereKit

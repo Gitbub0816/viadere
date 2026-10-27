@@ -65,6 +65,11 @@ struct InteractionService {
         if let existing = try await existing(businessId: principal.businessId, key: request.idempotencyKey) {
             return try replay(existing, requestHash: requestHash)
         }
+        // Defence in depth behind the API-key middleware: only a verified business may issue.
+        guard let business = try await BusinessRecord.find(principal.businessId.uuid, on: db), business.isVerified else {
+            throw APIError(.forbidden, .forbidden, "This business is not currently active.")
+        }
+        let controls = try await BusinessControls.load(principal.businessId.uuid, on: db)
         // Tenant isolation: the relationship must belong to *this* business; anything else is a plain 404.
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == request.relationshipId.uuid)
             .filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
@@ -72,6 +77,8 @@ struct InteractionService {
         let now = ctx.now
         var interaction = request.makeInteraction(businessId: principal.businessId, consumerId: ConsumerID(relationship.consumerId), now: now)
         interaction.priority = TrustEngine.clampPriority(requested: request.priority, kind: interaction.kind, purpose: interaction.purpose)
+        // Operator controls can only lower the ceiling; a billing tier is never consulted.
+        interaction.priority = BusinessControls.applyCeiling(interaction.priority, controls: controls)
         interaction.sensitivity = interaction.effectiveSensitivity
         let issues = InteractionValidation.issues(in: interaction, now: now)
         if !issues.isEmpty {
@@ -84,7 +91,7 @@ struct InteractionService {
                            details: ["purpose": request.purpose.rawValue])
         }
         // Quota (live traffic only). A paid tier raises the quota; it never changes priority.
-        if principal.livemode { try await enforceQuota(principal: principal, now: now) }
+        if principal.livemode { try await enforceQuota(principal: principal, business: business, controls: controls, now: now) }
         let issued = interaction
         let record = try InteractionRecord(interaction: issued, consumerId: relationship.consumerId, livemode: principal.livemode,
                                            requestHash: requestHash, activityKey: activityKey)
@@ -100,6 +107,9 @@ struct InteractionService {
                 }
                 relationship.lastActivityAt = now
                 try await relationship.update(on: tx)
+                try await UsageMeter.record(.interaction, businessId: principal.businessId.uuid, livemode: principal.livemode,
+                                            ref: issued.id.uuid.uuidString.lowercased(), at: now, on: tx)
+                try await ChannelRouter(db: tx, ctx: ctx).enqueue(record: record, interaction: issued, on: tx)
                 _ = try await AuditService(db: tx, ctx: ctx).record("interaction.issued", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "interaction",
                     subjectId: issued.id.description, correlationId: issued.correlationId,
@@ -129,14 +139,15 @@ struct InteractionService {
         return IssueResult(interaction: view, created: false)
     }
 
-    private func enforceQuota(principal: BusinessPrincipal, now: Date) async throws {
-        guard let business = try await BusinessRecord.find(principal.businessId.uuid, on: db) else { throw APIError.notFound }
+    private func enforceQuota(principal: BusinessPrincipal, business: BusinessRecord, controls: BusinessControlRecord?, now: Date) async throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
         let dayStart = calendar.startOfDay(for: now)
         let used = try await InteractionRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid)
             .filter(\.$livemode == true).filter(\.$createdAt >= dayStart).count()
-        if used >= business.dailyQuota {
+        // A throttled business (abuse thresholds or operator) gets a fraction of its quota; the tier only sets the base.
+        let quota = Int((Double(business.dailyQuota) * BusinessControls.throttleFactor(controls, settings: ctx.config.abuse)).rounded(.down))
+        if used >= quota {
             let retry = Int(dayStart.addingTimeInterval(86_400).timeIntervalSince(now))
             throw APIError(.tooManyRequests, .rateLimited, "Daily interaction quota exceeded.",
                            headers: ["Retry-After": String(max(1, retry))])
@@ -273,6 +284,9 @@ struct InteractionService {
         }
         guard record.statusValue == .pending else {
             try await deny("not_pending", error: .conflict("This request has already been resolved."))
+        }
+        guard try await DirectoryService(db: db).verified(id: record.businessId) != nil else {
+            try await deny("business_unavailable", error: .gone("This request is no longer available."))
         }
         if record.expiresAt <= now {
             _ = try await expireIfNeeded(record)

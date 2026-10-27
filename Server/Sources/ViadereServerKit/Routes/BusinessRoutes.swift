@@ -75,6 +75,40 @@ enum ProviderRoutes {
             _ = try await GatewayService(db: req.db, ctx: ctx).handleInbound(sms, provider: ctx.sms.name)
             return xml(.ok)
         }
+        routes.api(APIRoutes.providerRCSInbound) { req in
+            let ctx = req.ctx
+            let adapter = ctx.channels.rcs
+            let body = try await req.collectedBody(limit: 16 * 1024)
+            let webhook = ProviderWebhookRequest(url: ctx.config.publicBaseURL + APIRoutes.providerRCSInbound.template,
+                                                 signature: req.headers.first(name: GenericRBMProvider.signatureHeader), body: body,
+                                                 receivedAt: ctx.now)
+            // Unconfigured, unsigned, badly signed and stale-timestamp webhooks are all the same 403.
+            guard adapter.isEnabled, adapter.verifyInbound(webhook) else {
+                _ = try? await AuditService(db: req.db, ctx: ctx).record("gateway.webhook_rejected", outcome: .denied,
+                    actor: AuditActor(kind: .gateway), metadata: ["reason": "bad_signature", "provider": "rcs"])
+                throw APIError.forbidden
+            }
+            let events: [ChannelInboundEvent]
+            do { events = try adapter.parseInbound(webhook) } catch { throw APIError.badRequest("Unrecognized event.") }
+            let limits = ctx.config.rateLimits
+            var allowed: [ChannelInboundEvent] = []
+            for event in events {
+                switch event {
+                case .text(let phone, _, _, _), .postback(let phone, _, _, _):
+                    // Floods are dropped silently and audited, like SMS.
+                    if await ctx.limiter.allow("rcs-phone", key: ctx.hasher.phoneHash(phone), rule: limits.rcsInboundPerPhone) {
+                        allowed.append(event)
+                    } else {
+                        _ = try? await AuditService(db: req.db, ctx: ctx).record("gateway.rate_limited", outcome: .denied,
+                            actor: AuditActor(kind: .gateway, id: phone.masked), metadata: ["scope": "rcs_phone", "phone": phone.masked])
+                    }
+                case .receipt:
+                    allowed.append(event)
+                }
+            }
+            try await RCSInbound(db: req.db, ctx: ctx).handle(allowed)
+            return try req.emptyOK()
+        }
         routes.api(APIRoutes.providerSMSStatus) { req in
             let ctx = req.ctx
             let webhook = try await verified(req, template: APIRoutes.providerSMSStatus.template)

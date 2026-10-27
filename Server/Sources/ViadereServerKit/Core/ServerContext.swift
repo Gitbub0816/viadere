@@ -17,10 +17,15 @@ public final class ServerContext: Sendable {
     public let passkeys: any PasskeyVerifier
     public let webhookTransport: any WebhookTransport
     public let sequence: SequenceGenerator
+    /// SMS, RCS and Apple Messages for Business adapters.
+    public let channels: ChannelRegistry
+    /// Passkey verifier for the business dashboard / operator console (RP origin may differ from consumers').
+    public let dashboardPasskeys: any PasskeyVerifier
 
     public init(config: ServerConfig, clock: any ServerClock = SystemClock(), apns: any APNsSender, sms: any SMSProvider,
                 passkeys: any PasskeyVerifier, webhookTransport: any WebhookTransport,
-                rateLimitStore: any RateLimitStore = InMemoryRateLimitStore()) {
+                rateLimitStore: any RateLimitStore = InMemoryRateLimitStore(), rcs: (any RCSProvider)? = nil,
+                dashboardPasskeys: (any PasskeyVerifier)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey)
@@ -31,6 +36,9 @@ public final class ServerContext: Sendable {
         self.passkeys = passkeys
         self.webhookTransport = webhookTransport
         sequence = SequenceGenerator()
+        channels = ChannelRegistry(sms: SMSChannelAdapter(provider: sms), rcs: RCSChannelAdapter(provider: rcs),
+                                   appleMessagesForBusiness: AppleMessagesForBusinessAdapter(flagEnabled: config.channelFlags.appleMessagesForBusiness))
+        self.dashboardPasskeys = dashboardPasskeys ?? passkeys
     }
 
     public var now: Date { clock.now() }

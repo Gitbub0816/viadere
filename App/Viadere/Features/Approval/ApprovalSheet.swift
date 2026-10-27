@@ -97,8 +97,16 @@ struct ApprovalSheet: View {
     // MARK: Body
 
     @ViewBuilder private var mainContent: some View {
+        if let behalf = model.onBehalfOf {
+            ViadereNotice("You're responding on behalf of \(behalf). It's recorded in your household activity.", kind: .info)
+        }
         if case .done(let decision, _) = model.phase {
-            ResultState(decision: decision, business: model.envelope.business.displayName)
+            if case .acknowledge(let payload) = model.interaction.payload {
+                AcknowledgmentReceipt(envelope: model.envelope, payload: payload, outcome: model.outcome,
+                                      acknowledged: decision == .acknowledge, fallback: model.now)
+            } else {
+                ResultState(decision: decision, business: model.envelope.business.displayName)
+            }
         } else {
             switch model.availability {
             case .actionable:
@@ -146,8 +154,7 @@ struct ApprovalSheet: View {
             }
             failureNotice
         case .acknowledge(let payload):
-            Text(payload.title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
-            Text(payload.body).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
+            AcknowledgmentBody(envelope: model.envelope, payload: payload, now: model.now)
             failureNotice
         case .reply(let payload):
             Text(payload.prompt).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)

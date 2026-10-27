@@ -208,5 +208,16 @@ public final class BusinessRewardsViewModel {
         RedemptionViewModel(entry: entry, services: services) { [weak self] in await self?.load() }
     }
 
+    /// Asks the server to issue (and sign) the loyalty card pass. The app never builds a pass itself.
+    public func issueLoyaltyCard() async {
+        message = nil
+        do {
+            _ = try await services.api.issueWalletPass(WalletPassIssueRequest(kind: .storeCard, businessId: business.id))
+            await load()
+        } catch {
+            message = (error as? APIError)?.userMessage ?? "Couldn't create the Wallet card."
+        }
+    }
+
     public func clearMessage() { message = nil }
 }

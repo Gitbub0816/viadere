@@ -133,6 +133,14 @@ public final class WalletPassCoordinator {
     public func clearError() { lastError = nil }
 }
 
+/// A library for devices (and builds) with no Wallet: nothing is available, nothing is "in Wallet".
+public struct UnavailableWalletLibrary: WalletLibrary {
+    public init() {}
+    public var isAvailable: Bool { false }
+    public func containsPass(passTypeIdentifier: String, serialNumber: String) -> Bool { false }
+    public func validatedIdentity(of passData: Data) throws -> WalletPassIdentity { throw WalletPassError.unavailable }
+}
+
 // MARK: - Test and preview double
 
 /// In-memory Wallet. Its "passes" are small JSON documents (the mock server's stand-in for a signed `.pkpass`).

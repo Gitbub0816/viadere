@@ -4,13 +4,15 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions
+    case devices, phones, consents, sessions, household, acknowledgments
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
 struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var vm: SecuritySettingsViewModel
+    @State private var household: HouseholdViewModel
+    @State private var acknowledgments: AcknowledgmentsViewModel
     @State private var path: [SettingsRoute] = []
     @State private var confirmingSignOut = false
     @State private var confirmingDelete = false
@@ -20,6 +22,8 @@ struct SettingsView: View {
     init(model: AppModel) {
         self.model = model
         _vm = State(initialValue: SecuritySettingsViewModel(services: model.services))
+        _household = State(initialValue: HouseholdViewModel(services: model.services))
+        _acknowledgments = State(initialValue: AcknowledgmentsViewModel(services: model.services))
     }
 
     var body: some View {
@@ -29,6 +33,7 @@ struct SettingsView: View {
                     ViadereHeader("Settings")
                     thisDevice
                     securitySection
+                    trustSection
                     notificationsSection
                     accountSection
                     footer
@@ -45,11 +50,15 @@ struct SettingsView: View {
                 case .phones: PhonesView(vm: vm)
                 case .consents: ConsentHistoryView(vm: vm)
                 case .sessions: SessionsView(vm: vm)
+                case .household: HouseholdView(vm: household)
+                case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
                 }
             }
             .task {
                 await vm.load()
                 device = try? await model.services.records.load()
+                await household.load()
+                await acknowledgments.load()
             }
         }
         .sheet(isPresented: Binding(get: { model.pendingAccountLinkToken != nil }, set: { if !$0 { model.pendingAccountLinkToken = nil } })) {
@@ -114,6 +123,31 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// Household access and acknowledgment records. Each row hides itself if the server doesn't offer the feature yet.
+    @ViewBuilder private var trustSection: some View {
+        let showHousehold = household.phase != .unavailable
+        let showRecords = acknowledgments.phase != .unavailable
+        if showHousehold || showRecords {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Trust and records")
+                ViadereRowGroup {
+                    if showHousehold {
+                        navRow("Household", subtitle: householdSubtitle, symbol: "person.2", route: .household)
+                    }
+                    if showHousehold, showRecords { ViadereHairline(inset: 50) }
+                    if showRecords {
+                        navRow("Acknowledgments", subtitle: "Policies and estimates you've read", symbol: "doc.text", route: .acknowledgments)
+                    }
+                }
+            }
+        }
+    }
+
+    private var householdSubtitle: String {
+        let shared = household.activeGiven.count + household.activeReceived.count
+        return shared == 0 ? "Share limited access with people you trust" : "\(shared) active"
     }
 
     private func navRow(_ title: String, subtitle: String, symbol: String, route: SettingsRoute) -> some View {
@@ -196,16 +230,18 @@ struct SettingsView: View {
 
 // MARK: - Sub screens
 
-private struct SubScreen<Content: View>: View {
+/// A pushed screen: back button, large header, scrolling content. Shared by Settings, Rewards, Activity and Household.
+struct SubScreen<Content: View>: View {
     let title: String
     let subtitle: String?
+    var backTitle: String = "Settings"
     @ViewBuilder var content: Content
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
-                ViadereBackButton("Settings") { dismiss() }
+                ViadereBackButton(backTitle) { dismiss() }
                 ViadereHeader(title, subtitle: subtitle)
                 content
             }

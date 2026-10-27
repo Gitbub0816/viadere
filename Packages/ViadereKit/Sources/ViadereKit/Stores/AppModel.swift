@@ -4,7 +4,7 @@ import ViadereCore
 import Observation
 #endif
 
-public enum AppTab: String, CaseIterable, Sendable, Hashable { case home, connect, messages, settings }
+public enum AppTab: String, CaseIterable, Sendable, Hashable { case home, activity, connect, messages, settings }
 
 /// A request to start the connect flow with a code that arrived by link, QR, NFC or App Clip.
 public struct PendingConnect: Equatable, Sendable {
@@ -33,14 +33,21 @@ public final class AppModel {
 
     public let services: ViadereServices
     public let home: HomeViewModel
+    public let activity: ActivityViewModel
+    public let rewards: RewardsViewModel
+    public let wallet: WalletPassCoordinator
     public let messages: MessagesViewModel
     private var queuedLink: DeepLink?
     private var backgroundedAt: Date?
     private var isColdLaunch = true
 
-    public init(services: ViadereServices) {
+    /// - Parameter walletLibrary: `PassKitWalletLibrary()` in the app; the default reports Wallet as unavailable.
+    public init(services: ViadereServices, walletLibrary: any WalletLibrary = UnavailableWalletLibrary()) {
         self.services = services
         home = HomeViewModel(services: services)
+        activity = ActivityViewModel(services: services)
+        rewards = RewardsViewModel(services: services)
+        wallet = WalletPassCoordinator(services: services, library: walletLibrary)
         messages = MessagesViewModel(services: services)
     }
 
@@ -67,6 +74,7 @@ public final class AppModel {
         isColdLaunch = false
         if phase == .ready {
             await home.load()
+            await activity.load()
             if let link = queuedLink { queuedLink = nil; await handle(link) }
         }
     }
@@ -74,6 +82,7 @@ public final class AppModel {
     public func completeOnboarding() async {
         phase = .ready
         await home.load()
+        await activity.load()
         if let link = queuedLink { queuedLink = nil; await handle(link) }
     }
 
@@ -85,7 +94,7 @@ public final class AppModel {
         let policy = AppLockPolicy(enabled: services.preferences.bool(.appLockEnabled))
         if phase == .ready, policy.shouldLock(backgroundedAt: backgroundedAt, now: services.clock(), isColdLaunch: false) { isLocked = true }
         backgroundedAt = nil
-        if phase == .ready { await home.load() }
+        if phase == .ready { await home.load(); await activity.load() }
     }
 
     public func unlock() async {
@@ -149,7 +158,10 @@ public final class AppModel {
         model.onFinished = { [weak self] outcome in
             guard let self else { return }
             self.home.didDecide(outcome.interactionId)
-            Task { await self.home.load() }
+            Task {
+                await self.home.load()
+                await self.activity.load()
+            }
         }
         model.onKeyInvalidated = { [weak self] in self?.phase = .needsReenrollment }
         presentedApproval = model

@@ -58,7 +58,11 @@ public final class ApprovalViewModel: Identifiable {
 
     public var headline: String { InteractionPresentation.question(interaction) }
     public var title: String { InteractionPresentation.kindLabel(interaction) }
-    public var details: [PresentedDetail] { InteractionPresentation.details(envelope, now: now) }
+    public var details: [PresentedDetail] {
+        var rows = InteractionPresentation.details(envelope, now: now)
+        if let onBehalfOf { rows.insert(PresentedDetail(label: "On behalf of", value: onBehalfOf, emphasized: true), at: min(1, rows.count)) }
+        return rows
+    }
     public var risks: [RiskIndicator] { InteractionPresentation.riskIndicators(interaction) }
     public var effect: String? { InteractionPresentation.effectOfApproval(interaction) }
     public var countdown: String { InteractionPresentation.countdown(until: interaction.expiresAt, now: now) }

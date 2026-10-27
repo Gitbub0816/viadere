@@ -420,6 +420,44 @@ public struct ViadereCountdownRing: View {
     }
 }
 
+// MARK: - Progress
+
+/// A quiet progress track: a champagne fill that ends in a small dot, echoing the via mark. Used by Activity rows,
+/// Live Activities and the Dynamic Island. Reads "Progress, 55 percent" to VoiceOver.
+public struct ViadereProgressBar: View {
+    private let progress: Double
+    private let height: CGFloat
+    private let label: String
+
+    public init(progress: Double, height: CGFloat = 5, label: String = "Progress") {
+        self.progress = min(max(progress, 0), 1)
+        self.height = height
+        self.label = label
+    }
+
+    public var body: some View {
+        GeometryReader { proxy in
+            let dot = height + 3
+            let fill = max(height, proxy.size.width * progress)
+            ZStack(alignment: .leading) {
+                Capsule().fill(ViadereColor.track)
+                Capsule().fill(ViadereColor.accent).frame(width: fill)
+                if progress > 0, progress < 1 {
+                    Circle()
+                        .fill(ViadereColor.accent)
+                        .frame(width: dot, height: dot)
+                        .offset(x: min(max(0, fill - dot * 0.5), proxy.size.width - dot))
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .frame(height: height + 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text("\(Int(progress * 100)) percent"))
+    }
+}
+
 // MARK: - Input fields
 
 /// The unified connect field: one quiet, large field for a handle, a code, a link or a business name.

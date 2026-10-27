@@ -77,6 +77,15 @@ public struct ServerConfig: Sendable {
     /// Interactions a free-tier business may issue per UTC day.
     public var freeDailyInteractionQuota: Int
     public var allowInsecureWebhookURLs: Bool
+    /// RCS Business Messaging provider (generic RBM-style). `nil` disables RCS.
+    public var rcs: RCSConfig?
+    public var channelFlags = ChannelFeatureFlags()
+    public var dashboard = DashboardSettings.standard
+    public var abuse = AbuseThresholds.standard
+    public var billingRates = BillingRates.illustrative
+    /// Origin the business dashboard / operator console passkeys are scoped to. `nil` = `relyingPartyOrigin`.
+    /// The RP ID stays `relyingPartyID`, so a sub-domain origin such as `https://business.viadere.com` also works.
+    public var dashboardOrigin: String?
 
     public var isProduction: Bool { environment == .production }
 
@@ -145,7 +154,7 @@ public struct ServerConfig: Sendable {
         let teamID = env["APPLE_TEAM_ID"] ?? ""
         if production && teamID.isEmpty { throw ServerConfigError.missing("APPLE_TEAM_ID") }
 
-        return ServerConfig(
+        var config = ServerConfig(
             environment: environment, databaseURL: databaseURL,
             bindHost: env["BIND_HOST"] ?? "0.0.0.0", port: Int(env["PORT"] ?? "") ?? 8080,
             publicBaseURL: publicBase, relyingPartyID: env["RP_ID"] ?? ViadereCore.domain,
@@ -164,6 +173,8 @@ public struct ServerConfig: Sendable {
             accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
+        try config.applyPlatformEnvironment(env, production: production)
+        return config
     }
 
     private static func readFile(_ path: String?) -> String? {
@@ -198,6 +209,12 @@ public struct RateLimitSettings: Sendable {
     public var smsInboundPerPhone: RateRule
     public var smsInboundGlobal: RateRule
     public var providerIP: RateRule
+    /// Dashboard / operator state-changing actions per signed-in user.
+    public var dashboardAction: RateRule = .perMinute(60, burst: 30)
+    /// Dashboard sign-in and sign-up ceremonies per IP.
+    public var dashboardAuth: RateRule = .perMinute(15, burst: 8)
+    /// Inbound RCS events per phone.
+    public var rcsInboundPerPhone: RateRule = .perMinute(20, burst: 10)
 
     public static let standard = RateLimitSettings(
         globalIP: .perMinute(300), authCeremony: .perMinute(20, burst: 10), refresh: .perMinute(30, burst: 10),

@@ -152,6 +152,10 @@ public enum APIRoutes {
     /// Delivery receipts.
     public static let providerSMSStatus = Endpoint<Data, EmptyBody>(
         "providers.sms.status", .POST, "/v1/providers/sms/status", auth: .providerSignature)
+    /// RCS Business Messaging provider webhook (JSON): free text, suggestion postbacks and receipts, authenticated
+    /// by an HMAC signature header (`X-RCS-Signature: t=…,v1=…`).
+    public static let providerRCSInbound = Endpoint<Data, EmptyBody>(
+        "providers.rcs.inbound", .POST, "/v1/providers/rcs/inbound", auth: .providerSignature)
 
     /// Every endpoint, for route registration, docs and contract tests.
     public static let all: [AnyEndpoint] = [
@@ -172,7 +176,7 @@ public enum APIRoutes {
         businessSendMessage.descriptor, businessUpdateStatus.descriptor, businessIssueReward.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
         businessWebhookRotate.descriptor,
-        providerSMSInbound.descriptor, providerSMSStatus.descriptor,
+        providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
     ]
 
     /// Web (non-API) paths served on `viadere.com`.
@@ -183,6 +187,10 @@ public enum APIRoutes {
         public static let accountLinkPrefix = "/l/"
         /// Secure handoff landing: `/h/{token}`.
         public static let handoffPrefix = "/h/"
+        /// Business dashboard (server-rendered, passkey sign-in).
+        public static let dashboardPrefix = "/dashboard"
+        /// Viadere operator console (separate realm, passkey sign-in).
+        public static let operatorPrefix = "/operator"
 
         public static func accountLinkURL(token: String) -> URL? { URL(string: "https://\(ViadereCore.domain)\(accountLinkPrefix)\(token)") }
         public static func handoffURL(token: String) -> URL? { URL(string: "https://\(ViadereCore.domain)\(handoffPrefix)\(token)") }

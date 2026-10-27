@@ -41,7 +41,13 @@ public struct RequestGuardMiddleware: AsyncMiddleware {
             let isProvider = request.url.path.hasPrefix("/v1/providers/")
             let hasBody = (request.headers.first(name: .contentLength).flatMap(Int.init) ?? 0) > 0
                 || request.headers.first(name: .transferEncoding) != nil
-            if hasBody && !isProvider {
+            // The dashboard and operator console post HTML forms; everything else is JSON-only.
+            let isWebForm = request.url.path.hasPrefix(APIRoutes.Web.dashboardPrefix + "/") || request.url.path.hasPrefix(APIRoutes.Web.operatorPrefix + "/")
+            if hasBody && isWebForm {
+                guard let type = request.headers.contentType, (type.type == "application" && (type.subType == "json" || type.subType == "x-www-form-urlencoded")) else {
+                    throw APIError(.unsupportedMediaType, .badRequest, "Unsupported content type.")
+                }
+            } else if hasBody && !isProvider {
                 guard let type = request.headers.contentType, type.type == "application", type.subType == "json" else {
                     throw APIError(.unsupportedMediaType, .badRequest, "Content-Type must be application/json.")
                 }
