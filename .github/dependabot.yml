@@ -1,0 +1,52 @@
+# Keep every dependency on its current stable release (CLAUDE.md versioning policy). Dependabot opens PRs weekly and immediately for
+# security advisories; a PR is merged only when CI (all suites, SQLite and PostgreSQL) is green. Checksum-pinned CI tool binaries
+# (.github/scripts/install-tools.sh) and the OpenTofu release are not covered by Dependabot: they are bumped in the monthly refresh
+# (docs/ops/SECURE-SDLC.md).
+version: 2
+updates:
+  - package-ecosystem: swift
+    directories:
+      - /Packages/ViadereCore
+      - /Packages/ViadereKit
+      - /Packages/ViadereBusinessSDK
+      - /Server
+      - /Site
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      swift-minor-patch:
+        update-types: [minor, patch]
+    labels: [dependencies, swift]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies, ci]
+
+  - package-ecosystem: docker
+    directory: /Server
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, docker]
+
+  - package-ecosystem: docker-compose
+    directory: /Server
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, docker]
+
+  - package-ecosystem: terraform
+    directory: /Infra/terraform
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, infrastructure]

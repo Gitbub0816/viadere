@@ -1,0 +1,157 @@
+# Security scanning (OPS-002): secret scanning, dependency + SBOM scanning, container scan, IaC scan, SAST. SARIF goes to GitHub code scanning.
+# Scanners are checksum-pinned release binaries (.github/scripts/install-tools.sh); only GitHub's own upload-sarif action is used.
+# CodeQL is not used: it supports Swift on macOS runners only, and the Server is built on Linux. Semgrep (Python CLI, run from its
+# official container) provides SAST instead.
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * *" # daily: new advisories can hit unchanged code
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history: a secret removed in a later commit is still leaked
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh gitleaks
+      - name: Scan history
+        run: gitleaks git --redact --no-banner --report-format sarif --report-path gitleaks.sarif --exit-code 1 .
+      - name: Upload SARIF
+        if: always() && hashFiles('gitleaks.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+  dependencies:
+    name: Dependencies and SBOM (syft + grype, osv-scanner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh syft grype osv-scanner
+      - name: SBOM of the repository (SPDX)
+        run: syft dir:. --exclude './.build' --exclude '**/.build' -o spdx-json=sbom-repo.spdx.json
+      - name: Vulnerabilities in the SBOM (fail on high or critical)
+        run: |
+          grype sbom:sbom-repo.spdx.json --fail-on high -o sarif --file grype.sarif
+      - name: Vulnerabilities in lockfiles (OSV, includes Swift Package.resolved)
+        run: osv-scanner scan source --recursive --format sarif --output-file osv.sarif . || echo "osv_failed=1" >> "$GITHUB_ENV"
+      - name: Upload SARIF (grype)
+        if: always() && hashFiles('grype.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: grype.sarif
+          category: grype
+      - name: Upload SARIF (osv-scanner)
+        if: always() && hashFiles('osv.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sbom-repo
+          path: sbom-repo.spdx.json
+          retention-days: 90
+      - name: Fail if OSV found vulnerabilities
+        if: env.osv_failed == '1'
+        run: echo "osv-scanner reported vulnerabilities or failed; see the uploaded SARIF" && exit 1
+
+  container:
+    name: Server image scan (trivy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh trivy
+      - name: Build the Server image (context = repository root)
+        run: docker build -f Server/Dockerfile -t viadere-server:scan .
+      - name: Scan (SARIF, all severities, for code scanning)
+        run: trivy image --format sarif --output trivy-image.sarif --exit-code 0 viadere-server:scan
+      - name: Gate (fail on fixable HIGH or CRITICAL)
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 viadere-server:scan
+      - name: Upload SARIF
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  iac:
+    name: IaC, Dockerfile and workflow misconfiguration (trivy config)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh trivy
+      - name: Scan Terraform, Dockerfile, compose
+        run: trivy config --severity MEDIUM,HIGH,CRITICAL --format sarif --output trivy-config.sarif --exit-code 0 .
+      - name: Gate on HIGH and CRITICAL
+        run: trivy config --severity HIGH,CRITICAL --exit-code 1 .
+      - name: Upload SARIF
+        if: always() && hashFiles('trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+  sast:
+    name: SAST (semgrep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Semgrep (official image, digest-pinned; Python CLI inside, nothing installed on the runner)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            semgrep/semgrep:1.182.0@sha256:4a34048c04fef049f71665047f074cffb00cc3d89482f965a5cd151d589237af \
+            semgrep scan --metrics=off --error --sarif --output semgrep.sarif \
+              --config p/security-audit --config p/secrets --config p/github-actions --config p/dockerfile --config p/swift \
+              Server Packages App Site Infra .github
+      - name: Upload SARIF
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

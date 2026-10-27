@@ -1,0 +1,145 @@
+# CI: build and test every Swift package, the Server on SQLite AND on PostgreSQL 18 with the shared database rate limiter, the Site,
+# and lint the workflows. CLAUDE.md versioning rule 6: an upgrade is done only when all of these pass.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: ${{ matrix.package }} (build + test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: swift:6.4.1-resolute@sha256:82152e9f18ee21fc997fd4580b93a14097e465cb10d7a7eee3f2dc85364dd135
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ViadereCore, ViadereKit, ViadereBusinessSDK]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        working-directory: Packages/${{ matrix.package }}
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
+      - name: Test
+        working-directory: Packages/${{ matrix.package }}
+        run: swift test
+
+  server-sqlite:
+    name: Server on SQLite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container: swift:6.4.1-resolute@sha256:82152e9f18ee21fc997fd4580b93a14097e465cb10d7a7eee3f2dc85364dd135
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system libraries
+        run: apt-get update && apt-get install -y --no-install-recommends libssl-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
+      - name: Build
+        working-directory: Server
+        run: swift build --build-tests
+      - name: Test (in-memory SQLite)
+        working-directory: Server
+        run: swift test
+
+  server-postgres:
+    name: Server on PostgreSQL 18 (database rate limiter)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container: swift:6.4.1-resolute@sha256:82152e9f18ee21fc997fd4580b93a14097e465cb10d7a7eee3f2dc85364dd135
+    services:
+      postgres:
+        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: viaderetest
+        options: >-
+          --health-cmd "pg_isready -U postgres -d viaderetest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system libraries
+        run: apt-get update && apt-get install -y --no-install-recommends libssl-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
+      - name: Build
+        working-directory: Server
+        run: swift build --build-tests
+      - name: Test (PostgreSQL, shared rate-limit store)
+        working-directory: Server
+        env:
+          TEST_DATABASE_URL: postgres://postgres:ci-only-not-a-secret@postgres:5432/viaderetest
+          TEST_RATE_LIMIT_STORE: database
+        run: swift test
+
+  site:
+    name: Site (build + lint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: swift:6.4.1-resolute@sha256:82152e9f18ee21fc997fd4580b93a14097e465cb10d7a7eee3f2dc85364dd135
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect Site
+        id: detect
+        run: |
+          if [ -f Site/Package.swift ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; echo "Site/ not present yet: skipping"; fi
+      - name: Test
+        if: steps.detect.outputs.present == 'true'
+        working-directory: Site
+        run: swift test
+      - name: Build the site
+        if: steps.detect.outputs.present == 'true'
+        working-directory: Site
+        # INTERFACE ASSUMPTION (owned by WP7): `viadere-site build --out dist` writes the static site, and `lint` runs the
+        # marketing-integrity and link checks (spec §10.2). Reconcile with Site/Sources/viadere-site when it lands.
+        run: swift run -c release viadere-site build --out dist
+      - name: Lint (banned claims, links, legal metadata)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: Site
+        run: swift run -c release viadere-site lint --dist dist
+
+  infrastructure:
+    name: Infrastructure (OpenTofu validate, Fly config, workflows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned tools
+        run: .github/scripts/install-tools.sh actionlint
+      - name: Lint workflows
+        run: actionlint -color
+      - name: Fly config covers every Server/.env.example variable
+        run: python3 -I Infra/fly/check_env_coverage.py
+      - name: Install OpenTofu
+        env:
+          TOFU_VERSION: 1.13.2
+          # SHA-256 of tofu_1.13.2_linux_amd64.zip from the official release (verified 2026-10-27).
+          TOFU_SHA256: 723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  /tmp/tofu.zip" | sha256sum --check --status
+          unzip -q /tmp/tofu.zip tofu -d "$HOME/.local/bin"
+      - name: Validate
+        working-directory: Infra/terraform
+        run: |
+          tofu fmt -check -recursive
+          tofu init -backend=false -input=false
+          tofu validate

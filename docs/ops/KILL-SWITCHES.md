@@ -1,0 +1,53 @@
+# Kill switches and emergency controls (OPS-006)
+
+**Status:** v1, 2026-10-27, from a read of the Server code and the infrastructure in this repository. OPS-006 asks for safe kill switches,
+credential revocation, business suspension, replay-cache enforcement, webhook pause, emergency messaging restrictions and notification of affected parties.
+"Exists" means it works in the code today; everything else is a **gap** with a proposed design. Gaps are tracked as risk R-034.
+
+## 1. What exists
+
+| # | Control | Scope | How to use it | Effect and limits |
+|---|---|---|---|---|
+| E-1 | **Suspend a business** | one business | Operator console `/operator/businesses/{id}` -> Suspend (reason required, passkey re-auth); reinstate with Reinstate | Next request is refused for its API keys and interactions; pending interactions are cancelled (`business.suspended` audited). Blunt: all capabilities stop at once |
+| E-2 | **Throttle a business** | one business | Operator console -> throttle; also automatic (`abuse.auto_throttled`) from `ABUSE_COMPLAINT_RATE`, `ABUSE_OPTOUT_RATE`, `ABUSE_MIN_SAMPLE`, `ABUSE_WINDOW_DAYS` | Daily quota and API rate x `ABUSE_THROTTLE_FACTOR` (0.25 default) |
+| E-3 | **Priority ceiling** | one business | Operator console -> ceiling (downward only: low, normal, high) | Restricts only; never raises |
+| E-4 | **Revoke an API key** | one key | Business dashboard `/dashboard/api-keys` -> Revoke (`apikey.revoked` audited) | Immediate for that key. Requires a business member; there is no operator action (gap G-3) |
+| E-5 | **Delete / rotate a webhook endpoint** | one endpoint | Dashboard `/dashboard/webhooks` -> delete or rotate (`webhook.deleted`, `webhook.rotated`); `API: DELETE /v1/business/webhooks/{id}`, `POST .../rotate-secret` | Rotation keeps the previous secret for an overlap window. No pause (gap G-5) |
+| E-6 | **Replay a webhook delivery** | one delivery | Dashboard `/dashboard/webhooks/deliveries/{id}` -> Replay | A recovery tool, not a kill switch |
+| E-7 | **Revoke a device / session** | one consumer device | User: `DELETE /v1/devices/{id}`; automatic on expiry (`DeviceLifecycle.revokeExpired`), on recovery activation and on refresh-token reuse detection (`auth.refresh_reuse_detected`) | A bearer token alone cannot enroll a device. Not operator-invokable (gap G-7) |
+| E-8 | **Cancel a recovery / device replacement** | one account | User: `/v1/recovery/{id}/cancel`, `/v1/devices/{id}/cancel-replacement` from a trusted device | Defense against account takeover |
+| E-9 | **Replay protection** | all signed requests | Always on: `DatabaseReplayGuard` (`replay_nonces`), 300 s skew, single-use challenges | Automatic; there is no flush or tighten control (see G-9) |
+| E-10 | **Rate limits** | per namespace | Always on, database store, fail closed for security-critical namespaces; Cloudflare edge rules in `Infra/terraform/cloudflare.tf` | Server thresholds change only with a deploy (gap G-12) |
+| E-11 | **Stop all background delivery** | whole fleet | Set `RUN_BACKGROUND_JOBS=false` (a plain `[env]` value, not a secret): change it in `fly.*.toml` and redeploy, or `fly machine update <id> --env RUN_BACKGROUND_JOBS=false` on each machine | Halts outbound SMS/RCS, webhooks, pass pushes, expiry sweeps, **and** purge/limiter cleanup. Inbound still accepted and queued |
+| E-12 | **Disable a channel/feature by configuration** | whole fleet | Unset RCS values (SMS only); unset Wallet values (pass endpoints answer 501); `FEATURE_APPLE_MESSAGES_FOR_BUSINESS=false`; `OTP_ALLOWED_COUNTRIES=` narrowing; `APP_ATTEST_MODE` | Requires a config change and rolling restart (minutes). Unsetting Twilio is refused by staging/production config validation |
+| E-13 | **Edge block** | by path/host/IP/country | Cloudflare: add a WAF custom rule (block or challenge) via dashboard or Terraform; "Under Attack" mode | The fastest global switch we have (seconds), independent of the app. Coarse: path/IP based |
+| E-14 | **Stop the origin** | whole API | `fly scale count 0 --app viadere-server` (or `fly machine stop`) | Total outage; last resort. Neon compute can be suspended separately |
+| E-15 | **Reject unsafe configuration** | startup | `ENVIRONMENT` required, secrets mandatory and distinct, `seed` refused in staging/production | Prevents misconfiguration, not an incident control |
+| E-16 | **Audit and dispute tooling** | forensic | `ViadereServer audit-head`, `audit-verify [--head file]`, `export-dispute --interaction <id>` | Detection and evidence, see RUNBOOKS.md |
+| E-17 | **Operator enrollment** | operators | `ViadereServer create-operator` creates an operator enrollment link (audited `operator.created`) | Operators are the people who use E-1 to E-3; protect the console and review membership monthly |
+
+## 2. Gaps (what is missing)
+
+| ID | Gap | Why it matters | Proposed design | Priority |
+|---|---|---|---|---|
+| G-1 | No global maintenance or read-only mode | Cannot stop writes while keeping reads and health during a data-integrity incident | `MAINTENANCE_MODE` read from a DB row (cached 5 s) so it flips without a redeploy; middleware answers 503 `maintenance` for non-GET except `/readyz` and provider status callbacks | High |
+| G-2 | No runtime per-capability toggles (messaging, approve, verify, wallet, rewards, vault sync, each channel) | Config changes need a redeploy (minutes) and cannot be scoped to one capability | `feature_flags` table (key, scope: global or business, enabled, reason, actor), checked by the capability gate in the policy engine (WP2); operator UI + audit; fail closed for `approve` and `verify` when the table is unreachable | High |
+| G-3 | Operators cannot revoke a business's API keys without suspending it | A leaked key on an otherwise healthy business forces a full suspension, or waits for a business member | Operator action "revoke all keys / revoke key N" in `/operator/businesses/{id}`, audited | High |
+| G-4 | No vault-sync kill switch | ADR-08 ships E2EE vault sync behind a gate; a bug there must be stoppable alone | Flag per G-2, server refuses sync writes | Medium (before Phase 4) |
+| G-5 | No webhook pause (per endpoint or per business) | Takeover or a runaway endpoint can only be handled by deleting the endpoint or suspending the business | `webhook_subscriptions.paused_until` + operator/business action; deliveries stay queued and expire per retention | High |
+| G-6 | No emergency messaging restriction (block marketing or one channel for one business or globally) | Spam wave or provider compliance issue needs "no marketing SMS" without suspending sign-in approvals | Purpose/channel deny list in `business_controls` and a global one in G-2 flags, enforced in `InteractionService` and the outbound queues | High |
+| G-7 | Operators cannot lock a consumer account or revoke its sessions/devices | Fraud, coercion, or a reported compromise needs a server-side freeze (the user may not have the app) | Operator "freeze account": revoke all token families and devices, block approvals, notice via `security_notices`; reinstate needs the recovery flow | High |
+| G-8 | No key-rotation tooling for `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `CONNECT_LINK_SIGNING_KEY` | `reencrypt-fields` only upgrades legacy `v1.` ciphertexts to row-bound `v2.`; it does not change keys. A compromised key cannot be rotated safely | Key ids in ciphertext/hash prefixes, multi-key read with one write key, `ViadereServer rotate-data-key`, audit chain version 3 with a key-id field; KMS envelope (ADR-03) makes it routine | High |
+| G-9 | No operator-initiated notice to affected parties, no replay-cache controls | OPS-006 requires notifying affected parties; today notices are created only by system events | Operator/security tool that posts `security_notices` to a set of consumers (and email to business users), with templates and audit; `replay_nonces` flush is intentionally not offered (it would weaken replay protection) | Medium |
+| G-10 | Origin shared header (`X-Viadere-Edge-Token`) is set by Cloudflare but **not enforced by the server** | A request that bypasses Cloudflare skips the WAF, rate limits and the XFF assumptions | Middleware: constant-time compare against `EDGE_TOKEN` (and `EDGE_TOKEN_PREVIOUS` for rotation) on every route except `/healthz`/`/readyz`; 421 otherwise; log the Host/ASN of rejects | High |
+| G-11 | Authenticated Origin Pulls (mTLS) are enabled at Cloudflare but **not verified at the origin** (Fly's proxy cannot verify client certificates) | The strongest origin lock is not in effect | Either app-terminated TLS on a raw Fly TCP service with Cloudflare's origin-pull CA as the only client trust root, or Cloudflare Tunnel (`cloudflared`) with no public origin; decide in the next architecture review | High |
+| G-12 | Rate-limit thresholds and abuse thresholds change only with a deploy | During an attack the server limits cannot be tightened in seconds | Read thresholds from the G-2 table with env defaults; the edge (E-13) remains the fast path meanwhile | Medium |
+| G-13 | Observability: no metrics endpoint, no alerting on limiter fail-closed, dead-letter growth, audit-head age | Detection depends on log reading | Prometheus-style `/metrics` on an internal-only port, Fly metrics scrape, alerts (OPS-004) | Medium |
+| G-14 | No issuer-revocation or Wallet-ID trust-list control | Phase 3 (Verify): a malicious/revoked credential issuer must be blockable at once | IACA root allow-list in the database with enable/disable and audit (WP3) | High (before Phase 3) |
+| G-15 | No operator switch to stop **new** business sign-ups or dashboard invitations | A sign-up abuse wave cannot be paused | Flag per G-2 for `dashboard.signup` and `dashboard.invite`; edge rule as the interim (E-13) | Low |
+
+## 3. Interim operating procedure until the gaps close
+
+1. Business-scoped abuse: E-2 then E-1 (operator console). Credential leak: E-4 through the business, or E-1 if they cannot act.
+2. Fleet-scoped or capability-scoped problem: edge rule (E-13) on the path or host first, then config change (E-12), then E-11.
+3. Everything above is recorded in the incident record; each use is reviewed for the matching gap here.

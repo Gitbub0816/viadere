@@ -1,0 +1,131 @@
+# Viadere server -- PRODUCTION (Fly.io app "viadere-server").
+# Deploy:   flyctl deploy --config Infra/fly/fly.production.toml --image <ghcr image@sha256:...>
+# The release workflow deploys the signed image by digest (see .github/workflows/release.yml); never `fly deploy` from a laptop.
+# Only NON-SECRET configuration lives here. Secrets are set with `fly secrets set` (list in Infra/fly/README.md).
+# Every variable in Server/.env.example is accounted for in Infra/fly/README.md ("Environment variable coverage").
+
+app = "viadere-server"
+primary_region = "iad"
+kill_signal = "SIGTERM"   # Vapor shuts down gracefully on SIGTERM
+kill_timeout = 30         # seconds; lets in-flight requests and the job loop finish
+
+[deploy]
+  # Migrations run in a throwaway machine BEFORE any new machine starts; a non-zero exit aborts the deploy (old version keeps serving).
+  # `migrate` is Vapor's built-in command; --yes skips the interactive prompt. ENTRYPOINT is /app/ViadereServer, so this runs
+  # `ViadereServer migrate --yes --env production`.
+  release_command = "migrate --yes --env production"
+  release_command_timeout = "10m"
+  strategy = "rolling"
+  max_unavailable = 1
+
+[env]
+  # ---- runtime / mode -------------------------------------------------------------------------------
+  ENVIRONMENT = "production"
+  LOG_LEVEL = "info"
+  PORT = "8080"
+  BIND_HOST = "0.0.0.0"
+  # Migrations are run by the release command, never at boot (a boot-time migration would race across machines).
+  AUTO_MIGRATE = "false"
+  RATE_LIMIT_STORE = "database"
+  RUN_BACKGROUND_JOBS = "true"          # CAS-safe on every machine (README "Operations notes")
+  JOB_INTERVAL_SECONDS = "5"
+  MAX_BODY_BYTES = "65536"
+  FREE_DAILY_INTERACTION_QUOTA = "1000"
+  # Client -> Cloudflare -> Fly proxy -> app: X-Forwarded-For has two trusted hops (verify on staging: Infra/fly/README.md step 8).
+  TRUSTED_PROXY_COUNT = "2"
+  CORS_ALLOWED_ORIGINS = ""
+  ALLOW_INSECURE_WEBHOOKS = "false"
+  # ---- public URL / passkeys ------------------------------------------------------------------------
+  PUBLIC_BASE_URL = "https://api.viadere.com"
+  RP_ID = "viadere.com"
+  RP_NAME = "Viadere"
+  RP_ORIGIN = "https://viadere.com"
+  DASHBOARD_ORIGIN = ""                 # set to https://business.viadere.com if the dashboard gets its own origin
+  DASHBOARD_IDLE_MINUTES = "30"
+  DASHBOARD_ABSOLUTE_HOURS = "12"
+  # ---- Apple identifiers (public values) ------------------------------------------------------------
+  APPLE_TEAM_ID = "REPLACE_WITH_TEAM_ID"        # 10 characters
+  APP_STORE_ID = ""
+  APP_ATTEST_MODE = "report"            # roll out as `report`, then flip to `require` once the shipping app attests (README Round 4)
+  APP_ATTEST_ENVIRONMENT = "production"
+  APNS_ENVIRONMENT = "production"
+  APNS_TOPIC = "com.viadere.app"
+  APNS_KEY_ID = "REPLACE_WITH_KEY_ID"           # identifier of the .p8 key (not secret; the key itself is APNS_KEY_P8)
+  APNS_TEAM_ID = "REPLACE_WITH_TEAM_ID"
+  PASS_TYPE_IDENTIFIER = ""             # set with the three PASS_*_PEM secrets, or leave all four unset (passes off)
+  # ---- provider endpoints / senders (public values) -------------------------------------------------
+  EMAIL_API_URL = "https://api.resend.com/emails"
+  EMAIL_FROM_ADDRESS = "Viadere <no-reply@viadere.com>"
+  RCS_PROVIDER_BASE_URL = ""            # all four RCS_* values or none (token + webhook secret are secrets)
+  RCS_AGENT_ID = ""
+  FEATURE_APPLE_MESSAGES_FOR_BUSINESS = "false"
+  OTP_ALLOWED_COUNTRIES = "US,CA"
+  SMS_MENU_RACE_SECONDS = "3"
+  # ---- retention (days) -----------------------------------------------------------------------------
+  WEBHOOK_RETENTION_DAYS = "30"
+  OUTBOUND_RETENTION_DAYS = "30"
+  LINK_TOKEN_RETENTION_DAYS = "7"
+  # ---- abuse / billing preview ----------------------------------------------------------------------
+  ABUSE_COMPLAINT_RATE = "0.02"
+  ABUSE_OPTOUT_RATE = "0.10"
+  ABUSE_MIN_SAMPLE = "20"
+  ABUSE_WINDOW_DAYS = "7"
+  ABUSE_THROTTLE_FACTOR = "0.25"
+  BILLING_INCLUDED_INTERACTIONS = "1000"
+  BILLING_PLATFORM_MICROS_PER_INTERACTION = "5000"
+  BILLING_TRANSPORT_MICROS_PER_SMS_SEGMENT = "0"
+  BILLING_TRANSPORT_MICROS_PER_RCS_MESSAGE = "0"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Always on: an auth/approval service must never cold-start.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 2              # two machines minimum; scale with `fly scale count 3 --region ...`
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [http_service.tls_options]
+    # Fly only terminates TLS for the Cloudflare -> origin leg. Cloudflare is the policy point (Infra/terraform), where
+    # min TLS is 1.2 for clients and the compatibility policy is documented. The origin leg is 1.3 only: Cloudflare supports it.
+    versions = ["TLSv1.3"]
+    alpn = ["h2", "http/1.1"]
+    default_self_signed = false
+
+  # Liveness: process answers HTTP. No dependency state (the endpoint leaks nothing).
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    timeout = "3s"
+    method = "GET"
+    path = "/healthz"
+    [http_service.checks.headers]
+      X-Forwarded-Proto = "https"
+
+  # Readiness: the database answers a query (503 otherwise). Fly takes the machine out of rotation while it fails.
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    timeout = "5s"
+    method = "GET"
+    path = "/readyz"
+    [http_service.checks.headers]
+      X-Forwarded-Proto = "https"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"
+  processes = ["app"]
+
+[processes]
+  # Single process group. The in-process job runner is CAS-safe on every machine. To split a dedicated worker later, add a `worker`
+  # group with RUN_BACKGROUND_JOBS=true and set it to false on `app` (Server/README.md "Operations notes").
+  app = "serve --env production --hostname 0.0.0.0 --port 8080"

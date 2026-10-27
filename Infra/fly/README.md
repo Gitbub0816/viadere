@@ -1,0 +1,152 @@
+# Fly.io deployment (ADR-01)
+
+The Vapor server runs on Fly.io machines, always on, behind Cloudflare. Cloudflare owns DNS, TLS policy, the WAF and rate limits
+([`../terraform`](../terraform)); Fly owns the machines, the release command and the origin certificate. The database is Neon
+(ADR-02), service keys are in Google Cloud KMS (ADR-03).
+
+| File | Purpose |
+|---|---|
+| `fly.production.toml` | app `viadere-server`: 2+ machines, auto-stop off, `/healthz` + `/readyz` checks, release command `migrate --yes` |
+| `fly.staging.toml` | app `viadere-server-staging`: same shape, production rules (`ENVIRONMENT=staging`), 1 machine, sandbox providers |
+| `secrets.txt` | the names that must be set with `fly secrets set` |
+| `check_env_coverage.py` | CI/dev check: every variable in `Server/.env.example` is a `[env]` key, a secret, or an exempt alias |
+
+## Design notes
+
+* **Always on.** `auto_stop_machines = "off"`, `min_machines_running = 2` in production (two machines in one region at minimum so a
+  host failure or a rolling deploy never leaves zero; add a second region later, Neon is the single-region dependency, see
+  `docs/ops/RESILIENCE.md`). `max_unavailable = 1` keeps one machine serving during a rolling deploy.
+* **Health.** `/healthz` is liveness (process answers; no dependency state). `/readyz` runs one database query and answers `503`
+  when it fails, so Fly stops routing to a machine that lost the database. Both answer only `{"status":"ok"}`.
+* **Migrations.** `release_command = "migrate --yes --env production"` runs in a temporary machine before the new version starts;
+  a non-zero exit aborts the deploy and the old version keeps serving. `AUTO_MIGRATE=false` at runtime so machines never race.
+  Write migrations additively (expand, deploy, contract) because old machines run against the new schema during a rolling deploy.
+  Caveat: the release machine boots the whole app, so the in-process job loop also starts for the few seconds it lives. The jobs are
+  compare-and-swap safe (`Server/README.md`, "Operations notes"), so this is harmless but not ideal.
+* **Concurrency.** `type = "requests"`, soft 200 / hard 400 per machine in production (100/200 staging). Past the hard limit the
+  Fly proxy stops sending new requests to that machine and queues/503s; tune against load tests.
+* **Graceful stop.** `SIGTERM`, 30 s.
+* **Deploys come from CI only** (`.github/workflows/release.yml`): the image is built, SBOM'd, signed with cosign, attested, pushed
+  to GHCR and deployed **by digest**. Staging deploys first and production requires the `production` environment approval.
+
+## One-time setup
+
+```bash
+# Install flyctl (a Go binary, no Node): https://fly.io/docs/flyctl/install/   (CI uses a checksum-pinned release)
+fly auth login
+fly apps create viadere-server-staging --org viadere
+fly apps create viadere-server         --org viadere
+```
+
+### 1. Secrets
+
+Generate each key independently (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`); production values are **distinct** from
+staging and from each other (the server refuses duplicates). Never reuse a secret across environments. Store the production
+`DATA_ENCRYPTION_KEY`, `SERVER_PEPPER` and `AUDIT_CHAIN_KEY` in the offline escrow described in `docs/ops/RESILIENCE.md`
+(losing them makes encrypted columns and OTP/phone hashes unrecoverable).
+
+```bash
+fly secrets set --app viadere-server-staging --stage \
+  DATABASE_URL='postgres://viadere_app:...@ep-....neon.tech/viadere?sslmode=verify-full' \
+  CONNECT_LINK_SIGNING_KEY=... SERVER_PEPPER=... DATA_ENCRYPTION_KEY=... AUDIT_CHAIN_KEY=... \
+  EMAIL_API_KEY=... APNS_KEY_P8="$(cat AuthKey_XXXX.p8)" \
+  TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_MESSAGING_SERVICE_SID=...
+# optional groups (all or none): RCS_PROVIDER_TOKEN + RCS_WEBHOOK_SECRET (with RCS_PROVIDER_BASE_URL/RCS_AGENT_ID in fly.toml);
+# PASS_CERTIFICATE_PEM + PASS_PRIVATE_KEY_PEM + PASS_WWDR_CERTIFICATE_PEM (with PASS_TYPE_IDENTIFIER in fly.toml)
+fly secrets list --app viadere-server-staging      # names and digests only
+```
+
+`--stage` defers the restart to the next deploy. Do not put secrets on a shell history line on a shared machine; use `fly secrets import`
+from a file on `tmpfs` and delete it. The full list of names is `secrets.txt`; `python3 -I Infra/fly/check_env_coverage.py` proves
+every variable in `Server/.env.example` is covered.
+
+### 2. First deploy (staging, then production)
+
+```bash
+flyctl deploy --app viadere-server-staging --config Infra/fly/fly.staging.toml --image ghcr.io/<org>/viadere-server@sha256:<digest>
+fly status --app viadere-server-staging
+curl -fsS https://viadere-server-staging.fly.dev/readyz     # while the Fly hostname is still open (see step 6)
+```
+
+## Cloudflare in front of Fly (exact steps)
+
+Terraform creates the Cloudflare side (`Infra/terraform/cloudflare.tf`); the numbered steps below are the Fly side plus the
+verification. Hostnames: `api.viadere.com` is the origin hostname served by Fly (staging: `api.staging.viadere.com`).
+
+3. **Allocate addresses and a certificate on Fly** (Fly issues a Let's Encrypt certificate and validates by DNS-01, which works while
+   the record is proxied):
+   ```bash
+   fly ips allocate-v4 --shared --app viadere-server      # or a dedicated v4 if you need a stable address
+   fly ips allocate-v6 --app viadere-server
+   fly certs add api.viadere.com --app viadere-server
+   fly certs show api.viadere.com --app viadere-server     # prints the _acme-challenge CNAME target
+   ```
+4. **DNS.** Terraform's `cloudflare_dns_record.api` is a **proxied** `CNAME api -> viadere-server.fly.dev`
+   (variable `fly_origin_hostname`); add the `_acme-challenge.api` CNAME printed by `fly certs show` as an **unproxied** record
+   (variable `fly_acme_challenge_cname`). Re-run `fly certs show` until it says *Ready*.
+5. **SSL/TLS mode = Full (strict)** (Terraform: `cloudflare_zone_setting.ssl = strict`). Cloudflare then verifies Fly's certificate
+   for `api.viadere.com`; never use Flexible or Full (non-strict).
+6. **Lock the origin to Cloudflare.** The Fly app is reachable at `*.fly.dev` and by IP, so the proxy being in front proves nothing
+   unless the origin refuses everyone else. Layered controls, strongest last:
+   1. *Shared header (implemented at Cloudflare; **enforcement in the server is a gap**).* A Cloudflare Transform Rule sets
+      `X-Viadere-Edge-Token: <random>` on every request to the origin (`cloudflare_ruleset.origin_edge_token`, value from the
+      sensitive variable `edge_token`, rotate by applying a new value to Cloudflare and to Fly secret `EDGE_TOKEN` with an
+      overlap period). The server must reject any request (except `/healthz` and `/readyz` from Fly's checks) whose header is
+      missing or not constant-time equal to `EDGE_TOKEN`. **This middleware does not exist yet** (see
+      `docs/ops/KILL-SWITCHES.md`, gap G-10); until then the header is set but not verified. Do not claim origin lock-down before it lands.
+   2. *Authenticated Origin Pulls (mTLS Cloudflare -> origin).* Terraform enables zone-level AOP
+      (`cloudflare_authenticated_origin_pulls_settings`) so Cloudflare presents a client certificate to the origin. **The Fly
+      proxy does not verify client certificates** (its `http_service` supports only ALPN/TLS-version options), so to enforce it
+      the origin must terminate TLS itself: expose a raw TCP service (`[[services]]` with `handlers = []` on port 443, no `tls`
+      handler), serve the Let's Encrypt/Cloudflare Origin CA certificate from the server and configure NIO-SSL with
+      `certificateVerification = .noHostnameVerification` and Cloudflare's origin-pull CA as the only trust root. That needs a
+      Server change (gap G-11) and gives up Fly's HTTP-layer features (checks stay TCP/`/healthz` over the app's own TLS).
+      The alternative that needs no server change is **Cloudflare Tunnel**: run `cloudflared` (Go) as a second process group,
+      remove the public `[http_service]` and let Cloudflare reach the app over Fly's private network. Pick one in the next
+      architecture review; this repo ships the Terraform for AOP and the header, and the fly.toml for the Fly-proxied variant.
+   3. *Stop using the public Fly hostname for traffic.* After the certificate is *Ready*, nothing should call
+      `viadere-server.fly.dev`; alert on requests whose `Host` is not `api.viadere.com` (log line, once the middleware exists).
+7. **Authenticated Origin Pulls certificate.** Zone-level AOP uses Cloudflare's shared certificate (anyone using Cloudflare can
+   present it, so it only proves "some Cloudflare tenant"; the shared header is what ties the request to *our* zone). For a
+   per-zone certificate upload your own client certificate with `cloudflare_authenticated_origin_pulls_certificate`
+   (variables `aop_client_certificate`, `aop_client_private_key`; commented example in `cloudflare.tf`).
+8. **Client IP.** Traffic is client -> Cloudflare -> Fly proxy -> app, so `X-Forwarded-For` ends with `<client>, <cloudflare edge>`
+   and `TRUSTED_PROXY_COUNT = "2"` selects the client. Verify on staging before production (a wrong value makes every client share
+   one rate-limit bucket, or lets a client choose its own IP):
+   ```bash
+   curl -s https://api.staging.viadere.com/v1/<any rate-limited route> -H 'X-Forwarded-For: 203.0.113.9' -i   # spoofed hop
+   fly logs --app viadere-server-staging | grep -m1 'ip='    # the resolved address must be YOUR address, not 203.0.113.9 and not a Cloudflare range
+   ```
+9. **Cache and compression.** The API is dynamic: Terraform adds a cache-bypass rule for `api.viadere.com` (`cloudflare_ruleset.api_cache_bypass`);
+   only `/connect-button/v1/*` and `/.well-known/*` may be cached (they are immutable/public).
+10. **Smoke tests** after any change: `curl -sI https://api.viadere.com/healthz` (200, `strict-transport-security`, `cf-ray`),
+    `curl -sI http://api.viadere.com/` (301 to https), `openssl s_client -tls1_1 ...` (handshake refused),
+    `curl --tlsv1.2 --tls-max 1.2 https://api.viadere.com/healthz` (works only while the 1.2 compatibility policy is on).
+
+## Routine operations
+
+```bash
+fly status --app viadere-server                # machines and check state
+fly logs --app viadere-server                  # JSON logs, tokens/secrets/phones are redacted by the server
+fly scale count 3 --region iad --app viadere-server
+fly ssh console --app viadere-server -C "/app/ViadereServer audit-head"    # see docs/ops/RUNBOOKS.md for command use
+fly releases --app viadere-server              # roll back with: flyctl deploy --image <previous digest> (migrations are forward-only)
+fly secrets set --app viadere-server NAME=...  # restarts machines one by one
+```
+
+## Environment variable coverage
+
+`python3 -I Infra/fly/check_env_coverage.py` is authoritative. Summary of the mapping:
+
+* **Secrets (`fly secrets`)**: `DATABASE_URL`, `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`,
+  `EMAIL_API_KEY`, `APNS_KEY_P8`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID`,
+  `RCS_PROVIDER_TOKEN`, `RCS_WEBHOOK_SECRET`, `PASS_CERTIFICATE_PEM`, `PASS_PRIVATE_KEY_PEM`, `PASS_WWDR_CERTIFICATE_PEM`,
+  `EMAIL_API_AUTH_*` (only for providers that need them), `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` (upgrade only).
+* **Plain `[env]`**: everything else in `.env.example` (URLs, RP identifiers, Apple identifiers, App Attest, APNs ids/topic,
+  retention, abuse, billing, limits, rate-limit store, proxy count, dashboard timeouts).
+* **Exempt**: `POSTGRES_PASSWORD` (docker-compose only) and the `*_PATH` aliases (`APNS_KEY_PATH`, `PASS_*_PATH`): Fly has no mounted
+  secret files, so use the inline `APNS_KEY_P8` and `PASS_*_PEM` secrets.
+* `RATE_LIMIT_STORE=database` and `AUTO_MIGRATE=false` are set explicitly; `ENVIRONMENT` is set per app (`production` / `staging`).
+* `EDGE_TOKEN` (origin shared header) is not read by the server yet (gap G-10); it is listed here so the secret exists when it is.
+* The placeholders `REPLACE_WITH_*` in `fly.*.toml` (`APPLE_TEAM_ID`, `APNS_KEY_ID`, `APNS_TEAM_ID`) must be replaced before the
+  first deploy; they are identifiers, not secrets.

@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (gitignored). No secrets here: edge_token, provider credentials and the AOP key come from TF_VAR_* / env in CI.
+environment                = "production"
+cloudflare_account_id      = "REPLACE"
+cloudflare_zone_id         = "REPLACE"
+apex_domain                = "viadere.com"
+api_hostname_label         = "api"
+fly_origin_hostname        = "viadere-server.fly.dev"
+min_tls_version            = "1.2"
+gcp_project_id             = "viadere-kms-prod"
+kms_location               = "us-east1"
+kms_workload_identity_pool = "principalSet://iam.googleapis.com/projects/000000000000/locations/global/workloadIdentityPools/viadere/attribute.app/viadere-server"
+neon_org_id                = "org-REPLACE"
+neon_region_id             = "aws-us-east-1"

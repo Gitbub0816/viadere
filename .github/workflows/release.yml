@@ -1,0 +1,200 @@
+# Release: build the Server image, scan it, push it to GHCR, generate and attest an SBOM, sign it (cosign keyless / GitHub OIDC), attach
+# SLSA build provenance, then deploy by DIGEST to Fly: staging first, production behind the protected `production` environment.
+# Required repository settings (documented in docs/ops/SECURE-SDLC.md): environments `staging` and `production` (production:
+# required reviewers + wait timer + deployment branch/tag rule `v*`), each with its own FLY_API_TOKEN (a Fly deploy token scoped to
+# that single app). No long-lived cloud credentials exist in this workflow: signing uses the job's OIDC token.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false # never cancel a half-finished release
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build, scan, sign, attest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # keyless cosign + provenance (Sigstore OIDC)
+      attestations: write # GitHub artifact attestations
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh cosign syft trivy
+      - name: Image name and tags
+        id: meta
+        run: |
+          image="${REGISTRY}/${GITHUB_REPOSITORY,,}/viadere-server"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${image}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - name: Build (context = repository root)
+        env:
+          SHA_TAG: ${{ steps.meta.outputs.sha_tag }}
+        run: |
+          docker build -f Server/Dockerfile \
+            --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label org.opencontainers.image.revision="${GITHUB_SHA}" \
+            -t "${SHA_TAG}" .
+      - name: Scan before publishing (fail on fixable HIGH or CRITICAL)
+        env:
+          SHA_TAG: ${{ steps.meta.outputs.sha_tag }}
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${SHA_TAG}"
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "${GH_TOKEN}" | docker login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+      - name: Push
+        id: push
+        env:
+          SHA_TAG: ${{ steps.meta.outputs.sha_tag }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker push "${SHA_TAG}"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "${SHA_TAG}" | cut -d@ -f2)"
+          test -n "${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            docker tag "${SHA_TAG}" "${IMAGE}:${GITHUB_REF_NAME}"
+            docker push "${IMAGE}:${GITHUB_REF_NAME}"
+          fi
+      - name: SBOM (SPDX) of the pushed image
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: syft "registry:${REF}" -o spdx-json=sbom.spdx.json
+      - name: Sign the image (keyless)
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${REF}"
+      - name: Attach the SBOM as a signed attestation
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${REF}"
+      - name: SLSA build provenance (GitHub artifact attestation, pushed to the registry)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-server-image
+          path: sbom.spdx.json
+          retention-days: 365
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://api.staging.viadere.com
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+      FLY_APP: viadere-server-staging
+      FLY_CONFIG: Infra/fly/fly.staging.toml
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh cosign flyctl
+      - name: Verify the signature and the workflow identity before deploying
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/(tags/v.*|heads/main)$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}" > /dev/null
+      - name: Copy the verified image (same digest) to the Fly registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "${GH_TOKEN}" | docker login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+          flyctl auth docker
+          docker pull "${IMAGE}@${DIGEST}"
+          docker tag "${IMAGE}@${DIGEST}" "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+          docker push "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+          pushed="$(docker inspect --format '{{index .RepoDigests 0}}' "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}" | cut -d@ -f2)"
+          [ "${pushed}" = "${DIGEST}" ] || { echo "digest changed while copying (${pushed} != ${DIGEST})" >&2; exit 1; }
+      - name: Deploy (release command runs migrations first)
+        run: flyctl deploy --app "${FLY_APP}" --config "${FLY_CONFIG}" --image "registry.fly.io/${FLY_APP}@${DIGEST}" --strategy rolling --wait-timeout 600
+      - name: Smoke test
+        run: |
+          for path in healthz readyz; do
+            curl --proto '=https' --tlsv1.2 -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://api.staging.viadere.com/${path}"
+          done
+
+  deploy-production:
+    name: Deploy to production
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Protected environment: required reviewers (two people, neither the author of the release commit), wait timer, tag rule v*.
+    environment:
+      name: production
+      url: https://api.viadere.com
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+      FLY_APP: viadere-server
+      FLY_CONFIG: Infra/fly/fly.production.toml
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh cosign flyctl
+      - name: Verify the signature and the workflow identity before deploying
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/tags/v.*$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}" > /dev/null
+      - name: Verify the SLSA provenance attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "${GITHUB_REPOSITORY}" --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml"
+      - name: Copy the verified image (same digest) to the Fly registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "${GH_TOKEN}" | docker login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+          flyctl auth docker
+          docker pull "${IMAGE}@${DIGEST}"
+          docker tag "${IMAGE}@${DIGEST}" "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+          docker push "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+          pushed="$(docker inspect --format '{{index .RepoDigests 0}}' "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}" | cut -d@ -f2)"
+          [ "${pushed}" = "${DIGEST}" ] || { echo "digest changed while copying (${pushed} != ${DIGEST})" >&2; exit 1; }
+      - name: Deploy (release command runs migrations first)
+        run: flyctl deploy --app "${FLY_APP}" --config "${FLY_CONFIG}" --image "registry.fly.io/${FLY_APP}@${DIGEST}" --strategy rolling --wait-timeout 600
+      - name: Smoke test
+        run: |
+          for path in healthz readyz; do
+            curl --proto '=https' --tlsv1.2 -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://api.viadere.com/${path}"
+          done

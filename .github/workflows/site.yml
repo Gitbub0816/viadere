@@ -1,0 +1,70 @@
+# Site: build the Swift static site, lint it, and (on main only) upload it to Cloudflare Workers Static Assets through the REST direct-upload API
+# (ADR-04; Site/deploy/upload.py is Python standard library only, no Node/wrangler). Pull requests build and lint but never upload.
+name: Site
+
+on:
+  pull_request:
+    paths: ["Site/**", ".github/workflows/site.yml"]
+  push:
+    branches: [main]
+    paths: ["Site/**", "docs/openapi.yaml", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: swift:6.4.1-resolute@sha256:82152e9f18ee21fc997fd4580b93a14097e465cb10d7a7eee3f2dc85364dd135
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard
+        run: test -f Site/Package.swift || { echo "Site/ not present"; exit 1; }
+      - name: Build
+        working-directory: Site
+        # INTERFACE ASSUMPTION (owned by WP7): see ci.yml. Reconcile with Site/Sources/viadere-site when it lands.
+        run: swift run -c release viadere-site build --out dist
+      - name: Lint (marketing integrity, links, legal metadata)
+        working-directory: Site
+        run: swift run -c release viadere-site lint --dist dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-dist
+          path: Site/dist
+          retention-days: 14
+
+  deploy:
+    name: Upload to Cloudflare
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: site-production
+      url: https://viadere.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site-dist
+          path: Site/dist
+      - name: Upload (Python standard library; token scoped to Workers Scripts:Edit for this account)
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SITE_WORKER_NAME: viadere-site
+        # INTERFACE ASSUMPTION (owned by WP7): upload.py reads the two CLOUDFLARE_* variables and takes the dist directory and script name.
+        run: python3 -I Site/deploy/upload.py --dist Site/dist --script "${SITE_WORKER_NAME}"
+      - name: Smoke test
+        run: curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 5 --retry-all-errors https://viadere.com/ | head -n 1
