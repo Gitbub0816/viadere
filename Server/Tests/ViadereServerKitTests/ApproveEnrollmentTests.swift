@@ -241,7 +241,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             _ = try await h.connect(consumer, to: b)
             let phone = try await h.enrollApproval(consumer, business: b, keys: keys, confirm: false)
             let subject = h.subjectRef(b, consumer)
-            let enrollmentId = try XCTUnwrap(try await ApproveEnrollmentRecord.query(on: h.db).first()?.id)
+            let enrollmentId = try unwrap(try await ApproveEnrollmentRecord.query(on: h.db).first()?.id)
             let path = "/v1/business/approve/enrollments/\(enrollmentId.uuidString.lowercased())/confirm"
             let view = try await h.business(b, .GET, "/v1/business/approve/enrollments/\(enrollmentId.uuidString.lowercased())").json(ApprovalEnrollmentView.self)
             let signed = try XCTUnwrap(view.deviceStatement)
@@ -286,7 +286,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             let subject = h.subjectRef(b, consumer)
             let deviceKey = SoftwareP256SigningKey()
             let phone = try await h.enrollApproval(consumer, business: b, keys: keys, confirm: false, approvalKey: deviceKey)
-            let record = try XCTUnwrap(try await ApproveEnrollmentRecord.query(on: h.db).first())
+            let record = try unwrap(try await ApproveEnrollmentRecord.query(on: h.db).first())
             let genuineSigned = try XCTUnwrap(record.deviceStatement)
             let genuine = try ApprovalEnrollmentStatement.verify(genuineSigned)
 
@@ -295,7 +295,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             let attackerStatement = try ApprovalEnrollmentStatement(businessId: b.id, subject: subject, enrollmentId: record.id!, publicKey: attackerKey.publicKey,
                                                                     hpkePublicKey: SoftwareE2EEPrivateKey().publicKey, assurance: .biometric, createdAt: h.clock.now())
             let attackerSigned = try await attackerStatement.sign(with: attackerKey)
-            let key = try XCTUnwrap(try await ApproveKeyRecord.query(on: h.db).first())
+            let key = try unwrap(try await ApproveKeyRecord.query(on: h.db).first())
             try await ApproveEnrollmentRecord.query(on: h.db).set(\.$statementPayload, to: attackerSigned.payload).set(\.$statementSignature, to: attackerSigned.signature).set(\.$kid, to: attackerStatement.kid).update()
             try await ApproveKeyRecord.query(on: h.db).filter(\.$id == key.id!).set(\.$kid, to: attackerStatement.kid).set(\.$publicKey, to: attackerKey.publicKey.base64URL)
                 .set(\.$statementPayload, to: attackerSigned.payload).set(\.$statementSignature, to: attackerSigned.signature).update()
@@ -309,7 +309,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             XCTAssertEqual(confirmed.status, .ok, confirmed.text)
 
             // But the confirmation names the attacker's key and statement. The device, which still has its own statement, rejects it.
-            let wire = try XCTUnwrap(try await ApproveKeyRecord.query(on: h.db).first()?.confirmation)
+            let wire = try unwrap(try await ApproveKeyRecord.query(on: h.db).first()?.confirmation)
             let signedConfirmation = try ViadereJSON.decode(BusinessSignedStatement.self, from: Data(wire.utf8))
             let parsed = try ApprovalEnrollmentConfirmation.verify(signedConfirmation, confirmationKey: keys.confirmation.publicKey)
             XCTAssertThrowsError(try parsed.checkMatches(genuine, signed: genuineSigned)) { XCTAssertEqual($0 as? ApprovalEnrollmentError, .keyMismatch) }
@@ -332,7 +332,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             let (created, body) = try await h.createRequest(f)
             XCTAssertEqual(created.status, .created, created.text)
             atrue(try await h.pendingRequests(thief).isEmpty)
-            let delivery = try XCTUnwrap(try await ApproveDeliveryRecord.query(on: h.db).first())
+            let delivery = try unwrap(try await ApproveDeliveryRecord.query(on: h.db).first())
             let theirs = TestApprovalDevice(consumer: thief, approvalKey: SoftwareP256SigningKey(), hpke: SoftwareE2EEPrivateKey(), assurance: .biometric)
             let stolenAnswer = try await h.answer(f.phone, try await h.pendingRequests(consumer)[0])
             aeq(try await h.submit(theirs, deliveryId: delivery.id!, result: stolenAnswer).status, .notFound, "a delivery is bound to the device that holds the key")
@@ -408,7 +408,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             XCTAssertEqual(biz.status, .ok, biz.text)
             XCTAssertEqual(try biz.json(ApprovalKeyView.self).revokedBy, "business")
             atrue(try await h.pendingRequests(second).isEmpty)
-            let record = try XCTUnwrap(try await ApproveRequestRecord.query(on: h.db).first())
+            let record = try unwrap(try await ApproveRequestRecord.query(on: h.db).first())
             XCTAssertEqual(record.status, "cancelled")
             // Revocation is idempotent, owned (another business gets a 404) and audited.
             aeq(try await h.businessPost(f.business, "/v1/business/approve/keys/\(secondPhone.kid)/revoke", RevokeApprovalKeyRequest()).status, .ok)

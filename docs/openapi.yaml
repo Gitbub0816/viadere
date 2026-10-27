@@ -80,6 +80,7 @@ tags:
   - name: Webhooks
   - name: Rewards
   - name: Capabilities
+  - name: Verification
 
 paths:
   /v1/business/capabilities:
@@ -551,6 +552,103 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/verification-requests:
+    post:
+      tags: [Verification]
+      operationId: createVerificationRequest
+      summary: Ask a customer to verify an age threshold or an identity attribute
+      description: |
+        Needs the capability (`age.minimum`, `identity.name`, `identity.address` or `identity.verified`) on the key **and** in your business's
+        entitlements (risk tier V; identity attributes also need a recorded heightened review). A key that carries only messaging
+        capabilities gets `403 insufficient_scope`. The request is checked by the policy engine before anything about the customer is read.
+
+        The customer sees who you are, the purpose, **exactly** what will be shared, who receives it and when the request expires, and gives
+        consent for that disclosure (a consent receipt). Wallet (an ID in Apple Wallet) is offered first; document scanning is the alternative.
+        `callback_id` names one of **your registered webhook endpoints** subscribed to `verification.completed`; a URL is never accepted.
+        `expires_in_seconds` is 30 to 600 (default 300).
+
+        An `age.minimum` result discloses only `meets_threshold`, `assurance`, `issued_at`, `expires_at` and `audience`: never a birthdate,
+        an age, a name or a document number.
+        Idempotent on the `Idempotency-Key` header.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVerificationRequest" }
+            example:
+              subject_ref: "sub_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+              capability: age.minimum
+              parameters: { years: 18 }
+              purpose_code: age_restricted_access
+              callback_id: "5d1b2a60-0000-4000-8000-000000000001"
+              expires_in_seconds: 180
+      responses:
+        "200":
+          description: The idempotency key was used before with the same request; the original request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "201":
+          description: Created and delivered to the customer's app.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/verification-requests/{requestId}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationRequest
+      summary: The state of a verification request
+      description: |
+        `pending` until the request ends, then `completed` with a `result_ref`. There is no "declined", "expired" or "failed" here: every end
+        that is not a positive result is the same `not_verified` result (a customer under the threshold, a customer who said no and a
+        failed check are indistinguishable to you, AGE-005). Needs the request's capability on the key.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" } }
+      responses:
+        "200":
+          description: The request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/verification-results/{resultRef}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationResult
+      summary: Retrieve a verification result (once)
+      description: |
+        Authenticated and **bound to your business**: another business's `result_ref` is a plain `404`. **Single use**: the first successful
+        call returns the result and erases it; any later call is `410`. Results expire 15 minutes after they are issued (`410`). The response is
+        `Cache-Control: no-store`. Store what you need.
+
+        `outcome` is `verified` or `not_verified` (with an empty `result`). `result` holds exactly the capability's output fields.
+        `result.assurance` names the evidence and binding (for example `issuer_signed_credential_device_bound` for a Wallet ID,
+        `document_and_biometric_match` for a scanned document, `sandbox_simulated` for test mode); it is **not** a NIST IAL/AAL claim.
+        A selfie age estimate never produces `meets_threshold`.
+      parameters:
+        - { name: resultRef, in: path, required: true, schema: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$" } }
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
 webhooks:
   interaction.decided:
     post:
@@ -628,6 +726,32 @@ webhooks:
                   properties:
                     type: { const: consent.updated }
                     data: { $ref: "#/components/schemas/ConsentUpdatedData" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  verification.completed:
+    post:
+      summary: A verification request ended
+      description: |
+        Sent to the endpoint named by the request's `callback_id` when the request ends, with **any** outcome (a positive result, a decline, an
+        expiry and a failed check all send the same event). The body is opaque: it names the request and the result and carries nothing else.
+        Fetch the result with `GET /v1/verification-results/{result_ref}`. Subscriptions that opted into the `2026-10-27` envelope receive the
+        spec 14.3 form (`id`, `type`, `version`, `tenant_id`, `request_id`, `occurred_at`, `result_ref`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: verification.completed }
+                    data:
+                      type: object
+                      required: [request_id, result_ref]
+                      additionalProperties: false
+                      properties:
+                        request_id: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" }
+                        result_ref: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$" }
       responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
 
 components:
@@ -967,6 +1091,62 @@ components:
         - { $ref: "#/components/schemas/TicketPayload" }
         - { $ref: "#/components/schemas/MessagePayload" }
 
+    CreateVerificationRequest:
+      type: object
+      required: [subject_ref, capability, purpose_code]
+      additionalProperties: false
+      properties:
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { type: string, enum: [age.minimum, identity.name, identity.address, identity.verified] }
+        parameters:
+          type: object
+          description: "`age.minimum`: `{ \"years\": 13 | 16 | 18 | 21 | 25 }`. The identity capabilities take none. Unknown parameters are rejected."
+        purpose_code: { type: string, pattern: "^[a-z][a-z0-9_]{2,47}$", examples: [age_restricted_access] }
+        callback_id:
+          type: string
+          format: uuid
+          description: The id of a webhook endpoint you registered (subscribed to `verification.completed`). Never a URL.
+        expires_in_seconds: { type: integer, minimum: 30, maximum: 600, default: 300 }
+    VerificationRequest:
+      type: object
+      required: [request_id, capability, subject_ref, purpose_code, status, created_at, expires_at]
+      properties:
+        request_id: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" }
+        capability: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        purpose_code: { type: string }
+        status: { type: string, enum: [pending, completed] }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
+        result_ref: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$", description: Present once `completed`. }
+    VerificationResult:
+      type: object
+      required: [result_ref, request_id, capability, subject_ref, parameters, created_at, outcome, result]
+      additionalProperties: false
+      properties:
+        result_ref: { type: string }
+        request_id: { type: string }
+        capability: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        parameters: { type: object }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        outcome: { type: string, enum: [verified, not_verified] }
+        result:
+          type: object
+          description: |
+            Exactly the capability's output fields and nothing else. `age.minimum`: `meets_threshold`, `assurance`, `issued_at`, `expires_at`,
+            `audience`. `identity.name`: `given_name`, `family_name` + the same four. `identity.address`: `address` + the same four.
+            `identity.verified`: `verified` + the same four. Empty for `not_verified`.
+          properties:
+            meets_threshold: { type: boolean }
+            verified: { type: boolean }
+            given_name: { type: string }
+            family_name: { type: string }
+            address: { type: object }
+            assurance: { type: string }
+            issued_at: { $ref: "#/components/schemas/Timestamp" }
+            expires_at: { $ref: "#/components/schemas/Timestamp" }
+            audience: { type: string, description: The business the result is bound to (yours). }
     SubjectRef:
       type: string
       pattern: "^sub_[A-Za-z0-9_-]{43}$"

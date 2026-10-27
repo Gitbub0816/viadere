@@ -180,3 +180,8 @@ func ane<T: Equatable>(_ lhs: T, _ rhs: T, _ message: String = "", file: StaticS
 func atrue(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) { XCTAssertTrue(value, message, file: file, line: line) }
 func afalse(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) { XCTAssertFalse(value, message, file: file, line: line) }
 func anil<T>(_ value: T?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) { XCTAssertNil(value, message, file: file, line: line) }
+
+/// `XCTUnwrap` for an awaited optional.
+func unwrap<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) throws -> T {
+    try XCTUnwrap(value, file: file, line: line)
+}
