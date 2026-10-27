@@ -184,20 +184,21 @@ final class Round3Tests: XCTestCase {
 
     // MARK: #5 - refresh-token reuse, grace window, logout
 
-    func refresh(_ h: TestHarness, _ token: String) async throws -> HTTPResult {
-        try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: token))
+    func refresh(_ h: TestHarness, _ token: String, as user: TestConsumer? = nil) async throws -> HTTPResult {
+        if let user { return try await h.refresh(user, token: token) }
+        return try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: token))
     }
 
     func testALostRefreshResponseIsReplayedWithinTheGraceWindowAndIsTheftAfterwards() async throws {
         try await withHarness { h in
             let user = try await h.readyConsumer()
             let r1 = user.session.refreshToken!
-            let first = try await refresh(h, r1)
+            let first = try await refresh(h, r1, as: user)
             XCTAssertEqual(first.status, .ok, first.text)
             let pair = try first.json(AuthSession.self)
             // The response never arrived (or the extension raced the app): the same token again, 5 s later, returns the same pair.
             h.clock.advance(by: 5)
-            let again = try await refresh(h, r1)
+            let again = try await refresh(h, r1, as: user)
             XCTAssertEqual(again.status, .ok, again.text)
             let same = try again.json(AuthSession.self)
             XCTAssertEqual(same.refreshToken!, pair.refreshToken!)
@@ -211,13 +212,13 @@ final class Round3Tests: XCTestCase {
             try await isNil(try await TokenFamilyRecord.find(try XCTUnwrap(stored?.familyId), on: h.db)?.revokedAt)
             // After the window the same token is reuse.
             h.clock.advance(by: 120)
-            let late = try await refresh(h, r1)
+            let late = try await refresh(h, r1, as: user)
             XCTAssertEqual(late.status, .unauthorized)
             let wiped = try await RefreshTokenRecord.query(on: h.db).filter(\.$tokenHash == SecureToken.hash(r1)).first()
             _ = wiped
             try await notNil(try await TokenFamilyRecord.find(try XCTUnwrap(stored?.familyId), on: h.db)?.revokedAt)
             // The successor died with the family.
-            try await eq(try await refresh(h, pair.refreshToken!).status, .unauthorized)
+            try await eq(try await refresh(h, pair.refreshToken!, as: user).status, .unauthorized)
         }
     }
 
@@ -226,7 +227,7 @@ final class Round3Tests: XCTestCase {
             let user = try await h.readyConsumer()   // device D, enrolled before any rotation
             let deviceD = user.device!.id.uuid
             h.clock.advance(by: 1)
-            let second = try await refresh(h, user.session.refreshToken!)
+            let second = try await refresh(h, user.session.refreshToken!, as: user)
             var current = user
             current.session = try second.json(AuthSession.self)
             let r2 = current.session.refreshToken!
@@ -235,11 +236,11 @@ final class Round3Tests: XCTestCase {
             let thief = try await h.enrollInSession(current)
             XCTAssertNotNil(thief.device)
             h.clock.advance(by: 1)
-            let third = try await refresh(h, r2)   // legitimate rotation R2 -> R3
+            let third = try await refresh(h, r2, as: user)   // legitimate rotation R2 -> R3
             XCTAssertEqual(third.status, .ok, third.text)
             h.clock.advance(by: 120)
             // R2 is presented again, long after: reuse.
-            try await eq(try await refresh(h, r2).status, .unauthorized)
+            try await eq(try await refresh(h, r2, as: user).status, .unauthorized)
             let d = try await XCTUnwrapAsync(try await DeviceRecord.find(deviceD, on: h.db))
             XCTAssertNil(d.revokedAt, "the device the session already belonged to survives (no cascade to the pre-existing device)")
             let e = try await XCTUnwrapAsync(try await DeviceRecord.find(thief.device!.id.uuid, on: h.db))
@@ -250,9 +251,9 @@ final class Round3Tests: XCTestCase {
     func testAnExpiredUsedRefreshTokenIsJustInvalid() async throws {
         try await withHarness { h in
             let user = try await h.readyConsumer()
-            _ = try await refresh(h, user.session.refreshToken!)
+            _ = try await refresh(h, user.session.refreshToken!, as: user)
             h.clock.advance(by: h.config.refreshTokenTTL + 10)
-            try await eq(try await refresh(h, user.session.refreshToken!).status, .unauthorized)
+            try await eq(try await refresh(h, user.session.refreshToken!, as: user).status, .unauthorized)
             let family = try await TokenFamilyRecord.query(on: h.db).first()
             XCTAssertNil(family?.revokedAt, "an expired token proves nothing; nothing is revoked")
             try await isNil(try await DeviceRecord.find(user.device!.id.uuid, on: h.db)?.revokedAt)
@@ -287,12 +288,13 @@ final class Round3Tests: XCTestCase {
             try await eq(try await h.signed(a, .DELETE, "/v1/devices/\(a.device!.id)").status, .ok)
             let b = try await h.enrollDevice(a)
             let record = try await XCTUnwrapAsync(try await DeviceRecord.find(b.device!.id.uuid, on: h.db))
-            XCTAssertEqual(record.approvalsLockedUntil, h.clock.now().addingTimeInterval(24 * 3600), "any device in the last 30 days (revoked ones too) starts a cool-down")
-            // A truly lapsed account (nothing in 30 days) is new again.
+            XCTAssertEqual(record.approvalsLockedUntil, h.clock.now().addingTimeInterval(24 * 3600), "any earlier device (revoked ones too) starts a cool-down")
+            // A lapsed account (nothing for months) is NOT new again: an account that ever had an app device cools down.
             try await DeviceRecord.query(on: h.db).filter(\.$id == b.device!.id.uuid).set(\.$revokedAt, to: h.clock.now()).update()
-            h.clock.advance(by: 31 * 86_400)
+            h.clock.advance(by: 400 * 86_400)
             let c = try await h.enrollDevice(b)
-            try await isNil(try await DeviceRecord.find(c.device!.id.uuid, on: h.db)?.approvalsLockedUntil)
+            let lapsed = try await XCTUnwrapAsync(try await DeviceRecord.find(c.device!.id.uuid, on: h.db))
+            XCTAssertEqual(lapsed.approvalsLockedUntil, h.clock.now().addingTimeInterval(24 * 3600), "no lookback limit: a lapsed account's device cools down")
         }
     }
 
@@ -488,16 +490,36 @@ final class Round3Tests: XCTestCase {
 
     // MARK: #11 - "Set up again"
 
-    func testSetUpAgainReplacesTheDeviceAndKeepsTheSession() async throws {
+    func testSetUpAgainOfARevokedDeviceReplacesItAtOnceAndKeepsTheSession() async throws {
         try await withHarness { h in
             let a = try await h.readyConsumer()
             let oldId = a.device!.id
-            // A second session of the same device (bound to it on first use).
-            let other = try await h.login(a)
-            try await eq(try await h.signed(other, .GET, "/v1/devices").status, .ok)
-            let famRow = try await AccessTokenRecord.query(on: h.db).filter(\.$tokenHash == SecureToken.hash(a.token)).first()
+            // The old device was revoked (the normal biometric-change case); the owner signs in again with the passkey and sets up again.
+            try await eq(try await h.signed(a, .DELETE, "/v1/devices/\(oldId)").status, .ok)
+            let fresh = try await h.login(a)
+            let famRow = try await AccessTokenRecord.query(on: h.db).filter(\.$tokenHash == SecureToken.hash(fresh.token)).first()
             let family = try XCTUnwrap(famRow?.familyId)
+            let done = try await h.enrollRaw(fresh, replaces: oldId)
+            XCTAssertEqual(done.0.status, .created, done.0.text)
+            let newDevice = try done.0.json(Device.self)
+            XCTAssertNotNil(newDevice.approvalsLockedUntil, "the 24 h cool-down still applies to the new device")
+            XCTAssertNil(newDevice.replacementSession, "no second session: the caller's own session moves to the new device")
+            XCTAssertNil(newDevice.pendingReplacementBy)
+            let fam = try await XCTUnwrapAsync(try await TokenFamilyRecord.find(family, on: h.db))
+            XCTAssertNil(fam.revokedAt, "the caller's own session is not cascade-revoked")
+            XCTAssertEqual(fam.deviceId, newDevice.id.uuid, "the session moved to the new device")
+            var renewed = fresh
+            renewed.device = TestDevice(id: newDevice.id, requestKey: done.1[.request]!, passcodeKey: done.1[.approvalUserPresence]!, biometricKey: done.1[.approvalBiometric]!)
+            try await eq(try await h.signed(renewed, .GET, "/v1/devices").status, .ok)
+            let audited = try await AuditEventRecord.query(on: h.db).filter(\.$action == "device.replaced").count()
+            XCTAssertEqual(audited, 1)
+        }
+    }
 
+    func testSetUpAgainRefusesDevicesThatAreNotTheCallersOwnAndNeedsThePasskey() async throws {
+        try await withHarness { h in
+            let a = try await h.readyConsumer()
+            let oldId = a.device!.id
             // Replacing a device that is not this session's own is refused (and revokes nothing).
             let stranger = try await h.enrollDevice(try await h.registerConsumer(name: "Stranger"))
             let foreign = try await h.enrollRaw(a, replaces: stranger.device!.id)
@@ -507,26 +529,6 @@ final class Round3Tests: XCTestCase {
             let shortcut = try await h.enrollRaw(fresh, replaces: oldId, assertion: false)
             XCTAssertTrue([.unauthorized, .forbidden].contains(shortcut.0.status), shortcut.0.text)
             try await isNil(try await DeviceRecord.find(oldId.uuid, on: h.db)?.revokedAt)
-
-            // The real flow: the app lost its biometric key, signs in with the existing session and sets up again.
-            let done = try await h.enrollRaw(a, replaces: oldId)
-            XCTAssertEqual(done.0.status, .created, done.0.text)
-            let newDevice = try done.0.json(Device.self)
-            XCTAssertNotNil(newDevice.approvalsLockedUntil, "the 24 h cool-down still applies to the new device")
-            try await notNil(try await DeviceRecord.find(oldId.uuid, on: h.db)?.revokedAt)
-            let fam = try await XCTUnwrapAsync(try await TokenFamilyRecord.find(family, on: h.db))
-            XCTAssertNil(fam.revokedAt, "the caller's own session is not cascade-revoked")
-            XCTAssertEqual(fam.deviceId, newDevice.id.uuid, "the session moved to the new device")
-            // The same bearer works with the new device's key, and not with the old one.
-            var renewed = a
-            renewed.device = TestDevice(id: newDevice.id, requestKey: done.1[.request]!, passcodeKey: done.1[.approvalUserPresence]!, biometricKey: done.1[.approvalBiometric]!)
-            try await eq(try await h.signed(renewed, .GET, "/v1/devices").status, .ok)
-            let oldKeyResult = try await h.signed(a, .GET, "/v1/devices")
-            XCTAssertEqual(oldKeyResult.status, .unauthorized)
-            // Other sessions bound to the old device ended with it.
-            try await eq(try await h.signed(other, .GET, "/v1/devices").status, .unauthorized)
-            let audited = try await AuditEventRecord.query(on: h.db).filter(\.$action == "device.replaced").count()
-            XCTAssertEqual(audited, 1)
         }
     }
 

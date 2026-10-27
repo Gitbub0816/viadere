@@ -96,6 +96,11 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             throw APIError(.unauthorized, .signatureInvalid, "This device has been revoked.")
         }
         guard device.consumerId == tokenRecord.consumerId else { throw APIError.forbidden }
+        // A device that "Set up again" is replacing keeps working until its replacement is confirmed or out of its cool-down; the first
+        // request after that point completes the swap (the background job does too).
+        if device.pendingReplacementBy != nil, try await IdentityMaintenance(db: db, ctx: ctx).finalizeIfDue(device) {
+            throw APIError(.unauthorized, .signatureInvalid, "This device has been replaced.")
+        }
         // A suspended or deleted account loses device-signed access immediately, not only bearer access.
         guard let consumer = try await ConsumerRecord.find(tokenRecord.consumerId, on: db), consumer.status == "active" else { throw APIError.unauthorized }
         // Devices with their own lifetime (App Clips) stop working when it ends, and take their session with them.

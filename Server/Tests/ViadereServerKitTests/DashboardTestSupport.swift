@@ -92,9 +92,10 @@ extension TestHarness {
                                    signature: signature, userHandle: nil)
     }
 
+    /// Sign-up through the passkey ceremony only: the account exists but is **unverified** (no session, no organization).
     @discardableResult
-    func dashSignup(email: String = "owner@example.com", name: String = "Olive Owner", org: String = "Acme Roasters", handle: String? = "acmeroasters",
-                    category: String = "retail") async throws -> (session: DashSession, account: DashAccount, result: HTTPResult) {
+    func dashSignupUnverified(email: String = "owner@example.com", name: String = "Olive Owner", org: String = "Acme Roasters", handle: String? = "acmeroasters",
+                              category: String = "retail") async throws -> (account: DashAccount, result: HTTPResult) {
         let body = SignupBeginBody(email: email, displayName: name, organizationName: org, category: category, legalName: "Acme Roasters Ltd",
                                    website: "https://acme.example.com", requestedHandle: handle, description: "Sign-in approvals")
         let begin = try await jsonPost("/dashboard/auth/signup/begin", body)
@@ -105,14 +106,33 @@ extension TestHarness {
         let finish = try await jsonPost("/dashboard/auth/signup/finish",
             PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: registrationCredential(for: options, credentialId: credentialId, publicKey: publicKey)))
         XCTAssertEqual(finish.status, .ok, finish.text)
-        guard let cookie = sessionCookie(finish) else {
-            XCTFail("no session cookie: \(finish.text)")
-            throw XCTSkip("no cookie")
-        }
         let user = try await DashboardUserRecord.query(on: db).filter(\.$emailHash == ctx.hasher.hmacHex("dashboard-email", email)).first()!
-        let membership = try await OrgMembershipRecord.query(on: db).filter(\.$userId == user.id!).first()
-        let account = DashAccount(email: email, credentialId: credentialId, publicKey: publicKey, userId: user.id!, businessId: membership?.businessId)
-        return (DashSession(token: cookie.value, realm: .business), account, finish)
+        return (DashAccount(email: email, credentialId: credentialId, publicKey: publicKey, userId: user.id!, businessId: nil), finish)
+    }
+
+    /// Enters the emailed code on the public verification page.
+    @discardableResult
+    func dashVerifyEmail(_ email: String, code: String? = nil) async throws -> HTTPResult {
+        let code = code ?? emails.lastCode(to: email) ?? "000000"
+        return try await request(.POST, "/dashboard/verify", headers: ["Origin": origin], body: formBody([("email", email), ("code", code)]),
+                                 contentType: "application/x-www-form-urlencoded")
+    }
+
+    /// Sign-up, email verification and the first passkey sign-in: a verified owner of a *pending* organization with a live session.
+    @discardableResult
+    func dashSignup(email: String = "owner@example.com", name: String = "Olive Owner", org: String = "Acme Roasters", handle: String? = "acmeroasters",
+                    category: String = "retail") async throws -> (session: DashSession, account: DashAccount, result: HTTPResult) {
+        var (account, _) = try await dashSignupUnverified(email: email, name: name, org: org, handle: handle, category: category)
+        let verified = try await dashVerifyEmail(email)
+        XCTAssertEqual(verified.status, .ok, verified.text)
+        let (session, login) = try await dashLogin(account)
+        guard let session else {
+            XCTFail("no session after verification: \(login.text)")
+            throw XCTSkip("no session")
+        }
+        let membership = try await OrgMembershipRecord.query(on: db).filter(\.$userId == account.userId).first()
+        account.businessId = membership?.businessId
+        return (session, account, login)
     }
 
     func dashLogin(_ account: DashAccount, realm: DashboardRealm = .business, previous: DashSession? = nil) async throws -> (session: DashSession?, result: HTTPResult) {
@@ -179,13 +199,21 @@ extension TestHarness {
         return (session, account, businessId)
     }
 
-    /// Adds a team member the way the product does: invitation link → passkey registration.
+    /// The invitee asks for the emailed code on the invitation page; returns it.
+    func inviteCode(token: String, email: String) async throws -> String {
+        let response = try await request(.POST, "/dashboard/invite/\(token)/code", headers: ["Origin": origin], body: Data(), contentType: "application/x-www-form-urlencoded")
+        XCTAssertEqual(response.status, .ok, response.text)
+        return try XCTUnwrap(emails.lastCode(to: email), "no invite code mailed")
+    }
+
+    /// Adds a team member the way the product does: invitation email -> emailed code -> passkey registration.
     func addMember(owner: DashSession, role: OrgRole, email: String, name: String = "Teammate") async throws -> (session: DashSession, account: DashAccount) {
         let invite = try await formPost("/dashboard/team/invite", owner, [("email", email), ("role", role.rawValue)])
         XCTAssertEqual(invite.status, .ok, invite.text)
-        guard let r = invite.text.range(of: "/dashboard/invite/") else { throw XCTSkip("no invite link: \(invite.text.prefix(300))") }
-        let token = String(invite.text[r.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-        let begin = try await jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: name))
+        guard let token = emails.lastInviteToken(to: email) else { throw XCTSkip("no invite email: \(invite.text.prefix(300))") }
+        XCTAssertFalse(invite.text.contains(token), "the inviter never sees the token")
+        let code = try await inviteCode(token: token, email: email)
+        let begin = try await jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: name, code: code))
         XCTAssertEqual(begin.status, .ok, begin.text)
         let options = try begin.json(PasskeyRegistrationOptions.self)
         let credentialId = SecureToken.generate(byteCount: 16)

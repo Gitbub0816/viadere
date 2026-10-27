@@ -7,16 +7,22 @@ public struct RateDecision: Sendable, Equatable {
     public var retryAfter: TimeInterval
 }
 
-/// Pluggable rate-limit storage. The default is an in-process token bucket; a shared store (Redis,
-/// database) can be swapped in for multi-instance deployments without changing callers.
+/// Pluggable rate-limit storage. `InMemoryRateLimitStore` is per instance (development, tests); `DatabaseRateLimitStore` keeps the
+/// counters in the shared database so the limits are global across instances (the production default).
 public protocol RateLimitStore: Sendable {
-    /// Atomically takes `cost` tokens from the bucket identified by `key`.
+    /// Atomically takes `cost` tokens from the bucket identified by `key`. A negative `cost` gives tokens back (never beyond capacity).
     func take(key: String, rule: RateRule, cost: Double, now: Date) async -> RateDecision
+    /// Drops buckets that carry no state any more (shared stores only; the in-memory store sweeps on demand).
+    func purgeExpired(now: Date) async
+}
+
+extension RateLimitStore {
+    public func purgeExpired(now: Date) async {}
 }
 
 /// In-process token buckets. **Single instance only**: with several instances each has its own counters, so the effective limit is
-/// multiplied by the instance count; a deployment with more than one instance must supply a shared `RateLimitStore` (Redis or
-/// the database) through `Overrides.rateLimitStore`.
+/// multiplied by the instance count; a deployment with more than one instance uses `DatabaseRateLimitStore` (`RATE_LIMIT_STORE=database`,
+/// the default in staging and production). It is also the local fallback of that store while the database is unavailable.
 ///
 /// Memory is bounded **per namespace** (the part of the key before the first `|`, e.g. `ip`, `sms-phone`): every namespace has its own
 /// table, so a flood of fresh keys in one namespace (a signup-email spray, rotating phone numbers) can never exhaust the space of another
@@ -99,7 +105,7 @@ public actor InMemoryRateLimitStore: RateLimitStore {
         bucket.lastUsed = tick
         let decision: RateDecision
         if bucket.tokens >= cost {
-            bucket.tokens -= cost
+            bucket.tokens = min(bucket.capacity, bucket.tokens - cost)
             decision = RateDecision(allowed: true, retryAfter: 0)
         } else {
             let missing = cost - bucket.tokens
@@ -143,6 +149,11 @@ public struct RateLimiter: Sendable {
     public func enforce(_ name: String, key: String, rule: RateRule, cost: Double = 1) async throws {
         let decision = await store.take(key: "\(name)|\(key)", rule: rule, cost: cost, now: clock.now())
         if !decision.allowed { throw APIError.rateLimited(retryAfter: Int(decision.retryAfter.rounded(.up))) }
+    }
+
+    /// Gives tokens back (a lookup that turned out to be legitimate); never beyond the bucket's capacity.
+    public func refund(_ name: String, key: String, rule: RateRule, cost: Double = 1) async {
+        _ = await store.take(key: "\(name)|\(key)", rule: rule, cost: -cost, now: clock.now())
     }
 
     /// Non-throwing variant for contexts (SMS) that must drop silently.

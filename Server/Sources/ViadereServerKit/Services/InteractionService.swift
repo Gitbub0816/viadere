@@ -459,13 +459,25 @@ struct InteractionService {
 
     // MARK: Push
 
-    /// Best-effort push to the consumer's devices. The payload carries only an opaque interaction id.
+    /// Best-effort push to the consumer's devices, and to the devices of every delegate whose active grant covers this interaction's
+    /// purpose **and** business. The payload is the same generic one (opaque interaction id only, no business data); a delegate
+    /// fetches the details through the scoped API, which applies the same grant check again. An interaction outside every grant's
+    /// scope (other purpose, other business, expired or revoked grant, deleted delegate) is never pushed to the delegate.
     func push(record: InteractionRecord, interaction: Interaction) async {
         guard interaction.allowedChannels.contains(.nativePush) else { return }
         do {
             guard let business = try await BusinessRecord.find(record.businessId, on: db),
                   let summary = try await DirectoryService(db: db).summary(for: business) else { return }
-            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == record.consumerId).filter(\.$revokedAt == nil).all()
+            var recipients: [UUID] = [record.consumerId]
+            if let purpose = InteractionPurpose(rawValue: record.purpose) {
+                let now = ctx.now
+                let grants = try await DelegationGrantRecord.query(on: db).filter(\.$grantorId == record.consumerId).filter(\.$revokedAt == nil)
+                    .filter(\.$expiresAt > now).all()
+                for grant in grants where grant.permits(purpose: purpose, businessId: record.businessId, now: now) && !recipients.contains(grant.delegateId) {
+                    if let delegate = try await ConsumerRecord.find(grant.delegateId, on: db), delegate.status == "active" { recipients.append(grant.delegateId) }
+                }
+            }
+            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId ~~ recipients).filter(\.$revokedAt == nil).all()
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id))
                 .filter(\.$invalidatedAt == nil).all()
             let topic = ctx.config.appBundleID

@@ -123,9 +123,12 @@ final class DashboardPagesTests: XCTestCase {
         try await withHarness { h in
             let (owner, _, _) = try await h.verifiedOwner()
             let first = try await h.formPost("/dashboard/team/invite", owner, [("email", "new@example.com"), ("role", "developer")])
-            let firstToken = String(first.text[first.text.range(of: "/dashboard/invite/")!.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            XCTAssertEqual(first.status, .ok)
+            let firstToken = try XCTUnwrap(h.emails.lastInviteToken(to: "new@example.com"))
+            XCTAssertFalse(first.text.contains(firstToken), "the inviter never sees the token")
             let second = try await h.formPost("/dashboard/team/invite", owner, [("email", "NEW@example.com"), ("role", "analyst")])
-            let secondToken = String(second.text[second.text.range(of: "/dashboard/invite/")!.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            XCTAssertEqual(second.status, .ok)
+            let secondToken = try XCTUnwrap(h.emails.lastInviteToken(to: "new@example.com"))
             XCTAssertNotEqual(firstToken, secondToken)
             // Tokens are stored hashed only.
             let invites = try await OrgInviteRecord.query(on: h.db).all()
@@ -137,7 +140,8 @@ final class DashboardPagesTests: XCTestCase {
             let page = try await h.page("/dashboard/invite/\(secondToken)", nil)
             XCTAssertEqual(page.status, .ok)
             XCTAssertTrue(page.text.contains("Acme Roasters"))
-            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: secondToken, displayName: "New Person"))
+            let secondCode = try await h.inviteCode(token: secondToken, email: "new@example.com")
+            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: secondToken, displayName: "New Person", code: secondCode))
             let options = try begin.json(PasskeyRegistrationOptions.self)
             let cred = h.registrationCredential(for: options, credentialId: "cred-\(UUID().uuidString)", publicKey: SecureToken.generate(byteCount: 32))
             let finish = try await h.jsonPost("/dashboard/auth/invite/finish", PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: cred))
@@ -146,7 +150,8 @@ final class DashboardPagesTests: XCTestCase {
             try await eq(try await h.page("/dashboard/invite/\(secondToken)", nil).status, .gone)
             // Expiry.
             let third = try await h.formPost("/dashboard/team/invite", owner, [("email", "late@example.com"), ("role", "support")])
-            let thirdToken = String(third.text[third.text.range(of: "/dashboard/invite/")!.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            XCTAssertEqual(third.status, .ok)
+            let thirdToken = try XCTUnwrap(h.emails.lastInviteToken(to: "late@example.com"))
             h.clock.advance(by: 8 * 24 * 3600)
             try await eq(try await h.page("/dashboard/invite/\(thirdToken)", nil).status, .gone)
         }
@@ -157,7 +162,8 @@ final class DashboardPagesTests: XCTestCase {
             let (ownerA, _, aId) = try await h.verifiedOwner(email: "a@example.com", org: "Org Alpha", handle: "orgalpha")
             let (ownerB, _, bId) = try await h.verifiedOwner(email: "b@example.com", org: "Org Beta", handle: "orgbeta")
             let invite = try await h.formPost("/dashboard/team/invite", ownerA, [("email", "b@example.com"), ("role", "support")])
-            let token = String(invite.text[invite.text.range(of: "/dashboard/invite/")!.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            XCTAssertEqual(invite.status, .ok)
+            let token = try XCTUnwrap(h.emails.lastInviteToken(to: "b@example.com"))
             // B sees an accept button (not the registration form) and accepts.
             let landing = try await h.page("/dashboard/invite/\(token)", ownerB)
             XCTAssertTrue(landing.text.contains("Accept invitation"))

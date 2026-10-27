@@ -183,7 +183,9 @@ struct DashboardActions {
         }
     }
 
-    func invite(email rawEmail: String, role: OrgRole) async throws -> String {
+    /// Creates the invitation and **emails** the single-use link to the invited address; the inviter never sees the token. Accepting needs
+    /// the invitee to prove the mailbox again with an emailed code (`DashboardAuthService.sendInviteCode`).
+    func invite(email rawEmail: String, role: OrgRole) async throws {
         try require(.manageTeam)
         try authorize(roleChangeTo: role, current: nil)
         if role == .owner { try requireReauth(next: "/dashboard/team") }
@@ -199,12 +201,13 @@ struct DashboardActions {
         guard pending < Self.maxPendingInvites else { throw APIError.conflict("Too many pending invitations. Revoke some first.") }
         let token = SecureToken.generate()
         let now = ctx.now
+        let inviteId = UUID()
         try await db.transaction { tx in
             // Only the newest invitation to an address works.
             try await OrgInviteRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$emailHash == emailHash).filter(\.$state == "open")
                 .set(\.$state, to: "revoked").update()
             let invite = OrgInviteRecord()
-            invite.id = UUID()
+            invite.id = inviteId
             invite.businessId = businessId
             invite.emailHash = emailHash
             invite.emailCiphertext = try ctx.cipher.seal(email, context: "org_invites.email", rowId: invite.id!)
@@ -218,7 +221,20 @@ struct DashboardActions {
             _ = try await AuditService(db: tx, ctx: ctx).record("team.invited", actor: actor, businessId: BusinessID(businessId), subjectType: "invite",
                                                               subjectId: invite.id?.uuidString.lowercased(), metadata: ["role": role.rawValue])
         }
-        return ctx.config.publicBaseURL + "/dashboard/invite/" + token
+        let organization = principal.business?.displayName ?? "an organization"
+        let message = EmailMessage(to: email, subject: "You've been invited to Viadere", text: """
+            You've been invited to join \(organization) on Viadere as \(role.title).
+
+            Open this link to accept (it works once and expires in \(Int(ctx.config.dashboard.inviteTTL / 86_400)) days):
+            \(ctx.config.publicBaseURL)/dashboard/invite/\(token)
+
+            You will be asked for a verification code that we email to this address when you open the link. If you did not expect this invitation, ignore this email.
+            """, kind: "invite")
+        do { try await ctx.email.send(message) } catch {
+            // The invitation is useless if the mail did not go out: withdraw it instead of leaving a link nobody has.
+            _ = try? await DB.swap(db, table: OrgInviteRecord.schema, id: inviteId, column: "state", expected: "open", newValue: "revoked")
+            throw APIError.unavailable("The invitation email could not be sent. Try again in a few minutes.")
+        }
     }
 
     func revokeInvite(id: UUID) async throws {
@@ -263,7 +279,8 @@ struct DashboardActions {
 
     /// A signed-in user accepts an invitation addressed to their own email.
     static func acceptInvite(token: String, principal: DashboardPrincipal, db: any Database, ctx: ServerContext) async throws -> UUID {
-        guard let invite = try await DashboardAuthService(db: db, ctx: ctx).openInvite(token: token),
+        // Defence in depth: an account whose address is not verified never accepts an invitation (it cannot hold a session either).
+        guard principal.user.status == "active", let invite = try await DashboardAuthService(db: db, ctx: ctx).openInvite(token: token),
               ConstantTime.equals(invite.emailHash, principal.user.emailHash) else {
             throw APIError(.forbidden, .forbidden, "This invitation is not valid for your account.")
         }

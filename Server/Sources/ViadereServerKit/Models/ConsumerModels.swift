@@ -152,6 +152,11 @@ final class DeviceRecord: Model, @unchecked Sendable {
     @OptionalField(key: "confirmed_at") var confirmedAt: Date?
     /// `assertion` (fresh passkey assertion), `fresh_session` (unused passkey sign-in < 5 min old) or `legacy`.
     @Field(key: "enrollment_method") var enrollmentMethod: String
+    /// `attested` (App Attest verified), `unattested` (none provided or it failed; flagged under `APP_ATTEST_MODE=report`) or `none`
+    /// (enrolled before attestation existed).
+    @Field(key: "attestation_status") var attestationStatus: String
+    /// Set on a LIVE device that "Set up again" is replacing: the new device that takes over once confirmed or out of its cool-down.
+    @OptionalField(key: "pending_replacement_by") var pendingReplacementBy: UUID?
 
     init() {}
 
@@ -163,6 +168,7 @@ final class DeviceRecord: Model, @unchecked Sendable {
         createdAt = now
         self.clientKind = clientKind.rawValue
         enrollmentMethod = "legacy"
+        attestationStatus = "none"
     }
 
     var kind: DeviceClientKind { DeviceClientKind(rawValue: clientKind) ?? .app }
@@ -211,10 +217,13 @@ final class SecurityNoticeRecord: Model, @unchecked Sendable {
     @OptionalField(key: "origin_device_id") var originDeviceId: UUID?
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "dismissed_at") var dismissedAt: Date?
+    /// `SecurityNoticeAction` raw value: what the notice's "Not you? Cancel" button does.
+    @OptionalField(key: "action") var action: String?
 
     init() {}
 
-    init(consumerId: UUID, kind: String, message: String, subjectId: String?, originDeviceId: UUID?, now: Date) {
+    init(consumerId: UUID, kind: String, message: String, subjectId: String?, originDeviceId: UUID?, now: Date, action: String? = nil) {
+        self.action = action
         id = UUID()
         self.consumerId = consumerId
         self.kind = kind

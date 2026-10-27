@@ -228,10 +228,31 @@ struct HouseholdService {
 
     // MARK: Preview / accept
 
+    /// Looks an invitation code up under three budgets:
+    /// * the platform-wide budget (`household-invite-global`) and the per-consumer budget (`household-invite-attempt`) are **spent only by failed
+    ///   lookups**: a lookup that finds a live invitation is refunded, so any number of accounts doing valid previews can never exhaust the
+    ///   budget that guards against distributed guessing (and so cannot lock everyone else out). A budget that is already empty refuses the
+    ///   lookup before it touches the database, valid code or not;
+    /// * previews additionally have their own per-consumer limit (`household-invite-preview`, every preview counts).
+    /// The per-invitation cap of 10 lookups is unchanged and independent of the budgets.
     private func lookup(code: String, consumer: ConsumerID) async throws -> DelegationInvitationRecord {
-        // Both budgets are spent on every attempt, valid or not.
-        try await ctx.limiter.enforce("household-invite-attempt", key: consumer.description, rule: ctx.config.rateLimits.inviteAttemptPerConsumer)
-        try await ctx.limiter.enforce("household-invite-global", key: "all", rule: ctx.config.rateLimits.inviteAttemptGlobal)
+        let limits = ctx.config.rateLimits
+        // Reserve a token from each failure budget up front (so an empty budget refuses), and give it back when the lookup succeeds.
+        try await ctx.limiter.enforce("household-invite-attempt", key: consumer.description, rule: limits.inviteAttemptPerConsumer)
+        do {
+            try await ctx.limiter.enforce("household-invite-global", key: "all", rule: limits.inviteAttemptGlobal)
+        } catch {
+            await ctx.limiter.refund("household-invite-attempt", key: consumer.description, rule: limits.inviteAttemptPerConsumer)
+            throw error
+        }
+        // A failed lookup throws here and keeps its tokens spent.
+        let invitation = try await find(code: code, consumer: consumer)
+        await ctx.limiter.refund("household-invite-attempt", key: consumer.description, rule: limits.inviteAttemptPerConsumer)
+        await ctx.limiter.refund("household-invite-global", key: "all", rule: limits.inviteAttemptGlobal)
+        return invitation
+    }
+
+    private func find(code: String, consumer: ConsumerID) async throws -> DelegationInvitationRecord {
         guard let normalized = Self.normalizeCode(code),
               let invitation = try await DelegationInvitationRecord.query(on: db).filter(\.$codeHash == codeHash(normalized)).first(),
               let id = invitation.id else { throw APIError.notFound }
@@ -257,6 +278,7 @@ struct HouseholdService {
     }
 
     func preview(principal: ConsumerPrincipal, code: String) async throws -> DelegationInvitationPreview {
+        try await ctx.limiter.enforce("household-invite-preview", key: principal.consumerId.description, rule: ctx.config.rateLimits.invitePreviewPerConsumer)
         let invitation = try await lookup(code: code, consumer: principal.consumerId)
         let businessIds = invitation.businessIds.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
         let names = try await businessNames(businessIds)

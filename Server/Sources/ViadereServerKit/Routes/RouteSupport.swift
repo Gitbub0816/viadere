@@ -44,6 +44,7 @@ enum Routes {
         let api = root
         AuthRoutes.register(api)
         DeviceRoutes.register(api)
+        IdentityRoutes.register(api)
         DirectoryRoutes.register(api)
         RelationshipRoutes.register(api)
         InteractionRoutes.register(api)

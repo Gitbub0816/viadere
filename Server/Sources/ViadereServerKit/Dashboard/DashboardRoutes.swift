@@ -74,6 +74,11 @@ private struct InviteForm: Content {
 }
 
 private struct RoleForm: Content { var role: String }
+private struct VerifyForm: Content {
+    var email: String
+    var code: String
+}
+private struct ResendForm: Content { var email: String }
 private struct SwitchForm: Content { var businessId: String }
 private struct ApplicationForm: Content {
     var legalName: String?
@@ -107,7 +112,7 @@ enum DashboardRoutes {
             return DashboardUI.authPage(title: "Create an organization", body: """
             <h1>Create an organization</h1><p class="mu">Apply to join Viadere as a verified business. A Viadere reviewer checks every application; \
             your handle and code are issued only after approval.</p>\
-            <form data-passkey="register" data-begin="/dashboard/auth/signup/begin" data-finish="/dashboard/auth/signup/finish" data-next="/dashboard">\
+            <form data-passkey="register" data-begin="/dashboard/auth/signup/begin" data-finish="/dashboard/auth/signup/finish" data-next="/dashboard/verify">\
             <label for="displayName">Your name</label><input id="displayName" name="displayName" type="text" maxlength="64" required autocomplete="name">\
             <label for="email">Work email</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email">\
             <label for="organizationName">Organization name</label><input id="organizationName" name="organizationName" type="text" minlength="2" maxlength="80" required>\
@@ -116,40 +121,13 @@ enum DashboardRoutes {
             <label for="website">Website (https)</label><input id="website" name="website" type="url" maxlength="200" placeholder="https://">\
             <label for="requestedHandle">Requested handle (optional)</label><input id="requestedHandle" name="requestedHandle" type="text" maxlength="30" placeholder="yourbrand">\
             <label for="description">What will you use Viadere for?</label><textarea id="description" name="description" maxlength="500"></textarea>\
-            <p class="mu sm">You'll create a passkey to sign in. There are no passwords.</p>\
+            <p class="mu sm">You'll create a passkey to sign in. There are no passwords. We'll then email a 6-digit code to confirm your address; your application starts once you enter it.</p>\
             <p><button class="btn" type="submit">Create passkey and apply</button></p></form><p id="pk-msg" class="sm err" role="alert"></p>\
             <p class="mu sm">Already have an account? <a href="/dashboard/login">Sign in</a>.</p>
             """)
         }
-        pub.get("dashboard", "invite", ":token") { req -> Response in
-            let ctx = req.ctx
-            let token = req.parameters.get("token") ?? ""
-            guard let invite = try await DashboardAuthService(db: req.db, ctx: ctx).openInvite(token: token),
-                  let business = try await BusinessRecord.find(invite.businessId, on: req.db) else {
-                return DashboardUI.authPage(title: "Invitation", body: "<h1>Invitation not valid</h1><p>This invitation has expired or was already used. Ask your admin for a new one.</p>", script: false, status: .gone)
-            }
-            let role = OrgRole(rawValue: invite.role)?.title ?? "Member"
-            let existing = try await DashboardUserRecord.query(on: req.db).filter(\.$emailHash == invite.emailHash).count() > 0
-            if existing {
-                // Existing account: sign in first, then accept with the signed-in session.
-                var accept = ""
-                if let cookie = req.requireCookie(.business), let session = try await DashboardSessionStore(db: req.db, ctx: ctx).authenticate(token: cookie, realm: .business),
-                   let user = try await DashboardUserRecord.find(session.userId, on: req.db), ConstantTime.equals(user.emailHash, invite.emailHash) {
-                    let csrf = DashboardSessionStore.csrfToken(sessionToken: cookie, hasher: ctx.hasher)
-                    accept = "<form method=\"post\" action=\"/dashboard/invite/\(DashboardUI.esc(token))/accept\"><input type=\"hidden\" name=\"_csrf\" value=\"\(DashboardUI.esc(csrf))\"><button class=\"btn\" type=\"submit\">Accept invitation</button></form>"
-                } else {
-                    accept = "<p><a class=\"btn\" href=\"/dashboard/login\">Sign in to accept</a></p>"
-                }
-                return DashboardUI.authPage(title: "Invitation", body: "<h1>Join \(DashboardUI.esc(business.displayName))</h1><p>You've been invited as <strong>\(DashboardUI.esc(role))</strong>. You already have a Viadere account, so sign in to accept.</p>\(accept)", script: false)
-            }
-            return DashboardUI.authPage(title: "Invitation", body: """
-            <h1>Join \(DashboardUI.esc(business.displayName))</h1><p class="mu">You've been invited as <strong>\(DashboardUI.esc(role))</strong>. Create a passkey to sign in.</p>\
-            <form data-passkey="register" data-begin="/dashboard/auth/invite/begin" data-finish="/dashboard/auth/invite/finish" data-next="/dashboard">\
-            <input type="hidden" name="token" value="\(DashboardUI.esc(token))">\
-            <label for="displayName">Your name</label><input id="displayName" name="displayName" type="text" maxlength="64" required autocomplete="name">\
-            <p><button class="btn" type="submit">Create passkey and join</button></p></form><p id="pk-msg" class="sm err" role="alert"></p>
-            """)
-        }
+        pub.get("dashboard", "invite", ":token") { req in try await invitePage(req, token: req.parameters.get("token") ?? "") }
+        pub.get("dashboard", "verify") { _ in verifyPage() }
 
         let ceremonies = routes.grouped(authLimiter)
         @Sendable func sessionResponse(_ created: DashboardSessionStore.Created, req: Request, realm: DashboardRealm) throws -> Response {
@@ -164,8 +142,42 @@ enum DashboardRoutes {
         }
         ceremonies.post("dashboard", "auth", "signup", "finish") { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
-            let created = try await DashboardAuthService(db: req.db, ctx: req.ctx).signupFinish(body, previousCookie: req.requireCookie(.business))
-            return try sessionResponse(created, req: req, realm: .business)
+            // No session yet: the account is unverified until the emailed code is entered.
+            try await DashboardAuthService(db: req.db, ctx: req.ctx).signupFinish(body, previousCookie: req.requireCookie(.business))
+            return DashboardResponses.json(["redirect": "/dashboard/verify"])
+        }
+        ceremonies.post("dashboard", "verify") { req -> Response in
+            let form = try req.content.decode(VerifyForm.self)
+            let ip = ClientIP.resolve(req, trustedProxies: req.ctx.config.trustedProxyCount)
+            do {
+                try await DashboardAuthService(db: req.db, ctx: req.ctx).verifyEmail(VerifyEmailBody(email: form.email, code: form.code), ip: ip)
+            } catch let error as APIError {
+                return verifyPage(notice: error.message, status: error.status, error: true, headers: error.headers)
+            }
+            return DashboardUI.authPage(title: "Email verified", body: """
+            <h1>Email verified</h1><p>Your application has been submitted for review. Sign in with the passkey you just created to see its status.</p>\
+            <p><a class="btn" href="/dashboard/login">Sign in</a></p>
+            """, script: false)
+        }
+        ceremonies.post("dashboard", "verify", "resend") { req -> Response in
+            let form = try req.content.decode(ResendForm.self)
+            let ip = ClientIP.resolve(req, trustedProxies: req.ctx.config.trustedProxyCount)
+            do {
+                try await DashboardAuthService(db: req.db, ctx: req.ctx).resendSignupCode(email: form.email, ip: ip)
+            } catch let error as APIError {
+                return verifyPage(notice: error.message, status: error.status, error: true, headers: error.headers)
+            }
+            return verifyPage(notice: "If that address has a sign-up waiting, we've sent a new code. It expires in 15 minutes.")
+        }
+        ceremonies.post("dashboard", "invite", ":token", "code") { req -> Response in
+            let token = req.parameters.get("token") ?? ""
+            let ip = ClientIP.resolve(req, trustedProxies: req.ctx.config.trustedProxyCount)
+            do {
+                try await DashboardAuthService(db: req.db, ctx: req.ctx).sendInviteCode(token: token, ip: ip)
+            } catch let error as APIError where error.status == .tooManyRequests {
+                return try await invitePage(req, token: token, notice: error.message, error: true, status: error.status, headers: error.headers)
+            }
+            return try await invitePage(req, token: token, notice: "We've emailed a 6-digit code to the invited address. It expires in 15 minutes.")
         }
         ceremonies.post("dashboard", "auth", "login", "begin") { req in
             try req.jsonResponse(try await DashboardAuthService(db: req.db, ctx: req.ctx).loginBegin(realm: .business))
@@ -278,6 +290,62 @@ enum DashboardRoutes {
                 legalName: form.legalName, website: form.website, requestedHandle: form.requestedHandle, description: form.description)
             return DashboardResponses.redirect("/dashboard/organization?m=applied")
         }
+    }
+
+    // MARK: Email verification and invitation pages
+
+    /// The sign-up verification page (public). `notice` is a fixed server message, escaped anyway.
+    static func verifyPage(notice: String? = nil, status: HTTPStatus = .ok, error: Bool = false, headers: [String: String] = [:]) -> Response {
+        let note = notice.map { "<p class=\"sm\(error ? " err" : "")\" role=\"\(error ? "alert" : "status")\">\(DashboardUI.esc($0))</p>" } ?? ""
+        let response = DashboardUI.authPage(title: "Verify your email", body: """
+        <h1>Check your email</h1><p class="mu">Enter the 6-digit code we sent to the address you signed up with. Until you do, your account is not active.</p>\(note)\
+        <form method="post" action="/dashboard/verify"><label for="email">Email</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email">\
+        <label for="code">Code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required>\
+        <p><button class="btn" type="submit">Verify</button></p></form>\
+        <form method="post" action="/dashboard/verify/resend"><label for="remail">No code? Send a new one to</label><input id="remail" name="email" type="email" maxlength="254" required>\
+        <p><button class="btn s" type="submit">Send a new code</button></p></form>
+        """, script: false, status: status)
+        for (name, value) in headers { response.headers.replaceOrAdd(name: name, value: value) }
+        return response
+    }
+
+    /// The invitation landing page. A new person is asked for a name and the emailed code; an existing verified account signs in to accept.
+    static func invitePage(_ req: Request, token: String, notice: String? = nil, error: Bool = false, status: HTTPStatus = .ok,
+                           headers: [String: String] = [:]) async throws -> Response {
+        let ctx = req.ctx
+        guard let invite = try await DashboardAuthService(db: req.db, ctx: ctx).openInvite(token: token),
+              let business = try await BusinessRecord.find(invite.businessId, on: req.db) else {
+            return DashboardUI.authPage(title: "Invitation", body: "<h1>Invitation not valid</h1><p>This invitation has expired or was already used. Ask your admin for a new one.</p>", script: false, status: .gone)
+        }
+        let role = OrgRole(rawValue: invite.role)?.title ?? "Member"
+        let note = notice.map { "<p class=\"sm\(error ? " err" : "")\" role=\"\(error ? "alert" : "status")\">\(DashboardUI.esc($0))</p>" } ?? ""
+        // An unverified sign-up for the address does not count: it never blocks the invitee.
+        let existing = try await DashboardUserRecord.query(on: req.db).filter(\.$emailHash == invite.emailHash).filter(\.$status != "unverified").count() > 0
+        let response: Response
+        if existing {
+            // Existing account: sign in first, then accept with the signed-in session.
+            var accept = ""
+            if let cookie = req.requireCookie(.business), let session = try await DashboardSessionStore(db: req.db, ctx: ctx).authenticate(token: cookie, realm: .business),
+               let user = try await DashboardUserRecord.find(session.userId, on: req.db), ConstantTime.equals(user.emailHash, invite.emailHash) {
+                let csrf = DashboardSessionStore.csrfToken(sessionToken: cookie, hasher: ctx.hasher)
+                accept = "<form method=\"post\" action=\"/dashboard/invite/\(DashboardUI.esc(token))/accept\"><input type=\"hidden\" name=\"_csrf\" value=\"\(DashboardUI.esc(csrf))\"><button class=\"btn\" type=\"submit\">Accept invitation</button></form>"
+            } else {
+                accept = "<p><a class=\"btn\" href=\"/dashboard/login\">Sign in to accept</a></p>"
+            }
+            response = DashboardUI.authPage(title: "Invitation", body: "<h1>Join \(DashboardUI.esc(business.displayName))</h1><p>You've been invited as <strong>\(DashboardUI.esc(role))</strong>. You already have a Viadere account, so sign in to accept.</p>\(accept)", script: false, status: status)
+        } else {
+            response = DashboardUI.authPage(title: "Invitation", body: """
+            <h1>Join \(DashboardUI.esc(business.displayName))</h1><p class="mu">You've been invited as <strong>\(DashboardUI.esc(role))</strong>. Confirm your email with a code, then create a passkey to sign in.</p>\(note)\
+            <form method="post" action="/dashboard/invite/\(DashboardUI.esc(token))/code"><p><button class="btn s" type="submit">Email me a code</button></p></form>\
+            <form data-passkey="register" data-begin="/dashboard/auth/invite/begin" data-finish="/dashboard/auth/invite/finish" data-next="/dashboard">\
+            <input type="hidden" name="token" value="\(DashboardUI.esc(token))">\
+            <label for="displayName">Your name</label><input id="displayName" name="displayName" type="text" maxlength="64" required autocomplete="name">\
+            <label for="code">Code from the email</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>\
+            <p><button class="btn" type="submit">Create passkey and join</button></p></form><p id="pk-msg" class="sm err" role="alert"></p>
+            """, status: status)
+        }
+        for (name, value) in headers { response.headers.replaceOrAdd(name: name, value: value) }
+        return response
     }
 
     // MARK: Overview
@@ -612,8 +680,8 @@ enum DashboardRoutes {
             <div class="card"><h2>Invite a teammate</h2><form method="post" action="/dashboard/team/invite">\(DashboardUI.csrf(p))\
             <div class="cols"><div><label for="email">Email</label><input id="email" name="email" type="email" required maxlength="254"></div>\
             <div><label for="role">Role</label><select id="role" name="role">\(options)</select></div></div>\
-            <p class="mu sm">Viadere doesn't send the email: you'll get a single-use link to share. Adding an owner needs your passkey.</p>\
-            <button class="btn" type="submit">Create invitation</button></form></div>
+            <p class="mu sm">We email a single-use link to this address, and the person confirms a code we email them as well. Adding an owner needs your passkey.</p>\
+            <button class="btn" type="submit">Send invitation</button></form></div>
             """
         }
         let roles = OrgRole.allCases.sorted(by: >).map { "<tr><td><strong>\($0.title)</strong></td><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
@@ -627,10 +695,10 @@ enum DashboardRoutes {
         let (p, _) = try req.businessDashboard
         let form = try req.content.decode(InviteForm.self)
         guard let role = OrgRole(rawValue: form.role) else { throw APIError.validation("Choose a valid role.") }
-        let link = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).invite(email: form.email, role: role)
+        try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).invite(email: form.email, role: role)
         let body = """
-        <div class="card"><h2>Invitation created</h2><p>Share this single-use link with your teammate. It expires in \(Int(req.ctx.config.dashboard.inviteTTL / 86_400)) days and is shown only now.</p>\
-        <div class="secret mono">\(DashboardUI.esc(link))</div><p><a class="btn s" href="/dashboard/team">Done</a></p></div>
+        <div class="card"><h2>Invitation sent</h2><p>We emailed a single-use link to the address you entered. It expires in \(Int(req.ctx.config.dashboard.inviteTTL / 86_400)) days. \
+        To join, your teammate opens it and confirms a code that we email to the same address.</p><p><a class="btn s" href="/dashboard/team">Done</a></p></div>
         """
         return DashboardUI.businessPage(p, title: "Invitation", active: "/dashboard/team", body: body)
     }

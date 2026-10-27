@@ -29,6 +29,7 @@ struct BackgroundJobs {
         report.redemptionsReleased = try await RewardsService(db: db, ctx: ctx).releaseExpired()
         report.passPushes = try await WalletService(db: db, ctx: ctx).deliverDue()
         try await HouseholdService(db: db, ctx: ctx).recordExpired()
+        try await IdentityMaintenance(db: db, ctx: ctx).run()
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
         if await ctx.limiter.allow("abuse-sweep", key: "all", rule: .perMinute(1, burst: 1)) {
             try await AbuseService(db: db, ctx: ctx).sweep()
@@ -36,6 +37,10 @@ struct BackgroundJobs {
         if await ctx.limiter.allow("dashboard-purge", key: "all", rule: .perMinute(1, burst: 1)) {
             try await DashboardSessionStore.purge(on: db, now: ctx.now)
             try await WalletService(db: db, ctx: ctx).purge()
+            // Dashboard sign-ups still unverified after 24 hours, and spent codes: the address is free again.
+            try await EmailVerificationService.purge(on: db, now: ctx.now)
+            // Rate-limit buckets that have fully refilled carry no state (shared store only).
+            await ctx.limiter.store.purgeExpired(now: ctx.now)
         }
         if await ctx.limiter.allow("retention-purge", key: "all", rule: .perMinute(1, burst: 1)) {
             try await RetentionService(db: db, ctx: ctx).purge()

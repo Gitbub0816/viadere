@@ -138,3 +138,60 @@ public struct RetentionSettings: Sendable, Equatable {
         if let v = try days("LINK_TOKEN_RETENTION_DAYS") { linkTokenDays = v }
     }
 }
+
+/// Where rate-limit counters are kept.
+public enum RateLimitStoreMode: String, Sendable, Equatable {
+    case memory, database
+}
+
+/// A generic transactional-email HTTP API: `POST <url>` with a JSON body `{"from","to","subject","text"}` and the API key in a header
+/// (default `Authorization: Bearer <key>`). See Server/README.md for how to point it at a provider.
+public struct EmailConfig: Sendable, Equatable {
+    public var apiURL: URL
+    public var apiKey: String
+    public var fromAddress: String
+    /// Header carrying the key and the scheme prefix put before it (`Authorization` + `Bearer`; an empty scheme sends the bare key).
+    public var authHeader: String = "Authorization"
+    public var authScheme: String = "Bearer"
+
+    public init(apiURL: URL, apiKey: String, fromAddress: String, authHeader: String = "Authorization", authScheme: String = "Bearer") {
+        self.apiURL = apiURL
+        self.apiKey = apiKey
+        self.fromAddress = fromAddress
+        self.authHeader = authHeader
+        self.authScheme = authScheme
+    }
+}
+
+extension ServerConfig {
+    /// Rate-limit store and transactional email from the environment.
+    mutating func applyInfrastructureEnvironment(_ env: [String: String], production: Bool) throws {
+        let raw = (env["RATE_LIMIT_STORE"] ?? "").lowercased()
+        switch raw {
+        case "": rateLimitStore = isStrict ? .database : .memory
+        case "memory": rateLimitStore = .memory
+        case "database": rateLimitStore = .database
+        default: throw ServerConfigError.invalid("RATE_LIMIT_STORE (memory or database)")
+        }
+        if rateLimitStore == .database, databaseURL == nil, isStrict { throw ServerConfigError.missing("DATABASE_URL (required for RATE_LIMIT_STORE=database)") }
+
+        let url = env["EMAIL_API_URL"].flatMap { $0.isEmpty ? nil : $0 }
+        let key = env["EMAIL_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }
+        let from = env["EMAIL_FROM_ADDRESS"].flatMap { $0.isEmpty ? nil : $0 }
+        if url == nil && key == nil && from == nil {
+            if isStrict { throw ServerConfigError.missing("EMAIL_API_URL / EMAIL_API_KEY / EMAIL_FROM_ADDRESS") }
+            return
+        }
+        guard let url, let key, let from else { throw ServerConfigError.missing("EMAIL_API_URL, EMAIL_API_KEY and EMAIL_FROM_ADDRESS (all three or none)") }
+        guard let parsed = URL(string: url), let scheme = parsed.scheme, parsed.host != nil, parsed.user == nil,
+              scheme == "https" || (!isStrict && scheme == "http") else { throw ServerConfigError.invalid("EMAIL_API_URL (https required)") }
+        guard DashboardAuthService.normalizeEmail(from) != nil || from.contains("<") && from.hasSuffix(">") else { throw ServerConfigError.invalid("EMAIL_FROM_ADDRESS") }
+        var config = EmailConfig(apiURL: parsed, apiKey: key, fromAddress: from)
+        if let header = env["EMAIL_API_AUTH_HEADER"], !header.isEmpty {
+            guard header.unicodeScalars.allSatisfy({ $0.isASCII && ($0.properties.isAlphabetic || $0 == "-") }) else { throw ServerConfigError.invalid("EMAIL_API_AUTH_HEADER") }
+            config.authHeader = header
+        }
+        if let scheme = env["EMAIL_API_AUTH_SCHEME"] { config.authScheme = scheme }
+        email = config
+    }
+}

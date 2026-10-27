@@ -119,6 +119,15 @@ public struct ServerConfig: Sendable {
     /// must be keyed. It lives in the environment, not the database, so a database writer cannot downgrade the chain to an
     /// unkeyed one and recompute it.
     public var auditLegacyThroughSeq = 0
+    /// What to do with an enrollment without a valid App Attest attestation (`APP_ATTEST_MODE`; default `require` in production/staging).
+    public var appAttestMode: AppAttestMode = .off
+    /// Which App Attest environment the app's builds attest in (`APP_ATTEST_ENVIRONMENT`).
+    public var appAttestEnvironment: AppAttestEnvironment = .development
+    /// Where rate-limit counters live (`RATE_LIMIT_STORE`): `database` (shared by every instance; the default in staging/production)
+    /// or `memory` (per instance; development and tests).
+    public var rateLimitStore: RateLimitStoreMode = .memory
+    /// Transactional email provider (`EMAIL_API_URL`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`). `nil` = log-only sender (never in staging/production).
+    public var email: EmailConfig?
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -250,8 +259,10 @@ public struct ServerConfig: Sendable {
         }
         if let seconds = env["SMS_MENU_RACE_SECONDS"].flatMap(Double.init), seconds >= 0, seconds <= 30 { config.smsMenuRaceWindow = seconds }
         try config.retention.apply(env)
+        try config.applyIdentityEnvironment(env, production: production)
         try config.applyPlatformEnvironment(env, production: production)
         try config.applyPassEnvironment(env)
+        try config.applyInfrastructureEnvironment(env, production: production)
         return config
     }
 
@@ -307,6 +318,8 @@ public struct RateLimitSettings: Sendable {
     public var inviteAttemptGlobal: RateRule = .perMinute(120, burst: 60)
     /// Sensitive delegation invitations a consumer can create per hour.
     public var inviteCreatePerConsumer: RateRule = .perHour(20, burst: 10)
+    /// Household invitation previews per consumer (every preview, successful or not).
+    public var invitePreviewPerConsumer: RateRule = .perHour(30, burst: 15)
     /// PassKit `log` posts per client IP.
     public var walletLogPerIP: RateRule = .perMinute(10, burst: 10)
     /// PassKit web service calls per client IP.

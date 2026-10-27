@@ -27,6 +27,8 @@ public final class ServerContext: Sendable {
     public let passPush: any PassPushSender
     /// App Attest / DeviceCheck hook (a stub until Apple credentials are configured).
     public let integrity: any DeviceIntegrityVerifier
+    /// Transactional email (dashboard verification codes and invitations).
+    public let email: any EmailSender
     /// Security alerts (budget exhaustion, ...) that operators should be able to alert on.
     public let logger = Logger(label: "viadere.security")
 
@@ -35,7 +37,8 @@ public final class ServerContext: Sendable {
                 rateLimitStore: any RateLimitStore = InMemoryRateLimitStore(), rcs: (any RCSProvider)? = nil,
                 dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
                 passPush: any PassPushSender = DisabledPassPushSender(),
-                integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier()) {
+                integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
+                email: any EmailSender = DisabledEmailSender()) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey)
@@ -52,6 +55,7 @@ public final class ServerContext: Sendable {
         self.passSigner = passSigner
         self.passPush = passPush
         self.integrity = integrity
+        self.email = email
     }
 
     public var now: Date { clock.now() }

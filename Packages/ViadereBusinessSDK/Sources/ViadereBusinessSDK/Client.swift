@@ -85,8 +85,9 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     }
 
     /// Cancels a pending interaction (scope `interactions:write`). Cancelling an already-final interaction returns its outcome.
-    public func cancelInteraction(id: InteractionID) async throws -> InteractionOutcome {
-        try decode(InteractionOutcome.self, try await perform(APIRoutes.businessCancelInteraction.descriptor, parameters: ["interactionId": id.description], naturallyIdempotent: true))
+    public func cancelInteraction(id: InteractionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "cancel")) async throws -> InteractionOutcome {
+        try decode(InteractionOutcome.self, try await perform(APIRoutes.businessCancelInteraction.descriptor, parameters: ["interactionId": id.description],
+                                                              body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
     }
 
     // MARK: Sandbox (test keys only)
@@ -163,8 +164,10 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     }
 
     /// Creates a subscription. The returned `secret` is shown **once**: store it in your secrets manager.
-    public func createWebhook(url: URL, events: [WebhookEventType]) async throws -> WebhookSecretResponse {
-        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookCreate.descriptor, body: CreateWebhookRequest(url: url, events: events)))
+    /// The server requires an `Idempotency-Key`: a retry with the same key (and request) returns the same subscription and secret.
+    public func createWebhook(url: URL, events: [WebhookEventType], idempotencyKey: String = IdempotencyKey.generate(prefix: "webhook")) async throws -> WebhookSecretResponse {
+        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookCreate.descriptor, body: CreateWebhookRequest(url: url, events: events),
+                                                                 idempotencyKey: idempotencyKey))
     }
 
     public func deleteWebhook(id: WebhookSubscriptionID) async throws {
@@ -173,8 +176,9 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
 
     /// Rotates the signing secret. The previous secret keeps signing for 24 hours so you can switch over without dropping events
     /// (verify with both: `WebhookVerifier(secrets: [new, old])`).
-    public func rotateWebhookSecret(id: WebhookSubscriptionID) async throws -> WebhookSecretResponse {
-        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookRotate.descriptor, parameters: ["webhookId": id.description]))
+    public func rotateWebhookSecret(id: WebhookSubscriptionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "rotate")) async throws -> WebhookSecretResponse {
+        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookRotate.descriptor, parameters: ["webhookId": id.description],
+                                                                 body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
     }
 
     // MARK: Plumbing

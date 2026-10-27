@@ -13,7 +13,7 @@ final class DashboardUserRecord: Model, @unchecked Sendable {
     @Field(key: "display_name") var displayName: String
     /// WebAuthn user handle (opaque random).
     @Field(key: "user_handle") var userHandle: String
-    /// `active`, `pending` (operator awaiting enrollment) or `disabled`.
+    /// `active`, `unverified` (business sign-up whose emailed code has not been entered), `pending` (operator awaiting enrollment) or `disabled`.
     @Field(key: "status") var status: String
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "last_login_at") var lastLoginAt: Date?

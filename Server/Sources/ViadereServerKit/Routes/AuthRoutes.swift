@@ -26,7 +26,7 @@ enum AuthRoutes {
         }
         routes.api(APIRoutes.authRefresh, limiter: refresh) { req in
             let body: AuthRefreshRequest = try req.decodeBody()
-            return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).refresh(body))
+            return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).refresh(body, http: SignedRequestContext(req)))
         }
         routes.api(APIRoutes.logout) { req in
             try await AuthService(db: req.db, ctx: req.ctx).logout(try req.consumer)

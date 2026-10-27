@@ -24,7 +24,10 @@ info:
     ## Idempotency
     Every `POST` that creates something takes an `Idempotency-Key` header which **must equal** the body's `idempotencyKey`.
     Repeating a request with the same key and body returns the original result (`200` instead of `201`); the same key with a
-    different body is `409 idempotency_conflict`.
+    different body is `409 idempotency_conflict`. Webhook creation, webhook secret rotation and interaction cancel also
+    **require** an `Idempotency-Key` header (1-128 characters of `A-Za-z0-9_.-:`, no body field to match; a missing or invalid one is
+    `422`). A retry of one of those returns the original result (`200`); because creation and rotation return a one-time secret,
+    the sealed result is replayable for 24 hours, after which a replay is `410 gone` (rotate to get a new secret).
 
     ## Errors
     Every error body is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.
@@ -134,9 +137,12 @@ paths:
       tags: [Interactions]
       operationId: cancelInteraction
       summary: Cancel a pending interaction
-      description: Requires scope `interactions:write`. Cancelling an interaction that is already final returns its outcome unchanged.
+      description: |
+        Requires scope `interactions:write` and an `Idempotency-Key` header. Cancelling an interaction that is already final returns
+        its outcome unchanged. The same key with another interaction is `409 idempotency_conflict`.
       parameters:
         - $ref: "#/components/parameters/InteractionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The outcome after cancellation.
@@ -146,6 +152,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/business/messages:
     post:
@@ -253,7 +261,10 @@ paths:
       description: |
         Requires scope `webhooks:manage`. The URL must be a public `https` URL (private, loopback, link-local and cloud
         metadata addresses are refused, and redirects are never followed). The signing `secret` in the response is shown
-        **once**. At most 10 active endpoints per business.
+        **once**. At most 10 active endpoints per business. Requires an `Idempotency-Key` header: a retry with the same key and body
+        returns the same subscription and secret (`200`) for 24 hours; the same key with another body is `409 idempotency_conflict`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -265,9 +276,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "200":
+          description: The idempotency key was already used with an identical request; the original subscription and secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/business/webhooks/{webhookId}:
@@ -295,9 +312,12 @@ paths:
       summary: Rotate a webhook signing secret
       description: |
         Requires scope `webhooks:manage`. The previous secret keeps signing for 24 hours (the `Viadere-Signature` header then
-        carries two `v1=` values) so you can switch over without dropping events.
+        carries two `v1=` values) so you can switch over without dropping events. Requires an `Idempotency-Key` header: a retry with the
+        same key returns the same new secret instead of rotating again (24 hours; the same key for another webhook is
+        `409 idempotency_conflict`).
       parameters:
         - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The new secret (shown once).
@@ -307,6 +327,9 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/business/loyalty/program:
     get:
@@ -582,7 +605,7 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: Must equal the request body's `idempotencyKey`. Up to 128 characters of `A-Z a-z 0-9 _ . - :`.
+      description: Must equal the request body's `idempotencyKey` where the body has one (issue, messages, statuses, rewards, points); webhook create, webhook rotate and interaction cancel have no body key, the header alone identifies the operation. Up to 128 characters of `A-Z a-z 0-9 _ . - :`.
       schema: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
     InteractionId:
       name: interactionId
@@ -649,6 +672,9 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Conflict:
       description: State conflict, or `idempotency_conflict` when the key was used with a different body.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Gone:
+      description: The request was already completed and its one-time secret can no longer be replayed.
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     ValidationFailed:
       description: The request failed validation; `error.details` maps field paths to issue codes.

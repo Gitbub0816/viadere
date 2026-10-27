@@ -23,7 +23,9 @@ enum BusinessRoutes {
         }
         routes.api(APIRoutes.businessCancelInteraction, scope: Scope.interactionsWrite) { req in
             let id: InteractionID = try req.uuidParameter("interactionId")
-            return try req.jsonResponse(try await InteractionService(db: req.db, ctx: req.ctx).cancel(principal: try req.business, id: id))
+            let key = try BusinessIdempotency.requireKey(req.idempotencyHeader)
+            let result = try await BusinessIdempotency(db: req.db, ctx: req.ctx).cancelInteraction(principal: try req.business, id: id, key: key)
+            return try req.jsonResponse(result.value)
         }
         routes.api(APIRoutes.businessSendMessage, scope: Scope.messagesWrite) { req in
             let body: BusinessSendMessageRequest = try req.decodeBody()
@@ -44,7 +46,9 @@ enum BusinessRoutes {
         }
         routes.api(APIRoutes.businessWebhookCreate, scope: Scope.webhooksManage) { req in
             let body: CreateWebhookRequest = try req.decodeBody()
-            return try req.jsonResponse(try await WebhookService(db: req.db, ctx: req.ctx).create(businessId: try req.business.businessId, request: body), status: .created)
+            let key = try BusinessIdempotency.requireKey(req.idempotencyHeader)
+            let result = try await BusinessIdempotency(db: req.db, ctx: req.ctx).createWebhook(businessId: try req.business.businessId, request: body, key: key)
+            return try req.jsonResponse(result.value, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessWebhookDelete, scope: Scope.webhooksManage) { req in
             let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
@@ -53,7 +57,9 @@ enum BusinessRoutes {
         }
         routes.api(APIRoutes.businessWebhookRotate, scope: Scope.webhooksManage) { req in
             let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
-            return try req.jsonResponse(try await WebhookService(db: req.db, ctx: req.ctx).rotate(businessId: try req.business.businessId, id: id))
+            let key = try BusinessIdempotency.requireKey(req.idempotencyHeader)
+            let result = try await BusinessIdempotency(db: req.db, ctx: req.ctx).rotateWebhook(businessId: try req.business.businessId, id: id, key: key)
+            return try req.jsonResponse(result.value)
         }
     }
 }

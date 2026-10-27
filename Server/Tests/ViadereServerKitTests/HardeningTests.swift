@@ -143,11 +143,17 @@ final class HardeningTests: XCTestCase {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()
             let stolenRefresh = try XCTUnwrap(consumer.session.refreshToken)
-            // The legitimate client rotates; the thief later (after the 60 s grace window) presents the old refresh token.
-            let rotated = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: stolenRefresh))
+            // The legitimate client rotates (device-signed); the thief later (after the 60 s grace window) presents the old refresh token.
+            let rotated = try await h.refresh(consumer)
             XCTAssertEqual(rotated.status, .ok, rotated.text)
             h.clock.advance(by: 61)
-            let reuse = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: stolenRefresh))
+            // Without the device's signature the copied token is simply refused: nothing is revoked, the owner is not locked out.
+            let thief = try await h.refresh(consumer, token: stolenRefresh, signed: false)
+            XCTAssertEqual(thief.status, .unauthorized)
+            XCTAssertEqual(thief.errorCode, .signatureInvalid)
+            try await isNil(try await DeviceRecord.find(consumer.device!.id.uuid, on: h.db)?.revokedAt, "an unsigned replay cannot revoke the owner's device")
+            // Reuse that carries the device's own signature is still theft evidence: the family and the devices enrolled through it go.
+            let reuse = try await h.refresh(consumer, token: stolenRefresh)
             XCTAssertEqual(reuse.status, .unauthorized)
             let device = try await DeviceRecord.find(consumer.device!.id.uuid, on: h.db)
             XCTAssertNotNil(device?.revokedAt, "the device enrolled with the stolen session is revoked too")
@@ -241,7 +247,7 @@ final class HardeningTests: XCTestCase {
             h.clock.advance(by: 24 * 3600 + 1)
             // The access token is long expired by now: refresh the session like the app does.
             var renewed = second
-            let refreshed = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: try XCTUnwrap(second.session.refreshToken)))
+            let refreshed = try await h.refresh(second)
             renewed.session = try refreshed.json(AuthSession.self)
             let late = try await highAuthorize(h, b, rel)
             let real2 = try await h.consumerInteraction(renewed, id: late.id)
@@ -890,7 +896,8 @@ final class HardeningTests: XCTestCase {
         ["ENVIRONMENT": name, "DATABASE_URL": "postgres://u:p@db/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(), "SERVER_PEPPER": SecureToken.generate(),
          "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate(),
          "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG", "APNS_TEAM_ID": "TEAM123456",
-         "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456"]
+         "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
+         "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.com"]
     }
 
     func testStagingUsesProductionRulesAndSecretsAreNeverEphemeralWithADatabase() throws {
@@ -1196,10 +1203,11 @@ final class HardeningTests: XCTestCase {
             // The real Alice signed up but has not come back yet (the case the old feature let anyone with an invitation take over).
             let alice = try await h.dashSignup(email: "alice@acme.test", name: "Alice", org: "Alice Org", handle: nil)
             let invite = try await h.formPost("/dashboard/team/invite", owner.session, [("email", "alice@acme.test"), ("role", "admin")])
-            let range = try XCTUnwrap(invite.text.range(of: "/dashboard/invite/"))
-            let token = String(invite.text[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            XCTAssertEqual(invite.status, .ok)
+            let token = try XCTUnwrap(h.emails.lastInviteToken(to: "alice@acme.test"))
+            let code = try await h.inviteCode(token: token, email: "alice@acme.test")
             // `begin` answers exactly as it would for a fresh address (no enumeration) ...
-            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Mallory"))
+            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Mallory", code: code))
             XCTAssertEqual(begin.status, .ok, begin.text)
             XCTAssertFalse(begin.text.lowercased().contains("exist"), begin.text)
             let options = try begin.json(PasskeyRegistrationOptions.self)
@@ -1227,9 +1235,10 @@ final class HardeningTests: XCTestCase {
             var results: [HTTPResult] = []
             for email in ["other@acme.test", "brand-new@acme.test"] {
                 let invite = try await h.formPost("/dashboard/team/invite", owner.session, [("email", email), ("role", "admin")])
-                let range = try XCTUnwrap(invite.text.range(of: "/dashboard/invite/"))
-                let token = String(invite.text[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-                results.append(try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Other")))
+                XCTAssertEqual(invite.status, .ok)
+                let token = try XCTUnwrap(h.emails.lastInviteToken(to: email))
+                let code = try await h.inviteCode(token: token, email: email)
+                results.append(try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Other", code: code)))
             }
             XCTAssertEqual(results[0].status, results[1].status)
             XCTAssertEqual(results[0].status, .ok)

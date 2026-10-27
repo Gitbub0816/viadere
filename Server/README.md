@@ -102,12 +102,16 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` | set once when upgrading an existing deployment to the last pre-upgrade audit `seq` (default 0 = every event must be keyed) |
 | `PUBLIC_BASE_URL` | public origin (https in production). Used for links and for Twilio signature URLs — never the Host header |
 | `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
+| `APP_ATTEST_MODE` | `off` \| `report` \| `require`: what to do with an enrollment without a valid Apple App Attest attestation. Default `require` in production/staging (an unattested app **or** App Clip device is refused, `403 attestation_required`), `off` elsewhere. `report` accepts and flags it with a 72 h cool-down |
+| `APP_ATTEST_ENVIRONMENT` | `development` \| `production`: the App Attest AAGUID the app's builds attest with (default `production` in production, `development` elsewhere). TestFlight and App Store builds attest as `production` |
 | `OTP_ALLOWED_COUNTRIES` | ISO regions that may receive verification codes (default `US,CA`; Caribbean +1 regions such as `JM`, `DO` are separate) |
 | `SMS_MENU_RACE_SECONDS` | a menu digit this soon after a menu change re-shows the menu (default 3; 0 disables) |
 | `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS`, `LINK_TOKEN_RETENTION_DAYS` | retention for finished webhook deliveries (30), finished SMS/RCS outbound rows (30) and used/expired link tokens (7) |
 | `APPLE_TEAM_ID`, `APP_STORE_ID` | AASA file; Smart App Banner |
 | `APNS_KEY_P8` or `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_ENVIRONMENT` | APNs token auth |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID` | SMS provider |
+| `RATE_LIMIT_STORE` | `database` (shared, atomic, default in staging/production) or `memory` (per instance; development). Needs the round-4 migration |
+| `EMAIL_API_URL`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS` | transactional email for dashboard verification codes and invitations; **all three or none**; required in staging/production (https only there). Optional `EMAIL_API_AUTH_HEADER` (default `Authorization`) and `EMAIL_API_AUTH_SCHEME` (default `Bearer`; empty sends the bare key) |
 | `TRUSTED_PROXY_COUNT` | reverse proxies whose `X-Forwarded-For` hop is trusted for rate limiting (default 0 = ignore header; **set this behind a load balancer**) |
 | `CORS_ALLOWED_ORIGINS` | exact origins, comma separated (default none) |
 | `RUN_BACKGROUND_JOBS`, `JOB_INTERVAL_SECONDS` | in-process delivery/maintenance loop (default on, 5 s) |
@@ -121,6 +125,17 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `ABUSE_COMPLAINT_RATE`, `ABUSE_OPTOUT_RATE`, `ABUSE_MIN_SAMPLE`, `ABUSE_WINDOW_DAYS`, `ABUSE_THROTTLE_FACTOR` | auto-throttle thresholds (defaults 2 %, 10 %, 20, 7 d, ×0.25) |
 | `BILLING_*` | metering preview rates in micro-USD (`BILLING_INCLUDED_INTERACTIONS`, `…_PLATFORM_MICROS_PER_INTERACTION`, `…_TRANSPORT_MICROS_PER_SMS_SEGMENT`, `…_TRANSPORT_MICROS_PER_RCS_MESSAGE`); transport defaults to 0 |
 
+### Pointing the email sender at a provider
+
+`HTTPEmailSender` sends one request per email: `POST EMAIL_API_URL`, `Content-Type: application/json`, the key in `EMAIL_API_AUTH_HEADER` (`Authorization: Bearer <key>` by default) and the body
+`{"from": "<EMAIL_FROM_ADDRESS>", "to": "<recipient>", "subject": "…", "text": "…"}`. Any 2xx is success; the response body is ignored and never logged.
+
+* **Resend (matches as is):** `EMAIL_API_URL=https://api.resend.com/emails`, `EMAIL_API_KEY=re_…`, `EMAIL_FROM_ADDRESS="Viadere <no-reply@yourdomain>"` (a sending domain verified at the provider).
+* **A provider that takes the key in a custom header** (for example `X-Api-Key`): set `EMAIL_API_AUTH_HEADER=X-Api-Key` and `EMAIL_API_AUTH_SCHEME=` (empty).
+* **A provider with another body shape** (Postmark `TextBody`/`From`, SendGrid `personalizations`, SES): put a few-line relay or serverless function in front that accepts the body above and forwards it, and point `EMAIL_API_URL` at it.
+
+Use a dedicated sending domain with SPF, DKIM and DMARC. The messages contain a 6-digit code or a single-use link; do not enable provider click or open tracking (it would rewrite the link and report it to a third party). In development, with no provider settings, the message (code included) is printed to the log; in staging and production a code is never logged.
+
 ## Endpoints
 
 Auth legend: **none** public (IP rate-limited) · **bearer** consumer access token · **device+bearer** access token **and**
@@ -130,13 +145,17 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 
 | Method & path | Auth | Notes |
 |---|---|---|
-| `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.com`, UV required); returns session + refresh token |
+| `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.com`, UV required); returns session + refresh token **and, once, the account's 10 recovery codes with its recovery ID** (`recoveryCodes`) |
 | `POST /v1/auth/login/begin` · `/finish` | none | passkey login (discoverable credentials) |
-| `POST /v1/auth/refresh` | none | refresh-token rotation; reuse revokes the whole family |
+| `POST /v1/auth/refresh` | none (+ device signature) | refresh-token rotation; reuse revokes the whole family. **A session bound to a device must be refreshed with that device's `VIADERE-SIG-V1` headers** (grace replay included); unbound sessions refresh without |
+| `POST /v1/recovery/begin` · `/finish` · `/complete` | none | account recovery with a recovery code (SECURITY.md §2.25): spend one code, register a NEW passkey, wait **72 h** (every device is notified, any trusted device can cancel), then activate. Rate-limited per IP, 5 wrong codes lock the account for 24 h, every failure is the same `401` |
+| `POST /v1/recovery/{id}/cancel` · `GET /v1/recovery` | device+bearer | cancel a holding recovery (trusted device; also invalidates the remaining codes) · remaining-code count and pending recovery |
+| `POST /v1/recovery/codes/begin` · `/regenerate` | device+bearer | new recovery codes: trusted device **and** a fresh user-verified passkey assertion |
 | `POST /v1/auth/logout` | device+bearer | ends this session only (never revokes a device) |
 | `GET /v1/security-notices`, `POST /v1/security-notices/{id}/dismiss` | device+bearer | in-app notices for a new device, App Clip, phone link or a device set up again (dismiss needs a trusted device) |
-| `POST /v1/devices/enroll/begin` · `POST /v1/devices` | bearer | proof of possession per key (`VIADERE-ENROLL-V1`), single-use challenge, **plus a fresh user-verified passkey assertion over that challenge** (begin returns the assertion options; a session minted by a passkey ceremony < 5 min ago may enroll once without it). `clientKind: appClip` / `clipDevice: true` = request key only, 7 days, never decides. Keys are stored `attested = false` (App Attest hook is a stub) |
-| `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, **biometric** key). `POST /v1/devices` accepts `replacesDeviceId` ("Set up again") |
+| `POST /v1/devices/enroll/begin` · `POST /v1/devices` | bearer | proof of possession per key (`VIADERE-ENROLL-V1`), single-use challenge, **plus a fresh user-verified passkey assertion over that challenge** (begin returns the assertion options; a session minted by a passkey ceremony < 5 min ago may enroll once without it). `clientKind: appClip` / `clipDevice: true` = request key only, 7 days, never decides. `appAttest {keyId, attestation}` is verified against Apple's App Attestation Root CA, bound to the challenge, the account and the key list (`AppAttestBinding`); keys are `attested = true` only on success, and `APP_ATTEST_MODE=require` refuses the rest |
+| `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, **biometric** key). `POST /v1/devices` accepts `replacesDeviceId` ("Set up again"): a revoked old device is replaced at once, a **live** one stays until the new device is confirmed or its cool-down ends |
+| `POST /v1/devices/{newDeviceId}/cancel-replacement` | device+bearer | "Not you? Cancel": a trusted device (normally the one being replaced) revokes the NEW device; the old one is untouched |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | device+bearer | list / revoke |
 | `POST /v1/phone-links/start` · `/verify` | device+bearer | SMS OTP (HMAC-hashed, 5 attempts, rate-limited) |
 | `GET /v1/sms/link-tokens/{token}/preview` | device+bearer | masked phone + expiry, rate-limited, does not consume |
@@ -186,7 +205,7 @@ but separate credential tables, users and sessions, so a business passkey can ne
 
 | Page | Roles | Notes |
 |---|---|---|
-| `/dashboard/signup`, `/login`, `/invite/{token}` | public | sign-up creates a user, a **pending** organization and an application (no handle, no code) |
+| `/dashboard/signup`, `/verify`, `/login`, `/invite/{token}` | public | sign-up creates an **unverified** user (passkey, no session); entering the emailed 6-digit code at `/dashboard/verify` activates it and creates a **pending** organization and an application (no handle, no code); then sign in with the passkey. Unverified accounts are purged after 24 h and never block the address. An invitation page asks for a code emailed to the invited address |
 | `/dashboard` overview | all | aggregate analytics only: issued / decided by kind, decision latency, webhook and SMS/RCS delivery, opt-outs, reports |
 | `/dashboard/api-keys` | owner, admin, developer | create (scoped, live/test, expiry; **passkey re-auth**, secret shown once), revoke, last used |
 | `/dashboard/webhooks`, `/webhooks/deliveries` | owner, admin, developer | endpoints, secret rotation (**re-auth**), delivery log with redacted payloads, replay dead letters (compare-and-swap) |
@@ -194,7 +213,7 @@ but separate credential tables, users and sessions, so a business passkey can ne
 | `/dashboard/campaigns` | owner, admin, developer | signed `ConnectLink` with campaign context + server-rendered SVG QR code (own encoder, verified against an independent implementation) |
 | `/dashboard/consent` | owner, admin, support, analyst | consent counts per purpose; never individual customers |
 | `/dashboard/audit` | owner, admin | this tenant's append-only, hash-chained events |
-| `/dashboard/team` | owner, admin | invitations (single-use link shown once), roles, removal; admins cannot touch owners; adding an owner needs **re-auth**; the last owner cannot leave |
+| `/dashboard/team` | owner, admin | invitations (a single-use link **emailed** to the invitee; the inviter never sees it), roles, removal; admins cannot touch owners; adding an owner needs **re-auth**; the last owner cannot leave |
 | `/dashboard/billing` | owner, admin, analyst | metered usage and an **invoice preview** (platform fees and carrier/provider transport separate; no payment processor) |
 | `/dashboard/organization` | owner, admin | application status; a declined application can be corrected and resubmitted |
 | `/operator`, `/operator/applications/{id}` | operator | review and verify or decline applications (verification issues the handle and permanent code) |
@@ -293,11 +312,10 @@ Errors are always `{"error":{"code","message","requestId"}}` (`APIErrorResponse`
 
 Wallet pass signing (P3), Live Activity push, rewards and redemption, delegated access endpoints, a real Apple Messages for Business adapter
 (blocked on Apple's written policy approval), vendor-specific RCS adapters (the shipped one is a generic RBM-style REST + HMAC webhook contract;
-rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they fall back to a handoff link), device attestation
-(App Attest) at enrollment, account recovery, a shared (Redis) rate-limit store for multi-instance deployments, encryption-key rotation tooling,
+rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they fall back to a handoff link), encryption-key rotation tooling,
 DNS-pinned webhook connections (the destination is re-resolved and checked immediately before sending but is not pinned to the connection).
-Dashboard: no outbound email (invitations and operator enrollments are shown once as links), no payment processor (metering and an invoice preview
-only), no email verification of business users (an operator reviews every application; invitations are single-use links), no business-profile editing after verification, no recovery path for a user who loses every passkey (an operator-assisted flow is needed),
+Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview
+only), no business-profile editing after verification, no operator-assisted recovery for a business user who loses every passkey (consumers have recovery codes),
 and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale).
 
 ## Security operations
@@ -312,8 +330,9 @@ and analytics scan per-tenant rows (fine for pilot volumes; add rollups before l
 Notes for operators:
 * **Upgrading.** Set `ENVIRONMENT` and `AUDIT_CHAIN_KEY`; set `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` to the highest existing `audit_events.seq`; run `reencrypt-fields` once. Existing sessions keep working (they bind to their device the first time it signs).
 * **Round 3.** New migration `CreateSecurityRound3Schema` (sealed refresh-token successor, `security_notices`). Run `reencrypt-fields` again to strip `signedDecision` from queued `interaction.decided` deliveries. Trusted-device rules (household, phone link by code, revoking others, deletion) and the cool-down scope are in `docs/SECURITY.md` §2.5. Dashboard invitations never claim an existing account.
-* **Rate limiting is per instance, per namespace.** Each limiter name has its own capped table with LRU eviction (`evictions` metric and a warning log).
-* **Rate limiting is per instance.** With more than one instance, supply a shared `RateLimitStore` (`Overrides.rateLimitStore`).
+* **Round 4 (platform).** New migration `CreatePlatformRound4Schema` (`rate_limit_buckets`, `dashboard_email_codes`): run it (`AUTO_MIGRATE=true` or the `migrate` command) **before** rolling out, because with `RATE_LIMIT_STORE=database` the security-critical limiters fail closed while the table is missing. Staging and production now require `EMAIL_API_URL`, `EMAIL_API_KEY` and `EMAIL_FROM_ADDRESS`. Business accounts that already exist stay `active` (they are treated as verified).
+* **Rate limiting is shared by default.** `RATE_LIMIT_STORE=database` (the default in staging/production) keeps one atomic token-bucket row per key in the database, so limits are global across instances; expired rows are deleted by the job loop. If the database is unreachable, one-time-code, link, enrollment, household, dashboard-auth and similar namespaces refuse requests and everything else (the per-IP limiter included) uses a per-instance in-memory limiter until it recovers. `RATE_LIMIT_STORE=memory` is per instance (development) and multiplies every limit by the instance count.
+* **Email.** Dashboard verification codes and invitations are sent through a generic transactional-email HTTP API (see below). Without provider settings, development logs the message (with the code); staging and production refuse to start. A provider outage never fails a sign-up request (the user presses "send a new code"); a failed invitation email withdraws the invitation and tells the inviter.
 * **Webhook SSRF.** Deliveries resolve the host once, vet every address and connect to the vetted address (DNS pinning); redirects are never followed.
 * **Test keys** only address sandbox relationships (`POST /v1/business/sandbox/relationships`).
-* **App Attest** is a hook (`DeviceIntegrityVerifier`) with a stub; configure Apple credentials and implement `AppleAppAttestVerifier` to start storing `attested = true`.
+* **Round 4 (identity).** New migration `CreateIdentityRound4Schema` (`app_attest_keys`, `recovery_profiles`, `recovery_codes`, `account_recoveries`, `business_idempotency`, `devices.attestation_status` / `pending_replacement_by`, `security_notices.action`): run it before rolling out. **App Attest** is verified by `AppAttestVerifier` (Apple's App Attestation Root CA, embedded and fingerprint-checked at startup; SHA-256 `1CB9823B…42C932`, SECURITY.md §2.5). Set `APPLE_TEAM_ID`, choose `APP_ATTEST_ENVIRONMENT` and **roll out with `APP_ATTEST_MODE=report`** until the shipped app attests, then `require` (the production default; with an app that does not attest yet, `require` refuses every enrollment). Existing accounts have no recovery codes until a trusted device regenerates them (`/v1/recovery/codes/...`). A device that is being replaced stays live until the replacement is confirmed or cools down; the job loop (and the old device's next request) completes it. The business API now **requires** an `Idempotency-Key` on webhook create, secret rotation and interaction cancel (the BusinessSDK sends one).

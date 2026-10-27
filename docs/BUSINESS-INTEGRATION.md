@@ -160,10 +160,11 @@ Every `POST` that creates something takes an `Idempotency-Key` header **equal to
 
 * Same key and same body: you get the original result back (`200` instead of `201`). Retry freely after a timeout.
 * Same key and a different body: `409 idempotency_conflict`. Never reuse a key for a different operation.
+* **Webhook create, webhook secret rotation and interaction cancel also require an `Idempotency-Key`** (no body key: the header alone identifies the operation; missing or invalid is `422`). A retry with the same key returns the original result, including the **same one-time secret** for 24 hours (`createWebhook` / `rotateWebhookSecret` in the SDK generate and reuse a key across their own retries; pass `idempotencyKey:` to pin one). After 24 hours a replay is `410 gone`: rotate to get a new secret. The same key for another webhook or interaction is `409`.
 * Derive keys from the thing you are acting on so a retry from any process produces the same key:
   `IdempotencyKey.deterministic(namespace: "refund", [orderId, lineId])`. Use `IdempotencyKey.generate()` for genuinely new operations, and **store the key before sending**.
 * Idempotent retries are safe, so the SDK retries `429`, `5xx` and network failures automatically (honouring `Retry-After`) for `GET`s,
-  keyed `POST`s and cancels. It never blindly retries creating or rotating a webhook.
+  keyed `POST`s (webhook create, secret rotation and cancel included: every attempt of one call carries the same key).
 
 ## 5. Channels and what can be approved where
 

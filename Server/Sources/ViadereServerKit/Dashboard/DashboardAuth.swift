@@ -33,6 +33,19 @@ struct SignupBeginBody: Codable {
 struct InviteBeginBody: Codable {
     var token: String
     var displayName: String
+    /// The 6-digit code emailed to the invited address (`/dashboard/invite/:token/code`).
+    var code: String?
+
+    init(token: String, displayName: String, code: String? = nil) {
+        self.token = token
+        self.displayName = displayName
+        self.code = code
+    }
+}
+
+struct VerifyEmailBody: Codable {
+    var email: String
+    var code: String
 }
 
 struct EnrollBeginBody: Codable {
@@ -172,7 +185,11 @@ struct DashboardAuthService {
         }
         let legal = body.legalName.flatMap { cleanName($0, max: 120) }
         let detail = body.description.flatMap { cleanName($0, max: 500) }
+        // Three independent budgets, so one source cannot mail-bomb an address from many IPs, one IP cannot spray many addresses, and a single
+        // (IP, address) pair is limited on its own. The keys are the input, never the account's existence, so the answers reveal nothing.
         try await ctx.limiter.enforce("dashboard-signup-email", key: "\(ip)|\(emailHash(email))", rule: .perHour(5, burst: 5))
+        try await ctx.limiter.enforce("dashboard-signup-address", key: emailHash(email), rule: .perHour(5, burst: 5))
+        try await ctx.limiter.enforce("dashboard-signup-ip", key: ip, rule: .perHour(30, burst: 15))
         // Deliberately no "this email is taken" answer here: it would let anyone enumerate addresses, and the ceremony proves nothing
         // about the address. A taken address fails at the end with the same generic error as any other failed registration.
         let userHandle = SecureToken.generate(byteCount: 32)
@@ -195,24 +212,28 @@ struct DashboardAuthService {
         var userHandle: String
     }
 
-    func signupFinish(_ finish: PasskeyRegistrationFinishRequest, previousCookie: String?) async throws -> DashboardSessionStore.Created {
+    /// Creates the account **unverified** (passkey stored, no organization, no session) and emails the 6-digit code. The organization
+    /// application is created only when the code is entered (`verifyEmail`). An unverified account that holds the address is replaced; an
+    /// account that is already verified makes this fail with the generic registration error.
+    func signupFinish(_ finish: PasskeyRegistrationFinishRequest, previousCookie: String?) async throws {
         let ceremony = try await consume(finish.ceremonyId, kind: "signup")
         guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload", rowId: ceremony.id!),
               let payload = try? JSONDecoder().decode(SignupPayload.self, from: data) else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
         let userId = UUID()
-        let businessId = UUID()
+        let hash = emailHash(payload.email)
+        let verification = EmailVerificationService(db: db, ctx: ctx)
+        let code: String
         do {
-            try await db.transaction { tx in
+            code = try await db.transaction { tx in
+                try await EmailVerificationService.removeUnverified(emailHash: hash, on: tx)
                 try await makeUser(kind: "business", email: payload.email, displayName: payload.displayName, handle: payload.userHandle,
-                                   status: "active", id: userId).create(on: tx)
+                                   status: "unverified", id: userId).create(on: tx)
                 try await savePasskey(verified, userId: userId, on: tx)
-                _ = try await BusinessOnboarding(db: tx, ctx: ctx).createPending(
-                    businessId: businessId, ownerId: userId, displayName: payload.organizationName, legalName: payload.legalName,
-                    category: BusinessCategory(rawValue: payload.category), website: payload.website, requestedHandle: payload.requestedHandle,
-                    description: payload.description)
-                _ = try await AuditService(db: tx, ctx: ctx).record("dashboard.registered", actor: AuditActor(kind: .business, id: userId.uuidString.lowercased()),
-                    businessId: BusinessID(businessId), subjectType: "organization", subjectId: businessId.uuidString.lowercased())
+                let issued = try await verification.issue(kind: "signup", subjectId: userId, emailHash: hash,
+                                                          payload: String(decoding: try JSONEncoder().encode(payload), as: UTF8.self), on: tx)
+                _ = try await AuditService(db: tx, ctx: ctx).record("dashboard.signup_started", actor: AuditActor(kind: .business, id: userId.uuidString.lowercased()))
+                return issued
             }
         } catch {
             if error.isConstraintViolation {
@@ -220,7 +241,55 @@ struct DashboardAuthService {
             }
             throw error
         }
-        return try await store.create(userId: userId, realm: .business, businessId: businessId, replacing: previousCookie)
+        await verification.deliver(EmailVerificationService.codeMessage(to: payload.email, code: code, kind: "signup-code"))
+        if let previousCookie { try await store.revoke(token: previousCookie) }
+    }
+
+    /// Enters the sign-up code. Every failure (no such address, no pending sign-up, wrong, expired, out of attempts) is the same
+    /// validation error, so the endpoint cannot be used to probe addresses. On success the account becomes active and the organization
+    /// application is created, in one transaction; the user then signs in with the passkey made at sign-up.
+    func verifyEmail(_ body: VerifyEmailBody, ip: String) async throws {
+        let failure = APIError.validation("That code is not valid or has expired. Request a new code and try again.", details: ["code": "invalid"])
+        try await ctx.limiter.enforce("dashboard-verify-ip", key: ip, rule: .perMinute(20, burst: 10))
+        guard let email = Self.normalizeEmail(body.email) else { throw failure }
+        let hash = emailHash(email)
+        try await ctx.limiter.enforce("dashboard-verify-email", key: hash, rule: .perHour(30, burst: 10))
+        let verification = EmailVerificationService(db: db, ctx: ctx)
+        guard let record = try await verification.latest(kind: "signup", emailHash: hash), try await verification.check(record, code: body.code),
+              let sealed = record.payload, let data = try? ctx.cipher.open(sealed, context: EmailVerificationService.payloadContext, rowId: record.id!),
+              let payload = try? JSONDecoder().decode(SignupPayload.self, from: data),
+              let user = try await DashboardUserRecord.find(record.subjectId, on: db), user.status == "unverified", user.kind == "business" else { throw failure }
+        let businessId = UUID()
+        do {
+            try await db.transaction { tx in
+                guard try await verification.consume(record, on: tx),
+                      try await DB.swap(tx, table: DashboardUserRecord.schema, id: record.subjectId, column: "status", expected: "unverified", newValue: "active")
+                else { throw ConcurrencyConflict() }
+                _ = try await BusinessOnboarding(db: tx, ctx: ctx).createPending(
+                    businessId: businessId, ownerId: record.subjectId, displayName: payload.organizationName, legalName: payload.legalName,
+                    category: BusinessCategory(rawValue: payload.category), website: payload.website, requestedHandle: payload.requestedHandle,
+                    description: payload.description)
+                _ = try await AuditService(db: tx, ctx: ctx).record("dashboard.registered", actor: AuditActor(kind: .business, id: record.subjectId.uuidString.lowercased()),
+                    businessId: BusinessID(businessId), subjectType: "organization", subjectId: businessId.uuidString.lowercased())
+            }
+        } catch is ConcurrencyConflict {
+            throw failure
+        }
+    }
+
+    /// Sends a fresh sign-up code to an address that has a pending sign-up. Always returns normally for a well-formed request, whether or
+    /// not anything was sent; rate-limited per address and per IP.
+    func resendSignupCode(email rawEmail: String, ip: String) async throws {
+        guard let email = Self.normalizeEmail(rawEmail) else { return }
+        let hash = emailHash(email)
+        try await ctx.limiter.enforce("dashboard-signup-address", key: hash, rule: .perHour(5, burst: 5))
+        try await ctx.limiter.enforce("dashboard-signup-ip", key: ip, rule: .perHour(30, burst: 15))
+        let verification = EmailVerificationService(db: db, ctx: ctx)
+        guard let old = try await verification.latest(kind: "signup", emailHash: hash), let sealed = old.payload,
+              let data = try? ctx.cipher.open(sealed, context: EmailVerificationService.payloadContext, rowId: old.id!),
+              let user = try await DashboardUserRecord.find(old.subjectId, on: db), user.status == "unverified" else { return }
+        let code = try await verification.issue(kind: "signup", subjectId: old.subjectId, emailHash: hash, payload: String(decoding: data, as: UTF8.self))
+        await verification.deliver(EmailVerificationService.codeMessage(to: email, code: code, kind: "signup-code"))
     }
 
     // MARK: Sign-in
@@ -313,19 +382,41 @@ struct DashboardAuthService {
     // MARK: Invitations
 
     /// Registration through an invitation link. The link proves nothing about who controls the address beyond "someone holding the
-    /// email", so it can only ever create a **new** account. An address that already has an account (used or not) cannot be claimed
-    /// this way: that account signs in and accepts the invitation from its own session (`acceptInvite`). The answer here is the
-    /// same whether or not an account exists, so the link cannot be used to probe addresses; the difference only shows at `finish`
-    /// as a generic registration error.
+    /// email", so it can only ever create a **new** account, and only after the invitee **enters the code emailed to the invited address**
+    /// (`sendInviteCode`): the token (in the invitation email) and the code (a separate, fresh email) are two proofs of the same mailbox.
+    /// An address that already has a *verified* account cannot be claimed this way: that account signs in and accepts the invitation from
+    /// its own session (`acceptInvite`). An *unverified* sign-up for the address never blocks it: it is replaced at `finish`. The answer
+    /// here is the same whether or not an account exists, so the link cannot be used to probe addresses; the difference only shows at
+    /// `finish` as a generic registration error.
     func inviteBegin(_ body: InviteBeginBody) async throws -> PasskeyRegistrationOptions {
         guard let name = cleanName(body.displayName, max: 64), let invite = try await openInvite(token: body.token) else {
             throw APIError.validation("This invitation is not valid.", details: ["token": "invalid"])
         }
+        let verification = EmailVerificationService(db: db, ctx: ctx)
+        guard let record = try await verification.latest(kind: "invite", emailHash: invite.emailHash), record.subjectId == invite.id,
+              try await verification.check(record, code: body.code ?? ""), try await verification.consume(record) else {
+            throw APIError.validation("That code is not valid or has expired. Request a new code and try again.", details: ["code": "invalid"])
+        }
         let email = try ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!)
         let handle = SecureToken.generate(byteCount: 32)
-        let payload = String(decoding: try JSONEncoder().encode(["inviteId": invite.id!.uuidString, "displayName": name, "userHandle": handle]), as: UTF8.self)
+        let payload = String(decoding: try JSONEncoder().encode(["inviteId": invite.id!.uuidString, "displayName": name, "userHandle": handle, "emailVerified": "1"]), as: UTF8.self)
         let (ceremony, challenge) = try await newCeremony(kind: "invite", userId: nil, sealedPayload: payload)
         return registrationOptions(ceremony, challenge: challenge, handle: handle, email: email, displayName: name)
+    }
+
+    /// Emails the invitee a fresh 6-digit code (the token alone does not let anyone register). Rate-limited per invitation, per address
+    /// and per IP; an invalid token is the same validation error as at `inviteBegin`.
+    func sendInviteCode(token: String, ip: String) async throws {
+        guard let invite = try await openInvite(token: token) else {
+            throw APIError.validation("This invitation is not valid.", details: ["token": "invalid"])
+        }
+        try await ctx.limiter.enforce("dashboard-invite-code", key: invite.id!.uuidString, rule: .perHour(5, burst: 5))
+        try await ctx.limiter.enforce("dashboard-invite-code-address", key: invite.emailHash, rule: .perHour(10, burst: 10))
+        try await ctx.limiter.enforce("dashboard-invite-code-ip", key: ip, rule: .perHour(30, burst: 15))
+        let verification = EmailVerificationService(db: db, ctx: ctx)
+        let email = try ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!)
+        let code = try await verification.issue(kind: "invite", subjectId: invite.id!, emailHash: invite.emailHash)
+        await verification.deliver(EmailVerificationService.codeMessage(to: email, code: code, kind: "invite-code"))
     }
 
     func openInvite(token: String) async throws -> OrgInviteRecord? {
@@ -341,16 +432,20 @@ struct DashboardAuthService {
         guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload", rowId: ceremony.id!),
               let payload = try? JSONDecoder().decode([String: String].self, from: data), let inviteIdText = payload["inviteId"],
               let inviteId = UUID(uuidString: inviteIdText), let name = payload["displayName"], let handle = payload["userHandle"],
+              payload["emailVerified"] == "1",
               let invite = try await OrgInviteRecord.find(inviteId, on: db), invite.state == "open", invite.expiresAt > ctx.now,
               let email = try? ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!) else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
         let taken = APIError(.unauthorized, .unauthorized,
                              "Registration could not be completed. If you already have an account, sign in and accept the invitation from your team page.")
-        // Never claim an existing account (used or not): the invitation link does not prove the address is the invitee's.
-        guard try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).count() == 0 else { throw taken }
+        // Never claim an existing verified account: the invitation does not prove the address is the invitee's. An unverified sign-up for
+        // the address (a squatter that never owned the mailbox) does not count: the invitee just proved the mailbox and replaces it.
+        guard try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).filter(\.$status != "unverified").count() == 0
+        else { throw taken }
         let userId = UUID()
         do {
             try await db.transaction { tx in
+                try await EmailVerificationService.removeUnverified(emailHash: invite.emailHash, on: tx)
                 // Single use: exactly one acceptance can flip open → accepted.
                 guard try await DB.swap(tx, table: OrgInviteRecord.schema, id: inviteId, column: "state", expected: "open", newValue: "accepted",
                                         extra: [("accepted_at", ctx.now)]) else { throw APIError.unauthorized }

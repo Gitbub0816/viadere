@@ -135,6 +135,8 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case contextDigestRequired = "context_digest_required"
     /// The signed `contextDigest` is not the digest of the interaction the server holds.
     case contextMismatch = "context_mismatch"
+    /// The server requires App Attest (`APP_ATTEST_MODE=require`) and the enrollment carried no valid attestation (`403`).
+    case attestationRequired = "attestation_required"
     case unknown
 
     public init(from decoder: any Decoder) throws {

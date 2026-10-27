@@ -181,17 +181,26 @@ struct ClientTests {
         #expect(sleeps.delays[0] <= 0.5 && sleeps.delays[1] <= 1.0, "exponential backoff with jitter")
     }
 
-    @Test func requestsThatAreNotSafeToRepeatAreNeverRetried() async throws {
+    @Test func webhookCreateAndRotateAreRetriedWithTheSameIdempotencyKeyOnEveryAttempt() async throws {
         let transport = MockTransport()
-        try transport.enqueue(status: 500, json: Fixtures.errorBody(.internalError))
+        for _ in 0..<3 { try transport.enqueue(status: 500, json: Fixtures.errorBody(.internalError)) }
         let client = try Fixtures.client(transport)
-        // Creating a webhook has no idempotency key: a blind retry could create two endpoints.
+        // The server requires an Idempotency-Key on create, so a retry can no longer create two endpoints: every attempt carries the same key.
         await #expect(throws: ViadereAPIError.self) { try await client.createWebhook(url: URL(string: "https://example.com/h")!, events: [.interactionDecided]) }
-        #expect(transport.requests.count == 1)
-        // The same applies to rotation (a retry could rotate twice and lose the first secret).
-        try transport.enqueue(status: 500, json: Fixtures.errorBody(.internalError))
+        let createKeys = Set(transport.requests.map { $0.headers[ViadereHeader.idempotencyKey] ?? "" })
+        #expect(transport.requests.count == 3)
+        #expect(createKeys.count == 1 && createKeys.first?.isEmpty == false)
+        // Rotation too (a retry with a new key could rotate twice and lose the first secret), and a different call gets a different key.
+        for _ in 0..<3 { try transport.enqueue(status: 500, json: Fixtures.errorBody(.internalError)) }
         await #expect(throws: ViadereAPIError.self) { try await client.rotateWebhookSecret(id: WebhookSubscriptionID()) }
-        #expect(transport.requests.count == 2)
+        let rotateKeys = Set(transport.requests.dropFirst(3).map { $0.headers[ViadereHeader.idempotencyKey] ?? "" })
+        #expect(transport.requests.count == 6)
+        #expect(rotateKeys.count == 1 && rotateKeys.first?.isEmpty == false && rotateKeys != createKeys)
+        // A caller can pin the key (a deterministic key derived from its own object).
+        let cancelled = InteractionOutcome(interactionId: InteractionID(), businessId: BusinessID(), status: .cancelled, decidedAt: Fixtures.now)
+        try transport.enqueue(status: 200, json: cancelled)
+        _ = try await client.cancelInteraction(id: cancelled.interactionId, idempotencyKey: "cancel-order-17")
+        #expect(transport.requests.last?.headers[ViadereHeader.idempotencyKey] == "cancel-order-17")
     }
 
     @Test func retriesCanBeDisabled() async throws {

@@ -10,14 +10,28 @@ struct SecurityNotices {
     let ctx: ServerContext
 
     enum Notice {
-        case newDevice, newPhone, appClip, deviceReplaced
+        case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
+        case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked
 
         var kind: SecurityNoticeKind {
             switch self {
             case .newDevice: .newDevice
             case .newPhone: .newPhone
             case .appClip: .appClip
-            case .deviceReplaced: .deviceReplaced
+            case .deviceReplaced, .replacementCancelled: .deviceReplaced
+            case .devicePendingReplacement: .devicePendingReplacement
+            case .recoveryStarted: .recoveryStarted
+            case .recoveryCancelled: .recoveryCancelled
+            case .recoveryAttemptsLocked: .recoveryAttemptsLocked
+            }
+        }
+
+        /// The "Not you? Cancel" button, acting on the notice's `subjectId`.
+        var action: SecurityNoticeAction? {
+            switch self {
+            case .devicePendingReplacement: .cancelDeviceReplacement
+            case .recoveryStarted: .cancelRecovery
+            default: nil
             }
         }
 
@@ -27,6 +41,15 @@ struct SecurityNotices {
             case .newPhone: "A phone number was linked to your Viadere account. If this wasn't you, open Viadere and remove it."
             case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
             case .deviceReplaced: "A device on your Viadere account was set up again. If this wasn't you, open Viadere and review your devices."
+            case .devicePendingReplacement:
+                "A new device is about to replace one of your Viadere devices. Not you? Open Viadere and cancel it. Until then your current device keeps working."
+            case .replacementCancelled: "A pending device replacement on your Viadere account was cancelled and the new device was removed."
+            case .recoveryStarted:
+                "Account recovery was started for your Viadere account. Not you? Open Viadere and cancel it now. It only takes effect after 72 hours."
+            case .recoveryCancelled:
+                "An account recovery was cancelled. Its recovery codes no longer work: create new ones in Viadere settings."
+            case .recoveryAttemptsLocked:
+                "Someone entered wrong recovery codes for your Viadere account, so recovery is locked for a while. If this wasn't you, make new recovery codes in settings."
             }
         }
     }
@@ -36,7 +59,7 @@ struct SecurityNotices {
         let now = ctx.now
         do {
             try await SecurityNoticeRecord(consumerId: consumer, kind: notice.kind.rawValue, message: notice.body, subjectId: subjectId,
-                                           originDeviceId: except, now: now).create(on: db)
+                                           originDeviceId: except, now: now, action: notice.action?.rawValue).create(on: db)
         } catch {
             ctx.logger.warning("security notice could not be stored", metadata: ["kind": "\(notice.kind.rawValue)"])
         }
@@ -45,7 +68,9 @@ struct SecurityNotices {
                 .filter { $0.id != except && $0.kind == .app && !$0.isExpired(at: now) }
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id)).filter(\.$invalidatedAt == nil).all()
             for token in tokens {
-                let message = PushPayloadBuilder.securityNotice(body: notice.body, token: token.record, topic: ctx.config.appBundleID)
+                var message = PushPayloadBuilder.securityNotice(body: notice.body, token: token.record, topic: ctx.config.appBundleID)
+                // A notice with a "Not you? Cancel" button uses its own category so the app can attach the action to the notification.
+                if notice.action != nil { message.category = "viadere.security.cancel" }
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: now).update()
                 }
@@ -63,7 +88,8 @@ struct SecurityNotices {
             .filter { $0.originDeviceId == nil || $0.originDeviceId != device }
             .compactMap { row in
                 row.id.map { SecurityNotice(id: $0, kind: SecurityNoticeKind(rawValue: row.kind) ?? .unknown, message: row.message,
-                                            createdAt: row.createdAt, subjectId: row.subjectId) }
+                                            createdAt: row.createdAt, subjectId: row.subjectId,
+                                            action: row.action.flatMap(SecurityNoticeAction.init(rawValue:))) }
             }
     }
 

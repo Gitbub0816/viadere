@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 
 // MARK: - Passkeys (WebAuthn). Binary fields are base64url strings.
@@ -133,19 +134,30 @@ public struct AuthSession: Codable, Sendable, Hashable {
     public var expiresAt: Date
     public var refreshToken: String?
     public var refreshExpiresAt: Date?
+    /// The account's 10 single-use recovery codes. Present **only** in the `register/finish` response, exactly once: the app must make
+    /// the person save them (print, password manager) before continuing. The server keeps only peppered HMACs and can never show them
+    /// again (`RecoveryCodeSet`, §2.25).
+    public var recoveryCodes: RecoveryCodeSet?
 
     public init(consumerId: ConsumerID, accessToken: String, tokenType: String = "Bearer", expiresAt: Date,
-                refreshToken: String? = nil, refreshExpiresAt: Date? = nil) {
+                refreshToken: String? = nil, refreshExpiresAt: Date? = nil, recoveryCodes: RecoveryCodeSet? = nil) {
         self.consumerId = consumerId
         self.accessToken = accessToken
         self.tokenType = tokenType
         self.expiresAt = expiresAt
         self.refreshToken = refreshToken
         self.refreshExpiresAt = refreshExpiresAt
+        self.recoveryCodes = recoveryCodes
     }
 }
 
 /// Rotates a session: exchange the current refresh token for a new access + refresh token pair.
+///
+/// **Device-signed when the session is bound to a device.** `POST /v1/auth/refresh` carries the `VIADERE-SIG-V1` headers
+/// (`Viadere-Device`, `Viadere-Timestamp`, `Viadere-Nonce`, `Viadere-Signature`, §2.3) made with the bound device's `request` key
+/// over this exact request (method, path, body). A bound session without a valid signature from its device is `401 signature_invalid`
+/// (the 60 s grace replay included), so a copied refresh token is useless without the device. A session that has not enrolled a
+/// device yet (fresh passkey sign-in) refreshes without headers. There is no bearer header.
 public struct AuthRefreshRequest: Codable, Sendable, Hashable {
     public var refreshToken: String
     public init(refreshToken: String) { self.refreshToken = refreshToken }
@@ -212,18 +224,44 @@ public enum DeviceClientKind: String, Codable, Sendable, CaseIterable {
     case appClip
 }
 
-/// Apple App Attest evidence for the keys being enrolled (`DCAppAttestService.attestKey`). The server verifier is a stub
-/// until Apple credentials are configured: today the evidence is recorded and every key is stored as `attested = false`,
-/// so `hardwareBacked` remains a client claim that policy and telemetry must not trust.
+/// Apple App Attest evidence for the keys being enrolled (`DCAppAttestService.attestKey(_:clientDataHash:)`). The server verifies it
+/// against Apple's App Attestation Root CA (§2.5): `DeviceKey.attested` is `true` only on success, and with
+/// `APP_ATTEST_MODE=require` an enrollment without a valid attestation is refused (`403 attestation_required`).
+///
+/// **clientDataHash** = `AppAttestBinding.clientDataHash(consumerId:challenge:keys:)`: SHA-256 of
+/// `"VIADERE-APPATTEST-ENROLL-V1\n{consumerId}\n{challenge}\n{SHA-256 hex of the canonical key list}"`, so an attestation vouches for
+/// exactly this enrollment challenge, account and key set and cannot be replayed to vouch for other keys.
 public struct AppAttestEvidence: Codable, Sendable, Hashable {
-    /// App Attest key identifier (base64).
+    /// App Attest key identifier as `DCAppAttestService.generateKey` returned it (base64, standard or url alphabet).
     public var keyId: String
-    /// base64url CBOR attestation object, over `SHA-256(enroll challenge)` as the client data hash.
+    /// base64url (or standard base64) CBOR attestation object returned by `attestKey`.
     public var attestation: String
 
     public init(keyId: String, attestation: String) {
         self.keyId = keyId
         self.attestation = attestation
+    }
+}
+
+/// The App Attest client-data binding for an enrollment (`AppAttestEvidence`). Reference implementation shared by the app and server.
+public enum AppAttestBinding {
+    public static let domain = "VIADERE-APPATTEST-ENROLL-V1"
+
+    /// Lowercase hex SHA-256 of the canonical key list: one line `"{purpose}:{base64url X9.63 public key}"` per key, sorted by purpose
+    /// raw value, joined with `"\n"` (no trailing newline).
+    public static func keyListDigest(_ keys: [DeviceKeyRegistration]) -> String {
+        let lines = keys.map { "\($0.purpose.rawValue):\($0.publicKey.base64URL)" }.sorted()
+        return SecureToken.sha256Hex(Data(lines.joined(separator: "\n").utf8))
+    }
+
+    /// `"VIADERE-APPATTEST-ENROLL-V1\n{consumerId}\n{challenge}\n{keyListDigest}"` (UTF-8). The attestation's `clientData`.
+    public static func clientData(consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration]) -> Data {
+        Data([domain, consumerId.description, challenge, keyListDigest(keys)].joined(separator: "\n").utf8)
+    }
+
+    /// SHA-256 of `clientData`: the value to pass as `clientDataHash` to `attestKey`.
+    public static func clientDataHash(consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration]) -> Data {
+        Data(SHA256.hash(data: clientData(consumerId: consumerId, challenge: challenge, keys: keys)))
     }
 }
 
@@ -258,9 +296,13 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
     public var clipDevice: Bool?
     /// App Attest evidence (recorded; not yet trusted).
     public var appAttest: AppAttestEvidence?
-    /// "Set up again": the caller's own device (or one revoked within the last 30 days) that this enrollment replaces. After a
-    /// successful enrollment the server revokes it atomically and moves the session's device binding to the new device. The
-    /// new device is still subject to the new-device cool-down. Omitted for an ordinary enrollment.
+    /// "Set up again": the caller's own device (or one revoked within the last 30 days) that this enrollment replaces.
+    /// * An old device that is already **revoked** is replaced at once (the session moves to the new device).
+    /// * A **live** old device is not revoked yet: it is marked `Device.pendingReplacementBy`, keeps working, and is revoked when the
+    ///   new device is confirmed or its cool-down ends, unless the owner cancels from the old device
+    ///   (`APIRoutes.deviceReplacementCancel`). The caller's session stays bound to the old device; the response carries a new
+    ///   session bound to the new device (`Device.replacementSession`).
+    /// The new device is still subject to the new-device cool-down. Omitted for an ordinary enrollment.
     public var replacesDeviceId: DeviceID?
 
     public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration],
@@ -526,10 +568,33 @@ public struct SessionInfo: Codable, Sendable, Hashable, Identifiable {
 
 /// What happened. Unknown values decode as `.unknown` so older apps survive new kinds.
 public enum SecurityNoticeKind: String, Codable, Sendable, Hashable {
-    case newDevice, newPhone, appClip, deviceReplaced, unknown
+    case newDevice, newPhone, appClip, deviceReplaced
+    /// A new device is replacing this account's live device and will take over when it is confirmed or its cool-down ends
+    /// (`action == .cancelDeviceReplacement`, `subjectId` = the NEW device).
+    case devicePendingReplacement
+    /// Account recovery was started with a recovery code (`action == .cancelRecovery`, `subjectId` = the recovery id).
+    case recoveryStarted
+    /// A recovery was cancelled, or its remaining recovery codes were invalidated.
+    case recoveryCancelled
+    /// Repeated wrong recovery codes locked recovery for a while.
+    case recoveryAttemptsLocked
+    case unknown
 
     public init(from decoder: any Decoder) throws {
         self = SecurityNoticeKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// What the person can do about a notice ("Not you? Cancel"). Unknown values decode as `.unknown` (show no button).
+public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
+    /// `POST /v1/recovery/{subjectId}/cancel` (a trusted device).
+    case cancelRecovery
+    /// `POST /v1/devices/{subjectId}/cancel-replacement`: revokes the NEW device; the old one keeps working.
+    case cancelDeviceReplacement
+    case unknown
+
+    public init(from decoder: any Decoder) throws {
+        self = SecurityNoticeAction(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 }
 
@@ -544,13 +609,17 @@ public struct SecurityNotice: Codable, Sendable, Hashable, Identifiable {
     public var createdAt: Date
     /// The device or phone link id the notice is about, when there is one.
     public var subjectId: String?
+    /// "Not you? Cancel": what the notice's button does (acting on `subjectId`). `nil` for informational notices.
+    public var action: SecurityNoticeAction?
 
-    public init(id: UUID, kind: SecurityNoticeKind, message: String, createdAt: Date, subjectId: String? = nil) {
+    public init(id: UUID, kind: SecurityNoticeKind, message: String, createdAt: Date, subjectId: String? = nil,
+                action: SecurityNoticeAction? = nil) {
         self.id = id
         self.kind = kind
         self.message = message
         self.createdAt = createdAt
         self.subjectId = subjectId
+        self.action = action
     }
 }
 

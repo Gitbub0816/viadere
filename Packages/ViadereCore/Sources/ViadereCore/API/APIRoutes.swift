@@ -14,7 +14,9 @@ public enum APIRoutes {
         "auth.login.begin", .POST, "/v1/auth/login/begin", auth: .none)
     public static let loginFinish = Endpoint<PasskeyLoginFinishRequest, AuthSession>(
         "auth.login.finish", .POST, "/v1/auth/login/finish", auth: .none)
-    /// Public: the refresh token itself is the credential (single-use, rotated, reuse revokes the family).
+    /// Public (no bearer): the refresh token is the credential (single-use, rotated, reuse revokes the family). **When the session is
+    /// bound to a device the request must also carry that device's `VIADERE-SIG-V1` headers** (§2.3), the 60 s grace replay included;
+    /// a session that has not enrolled a device refreshes without them. Declared `.none` because the headers are conditional.
     public static let authRefresh = Endpoint<AuthRefreshRequest, AuthSession>(
         "auth.refresh", .POST, "/v1/auth/refresh", auth: .none)
     /// Ends **this session only** (its tokens). It never revokes devices: use `devices.revoke` for that. Device-signed, so a stolen
@@ -32,10 +34,37 @@ public enum APIRoutes {
     /// Lifts the new-device cool-down of `{deviceId}`; signed by a different, trusted device (`ConfirmationProof`).
     public static let deviceConfirm = Endpoint<ConfirmationRequest, Device>(
         "devices.confirm", .POST, "/v1/devices/{deviceId}/confirm", auth: .deviceSignedBearer)
+    /// "Not you? Cancel" on a pending replacement: revokes the NEW device `{deviceId}` that is about to replace a live one. Signed by a
+    /// trusted device of the account other than `{deviceId}` (normally the device being replaced).
+    public static let deviceReplacementCancel = Endpoint<EmptyBody, EmptyBody>(
+        "devices.replacement.cancel", .POST, "/v1/devices/{deviceId}/cancel-replacement", auth: .deviceSignedBearer)
     public static let devicesList = Endpoint<EmptyBody, [Device]>(
         "devices.list", .GET, "/v1/devices", auth: .deviceSignedBearer)
     public static let deviceRevoke = Endpoint<EmptyBody, EmptyBody>(
         "devices.revoke", .DELETE, "/v1/devices/{deviceId}", auth: .deviceSignedBearer)
+
+    // MARK: Account recovery
+    /// Spends one recovery code and returns options to register a NEW passkey (`PasskeyRegistrationOptions`). Public, rate-limited.
+    public static let recoveryBegin = Endpoint<RecoveryBeginRequest, PasskeyRegistrationOptions>(
+        "recovery.begin", .POST, "/v1/recovery/begin", auth: .none)
+    /// Registers the new passkey and starts the 72 h hold. Public, rate-limited.
+    public static let recoveryFinish = Endpoint<RecoveryFinishRequest, RecoveryStatus>(
+        "recovery.finish", .POST, "/v1/recovery/finish", auth: .none)
+    /// Polls / completes a recovery with its status token; returns the replacement recovery codes once after activation. Public.
+    public static let recoveryComplete = Endpoint<RecoveryCompleteRequest, RecoveryStatus>(
+        "recovery.complete", .POST, "/v1/recovery/complete", auth: .none)
+    /// Cancels a recovery that is holding ("Not you? Cancel"). Any trusted device. Also invalidates the account's remaining recovery
+    /// codes (whoever started it held at least one).
+    public static let recoveryCancel = Endpoint<EmptyBody, RecoveryStatus>(
+        "recovery.cancel", .POST, "/v1/recovery/{recoveryId}/cancel", auth: .deviceSignedBearer)
+    public static let recoveryInfo = Endpoint<EmptyBody, RecoveryInfo>(
+        "recovery.info", .GET, "/v1/recovery", auth: .deviceSignedBearer)
+    /// Starts regeneration: returns passkey assertion options (`PasskeyAssertionOptions`). Trusted device.
+    public static let recoveryCodesBegin = Endpoint<EmptyBody, PasskeyAssertionOptions>(
+        "recovery.codes.begin", .POST, "/v1/recovery/codes/begin", auth: .deviceSignedBearer)
+    /// Issues a new `RecoveryCodeSet` (old codes die). Trusted device **and** a fresh user-verified passkey assertion.
+    public static let recoveryCodesRegenerate = Endpoint<RecoveryCodesRegenerateRequest, RecoveryCodeSet>(
+        "recovery.codes.regenerate", .POST, "/v1/recovery/codes/regenerate", auth: .deviceSignedBearer)
 
     // MARK: Phone links & SMS account linking
     public static let phoneLinkStart = Endpoint<PhoneLinkStartRequest, PhoneLinkStartResponse>(
@@ -231,6 +260,9 @@ public enum APIRoutes {
         registerBegin.descriptor, registerFinish.descriptor, loginBegin.descriptor, loginFinish.descriptor,
         authRefresh.descriptor, logout.descriptor,
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, deviceConfirm.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
+        deviceReplacementCancel.descriptor,
+        recoveryBegin.descriptor, recoveryFinish.descriptor, recoveryComplete.descriptor, recoveryCancel.descriptor, recoveryInfo.descriptor,
+        recoveryCodesBegin.descriptor, recoveryCodesRegenerate.descriptor,
         phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkPreview.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
         phoneLinkConfirm.descriptor,
         phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, accountDelete.descriptor,

@@ -60,10 +60,21 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
     public var approvalsLockedUntil: Date?
     /// When the device stops working on its own (App Clips: 7 days after enrollment). `nil` = never.
     public var expiresAt: Date?
+    /// Set on a **live** device that "Set up again" is replacing: the new device that will take its place. The old device keeps working
+    /// until that device is confirmed or its cool-down ends (`pendingReplacementAt`), or until the owner cancels
+    /// (`APIRoutes.deviceReplacementCancel`, which revokes the new device).
+    public var pendingReplacementBy: DeviceID?
+    /// The latest moment the old device is revoked automatically (the new device's cool-down end).
+    public var pendingReplacementAt: Date?
+    /// Present **only** in the `POST /v1/devices` response that started a pending replacement of a live device: a new session already
+    /// bound to this new device (the caller's own session stays bound to the old device, which keeps working). The app stores these
+    /// tokens for the new device; there is no second passkey prompt.
+    public var replacementSession: AuthSession?
 
     public init(id: DeviceID, consumerId: ConsumerID, name: String, platform: DevicePlatform, keys: [DeviceKey],
                 createdAt: Date, lastSeenAt: Date? = nil, revokedAt: Date? = nil, clientKind: DeviceClientKind = .app,
-                approvalsLockedUntil: Date? = nil, expiresAt: Date? = nil) {
+                approvalsLockedUntil: Date? = nil, expiresAt: Date? = nil, pendingReplacementBy: DeviceID? = nil,
+                pendingReplacementAt: Date? = nil, replacementSession: AuthSession? = nil) {
         self.id = id
         self.consumerId = consumerId
         self.name = name
@@ -76,10 +87,14 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         self.clientKind = clientKind
         self.approvalsLockedUntil = approvalsLockedUntil
         self.expiresAt = expiresAt
+        self.pendingReplacementBy = pendingReplacementBy
+        self.pendingReplacementAt = pendingReplacementAt
+        self.replacementSession = replacementSession
     }
 
     enum CodingKeys: String, CodingKey {
         case id, consumerId, name, platform, keys, maxAssurance, createdAt, lastSeenAt, revokedAt, clientKind, clipDevice, approvalsLockedUntil, expiresAt
+        case pendingReplacementBy, pendingReplacementAt, replacementSession
     }
 
     public init(from decoder: any Decoder) throws {
@@ -97,6 +112,9 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         clientKind = clip ? .appClip : (try c.decodeIfPresent(DeviceClientKind.self, forKey: .clientKind) ?? .app)
         approvalsLockedUntil = try c.decodeIfPresent(Date.self, forKey: .approvalsLockedUntil)
         expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
+        pendingReplacementBy = try c.decodeIfPresent(DeviceID.self, forKey: .pendingReplacementBy)
+        pendingReplacementAt = try c.decodeIfPresent(Date.self, forKey: .pendingReplacementAt)
+        replacementSession = try c.decodeIfPresent(AuthSession.self, forKey: .replacementSession)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -114,6 +132,9 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         try c.encode(clientKind == .appClip, forKey: .clipDevice)
         try c.encodeIfPresent(approvalsLockedUntil, forKey: .approvalsLockedUntil)
         try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(pendingReplacementBy, forKey: .pendingReplacementBy)
+        try c.encodeIfPresent(pendingReplacementAt, forKey: .pendingReplacementAt)
+        try c.encodeIfPresent(replacementSession, forKey: .replacementSession)
     }
 
     /// Whether the device is inside its new-device cool-down at `now`.

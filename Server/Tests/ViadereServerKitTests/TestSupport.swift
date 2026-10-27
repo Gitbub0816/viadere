@@ -52,6 +52,34 @@ final class RecordingAPNsSender: APNsSender, @unchecked Sendable {
     }
 }
 
+/// Records outbound email instead of sending it.
+final class RecordingEmailSender: EmailSender, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [EmailMessage] = []
+    private var failing = false
+    var sent: [EmailMessage] { lock.withLock { storage } }
+    func setFailing(_ value: Bool) { lock.withLock { failing = value } }
+    func send(_ message: EmailMessage) async throws {
+        try lock.withLock {
+            if failing { throw EmailError.transport }
+            storage.append(message)
+        }
+    }
+    func messages(to address: String) -> [EmailMessage] { sent.filter { $0.to == address } }
+    /// The newest 6-digit code mailed to `address`.
+    func lastCode(to address: String) -> String? {
+        messages(to: address).last(where: { $0.kind.hasSuffix("code") }).flatMap { message in
+            message.text.range(of: #"\b[0-9]{6}\b"#, options: .regularExpression).map { String(message.text[$0]) }
+        }
+    }
+    /// The token of the newest invitation link mailed to `address`.
+    func lastInviteToken(to address: String) -> String? {
+        messages(to: address).last(where: { $0.kind == "invite" }).flatMap { message in
+            message.text.range(of: "/dashboard/invite/").map { String(message.text[$0.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) }
+        }
+    }
+}
+
 /// Uses the real Twilio signature/parsing code, but records outbound messages instead of calling the network.
 final class RecordingSMSProvider: SMSProvider, @unchecked Sendable {
     static let authToken = "test-auth-token-0123456789"
@@ -179,8 +207,11 @@ final class TestHarness: @unchecked Sendable {
     var config: ServerConfig
     let signer: FakePassSigner
     let passPush: RecordingPassPush
+    let emails: RecordingEmailSender
 
-    init(app: Application, clock: ManualClock, config: ServerConfig, signer: FakePassSigner, passPush: RecordingPassPush) {
+    init(app: Application, clock: ManualClock, config: ServerConfig, signer: FakePassSigner, passPush: RecordingPassPush,
+         emails: RecordingEmailSender = RecordingEmailSender()) {
+        self.emails = emails
         self.app = app
         self.clock = clock
         self.config = config
@@ -200,10 +231,13 @@ final class TestHarness: @unchecked Sendable {
         let transport = ScriptedWebhookTransport()
         let signer = FakePassSigner()
         let passPush = RecordingPassPush()
+        let emails = RecordingEmailSender()
+        // TEST_RATE_LIMIT_STORE=database runs the whole suite on the shared database rate limiter (the production default).
+        if ProcessInfo.processInfo.environment["TEST_RATE_LIMIT_STORE"] == "database" { config.rateLimitStore = .database }
         let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
             clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil,
-            passSigner: passes ? signer : nil, passPush: passPush))
-        let harness = TestHarness(app: app, clock: clock, config: config, signer: signer, passPush: passPush)
+            passSigner: passes ? signer : nil, passPush: passPush, emailSender: emails))
+        let harness = TestHarness(app: app, clock: clock, config: config, signer: signer, passPush: passPush, emails: emails)
         harness.bind(apns: apns, sms: sms, transport: transport)
         return harness
     }
@@ -335,6 +369,19 @@ final class TestHarness: @unchecked Sendable {
         return headers
     }
 
+    /// `POST /v1/auth/refresh` the way the app sends it: no bearer, device-signed with the session's device (when it has one).
+    func refresh(_ consumer: TestConsumer, token: String? = nil, signWith: SoftwareP256SigningKey? = nil, at: Date? = nil, nonce: String? = nil,
+                 signed: Bool = true) async throws -> HTTPResult {
+        let body = try ViadereJSON.encode(AuthRefreshRequest(refreshToken: token ?? consumer.session.refreshToken!))
+        var headers: [String: String] = [:]
+        if signed, let device = consumer.device {
+            let signer = RequestSigner(deviceId: device.id, key: signWith ?? device.requestKey)
+            headers = try await signer.sign(method: "POST", pathAndQuery: APIRoutes.authRefresh.template, body: body, now: at ?? clock.now(),
+                                            nonce: nonce ?? SecureToken.generate(byteCount: 16)).fields
+        }
+        return try await request(.POST, APIRoutes.authRefresh.template, headers: headers, body: body)
+    }
+
     func signedPost<T: Encodable>(_ consumer: TestConsumer, _ path: String, _ value: T) async throws -> HTTPResult {
         try await signed(consumer, .POST, path, body: try ViadereJSON.encode(value))
     }
@@ -356,6 +403,11 @@ final class TestHarness: @unchecked Sendable {
                   key: String? = nil) async throws -> HTTPResult {
         var headers = ["Authorization": "Bearer \(key ?? b.key)"]
         if let idempotencyKey { headers["Idempotency-Key"] = idempotencyKey }
+        // Webhook create/rotate and interaction cancel require an Idempotency-Key header like an issue does: tests that are not about
+        // idempotency get a fresh one.
+        if idempotencyKey == nil, method == .POST, path == "/v1/business/webhooks" || path.hasSuffix("/rotate-secret") || path.hasSuffix("/cancel") {
+            headers["Idempotency-Key"] = UUID().uuidString
+        }
         return try await request(method, path, headers: headers, body: body)
     }
 
