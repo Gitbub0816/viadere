@@ -12,6 +12,7 @@ struct SecurityNotices {
     enum Notice {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
         case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
+        case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -25,6 +26,9 @@ struct SecurityNotices {
             case .recoveryAttemptsLocked: .recoveryAttemptsLocked
             case .recoveryCompleted: .recoveryCompleted
             case .delegationEnded: .delegationEnded
+            case .vaultDeviceAdded: .vaultDeviceAdded
+            case .vaultDeviceRemoved: .vaultDeviceRemoved
+            case .vaultDeleted: .vaultDeleted
             }
         }
 
@@ -54,6 +58,10 @@ struct SecurityNotices {
                 "Someone entered wrong recovery codes for your Viadere account, so recovery is locked for a while. If this wasn't you, make new recovery codes in settings."
             case .recoveryCompleted:
                 "Your Viadere account was recovered. Household access was ended and your linked phone numbers need to be confirmed again from a trusted device."
+            case .vaultDeviceAdded:
+                "A device was added to your synced Viadere credential vault. If this wasn't you, open Viadere, remove it and change the passwords and passkeys you keep there."
+            case .vaultDeviceRemoved: "A device was removed from your synced Viadere credential vault."
+            case .vaultDeleted: "Your synced Viadere credential vault was deleted from Viadere's servers. Your devices keep their own copies."
             case .delegationEnded:
                 "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }

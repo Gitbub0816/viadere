@@ -80,6 +80,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         app.databases.use(.sqlite(.memory), as: .sqlite)
     }
     app.migrations.add(Migrations.all)
+    PolicyRegistration.configure(app, config: config)
     if config.databaseURL == nil || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
 
     // MARK: HTTP

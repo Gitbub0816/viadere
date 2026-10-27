@@ -592,6 +592,8 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case recoveryCompleted
     /// A household grant with another account ended because that account was recovered.
     case delegationEnded
+    /// A device was added to (or removed from) the account's synced credential vault, or the synced vault was deleted.
+    case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
     case unknown
 
     public init(from decoder: any Decoder) throws {

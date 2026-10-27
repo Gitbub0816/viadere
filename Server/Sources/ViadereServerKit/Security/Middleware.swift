@@ -35,7 +35,7 @@ public struct RequestGuardMiddleware: AsyncMiddleware {
         let ctx = request.ctx
         let method = request.method
         if method == .POST || method == .PUT || method == .PATCH || method == .DELETE {
-            if let length = request.headers.first(name: .contentLength).flatMap(Int.init), length > ctx.config.maxBodyBytes {
+            if let length = request.headers.first(name: .contentLength).flatMap(Int.init), length > ctx.config.maxBodyBytes(forPath: request.url.path) {
                 throw APIError(.payloadTooLarge, .badRequest, "Request body is too large.")
             }
             let isProvider = request.url.path.hasPrefix("/v1/providers/")

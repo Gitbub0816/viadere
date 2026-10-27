@@ -6,7 +6,7 @@ import ViadereCore
 extension RoutesBuilder {
     /// Registers a route from the shared `APIRoutes` catalog and applies the middleware its
     /// `AuthRequirement` demands, so the server cannot drift from the contract.
-    func api<Req, Res>(_ endpoint: Endpoint<Req, Res>, scope: String? = nil, limiter: IPRateLimitMiddleware? = nil,
+    func api<Req, Res>(_ endpoint: Endpoint<Req, Res>, scope: String? = nil, limiter: IPRateLimitMiddleware? = nil, bodyLimit: ByteCount? = nil,
                        use handler: @escaping @Sendable (Request) async throws -> Response) {
         var group: any RoutesBuilder = self
         if let limiter { group = group.grouped(limiter) }
@@ -19,7 +19,7 @@ extension RoutesBuilder {
         }
         let method = NIOHTTP1.HTTPMethod(rawValue: endpoint.method.rawValue)
         let path = endpoint.descriptor.vaporPathComponents.map { PathComponent(stringLiteral: $0) }
-        group.on(method, path, body: .collect(maxSize: nil), use: handler)
+        group.on(method, path, body: .collect(maxSize: bodyLimit), use: handler)
     }
 }
 
@@ -58,5 +58,8 @@ enum Routes {
         WalletRoutes.register(api)
         HouseholdRoutes.register(api)
         BusinessRewardRoutes.register(api)
+        VaultRoutes.register(api)
+        PolicyRoutes.register(api)
+        PolicyOperatorRoutes.register(app)
     }
 }

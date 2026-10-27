@@ -18,6 +18,14 @@ public struct ViadereAPIError: Error, Sendable, Equatable, CustomStringConvertib
 
     /// The request is safe to retry unchanged (rate limited or a server-side failure).
     public var isRetryable: Bool { status == 429 || status >= 500 }
+
+    /// The key lacks the capability (`insufficient_scope`), the business is not (or no longer) entitled to it (`not_entitled`), or it is
+    /// switched off (`capability_disabled`). Retrying unchanged cannot help: use a key with the capability, ask Viadere for the
+    /// entitlement, or wait for the capability to be re-enabled. `details["capability"]` names it.
+    public var isCapabilityDenied: Bool { code == .insufficientScope || code == .notEntitled || code == .capabilityDisabled }
+
+    /// The capability the request needed, when the API says so.
+    public var deniedCapability: Capability? { details?["capability"].map { Capability(rawValue: $0) } }
 }
 
 /// Failures that are not API errors.

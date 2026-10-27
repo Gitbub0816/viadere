@@ -139,8 +139,8 @@ struct EntitlementService {
             throw APIError.validation("Record why the entitlement is revoked.", details: ["justification": "required"])
         }
         let now = ctx.now
-        var revoked = 0
-        try await db.transaction { tx in
+        _ = try await db.transaction { tx -> Int in
+            var revoked = 0
             for (rowKind, rowValue) in [(kind, value)] + cascade {
                 let rows = try await BusinessEntitlementRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$kind == rowKind)
                     .filter(\.$value == rowValue).filter(\.$revokedAt == nil).all()
@@ -156,6 +156,7 @@ struct EntitlementService {
             _ = try await AuditService(db: tx, ctx: ctx).record(action, actor: AuditActor(kind: actor.kind, id: actor.id), businessId: BusinessID(businessId),
                 subjectType: "entitlement", subjectId: nil,
                 metadata: ["kind": kind, "value": value, "justification": justification, "revoked_rows": String(revoked)])
+            return revoked
         }
     }
 }

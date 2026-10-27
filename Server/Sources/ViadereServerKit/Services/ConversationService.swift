@@ -131,6 +131,7 @@ struct ConversationService {
                 try await relationship.update(on: tx)
                 try await WebhookService(db: tx, ctx: ctx).enqueue(.messageReceived, businessId: BusinessID(session.businessId),
                     payload: MessageReceivedPayload(sessionId: sessionId, relationshipId: RelationshipID(relationship.id!),
+                                                    subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(relationship.businessId), consumerId: ConsumerID(relationship.consumerId)),
                                                     messageId: MessageID(record.id!), text: body, channel: .inApp, receivedAt: now))
             }
         } catch {
@@ -145,6 +146,8 @@ struct ConversationService {
 
     func businessSend(principal: BusinessPrincipal, request: BusinessSendMessageRequest, headerKey: String?) async throws -> (message: ConversationMessage, created: Bool) {
         if let headerKey, headerKey != request.idempotencyKey { throw APIError.badRequest("Idempotency-Key header does not match the request body.") }
+        // SEC-API-003: the key must carry `message.send` and the business must be entitled to it *now*, before a replay can answer.
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(.messageSend), principal: principal, auditAllowed: false)
         guard !request.idempotencyKey.isEmpty, request.idempotencyKey.count <= 128 else {
             throw APIError.validation("idempotencyKey is required.", details: ["idempotencyKey": "invalid"])
         }
@@ -161,9 +164,12 @@ struct ConversationService {
             .filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
         guard relationship.isActive else { throw APIError.conflict("The consumer is not connected to your business.") }
         try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
-        guard try await ConsentService(db: db, ctx: ctx).permits(purpose: .support, relationshipId: relationship.id!) else {
-            throw APIError(.forbidden, .consentRequired, "The consumer has not consented to support messages.")
-        }
+        let policy = PolicyService(db: db, ctx: ctx)
+        let subject = try await policy.subjectFacts(relationship: relationship, capability: .messageSend, interactionPurpose: .support)
+        let decision = try await policy.decide(PolicyInput(.messageSend, subjectRef: SubjectResolver(db: db, ctx: ctx).ref(for: relationship), purpose: "support"),
+                                               principal: principal, stage: .full, subject: subject)
+        if decision.primaryReason == .consentRequired { throw APIError(.forbidden, .consentRequired, "The consumer has not consented to support messages.") }
+        if let error = decision.apiError { throw error }
         let session: ConversationSessionRecord
         if let sessionId = request.sessionId {
             // The session must belong to this business *and* this relationship.

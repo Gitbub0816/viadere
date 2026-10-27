@@ -414,7 +414,7 @@ final class HardeningTests: XCTestCase {
         try await withHarness { h in
             let live = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let test = TestBusiness(record: live.record, key: try await BusinessAPIKeys.issue(businessId: live.record.id!, name: "t", live: false,
-                                                                                                 scopes: BusinessAPIKeys.Scope.all, now: h.clock.now(), on: h.db).key,
+                                                                                                 scopes: BusinessAPIKeys.Scope.all, capabilities: Capability.operational, now: h.clock.now(), on: h.db).key,
                                     summary: live.summary)
             let consumer = try await h.readyConsumer()
             let real = try await h.connect(consumer, to: live)

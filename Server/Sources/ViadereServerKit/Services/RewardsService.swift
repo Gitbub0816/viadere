@@ -685,7 +685,8 @@ struct RewardsService {
             guard let account = try await LoyaltyAccountRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$consumerId == relationship.consumerId).first(),
                   let program = try await LoyaltyProgramRecord.query(on: db).filter(\.$businessId == businessId).first() else { throw APIError.notFound }
             let tier = program.tiers.last { $0.minimumPoints <= account.pointsBalance }
-            return LoyaltyPointsResult(relationshipId: request.relationshipId, pointsBalance: account.pointsBalance, statusName: tier?.name, applied: applied)
+            return LoyaltyPointsResult(relationshipId: request.relationshipId, pointsBalance: account.pointsBalance, statusName: tier?.name, applied: applied,
+                                       subjectRef: ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: ConsumerID(relationship.consumerId)))
         }
         if let existing = try await LoyaltyLedgerRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$idempotencyKey == request.idempotencyKey).first() {
             guard ConstantTime.equals(existing.requestHash, hash) else {
@@ -765,7 +766,8 @@ struct RewardsService {
                 let receipt = RedemptionReceipt(
                     redemptionId: RedemptionID(rowId), rewardId: RewardID(reward.id!), rewardTitle: reward.title, kind: reward.kindValue,
                     consumerReference: ctx.hasher.consumerReference(businessId: principal.businessId, consumerId: ConsumerID(row.consumerId)),
-                    redeemedAt: now, pointsSpent: row.pointsHeld > 0 ? row.pointsHeld : nil, locationCode: location ?? row.locationCode)
+                    redeemedAt: now, pointsSpent: row.pointsHeld > 0 ? row.pointsHeld : nil, locationCode: location ?? row.locationCode,
+                    subjectRef: ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: ConsumerID(row.consumerId)))
                 try await UsageMeter.record(.rewardRedemption, businessId: principal.businessId.uuid, livemode: principal.livemode,
                                             ref: rowId.uuidString.lowercased(), at: now, on: tx)
                 try await WebhookService(db: tx, ctx: ctx).enqueue(.rewardRedeemed, businessId: principal.businessId, payload: receipt)

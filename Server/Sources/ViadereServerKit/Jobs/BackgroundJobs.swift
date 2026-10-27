@@ -30,6 +30,8 @@ struct BackgroundJobs {
         report.passPushes = try await WalletService(db: db, ctx: ctx).deliverDue()
         try await HouseholdService(db: db, ctx: ctx).recordExpired()
         try await IdentityMaintenance(db: db, ctx: ctx).run()
+        // Relationships created before `subject_ref` existed get theirs (a read first; nothing to do once all have one).
+        try await SubjectResolver.backfill(db: db, ctx: ctx)
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
         if await ctx.limiter.allow("abuse-sweep", key: "all", rule: .perMinute(1, burst: 1)) {
             try await AbuseService(db: db, ctx: ctx).sweep()

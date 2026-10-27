@@ -8,8 +8,11 @@ enum BusinessRoutes {
 
     static func register(_ routes: any RoutesBuilder) {
         routes.api(APIRoutes.businessIssueInteraction, scope: Scope.interactionsWrite) { req in
-            let body: IssueInteractionRequest = try req.decodeBody()
+            var body: IssueInteractionRequest = try req.decodeBody()
             let principal = try req.business
+            // Capability first (a key without it never learns whether a customer reference exists), then the customer addressing.
+            try await req.requireCapability(Capability.required(forInteractionKind: body.kind))
+            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
             let result = try await InteractionService(db: req.db, ctx: req.ctx).issue(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }
@@ -18,6 +21,7 @@ enum BusinessRoutes {
             let service = InteractionService(db: req.db, ctx: req.ctx)
             let principal = try req.business
             let record = try await service.record(id: id, businessId: principal.businessId, livemode: principal.livemode)
+            try await req.requireCapability(Capability.required(forInteractionKind: InteractionKind(rawValue: record.kind)))
             _ = try await service.expireIfNeeded(record)
             return try req.jsonResponse(try service.outcome(record))
         }
@@ -28,13 +32,19 @@ enum BusinessRoutes {
             return try req.jsonResponse(result.value)
         }
         routes.api(APIRoutes.businessSendMessage, scope: Scope.messagesWrite) { req in
-            let body: BusinessSendMessageRequest = try req.decodeBody()
-            let result = try await ConversationService(db: req.db, ctx: req.ctx).businessSend(principal: try req.business, request: body, headerKey: req.idempotencyHeader)
+            var body: BusinessSendMessageRequest = try req.decodeBody()
+            let principal = try req.business
+            try await req.requireCapability(.messageSend)
+            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            let result = try await ConversationService(db: req.db, ctx: req.ctx).businessSend(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.message, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessUpdateStatus, scope: Scope.statusesWrite) { req in
-            let body: BusinessStatusUpdateRequest = try req.decodeBody()
-            let result = try await InteractionService(db: req.db, ctx: req.ctx).updateStatus(principal: try req.business, request: body, headerKey: req.idempotencyHeader)
+            var body: BusinessStatusUpdateRequest = try req.decodeBody()
+            let principal = try req.business
+            try await req.requireCapability(.messageSend)
+            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            let result = try await InteractionService(db: req.db, ctx: req.ctx).updateStatus(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessSandboxRelationship, scope: Scope.interactionsWrite) { req in

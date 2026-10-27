@@ -132,6 +132,8 @@ public struct ServerConfig: Sendable {
     public var rateLimitStore: RateLimitStoreMode = .memory
     /// Transactional email provider (`EMAIL_API_URL`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`). `nil` = log-only sender (never in staging/production).
     public var email: EmailConfig?
+    /// Credential-vault sync gate and limits (`VAULT_SYNC_ENABLED`, default off).
+    public var vaultSync = VaultSyncSettings()
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -269,6 +271,7 @@ public struct ServerConfig: Sendable {
         try config.applyPlatformEnvironment(env, production: production)
         try config.applyPassEnvironment(env)
         try config.applyInfrastructureEnvironment(env, production: production)
+        config.applyVaultEnvironment(env)
         return config
     }
 

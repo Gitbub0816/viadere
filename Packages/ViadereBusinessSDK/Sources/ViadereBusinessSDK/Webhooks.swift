@@ -86,6 +86,8 @@ public final class InMemoryWebhookDeduplicator: WebhookEventDeduplicator, @unche
 public struct MessageReceivedEvent: Codable, Sendable, Equatable {
     public var sessionId: SessionID
     public var relationshipId: RelationshipID
+    /// The customer's pairwise reference: the same value at every call, and unrelated to the same customer's reference at any other business.
+    public var subjectRef: SubjectRef?
     public var messageId: MessageID
     public var text: String
     public var channel: Channel
@@ -95,6 +97,7 @@ public struct MessageReceivedEvent: Codable, Sendable, Equatable {
 /// `relationship.connected` / `relationship.disconnected`.
 public struct RelationshipEvent: Codable, Sendable, Equatable {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     public var source: ConnectSource?
     public var occurredAt: Date
 }
@@ -102,6 +105,7 @@ public struct RelationshipEvent: Codable, Sendable, Equatable {
 /// `consent.updated`.
 public struct ConsentUpdatedEvent: Codable, Sendable, Equatable {
     public var relationshipId: RelationshipID
+    public var subjectRef: SubjectRef?
     public var purpose: InteractionPurpose
     public var granted: Bool
     public var occurredAt: Date

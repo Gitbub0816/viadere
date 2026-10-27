@@ -135,8 +135,8 @@ public struct UnlockedVault: Sendable {
     /// Opens a verified snapshot for `identity` (a device, or the recovery member): its envelope must open, and the key inside must match the
     /// manifest's signed commitment.
     public static func open(_ snapshot: VaultSnapshot, identity: VaultDeviceIdentity) throws -> UnlockedVault {
-        try snapshot.validateContents()
         guard let member = snapshot.manifest.member(identity.memberId), member.agreementKey == identity.agreementPublicKey else { throw VaultError.notAMember }
+        try snapshot.validateContents()
         guard let envelope = snapshot.envelopes[member.id] else { throw VaultError.malformed("no envelope for this device") }
         let key = try VaultEnvelope.open(envelope, with: identity.agreementKey, vaultId: snapshot.vaultId, epoch: snapshot.manifest.epoch, memberId: member.id)
         guard ConstantTime.equals(key.keyCheck(epoch: snapshot.manifest.epoch), snapshot.manifest.keyCheck) else { throw VaultError.keyCheckMismatch }

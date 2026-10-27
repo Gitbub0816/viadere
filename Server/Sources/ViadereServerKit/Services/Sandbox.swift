@@ -51,6 +51,7 @@ struct Sandbox {
             try await ConsentService(db: tx, ctx: ctx).initialize(relationship: relationship, optIn: Set(InteractionPurpose.allCases),
                                                                   source: .system, channels: [.nativePush, .inApp])
         }
-        return SandboxRelationship(relationshipId: RelationshipID(relationship.id!), createdAt: now)
+        return SandboxRelationship(relationshipId: RelationshipID(relationship.id!), createdAt: now,
+                                   subjectRef: ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: ConsumerID(consumerId)))
     }
 }

@@ -71,9 +71,23 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     public var description: String { "ViadereBusinessClient(\(isLive ? "live" : "test") key •••\(apiKey.suffix(4)), \(baseURL.absoluteString))" }
     public var debugDescription: String { description }
 
+    // MARK: Capabilities
+
+    /// What this key can do right now (`GET /v1/business/capabilities`): your tiers, the capabilities Viadere granted your business
+    /// (the ceiling), the capabilities this key carries, their intersection (`effective`) and the capability catalog. A capability that
+    /// was revoked or switched off disappears from `effective` on the next call; a request that needs it fails with
+    /// `403 insufficient_scope`, `403 not_entitled` or `403 capability_disabled` (see `ViadereAPIError.isCapabilityDenied`).
+    public func capabilities() async throws -> BusinessCapabilitiesResponse {
+        try decode(BusinessCapabilitiesResponse.self, try await perform(APIRoutes.businessCapabilities.descriptor))
+    }
+
     // MARK: Interactions
 
     /// Issues an interaction (`POST /v1/business/interactions`, scope `interactions:write`). Idempotent on `request.idempotencyKey`.
+    ///
+    /// The interaction's kind decides the capability the key needs: `authenticate` needs `auth.challenge`, `authorize` needs
+    /// `transaction.approve`, every other kind `message.send`. A messaging-only key that issues an approval fails with
+    /// `403 insufficient_scope`.
     public func issueInteraction(_ request: IssueInteractionRequest) async throws -> IssuedInteraction {
         let response = try await perform(APIRoutes.businessIssueInteraction.descriptor, body: request, idempotencyKey: request.idempotencyKey)
         return IssuedInteraction(interaction: try decode(Interaction.self, response), wasCreated: response.status == 201)

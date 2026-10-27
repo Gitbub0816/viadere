@@ -106,7 +106,10 @@ struct BusinessIdempotency {
         let livemode = principal.livemode
         // Verify the interaction belongs to this business before a key is recorded for it.
         let service = InteractionService(db: db, ctx: ctx)
-        _ = try await service.record(id: id, businessId: businessId, livemode: livemode)
+        let existing = try await service.record(id: id, businessId: businessId, livemode: livemode)
+        // Cancelling (or replaying a cancel of) an approval needs the approval capability, like issuing it did.
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(Capability.required(forInteractionKind: InteractionKind(rawValue: existing.kind))),
+                                                          principal: principal, auditAllowed: false)
         return try await once(businessId: businessId.uuid, operation: .interactionCancel, key: key, requestHash: hash, sealResult: false,
                               perform: { tx in (try await InteractionService(db: tx, ctx: ctx).cancel(principal: principal, id: id), id.uuid) },
                               replay: { _ in

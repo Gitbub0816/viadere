@@ -19,6 +19,9 @@ public struct BusinessPrincipal: Authenticatable, Sendable {
     public let livemode: Bool
     public let scopes: Set<String>
     public let businessName: String
+    /// The capabilities the key carries (SEC-API-003). A ceiling, not a grant: `PolicyService` intersects it with the business's
+    /// current entitlements on every request.
+    public var capabilities: Set<Capability> = []
 }
 
 extension Request {
@@ -125,7 +128,7 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             .filter(\.$purpose == DeviceKeyPurpose.request.rawValue).first(),
               let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else { throw APIError.signatureInvalid }
         // 4. Verify exactly what is on the request line, the body hash, skew and nonce freshness.
-        let body = try await request.collectedBody(limit: ctx.config.maxBodyBytes)
+        let body = try await request.collectedBody(limit: ctx.config.maxBodyBytes(forPath: request.url.path))
         do {
             try await RequestVerifier().verify(method: request.method.rawValue, pathAndQuery: request.url.string, body: body,
                                                headers: headers, publicKey: publicKey, now: now,

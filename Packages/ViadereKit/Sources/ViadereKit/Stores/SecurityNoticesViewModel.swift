@@ -139,6 +139,9 @@ public final class SecurityNoticesViewModel {
         case .recoveryAttemptsLocked: return "Several wrong recovery codes were entered, so recovery is paused for a day."
         case .recoveryCompleted: return "Your account was recovered \(when). Household access ended and your phone numbers are cooling down."
         case .delegationEnded: return "Household access with another account ended \(when) because that account was recovered."
+        case .vaultDeviceAdded: return "A device was added to your synced credential vault \(when)."
+        case .vaultDeviceRemoved: return "A device was removed from your synced credential vault \(when)."
+        case .vaultDeleted: return "Your synced credential vault was deleted from Viadere's servers \(when)."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
@@ -156,6 +159,7 @@ public final class SecurityNoticesViewModel {
         case .recoveryCancelled, .recoveryAttemptsLocked: return "Your devices were told. You can generate new recovery codes in Settings."
         case .recoveryCompleted: return "Confirm your phone numbers from a device you trust, and share access again if you want to."
         case .delegationEnded: return "Ask them to invite you again if you still want to share."
+        case .vaultDeviceAdded: return "Not you? Open Authenticator, remove the device and change the passwords and passkeys stored there."
         default: return Self.prompt
         }
     }

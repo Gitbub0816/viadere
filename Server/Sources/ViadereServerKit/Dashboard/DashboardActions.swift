@@ -37,7 +37,8 @@ struct DashboardActions {
 
     static let maxActiveKeys = 25
 
-    func createAPIKey(name rawName: String, live: Bool, scopes: [String], expiresInDays: Int?) async throws -> BusinessAPIKeys.Issued {
+    func createAPIKey(name rawName: String, live: Bool, scopes: [String], capabilities requested: [String]? = nil,
+                      expiresInDays: Int?) async throws -> BusinessAPIKeys.Issued {
         try require(.manageAPIKeys)
         try requireVerified()
         try requireReauth(next: "/dashboard/api-keys")
@@ -49,14 +50,34 @@ struct DashboardActions {
         guard !chosen.isEmpty, chosen.count == Set(scopes).count else {
             throw APIError.validation("Choose at least one valid scope.", details: ["scopes": "invalid"])
         }
+        // Capability scopes (SEC-API-003) can only be chosen within the organization's current entitlements. Left out, a key that can
+        // send gets the messaging capabilities it is entitled to and nothing more; a key with only webhook or reward scopes gets none.
+        let entitled = try await EntitlementService(db: db, ctx: ctx).snapshot(businessId: businessId)
+        func allowed(_ capability: Capability) -> Bool {
+            guard let definition = capability.definition else { return false }
+            return entitled.capabilities.contains(capability) && entitled.tiers.contains(definition.minimumTier)
+        }
+        let capabilities: [Capability]
+        if let requested {
+            let parsed = requested.map { Capability(rawValue: $0) }
+            guard Set(requested).count == requested.count, parsed.allSatisfy(allowed) else {
+                throw APIError.validation("Choose only capabilities your organization is enabled for.", details: ["capabilities": "not_entitled"])
+            }
+            capabilities = parsed
+        } else {
+            let sends = !Set(chosen).isDisjoint(with: [BusinessAPIKeys.Scope.interactionsWrite, BusinessAPIKeys.Scope.interactionsRead,
+                                                      BusinessAPIKeys.Scope.messagesWrite, BusinessAPIKeys.Scope.statusesWrite])
+            capabilities = sends ? Capability.messaging.filter(allowed) : []
+        }
         let active = try await BusinessAPIKeyRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$revokedAt == nil).count()
         guard active < Self.maxActiveKeys else { throw APIError.conflict("Revoke an unused key before creating another.") }
         let now = ctx.now
         let expiry = expiresInDays.flatMap { [30, 90, 365].contains($0) ? now.addingTimeInterval(TimeInterval($0) * 86_400) : nil }
-        let issued = try await BusinessAPIKeys.issue(businessId: businessId, name: name, live: live, scopes: chosen.sorted(), now: now,
-                                                     expiresAt: expiry, on: db)
+        let issued = try await BusinessAPIKeys.issue(businessId: businessId, name: name, live: live, scopes: chosen.sorted(), capabilities: capabilities,
+                                                     now: now, expiresAt: expiry, on: db)
         try await audit("apikey.created", subjectType: "api_key", subjectId: issued.record.id?.uuidString.lowercased(),
-                        metadata: ["mode": live ? "live" : "test", "scopes": chosen.sorted().joined(separator: " ")])
+                        metadata: ["mode": live ? "live" : "test", "scopes": chosen.sorted().joined(separator: " "),
+                                   "capabilities": capabilities.map(\.rawValue).sorted().joined(separator: " ")])
         return issued
     }
 

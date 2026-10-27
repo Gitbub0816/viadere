@@ -183,8 +183,10 @@ enum BusinessRewardRoutes {
 
     static func register(_ routes: any RoutesBuilder) {
         routes.api(APIRoutes.businessIssueReward, scope: Scope.rewardsWrite) { req in
-            let body: IssueRewardRequest = try req.decodeBody()
-            let result = try await RewardsService(db: req.db, ctx: req.ctx).createReward(principal: try req.business, request: body, headerKey: req.idempotencyHeader)
+            var body: IssueRewardRequest = try req.decodeBody()
+            let principal = try req.business
+            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(relationshipId: &body.relationshipId, subjectRef: &body.subjectRef, businessId: principal.businessId)
+            let result = try await RewardsService(db: req.db, ctx: req.ctx).createReward(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.reward, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessRewardsList, scope: Scope.rewardsWrite) { req in
@@ -202,8 +204,10 @@ enum BusinessRewardRoutes {
             return try req.jsonResponse(try await RewardsService(db: req.db, ctx: req.ctx).upsertProgram(principal: try req.business, request: body))
         }
         routes.api(APIRoutes.businessAdjustPoints, scope: Scope.rewardsWrite) { req in
-            let body: AdjustLoyaltyPointsRequest = try req.decodeBody()
-            return try req.jsonResponse(try await RewardsService(db: req.db, ctx: req.ctx).adjustPoints(principal: try req.business, request: body, headerKey: req.idempotencyHeader))
+            var body: AdjustLoyaltyPointsRequest = try req.decodeBody()
+            let principal = try req.business
+            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            return try req.jsonResponse(try await RewardsService(db: req.db, ctx: req.ctx).adjustPoints(principal: principal, request: body, headerKey: req.idempotencyHeader))
         }
         routes.api(APIRoutes.businessConsumeRedemption, scope: Scope.rewardsWrite) { req in
             let body: ConsumeRedemptionRequest = try req.decodeBody()

@@ -246,6 +246,38 @@ public enum APIRoutes {
     public static let businessWebhookRotate = Endpoint<EmptyBody, WebhookSecretResponse>(
         "business.webhooks.rotate", .POST, "/v1/business/webhooks/{webhookId}/rotate-secret", auth: .businessAPIKey)
 
+    // MARK: Credential vault sync (Phase 4; behind `VAULT_SYNC_ENABLED`, ciphertext and public keys only)
+    public static let vaultStatus = Endpoint<EmptyBody, VaultStatus>(
+        "vault.status", .GET, "/v1/vault", auth: .deviceSignedBearer)
+    /// Compare-and-swap of the whole vault state: manifest, changed blobs and envelopes.
+    public static let vaultPut = Endpoint<VaultPutRequest, VaultStatus>(
+        "vault.put", .PUT, "/v1/vault", auth: .deviceSignedBearer)
+    /// Wipes the vault from the server (turns sync off). Devices keep their local copies.
+    public static let vaultDelete = Endpoint<EmptyBody, EmptyBody>(
+        "vault.delete", .DELETE, "/v1/vault", auth: .deviceSignedBearer)
+    public static let vaultManifests = Endpoint<EmptyBody, VaultManifestsResponse>(
+        "vault.manifests", .GET, "/v1/vault/manifests", auth: .deviceSignedBearer)
+    public static let vaultBlobs = Endpoint<VaultBlobsRequest, VaultBlobsResponse>(
+        "vault.blobs", .POST, "/v1/vault/blobs", auth: .deviceSignedBearer)
+    public static let vaultEnvelope = Endpoint<EmptyBody, VaultEnvelopeResponse>(
+        "vault.envelope", .GET, "/v1/vault/envelope", auth: .deviceSignedBearer)
+    /// The recovery member's envelope (useless without the vault recovery key). Needs a trusted device, tightly rate-limited.
+    public static let vaultRecoveryEnvelope = Endpoint<EmptyBody, VaultEnvelopeResponse>(
+        "vault.recovery.envelope", .GET, "/v1/vault/recovery-envelope", auth: .deviceSignedBearer)
+    public static let vaultDevices = Endpoint<EmptyBody, [VaultDeviceInfo]>(
+        "vault.devices.list", .GET, "/v1/vault/devices", auth: .deviceSignedBearer)
+    /// Ends a vault device's server access. The client then publishes a rotation manifest (`removingDevice`).
+    public static let vaultDeviceRemove = Endpoint<EmptyBody, EmptyBody>(
+        "vault.devices.remove", .DELETE, "/v1/vault/devices/{memberId}", auth: .deviceSignedBearer)
+    public static let vaultJoinCreate = Endpoint<EmptyBody, VaultJoinState>(
+        "vault.joins.create", .PUT, "/v1/vault/joins/{joinId}", auth: .deviceSignedBearer)
+    public static let vaultJoinGet = Endpoint<EmptyBody, VaultJoinState>(
+        "vault.joins.get", .GET, "/v1/vault/joins/{joinId}", auth: .deviceSignedBearer)
+    public static let vaultJoinRequest = Endpoint<VaultJoinRequestBody, VaultJoinState>(
+        "vault.joins.request", .PUT, "/v1/vault/joins/{joinId}/request", auth: .deviceSignedBearer)
+    public static let vaultJoinCancel = Endpoint<EmptyBody, EmptyBody>(
+        "vault.joins.cancel", .DELETE, "/v1/vault/joins/{joinId}", auth: .deviceSignedBearer)
+
     // MARK: Messaging provider
     /// Raw provider payload (e.g. form-encoded); verified with the provider's signature scheme.
     public static let providerSMSInbound = Endpoint<Data, EmptyBody>(
@@ -287,6 +319,9 @@ public enum APIRoutes {
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
         businessWebhookRotate.descriptor, businessSandboxRelationship.descriptor, businessCapabilities.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
+        vaultStatus.descriptor, vaultPut.descriptor, vaultDelete.descriptor, vaultManifests.descriptor, vaultBlobs.descriptor, vaultEnvelope.descriptor,
+        vaultRecoveryEnvelope.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,
+        vaultJoinRequest.descriptor, vaultJoinCancel.descriptor,
     ]
 
     /// Web (non-API) paths served on `viadere.com`.

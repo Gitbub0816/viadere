@@ -31,6 +31,8 @@ struct InteractionService {
     /// reference instead of the device challenge.
     func businessView(_ record: InteractionRecord) throws -> Interaction {
         var interaction = try record.interaction()
+        // Both business-facing references: the pairwise `subject_ref` (canonical) and the legacy per-business pseudonym (kept for compatibility).
+        interaction.scope.subjectRef = ctx.subjects.subjectRef(businessId: interaction.businessId, consumerId: interaction.scope.consumerId)
         interaction.scope.consumerId = ctx.hasher.consumerReference(businessId: interaction.businessId, consumerId: interaction.scope.consumerId)
         if let reference = ChallengeNonce(SecureToken.hash(interaction.challenge.value)) { interaction.challenge = reference }
         return interaction
@@ -65,6 +67,11 @@ struct InteractionService {
 
     private func issueInternal(principal: BusinessPrincipal, request: IssueInteractionRequest, requestHash: String,
                                activityKey: String?) async throws -> IssueResult {
+        // Policy first (SEC-API-003): the capability this kind exercises must be in the key's scope **and** in the business's current
+        // entitlements, before anything about the customer is read and before an idempotent replay can return an earlier result.
+        let policy = PolicyService(db: db, ctx: ctx)
+        let capability = Capability.required(forInteractionKind: request.kind)
+        try await policy.enforce(PolicyInput(capability), principal: principal, auditAllowed: false)
         // Idempotency: same key + same body → the original; same key + different body → 409.
         if let existing = try await existing(businessId: principal.businessId, key: request.idempotencyKey) {
             return try replay(existing, requestHash: requestHash)
@@ -93,10 +100,10 @@ struct InteractionService {
             for issue in issues.prefix(8) { details[issue.field] = issue.code.rawValue }
             throw APIError.validation("The interaction is invalid.", details: details)
         }
-        guard try await ConsentService(db: db, ctx: ctx).permits(purpose: request.purpose, relationshipId: relationship.id!) else {
-            throw APIError(.forbidden, .consentRequired, "The consumer has not consented to this kind of message.",
-                           details: ["purpose": request.purpose.rawValue])
-        }
+        // Customer consent, authenticator evidence and law/policy: the policy engine decides (same `consent_required` answer as before).
+        let subject = try await policy.subjectFacts(relationship: relationship, capability: capability, interactionPurpose: request.purpose)
+        try await policy.enforce(PolicyInput(capability, subjectRef: SubjectResolver(db: db, ctx: ctx).ref(for: relationship), purpose: request.purpose.rawValue),
+                                 principal: principal, stage: .full, subject: subject)
         // Quota (live traffic only). A paid tier raises the quota; it never changes priority.
         if principal.livemode { try await enforceQuota(principal: principal, business: business, controls: controls, now: now) }
         let issued = interaction

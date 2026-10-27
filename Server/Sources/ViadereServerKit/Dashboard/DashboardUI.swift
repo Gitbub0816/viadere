@@ -106,7 +106,7 @@ enum DashboardUI {
     ]
 
     static let operatorNav: [(String, String)] = [
-        ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"),
+        ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"), ("Capability policy", "/operator/policy"),
     ]
 
     static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {

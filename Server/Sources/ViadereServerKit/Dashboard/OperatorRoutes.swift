@@ -266,7 +266,8 @@ enum OperatorRoutes {
         <input id="reason2" name="reason" type="text" maxlength="200" placeholder="Reason"><input type="hidden" name="throttled" value="\(controls?.throttled == true ? "off" : "on")">\
         <p><button class="btn s" type="submit">\(controls?.throttled == true ? "Clear throttle (currently \(DashboardUI.esc(controls?.throttleSource ?? "")))" : "Throttle")</button></p></form></div></div>
         """
-        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", flash: DashboardFormat.flash(req), body: tiles + status + controlsCard)
+        let entitlements = PolicyOperatorRoutes.summaryCard(businessId: id, snapshot: try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: id))
+        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", flash: DashboardFormat.flash(req), body: tiles + status + entitlements + controlsCard)
     }
 
     private static func abuse(_ req: Request) async throws -> Response {

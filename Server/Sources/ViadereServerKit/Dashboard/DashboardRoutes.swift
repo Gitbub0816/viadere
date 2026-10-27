@@ -54,6 +54,10 @@ private struct CreateKeyForm: Content {
     var name: String
     var mode: String?
     var scopes: [String]?
+    /// Capability scopes (`capabilities[]`), chosen within the organization's entitlements.
+    var capabilities: [String]?
+    /// `1` when the form showed the capability boxes: an empty selection then means "none" rather than "default".
+    var capabilitiesChosen: String?
     var expires: Int?
 }
 
@@ -393,7 +397,9 @@ enum DashboardRoutes {
                 action = "<form method=\"post\" action=\"/dashboard/api-keys/\(id.uuidString.lowercased())/revoke\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Revoke</button></form>"
             }
             return [DashboardUI.esc(key.name), "<code>\(DashboardUI.esc(key.prefix))…\(DashboardUI.esc(key.last4))</code>",
-                    DashboardUI.esc(key.scopes.replacingOccurrences(of: ",", with: " ")), DashboardFormat.optional(key.lastUsedAt),
+                    DashboardUI.esc(key.scopes.replacingOccurrences(of: ",", with: " ")),
+                    key.capabilities.isEmpty ? "<span class=\"mu\">none</span>" : "<code>\(DashboardUI.esc(key.capabilities.replacingOccurrences(of: ",", with: " ")))</code>",
+                    DashboardFormat.optional(key.lastUsedAt),
                     DashboardFormat.date(key.createdAt), status, action]
         }
         var form = ""
@@ -402,19 +408,28 @@ enum DashboardRoutes {
                 let scopes = BusinessAPIKeys.Scope.all.map { scope in
                     "<label class=\"ck\"><input type=\"checkbox\" name=\"scopes[]\" value=\"\(scope)\"\(scope == "interactions:write" || scope == "interactions:read" ? " checked" : "")> <code>\(scope)</code></label>"
                 }.joined()
+                let entitled = try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: businessId)
+                let capabilityBoxes = CapabilityCatalog.definitions.map { definition -> String in
+                    let capability = definition.capability
+                    let isEntitled = entitled.capabilities.contains(capability) && entitled.tiers.contains(definition.minimumTier)
+                    let checked = Capability.messaging.contains(capability) ? " checked" : ""
+                    return "<label class=\"ck\"><input type=\"checkbox\" name=\"capabilities[]\" value=\"\(capability.rawValue)\"\(isEntitled ? checked : " disabled")> <code>\(capability.rawValue)</code>"
+                        + (isEntitled ? "" : " <span class=\"mu sm\">not enabled for your organization</span>") + "</label>"
+                }.joined()
                 form = """
                 <div class="card"><h2>Create a key</h2><form method="post" action="/dashboard/api-keys">\(DashboardUI.csrf(p))\
                 <div class="cols"><div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="64" required placeholder="Production server"></div>\
                 <div><label for="mode">Mode</label><select id="mode" name="mode"><option value="test">Test (no real delivery)</option><option value="live">Live</option></select></div>\
                 <div><label for="expires">Expires</label><select id="expires" name="expires"><option value="0">Never</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option></select></div></div>\
-                <label>Scopes</label>\(scopes)<p class="mu sm">Give a key only the scopes it needs. Creating a key asks you to confirm with your passkey. The secret is shown once.</p>\
+                <label>Scopes</label>\(scopes)<label>Capabilities</label><input type="hidden" name="capabilitiesChosen" value="1">\(capabilityBoxes)\
+                <p class="mu sm">Give a key only the scopes and capabilities it needs. A key can never do more than your organization is entitled to, and it loses a capability the moment Viadere withdraws the entitlement. Creating a key asks you to confirm with your passkey. The secret is shown once.</p>\
                 <button class="btn" type="submit">Create key</button></form></div>
                 """
             } else {
                 form = "<div class=\"notice\">Keys can be created after Viadere verifies your organization.</div>"
             }
         }
-        let table = "<div class=\"card\"><h2>Keys</h2>\(DashboardFormat.table(["Name", "Key", "Scopes", "Last used", "Created", "Status", ""], rows, empty: "No keys yet."))</div>"
+        let table = "<div class=\"card\"><h2>Keys</h2>\(DashboardFormat.table(["Name", "Key", "Scopes", "Capabilities", "Last used", "Created", "Status", ""], rows, empty: "No keys yet."))</div>"
         return DashboardUI.businessPage(p, title: "API keys", active: "/dashboard/api-keys", subtitle: "Credentials for your server integration.",
                                         flash: DashboardFormat.flash(req), body: form + table)
     }
@@ -423,11 +438,12 @@ enum DashboardRoutes {
         let (p, _) = try req.businessDashboard
         let form = try req.content.decode(CreateKeyForm.self)
         let issued = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).createAPIKey(
-            name: form.name, live: form.mode == "live", scopes: form.scopes ?? [], expiresInDays: form.expires)
+            name: form.name, live: form.mode == "live", scopes: form.scopes ?? [],
+            capabilities: form.capabilitiesChosen == "1" ? (form.capabilities ?? []) : form.capabilities, expiresInDays: form.expires)
         let body = """
         <div class="card"><h2>Copy your key now</h2><p>This is the only time the full key is shown. Store it in your secrets manager.</p>\
         <div class="secret mono">\(DashboardUI.esc(issued.key))</div>\
-        <p class="mu sm">Name: \(DashboardUI.esc(issued.record.name)) · Scopes: \(DashboardUI.esc(issued.record.scopes.replacingOccurrences(of: ",", with: " "))) · \(issued.record.livemode ? "Live" : "Test")</p>\
+        <p class="mu sm">Name: \(DashboardUI.esc(issued.record.name)) · Scopes: \(DashboardUI.esc(issued.record.scopes.replacingOccurrences(of: ",", with: " "))) · Capabilities: \(DashboardUI.esc(issued.record.capabilities.replacingOccurrences(of: ",", with: " ").isEmpty ? "none" : issued.record.capabilities.replacingOccurrences(of: ",", with: " "))) · \(issued.record.livemode ? "Live" : "Test")</p>\
         <p><a class="btn s" href="/dashboard/api-keys">Done</a></p></div>
         """
         return DashboardUI.businessPage(p, title: "New API key", active: "/dashboard/api-keys", body: body)

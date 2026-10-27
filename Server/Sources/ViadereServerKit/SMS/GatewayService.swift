@@ -8,6 +8,8 @@ import enum ViadereCore.Channel
 struct MessageReceivedPayload: Codable, Sendable {
     var sessionId: SessionID
     var relationshipId: RelationshipID
+    /// The customer's pairwise reference (`subject_ref`).
+    var subjectRef: SubjectRef?
     var messageId: MessageID
     var text: String
     var channel: Channel
@@ -283,6 +285,7 @@ struct GatewayService {
         try await relationship.update(on: db)
         try await WebhookService(db: db, ctx: ctx).enqueue(.messageReceived, businessId: businessId,
             payload: MessageReceivedPayload(sessionId: sessionId, relationshipId: RelationshipID(relationship.id!),
+                                            subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(relationship.businessId), consumerId: ConsumerID(relationship.consumerId)),
                                             messageId: MessageID(message.id!), text: text, channel: .sms, receivedAt: now))
     }
 

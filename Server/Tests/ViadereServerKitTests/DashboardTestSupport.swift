@@ -238,7 +238,9 @@ extension TestHarness {
     /// A `TestBusiness` handle (API key included) for an organization created through the dashboard.
     func testBusiness(_ businessId: UUID, live: Bool = true, scopes: [String] = BusinessAPIKeys.Scope.all) async throws -> TestBusiness {
         let record = try await XCTUnwrapAsync(await BusinessRecord.find(businessId, on: db))
-        let key = try await BusinessAPIKeys.issue(businessId: businessId, name: "test", live: live, scopes: scopes, now: clock.now(), on: db)
+        if record.isVerified { try await entitle(businessId, Capability.operational) }
+        let key = try await BusinessAPIKeys.issue(businessId: businessId, name: "test", live: live, scopes: scopes, capabilities: Capability.operational,
+                                                  now: clock.now(), on: db)
         let summary = try await XCTUnwrapAsync(await DirectoryService(db: db).summary(for: record))
         return TestBusiness(record: record, key: key.key, summary: summary)
     }

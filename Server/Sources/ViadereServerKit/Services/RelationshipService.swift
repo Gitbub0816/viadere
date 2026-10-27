@@ -149,7 +149,8 @@ struct RelationshipService {
                                        consumerId: consumer, businessId: summary.id, subjectType: "relationship",
                                        subjectId: record.id?.uuidString.lowercased(), metadata: ["source": effectiveSource.rawValue])
             try await WebhookService(db: db, ctx: ctx).enqueue(.relationshipConnected, businessId: summary.id,
-                payload: RelationshipEventPayload(relationshipId: RelationshipID(record.id!), source: effectiveSource, occurredAt: now))
+                payload: RelationshipEventPayload(relationshipId: RelationshipID(record.id!), subjectRef: ctx.subjects.subjectRef(businessId: summary.id, consumerId: consumer),
+                                                       source: effectiveSource, occurredAt: now))
         }
         return (dto(record, business: summary), created)
     }
@@ -172,7 +173,8 @@ struct RelationshipService {
             try await ConversationSessionRecord.query(on: tx).filter(\.$relationshipId == record.id!).filter(\.$state != "closed")
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
             try await WebhookService(db: tx, ctx: ctx).enqueue(.relationshipDisconnected, businessId: businessId,
-                payload: RelationshipEventPayload(relationshipId: relationshipId, source: nil, occurredAt: now))
+                payload: RelationshipEventPayload(relationshipId: relationshipId, subjectRef: ctx.subjects.subjectRef(businessId: businessId, consumerId: consumer),
+                                                       source: nil, occurredAt: now))
             _ = try await AuditService(db: tx, ctx: ctx).record("relationship.disconnected",
                 actor: AuditActor(kind: .consumer, id: consumer.description), consumerId: consumer, businessId: businessId,
                 subjectType: "relationship", subjectId: relationshipId.description)
@@ -182,12 +184,14 @@ struct RelationshipService {
 
 struct RelationshipEventPayload: Codable, Sendable {
     var relationshipId: RelationshipID
+    var subjectRef: SubjectRef?
     var source: ConnectSource?
     var occurredAt: Date
 }
 
 struct ConsentEventPayload: Codable, Sendable {
     var relationshipId: RelationshipID
+    var subjectRef: SubjectRef?
     var purpose: InteractionPurpose
     var granted: Bool
     var occurredAt: Date

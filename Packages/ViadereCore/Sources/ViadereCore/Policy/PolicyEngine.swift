@@ -160,6 +160,12 @@ public struct PolicyAuditRecord: Sendable, Hashable {
     public var action: String
     public var outcome: AuditEvent.Outcome
     public var metadata: [String: String]
+
+    public init(action: String, outcome: AuditEvent.Outcome, metadata: [String: String]) {
+        self.action = action
+        self.outcome = outcome
+        self.metadata = metadata
+    }
 }
 
 /// `PolicyDecision = entitlement ∩ key scope ∩ customer consent ∩ evidence sufficiency ∩ law/policy`.

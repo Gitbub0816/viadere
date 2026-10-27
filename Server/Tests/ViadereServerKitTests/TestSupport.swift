@@ -388,15 +388,34 @@ final class TestHarness: @unchecked Sendable {
 
     // MARK: Business helpers
 
+    /// `capabilities` are the key's capability scopes **and** what the business is entitled to (Tier A is granted when any
+    /// approval-class capability is listed): the default is everything with an endpoint today, so tests that are not about policy
+    /// behave as before. Pass `Capability.messaging` for a plain verified business.
     func makeBusiness(name: String, handle: String?, status: VerificationStatus = .verified, tier: String = "free", quota: Int? = nil,
-                      scopes: [String] = BusinessAPIKeys.Scope.all, live: Bool = true) async throws -> TestBusiness {
+                      scopes: [String] = BusinessAPIKeys.Scope.all, live: Bool = true,
+                      capabilities: [Capability] = Capability.operational) async throws -> TestBusiness {
         let record = try await BusinessRegistry(db: db, ctx: ctx).register(displayName: name, handle: handle, category: .other, status: status,
                                                                             tier: tier, dailyQuota: quota)
-        let key = try await BusinessAPIKeys.issue(businessId: record.id!, name: "test", live: live, scopes: scopes, now: clock.now(), on: db)
+        if status == .verified { try await entitle(record.id!, capabilities) }
+        let key = try await BusinessAPIKeys.issue(businessId: record.id!, name: "test", live: live, scopes: scopes, capabilities: capabilities, now: clock.now(), on: db)
         let directory = DirectoryService(db: db)
         // Pending/suspended businesses have no public summary through `verified`; build it directly.
         let summary = try await directory.summary(for: record)!
         return TestBusiness(record: record, key: key.key, summary: summary)
+    }
+
+    /// Grants the tiers and capabilities `capabilities` needs, as an operator would (with a recorded justification).
+    func entitle(_ businessId: UUID, _ capabilities: [Capability]) async throws {
+        let service = EntitlementService(db: db, ctx: ctx)
+        let actor = EntitlementActor.system("test")
+        for capability in capabilities where !Capability.messaging.contains(capability) {
+            guard let definition = capability.definition else { continue }
+            if !BusinessRiskTier.baseline.contains(definition.minimumTier) {
+                try await service.grant(businessId: businessId, tier: definition.minimumTier, actor: actor, justification: "Test fixture: tier for \(capability).")
+            }
+            try await service.grant(businessId: businessId, capability: capability, actor: actor, justification: "Test fixture: capability \(capability).",
+                                    reviewReference: "TEST-REVIEW-1")
+        }
     }
 
     func business(_ b: TestBusiness, _ method: NIOHTTP1.HTTPMethod, _ path: String, body: Data? = nil, idempotencyKey: String? = nil,

@@ -107,7 +107,7 @@ enum RelationshipRoutes {
                 let applied = try await service.apply(changes: body.changes, policyVersion: body.policyVersion, relationship: relationship, source: .app)
                 for change in applied {
                     try await WebhookService(db: tx, ctx: ctx).enqueue(.consentUpdated, businessId: BusinessID(relationship.businessId),
-                        payload: ConsentEventPayload(relationshipId: id, purpose: change.purpose, granted: change.granted, occurredAt: ctx.now))
+                        payload: ConsentEventPayload(relationshipId: id, subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(relationship.businessId), consumerId: ConsumerID(relationship.consumerId)), purpose: change.purpose, granted: change.granted, occurredAt: ctx.now))
                     _ = try await AuditService(db: tx, ctx: ctx).record("consent.updated", principal: principal,
                         businessId: BusinessID(relationship.businessId), subjectType: "relationship", subjectId: id.description,
                         metadata: ["purpose": change.purpose.rawValue, "granted": change.granted ? "true" : "false"])
