@@ -57,7 +57,7 @@ public enum ApprovalPolicy {
     }
 
     /// Text for the Face ID / passcode sheet. States the business and amount. Capped to keep the sheet tidy.
-    public static func promptReason(for envelope: InteractionEnvelope, decision: Decision) -> String {
+    public static func promptReason(for envelope: InteractionEnvelope, decision: Decision, onBehalfOf: String? = nil) -> String {
         let business = envelope.business.displayName
         let text: String
         switch (envelope.interaction.payload, decision) {
@@ -72,6 +72,7 @@ public enum ApprovalPolicy {
         default:
             text = "Confirm with \(business)"
         }
+        if let onBehalfOf { return String((text + " on behalf of \(onBehalfOf)").prefix(90)) }
         return String(text.prefix(90))
     }
 }

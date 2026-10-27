@@ -9,13 +9,13 @@ import ViadereCore
 /// the mock exercise the real cryptography.
 public actor MockViadereAPI: ViadereAPI {
     public let consumerId: ConsumerID
-    private let clock: @Sendable () -> Date
+    let clock: @Sendable () -> Date
     private var envelopes: [InteractionID: InteractionEnvelope] = [:]
     private var interactionOrder: [InteractionID] = []
     private var relationshipList: [Relationship] = []
     private var consentStore: [RelationshipID: [ConsentGrant]] = [:]
-    private var deviceList: [Device] = []
-    private var deviceKeys: [DeviceID: [DeviceKeyPurpose: DevicePublicKey]] = [:]
+    var deviceList: [Device] = []
+    var deviceKeys: [DeviceID: [DeviceKeyPurpose: DevicePublicKey]] = [:]
     private var enrollmentChallenges: Set<String> = []
     private var conversationList: [ConversationSummary] = []
     private var messageStore: [SessionID: [ConversationMessage]] = [:]
@@ -27,10 +27,19 @@ public actor MockViadereAPI: ViadereAPI {
     public private(set) var liveActivityTokens: [LiveActivityTokenRegistration] = []
     public private(set) var decisionLog: [(InteractionID, Decision, DecisionAssurance)] = []
     public private(set) var accountDeleted = false
+    /// P3 state: loyalty, rewards, Wallet, household, acknowledgments (see `MockP3.swift`).
+    var p3 = MockP3State()
     /// Artificial latency, for demoing loading states.
     public var latency: Duration = .zero
 
-    public init(seed: Bool = true, consumerId: ConsumerID = PreviewData.consumerId, clock: @escaping @Sendable () -> Date = { Date() }) {
+    /// A server seeded with everything P3 shows: loyalty, Wallet, orders, appointments, travel, events, household.
+    public static func p3Demo(clock: @escaping @Sendable () -> Date = { Date() }) -> MockViadereAPI {
+        MockViadereAPI(seed: true, p3: true, clock: clock)
+    }
+
+    /// - Parameter p3: also seed the P3 world (extra businesses, loyalty, passes, activity). Off by default so the
+    ///   P2 fixtures and their tests stay exactly as they were.
+    public init(seed: Bool = true, p3: Bool = false, consumerId: ConsumerID = PreviewData.consumerId, clock: @escaping @Sendable () -> Date = { Date() }) {
         self.consumerId = consumerId
         self.clock = clock
         let now = clock()
@@ -43,6 +52,14 @@ public actor MockViadereAPI: ViadereAPI {
             consentStore = data.consents
             conversationList = data.conversations
             messageStore = data.messages
+            if p3 {
+                let extra = Self.makeP3Seed(now: now, consumerId: consumerId, relationships: &relationshipList, consents: &consentStore)
+                self.p3 = extra.state
+                for envelope in extra.envelopes {
+                    envelopes[envelope.id] = envelope
+                    interactionOrder.append(envelope.id)
+                }
+            }
         }
     }
 
@@ -94,7 +111,7 @@ public actor MockViadereAPI: ViadereAPI {
         }
     }
 
-    private func pause() async {
+    func pause() async {
         if latency > .zero { try? await Task.sleep(for: latency) }
     }
 
@@ -310,6 +327,7 @@ public actor MockViadereAPI: ViadereAPI {
             envelope.status = InteractionStatus(decision: payload.decision)
             envelopes[id] = envelope
             decisionLog.append((id, payload.decision, payload.assurance))
+            recordAcknowledgment(for: envelope, decision: payload.decision, at: now)
             return InteractionOutcome(interactionId: id, businessId: envelope.business.id, status: envelope.status, decision: payload.decision,
                                       selectedOptionIds: payload.selectedOptionIds, reply: payload.reply, assurance: payload.assurance,
                                       channel: request.channel, decidedAt: now, signedDecision: request.signedDecision)

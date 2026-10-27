@@ -28,7 +28,7 @@ public enum PreviewData {
         id: tid("a0000000-0000-4000-8000-000000000005"), displayName: "Copperline Coffee", handle: handle("@copperline"),
         code: code("CC8M40"), verificationStatus: .verified)
 
-    public static let allBusinesses: [BusinessSummary] = [harborBank, northfield, juniperAir, lindenDental, copperline]
+    public static let allBusinesses: [BusinessSummary] = [harborBank, northfield, juniperAir, lindenDental, copperline] + p3Businesses
 
     public static func profile(for business: BusinessSummary) -> BusinessProfile {
         let category: BusinessCategory

@@ -86,6 +86,32 @@ public protocol ViadereAPI: Sendable {
     func messages(in session: SessionID, cursor: String?) async throws -> Page<ConversationMessage>
     func sendMessage(in session: SessionID, _ request: SendMessageRequest) async throws -> ConversationMessage
 
+    // MARK: Rewards, loyalty and Wallet (P3)
+    /// Accounts and rewards across every connected business, with the server's eligibility verdict on each reward.
+    func rewardsOverview() async throws -> RewardsOverview
+    /// One business's program, the person's membership (if any) and its rewards. `404` = the business has no program.
+    func loyaltyProgram(business: BusinessID) async throws -> LoyaltyProgramOverview
+    func enrollLoyalty(business: BusinessID, _ request: LoyaltyEnrollRequest) async throws -> LoyaltyAccount
+    /// Device-signed. The server re-checks eligibility and may refuse (`409`).
+    func claimReward(_ id: RewardID) async throws -> RewardEntry
+    /// Device-signed. Returns a short-lived, single-use redemption code. Never cache the result.
+    func redeemReward(_ id: RewardID, _ request: RedeemRewardRequest) async throws -> RewardRedemption
+    func walletPasses() async throws -> [WalletPassMetadata]
+    func issueWalletPass(_ request: WalletPassIssueRequest) async throws -> WalletPassMetadata
+    /// The signed `.pkpass` bytes. The app only validates and presents it.
+    func walletPass(_ id: WalletPassID) async throws -> Data
+
+    // MARK: Household (delegation)
+    func household() async throws -> HouseholdOverview
+    func createDelegationInvitation(_ request: DelegationInvitationRequest) async throws -> DelegationInvitation
+    func previewDelegationInvitation(code: String) async throws -> DelegationInvitationPreview
+    func acceptDelegationInvitation(code: String) async throws -> HouseholdGrant
+    func revokeDelegation(_ id: DelegationID) async throws
+    func householdAudit() async throws -> [HouseholdAuditEntry]
+
+    // MARK: Acknowledgments
+    func acknowledgments() async throws -> [AcknowledgmentRecord]
+
     // MARK: Push
     func registerAPNsToken(_ registration: APNsTokenRegistration) async throws
     func registerLiveActivityToken(_ registration: LiveActivityTokenRegistration) async throws

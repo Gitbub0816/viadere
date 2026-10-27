@@ -14,8 +14,23 @@ public struct LiveActivityPresentation: Equatable, Sendable {
     /// A moment to show as a time/countdown (ETA, departure, start).
     public var target: Date?
     public var isAlert: Bool
+    /// What happens next, in a few words ("We'll tell you when it's ready"). Shown in the expanded Dynamic Island
+    /// and on the Lock Screen. `nil` when the activity is finished.
+    public var nextStep: String?
+    /// What the compact trailing slot and the expanded trailing region show.
+    public var trailing: Trailing
 
-    public init(status: LiveActivityStatus, businessName: String) {
+    /// The right-hand slot: a live countdown when the moment is close, otherwise a short status word.
+    public enum Trailing: Equatable, Sendable {
+        /// Count down to this moment (`Text(timerInterval:)`).
+        case countdown(to: Date)
+        case text(String)
+    }
+
+    /// A countdown is only worth showing inside this window; farther out, a status word is calmer.
+    public static let countdownWindow: TimeInterval = 99 * 60
+
+    public init(status: LiveActivityStatus, businessName: String, now: Date = Date()) {
         switch status {
         case .order(let s):
             headline = "Order \(s.orderReference)"
@@ -79,6 +94,50 @@ public struct LiveActivityPresentation: Equatable, Sendable {
             case .cancelled: detail = "Cancelled"; compact = "Off"; progress = nil
             }
             if let provider = s.providerName ?? Optional(businessName), s.stage != .completed { detail += " · \(provider)" }
+        }
+        nextStep = Self.nextStep(for: status)
+        if let target, !status.isTerminal, !isAlert, target.timeIntervalSince(now) > 0, target.timeIntervalSince(now) <= Self.countdownWindow {
+            trailing = .countdown(to: target)
+        } else {
+            trailing = .text(compact)
+        }
+    }
+
+    /// The next step, in the business's voice-free, calm wording. `nil` once the activity has ended.
+    static func nextStep(for status: LiveActivityStatus) -> String? {
+        if status.isTerminal { return nil }
+        switch status {
+        case .order(let s):
+            switch s.stage {
+            case .placed: return "Next: they start preparing it"
+            case .preparing: return "Next: we'll tell you when it's ready"
+            case .ready: return "Next: pick it up at the counter"
+            case .completed, .cancelled: return nil
+            }
+        case .delivery(let s):
+            switch s.stage {
+            case .labelCreated: return "Next: the carrier collects it"
+            case .inTransit: return "Next: out for delivery"
+            case .outForDelivery: return "Next: watch for the driver"
+            case .exception: return "Next: check with the business"
+            case .delivered: return nil
+            }
+        case .flight(let s):
+            switch s.stage {
+            case .scheduled: return "Next: boarding opens at the gate"
+            case .delayed: return "Next: watch for a new gate time"
+            case .boarding: return "Next: head to the gate"
+            case .departed: return "Next: arrival"
+            case .landed, .cancelled, .diverted: return nil
+            }
+        case .appointment(let s):
+            switch s.stage {
+            case .upcoming: return "Next: check-in opens before your visit"
+            case .checkInOpen: return "Next: check in when you arrive"
+            case .checkedIn: return "Next: you'll be called in"
+            case .inProgress: return "Next: we'll follow up afterwards"
+            case .completed, .cancelled: return nil
+            }
         }
     }
 }

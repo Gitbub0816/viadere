@@ -22,6 +22,10 @@ public final class ApprovalViewModel: Identifiable {
     public private(set) var phase: Phase = .ready
     public private(set) var now: Date
     public private(set) var device: DeviceRecord?
+    /// The recorded outcome once a decision is accepted (carries the server's timestamp).
+    public private(set) var outcome: InteractionOutcome?
+    /// Set when this request belongs to someone who delegated to the signed-in person ("Alex Morgan").
+    public private(set) var onBehalfOf: String?
     /// Set by the view when the screen is being recorded or mirrored.
     public var isScreenBeingCaptured = false
     /// Called once a decision has been recorded (home refreshes, sheet dismisses).
@@ -74,11 +78,19 @@ public final class ApprovalViewModel: Identifiable {
     /// Loads this device's record and refreshes the interaction (it may have been handled elsewhere).
     public func load() async {
         device = try? await services.records.load()
+        await resolveDelegation()
         if let fresh = try? await services.api.interaction(interaction.id) { envelope = fresh }
         now = services.clock()
     }
 
     public func tick(_ date: Date) { now = date }
+
+    /// An interaction scoped to another consumer reached this person through a delegation: label it "on behalf of".
+    private func resolveDelegation() async {
+        guard let consumerId = device?.consumerId, interaction.scope.consumerId != consumerId else { onBehalfOf = nil; return }
+        let received = (try? await services.api.household())?.received ?? []
+        onBehalfOf = DelegationScopePolicy.onBehalfOfName(scopeConsumerId: interaction.scope.consumerId, myConsumerId: consumerId, received: received)
+    }
 
     // MARK: Decisions
 
@@ -101,7 +113,9 @@ public final class ApprovalViewModel: Identifiable {
         if decision == .approve || decision == .confirm, approvalBlockedByCapture { return }
         phase = .signing(decision)
         do {
-            let outcome = try await services.approvals.submit(envelope, decision: decision, selectedOptionIds: selected, reply: reply, channel: .inApp)
+            let outcome = try await services.approvals.submit(envelope, decision: decision, selectedOptionIds: selected, reply: reply,
+                                                              channel: .inApp, onBehalfOf: onBehalfOf)
+            self.outcome = outcome
             envelope.status = outcome.status
             phase = .done(decision, outcome.status)
             onFinished?(outcome)

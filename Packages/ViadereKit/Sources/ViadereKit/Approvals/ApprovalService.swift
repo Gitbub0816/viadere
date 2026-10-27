@@ -42,7 +42,8 @@ public struct ApprovalService: Sendable {
     /// - Parameter assuranceOverride: a deliberately lower claim (used only for inline `deny`/`report` from a
     ///   notification, where no biometric UI can appear). The server decides whether that is acceptable.
     public func submit(_ envelope: InteractionEnvelope, decision: Decision, selectedOptionIds: [String]? = nil, reply: String? = nil,
-                       channel: Channel = .inApp, assuranceOverride: DecisionAssurance? = nil) async throws -> InteractionOutcome {
+                       channel: Channel = .inApp, assuranceOverride: DecisionAssurance? = nil,
+                       onBehalfOf: String? = nil) async throws -> InteractionOutcome {
         let interaction = envelope.interaction
         let now = clock()
         guard !interaction.kind.isUnknown else { throw ApprovalError.unsupportedKind }
@@ -73,7 +74,7 @@ public struct ApprovalService: Sendable {
             interactionId: interaction.id, businessId: interaction.businessId, decision: decision,
             selectedOptionIds: selectedOptionIds, reply: reply, challenge: interaction.challenge,
             signedAt: now, deviceId: record.deviceId, assurance: plan.assurance)
-        let prompt = SigningPrompt(reason: ApprovalPolicy.promptReason(for: envelope, decision: decision))
+        let prompt = SigningPrompt(reason: ApprovalPolicy.promptReason(for: envelope, decision: decision, onBehalfOf: onBehalfOf))
         let signed: SignedDecision
         do {
             signed = try await DecisionSigner(key: PromptBoundKey(key, prompt: prompt)).sign(payload)
