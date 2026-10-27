@@ -121,7 +121,7 @@ final class RecoveryTests: XCTestCase {
             try await eq(try await RecoveryCodeRecord.query(on: h.db).filter(\.$state == "used").count(), 0)
             // The account's devices are told.
             let userNotices = try await notices(h, user)
-            let notice = try XCTUnwrap(userNotices.first { $0.kind == .recoveryAttemptsLocked })
+            let notice = try XCTUnwrap(userNotices.first { $0.topic == .recoveryAttemptsLocked })
             XCTAssertNil(notice.action)
             XCTAssertTrue(h.push.sent.contains { $0.body.contains("wrong recovery codes") })
             // The lock ends by itself.
@@ -158,7 +158,7 @@ final class RecoveryTests: XCTestCase {
             // Every existing device is told, with a "Not you? Cancel" action; a push goes out.
             for device in [owner, second] {
                 let deviceNotices = try await notices(h, device)
-                let notice = try XCTUnwrap(deviceNotices.first { $0.kind == .recoveryStarted })
+                let notice = try XCTUnwrap(deviceNotices.first { $0.topic == .recoveryStarted })
                 XCTAssertEqual(notice.action, .cancelRecovery)
                 XCTAssertEqual(notice.subjectId, status.id.description)
             }
@@ -267,7 +267,7 @@ final class RecoveryTests: XCTestCase {
             XCTAssertEqual(info.remainingCodes, 0)
             XCTAssertNil(info.pending)
             let coolingNotices = try await notices(h, cooling)
-            XCTAssertTrue(coolingNotices.contains { $0.kind == .recoveryCancelled })
+            XCTAssertTrue(coolingNotices.contains { $0.topic == .recoveryCancelled })
             // 72 hours later nothing happens.
             h.clock.advance(by: 73 * 3600)
             try await h.runJobs()

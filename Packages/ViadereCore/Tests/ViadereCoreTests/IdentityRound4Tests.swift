@@ -61,7 +61,13 @@ struct IdentityRound4Tests {
         // Unknown notice kinds / actions decode leniently.
         let json = #"{"id":"\#(UUID().uuidString.lowercased())","kind":"somethingNew","message":"m","createdAt":"2027-01-15T08:00:00.000Z","action":"newAction"}"#
         let notice = try ViadereJSON.decode(SecurityNotice.self, from: Data(json.utf8))
-        #expect(notice.kind == .unknown && notice.action == .unknown)
+        #expect(notice.kind == .unknown && notice.topic == .unknown && notice.action == .unknown && notice.rawKind == "somethingNew")
+        // Topics newer than the kind enum decode as `.unknown` kind but keep their topic and survive a round trip.
+        let recovery = try ViadereJSON.decode(SecurityNotice.self, from: Data(#"{"id":"\#(UUID().uuidString.lowercased())","kind":"recoveryStarted","message":"m","createdAt":"2027-01-15T08:00:00.000Z","subjectId":"x","action":"cancelRecovery"}"#.utf8))
+        #expect(recovery.kind == .unknown && recovery.topic == .recoveryStarted && recovery.action == .cancelRecovery)
+        let again = try ViadereJSON.decode(SecurityNotice.self, from: try ViadereJSON.encode(recovery))
+        #expect(again == recovery && again.rawKind == "recoveryStarted")
+        #expect(SecurityNotice(id: UUID(), kind: .newDevice, message: "m", createdAt: Fixtures.now).topic == .newDevice)
         // Device: pending replacement fields round-trip and are optional.
         let device = Device(id: DeviceID(), consumerId: ConsumerID(), name: "Phone", platform: .iOS, keys: [], createdAt: Fixtures.now,
                             pendingReplacementBy: DeviceID(), pendingReplacementAt: Fixtures.now)

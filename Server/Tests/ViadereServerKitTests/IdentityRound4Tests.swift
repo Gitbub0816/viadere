@@ -60,7 +60,7 @@ final class IdentityRound4Tests: XCTestCase {
             XCTAssertNil(shown.revokedAt)
             // ...and is told, with a "Not you? Cancel" action that targets the new device.
             let ownerNotices = try await notices(h, owner)
-            let notice = try XCTUnwrap(ownerNotices.first { $0.kind == .devicePendingReplacement })
+            let notice = try XCTUnwrap(ownerNotices.first { $0.topic == .devicePendingReplacement })
             XCTAssertEqual(notice.action, .cancelDeviceReplacement)
             XCTAssertEqual(notice.subjectId, replacement.id.description)
             XCTAssertTrue(h.push.sent.contains { $0.body.contains("about to replace") && $0.category == "viadere.security.cancel" }, "a push goes to the old device")

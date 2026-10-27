@@ -568,6 +568,16 @@ public struct SessionInfo: Codable, Sendable, Hashable, Identifiable {
 
 /// What happened. Unknown values decode as `.unknown` so older apps survive new kinds.
 public enum SecurityNoticeKind: String, Codable, Sendable, Hashable {
+    case newDevice, newPhone, appClip, deviceReplaced, unknown
+
+    public init(from decoder: any Decoder) throws {
+        self = SecurityNoticeKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// Every notice topic the server sends, including the ones added after `SecurityNoticeKind` shipped (which an older app decodes as
+/// `.unknown`). `SecurityNotice.topic` is derived from the wire `kind`, so new apps can tell them apart and old ones keep compiling.
+public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case newDevice, newPhone, appClip, deviceReplaced
     /// A new device is replacing this account's live device and will take over when it is confirmed or its cool-down ends
     /// (`action == .cancelDeviceReplacement`, `subjectId` = the NEW device).
@@ -581,7 +591,7 @@ public enum SecurityNoticeKind: String, Codable, Sendable, Hashable {
     case unknown
 
     public init(from decoder: any Decoder) throws {
-        self = SecurityNoticeKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        self = SecurityNoticeTopic(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 }
 
@@ -603,23 +613,54 @@ public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
 /// shows them when it opens, so an account whose other devices received no push still hears about it. Dismissing needs a trusted device.
 public struct SecurityNotice: Codable, Sendable, Hashable, Identifiable {
     public var id: UUID
+    /// The notice kind as this app version knows it; kinds added later (recovery, pending replacement) are `.unknown` here:
+    /// use `topic` (or `action`) for those.
     public var kind: SecurityNoticeKind
+    /// The wire `kind` string exactly as sent.
+    public var rawKind: String
     /// Plain text, safe to show as-is.
     public var message: String
     public var createdAt: Date
-    /// The device or phone link id the notice is about, when there is one.
+    /// The device or phone link id (or recovery id) the notice is about, when there is one.
     public var subjectId: String?
     /// "Not you? Cancel": what the notice's button does (acting on `subjectId`). `nil` for informational notices.
     public var action: SecurityNoticeAction?
 
+    /// Every topic, including those newer than `SecurityNoticeKind`.
+    public var topic: SecurityNoticeTopic { SecurityNoticeTopic(rawValue: rawKind) ?? .unknown }
+
     public init(id: UUID, kind: SecurityNoticeKind, message: String, createdAt: Date, subjectId: String? = nil,
                 action: SecurityNoticeAction? = nil) {
+        self.init(id: id, rawKind: kind.rawValue, message: message, createdAt: createdAt, subjectId: subjectId, action: action)
+    }
+
+    public init(id: UUID, rawKind: String, message: String, createdAt: Date, subjectId: String? = nil, action: SecurityNoticeAction? = nil) {
         self.id = id
-        self.kind = kind
+        self.rawKind = rawKind
+        kind = SecurityNoticeKind(rawValue: rawKind) ?? .unknown
         self.message = message
         self.createdAt = createdAt
         self.subjectId = subjectId
         self.action = action
+    }
+
+    enum CodingKeys: String, CodingKey { case id, kind, message, createdAt, subjectId, action }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(UUID.self, forKey: .id), rawKind: try c.decode(String.self, forKey: .kind), message: try c.decode(String.self, forKey: .message),
+                  createdAt: try c.decode(Date.self, forKey: .createdAt), subjectId: try c.decodeIfPresent(String.self, forKey: .subjectId),
+                  action: try c.decodeIfPresent(SecurityNoticeAction.self, forKey: .action))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(rawKind, forKey: .kind)
+        try c.encode(message, forKey: .message)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(subjectId, forKey: .subjectId)
+        try c.encodeIfPresent(action, forKey: .action)
     }
 }
 

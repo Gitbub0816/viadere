@@ -13,7 +13,7 @@ struct SecurityNotices {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
         case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked
 
-        var kind: SecurityNoticeKind {
+        var kind: SecurityNoticeTopic {
             switch self {
             case .newDevice: .newDevice
             case .newPhone: .newPhone
@@ -87,7 +87,7 @@ struct SecurityNotices {
             .filter(\.$createdAt > cutoff).sort(\.$createdAt, .descending).limit(50).all()
             .filter { $0.originDeviceId == nil || $0.originDeviceId != device }
             .compactMap { row in
-                row.id.map { SecurityNotice(id: $0, kind: SecurityNoticeKind(rawValue: row.kind) ?? .unknown, message: row.message,
+                row.id.map { SecurityNotice(id: $0, rawKind: row.kind, message: row.message,
                                             createdAt: row.createdAt, subjectId: row.subjectId,
                                             action: row.action.flatMap(SecurityNoticeAction.init(rawValue:))) }
             }

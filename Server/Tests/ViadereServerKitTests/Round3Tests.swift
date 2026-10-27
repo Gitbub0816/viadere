@@ -236,11 +236,11 @@ final class Round3Tests: XCTestCase {
             let thief = try await h.enrollInSession(current)
             XCTAssertNotNil(thief.device)
             h.clock.advance(by: 1)
-            let third = try await refresh(h, r2, as: user)   // legitimate rotation R2 -> R3
+            let third = try await refresh(h, r2, as: thief)   // legitimate rotation R2 -> R3
             XCTAssertEqual(third.status, .ok, third.text)
             h.clock.advance(by: 120)
             // R2 is presented again, long after: reuse.
-            try await eq(try await refresh(h, r2, as: user).status, .unauthorized)
+            try await eq(try await refresh(h, r2, as: thief).status, .unauthorized)
             let d = try await XCTUnwrapAsync(try await DeviceRecord.find(deviceD, on: h.db))
             XCTAssertNil(d.revokedAt, "the device the session already belonged to survives (no cascade to the pre-existing device)")
             let e = try await XCTUnwrapAsync(try await DeviceRecord.find(thief.device!.id.uuid, on: h.db))
