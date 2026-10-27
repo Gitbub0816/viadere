@@ -23,7 +23,7 @@ get the customer's decision back, exchange messages, and let customers connect w
 | `messages:write` | send messages |
 | `statuses:write` | publish ongoing-event statuses |
 | `webhooks:manage` | manage webhook endpoints through the API |
-| `rewards:write` | reserved (rewards are not available yet) |
+| `rewards:write` | loyalty program, rewards, points and redemption validation (`/v1/business/loyalty/*`, `/v1/business/rewards*`, `/v1/business/redemptions/consume`) |
 
 Dashboard roles are least-privilege: **owner**, **admin** (no owner changes), **developer** (keys, webhooks, templates, campaign links),
 **support** (consent status), **analyst** (aggregate analytics and usage, read-only).
@@ -147,6 +147,7 @@ function verify(header, rawBody, secrets, now = Date.now() / 1000) {
 | `message.received` | the customer messaged you | `{sessionId, relationshipId, messageId, text, channel, receivedAt}` |
 | `relationship.connected` / `.disconnected` | connection changes | `{relationshipId, source?, occurredAt}` |
 | `consent.updated` | a consent changed | `{relationshipId, purpose, granted, occurredAt}` |
+| `reward.redeemed` | you consumed a redemption code | `RedemptionReceipt` (pseudonymous) |
 
 The body is `{id, type, createdAt, businessId, apiVersion, data}`. The dashboard delivery log redacts customer-authored text.
 
@@ -176,6 +177,76 @@ Every `POST` that creates something takes an `Idempotency-Key` header **equal to
 * RCS postbacks are opaque, signed, single-use tokens bound to the customer's phone and the active menu; a newer message to the same phone supersedes older menus, exactly like SMS numbers.
 * Apple Messages for Business is a disabled placeholder and cannot be used until Apple approves multi-merchant brokerage in writing.
 
+## 5a. Loyalty, rewards and redemption
+
+Everything here needs the `rewards:write` scope. Eligibility is decided by Viadere's servers, never by the app: the customer's phone shows a
+reward's state and offers its button only when the server says so.
+
+### 1. Create your program (optional, needed for points)
+```swift
+let client = try ViadereBusinessClient(apiKey: apiKey)
+_ = try await client.saveLoyaltyProgram(UpsertLoyaltyProgramRequest(
+    programName: "Juniper Club", summary: "A point for every dollar.", termsVersion: "2026-10",
+    timeZone: "America/Phoenix",                      // the business's zone: when a "day" starts
+    tiers: [LoyaltyTier(name: "Silver", minimumPoints: 100), LoyaltyTier(name: "Gold", minimumPoints: 500)]))
+```
+Customers see the program in the app, accept the current `termsVersion` and join. Bumping `termsVersion` makes the next join require the new terms.
+
+### 2. Create rewards
+```swift
+// Free coffee every Tuesday, one per customer per day, evaluated in Phoenix time (DST-safe).
+_ = try await client.createReward(IssueRewardRequest(
+    title: "Free coffee on Tuesdays", kind: .perk,
+    recurrence: RewardRecurrence(weekdays: [2], perDayLimit: 1, timeZone: "America/Phoenix"),
+    idempotencyKey: "reward-tuesday-coffee"))
+```
+| `kind` | Behaviour |
+|---|---|
+| `coupon`, `offer` | the customer **claims** it (saves it to their account, optionally to Wallet), then redeems it; once per customer unless recurring |
+| `perk` | redeemed directly; once per customer unless recurring |
+| `pointsReward` | costs `pointsCost` points, held when a code is issued; repeatable while the balance lasts |
+
+Omit `relationshipId` to offer a reward to every connected customer; pass one to issue it to a single customer. Withdraw a reward with `revokeReward(id:)`:
+outstanding codes stop validating, held points return, and its Wallet passes are voided.
+
+### 3. Award points
+```swift
+_ = try await client.adjustPoints(AdjustLoyaltyPointsRequest(relationshipId: rel, delta: 25, reason: "purchase", idempotencyKey: "order-1042-points"))
+```
+Idempotent per key; a balance never goes below zero; the customer must have joined. Status levels (tiers) follow the current balance.
+
+### 4. Validate a redemption code at the till
+The customer taps **Use now** and the app shows a code like `K7M2Q-9XPB4` for about **two minutes**. Your till submits it:
+```swift
+do {
+    let receipt = try await client.consumeRedemption(code: scanned, locationCode: "till-2")
+    // hand over `receipt.rewardTitle`; `receipt.consumerReference` is a per-business pseudonym
+} catch let error as ViadereAPIError where error.status == 409 { /* already used (error.details?["redeemedAt"]) */ }
+  catch let error as ViadereAPIError where error.status == 410 { /* expired or withdrawn */ }
+  catch let error as ViadereAPIError where error.status == 404 { /* unknown code */ }
+```
+Validation and consumption are **one atomic step**: if two tills submit the same code at once, exactly one gets `200`. A code is single use; the per-day limit is
+reserved when the code is issued and released if it expires unused. The call is rate-limited (60/min, burst 30 per business) because that bounds code guessing.
+If a response is lost, a repeat answers `409`; confirm with the customer rather than assuming. Subscribe to `reward.redeemed` to reconcile.
+
+### 5. Wallet passes
+Customers add passes from the app; you do not call a pass API. Viadere signs the passes with its own Pass Type ID certificate (see the server README) and
+updates them for you:
+
+| Pass | Issued when the customer adds | Updates |
+|---|---|---|
+| Loyalty card (`storeCard`) | the card from their membership | points and status change when you adjust points |
+| Coupon | a claimed coupon | voided when redeemed or when you revoke the reward |
+| Event ticket / boarding pass | a `ticket` interaction you sent (`venue`, `seat`, `startsAt` appear on the pass) | not yet |
+
+Passes never contain a phone number, email, name, member number or redemption code. Wallet pass updates are not a way to send promotional notifications.
+
+### 6. Ongoing events, tickets and Live Activities
+Give an order, trip or appointment a stable `correlationId` and send it on every related interaction: the `status` updates (`BusinessStatusUpdateRequest.correlationId`),
+the `ticket`, and `confirm`/`choose` actions (for example a `confirm` titled "Check in", a `choose` for rescheduling, an `authorize` with an amount for rebooking). The
+customer's Activity tab shows them as one item. A `status` whose `liveActivity` is set drives a Live Activity when its purpose is `transactional`, `accountService` or
+`support` and you use a live key; marketing, rewards and security statuses never do.
+
 ## 6. Errors
 
 Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.
@@ -193,7 +264,7 @@ Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `req
 | 422 | `validation_failed` | `error.details` maps field paths to issue codes (for example `expiresAt: invalidLifetime`). |
 | 429 | `rate_limited` | Slow down; wait `Retry-After` seconds. |
 | 500 | `internal_error` | Retry keyed requests with backoff. |
-| 501 | `unavailable` | Feature not available yet (rewards). |
+| 501 | `unavailable` | Feature not configured on this deployment (for example Wallet passes without a pass certificate). |
 
 ## 7. Rate limits, quotas and trust
 
@@ -247,4 +318,5 @@ The files are versioned and immutable (`Cache-Control: public, max-age=31536000,
 - [ ] `expired`, `cancelled`, `denied` and `reported` are all treated as "do not proceed".
 - [ ] You never treat an RCS or SMS reply as approval of a sensitive action.
 - [ ] Customer-authored text (`message.received`) is handled as untrusted input.
+- [ ] Redemption codes are validated server-side with `consumeRedemption` (never trusted from the app) and `409`/`410` mean "do not hand over the reward".
 - [ ] You monitor `429`s, your complaint rate and your opt-out rate; you rotate keys and webhook secrets on a schedule (rotation keeps the old secret valid for 24 hours).

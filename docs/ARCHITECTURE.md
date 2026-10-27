@@ -26,7 +26,7 @@ Dependency direction: `Server` → `ViadereCore`, `ViadereBusinessSDK` → `Viad
 | Rendering | `ChannelRenderer`, `SMSEncoding` | Interaction → SMS (numbered, GSM-7 aware), RCS suggestions, and native notification categories. Sensitive interactions get a secure handoff instead |
 | Security | `RequestSigner`/`RequestVerifier`, `DecisionSigner`/`DecisionVerifier`, `WebhookSignature`, `SecureToken`, `ReplayGuard`, `DeviceSigningKey` | Device request signing, signed decisions, webhook HMAC, tokens, replay protection |
 | SMS gateway | `SMSGatewayEngine`, `ConversationContext`, `GatewayEffect`, `DirectoryLookup`, `GatewayCopy` | A pure, deterministic state machine that returns the next state plus effects |
-| Models / DTOs | `BusinessProfile`, `Relationship`, `ConsentGrant`, `Device`, `ConversationMessage`, `Reward`, `LiveActivityStatus`, `AuditEvent`, `DelegationGrant`, request/response types | Shared wire types. Always encode them with `ViadereJSON` |
+| Models / DTOs | `BusinessProfile`, `Relationship`, `ConsentGrant`, `Device`, `ConversationMessage`, `Reward`, `RewardEntry`/`RewardEligibility`, `LoyaltyAccount`, `HouseholdGrant`, `DelegationStepUpProof`/`DelegationScopePolicy`, `AcknowledgmentRecord`, `LiveActivityStatus`, `AuditEvent`, `DelegationGrant`, request/response types | Shared wire types. Always encode them with `ViadereJSON` |
 | API catalog | `APIRoutes`, `Endpoint<Req, Res>`, `AuthRequirement` | One source of truth for paths, methods and the auth each route requires |
 
 **Design rules:**
@@ -53,6 +53,8 @@ Dependency direction: `Server` → `ViadereCore`, `ViadereBusinessSDK` → `Viad
 - Delivers webhooks signed with `WebhookSignature` and writes audit events.
 - **Channels (P4).** `ChannelAdapter` unifies SMS, RCS and the Apple Messages for Business placeholder. `ChannelRouter` owns a durable outbox: capability check per phone, RCS send, SMS fallback, receipts. RCS postbacks are opaque signed single-use tokens validated against the active menu version and TTL.
 - **Platform (P5).** Server-rendered business dashboard and operator console (passkey sign-in, `__Host-` sessions, CSRF, re-authentication, roles), business onboarding (`pending → verified`, handle and code only on verification), suspension, abuse thresholds with automatic throttling, downward-only operator overrides, usage metering with an invoice preview, a server-side QR encoder, and the embeddable connect button.
+
+- **Utility (P3).** `RewardsService` + `RewardEligibilityEvaluator` compute eligibility only on the server (recurrence in the business's time zone, per-day slots and points reserved when a single-use code is issued, released on expiry; the business consumes a code with one compare-and-swap). `WalletService` signs passes (`PassSigner`; `X509PassSigner` builds the detached PKCS#7 with swift-certificates), serves Apple's PassKit web service with per-pass tokens and pushes updates from a durable outbox. `LiveActivityService` sends ActivityKit pushes only for statuses `LiveActivityPolicy` allows. `HouseholdService` implements invitations (hashed single-use codes, attempt limits), the biometric step-up (`DelegationStepUpVerifier` in Core) and the household audit; `InteractionService` scopes a delegate to the grant's purposes and businesses and refuses delegated `authenticate`/`authorize` decisions.
 
 **App (SwiftUI)**
 - Onboarding (passkey), connected businesses, inbox and history, approvals that need a secure step-up, permissions, devices.

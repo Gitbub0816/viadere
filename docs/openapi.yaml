@@ -278,20 +278,187 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
-  /v1/business/rewards:
+  /v1/business/loyalty/program:
+    get:
+      tags: [Rewards]
+      operationId: getLoyaltyProgram
+      summary: Read your loyalty program
+      description: Requires scope `rewards:write`. `404` until you create one.
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessLoyaltyProgram" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    put:
+      tags: [Rewards]
+      operationId: saveLoyaltyProgram
+      summary: Create or replace your loyalty program
+      description: |
+        Requires scope `rewards:write`. One program per business. `timeZone` is the IANA zone whose midnight starts a "day" for
+        recurring rewards and per-day limits. Changing `termsVersion` makes customers accept the new terms to join (an enroll call
+        with the old version is `409`); existing members keep their balance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertLoyaltyProgramRequest" }
+      responses:
+        "200":
+          description: The saved program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessLoyaltyProgram" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/loyalty/points:
     post:
       tags: [Rewards]
-      operationId: issueReward
-      summary: Issue a reward (not yet available)
-      description: Reserved. Authenticated and scope-checked (`rewards:write`), but currently always answers `501 unavailable`.
+      operationId: adjustLoyaltyPoints
+      summary: Add or remove points for an enrolled customer
+      description: |
+        Requires scope `rewards:write`. Idempotent on `idempotencyKey` (the `Idempotency-Key` header must equal it): a replay changes
+        nothing and returns `applied: false`. A balance never goes below zero (`409`). The customer must have joined your program (`409`).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdjustLoyaltyPointsRequest" }
       responses:
-        "501":
-          description: Not available yet.
+        "200":
+          description: The new balance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoyaltyPointsResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/rewards:
+    get:
+      tags: [Rewards]
+      operationId: listRewards
+      summary: List your rewards
+      description: Requires scope `rewards:write`. Newest first, at most 200.
+      responses:
+        "200":
+          description: Your rewards.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Rewards]
+      operationId: createReward
+      summary: Create a reward
+      description: |
+        Requires scope `rewards:write`. Without `relationshipId` the reward belongs to your program and every connected customer sees
+        it with their own **server-computed** eligibility; with one, only that customer does. Kinds: `coupon` and `offer` are claimed
+        before use; `perk` and `pointsReward` are redeemed directly. A `recurrence` limits the reward to ISO weekdays (1 = Monday)
+        evaluated in the recurrence's time zone, with `perDayLimit` redemptions per local day; without one, coupons, offers and perks
+        can be redeemed once per customer and points rewards as often as the balance allows.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueRewardRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/rewards/{rewardId}/revoke:
+    post:
+      tags: [Rewards]
+      operationId: revokeReward
+      summary: Withdraw a reward
+      description: |
+        Requires scope `rewards:write`. Outstanding redemption codes stop validating (`410`), held points return to customers, and
+        Wallet passes for the reward are voided. Safe to repeat.
+      parameters:
+        - name: rewardId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: The revoked reward.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/redemptions/consume:
+    post:
+      tags: [Rewards]
+      operationId: consumeRedemption
+      summary: Validate and consume a redemption code
+      description: |
+        Requires scope `rewards:write`. Validation and consumption are **one atomic step**: of any number of concurrent calls for a code,
+        exactly one succeeds. Codes look like `K7M2Q-9XPB4`, are valid for about two minutes after the customer asks for them, and are
+        single use; case, dashes and spaces are ignored.
+
+        | Result | Meaning |
+        |---|---|
+        | `200` | Redeemed. Give the customer their reward. |
+        | `404` | Unknown, malformed or another business's code (indistinguishable on purpose). |
+        | `409` | Already used (`details.redeemedAt`). |
+        | `410` | Expired, or the reward was withdrawn. |
+        | `429` | Too many attempts; the budget (60/min, burst 30 per business) bounds code guessing. |
+
+        This call is not retried automatically by the SDK: if a response is lost, a repeat answers `409`, so confirm with the customer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConsumeRedemptionRequest" }
+      responses:
+        "200":
+          description: Consumed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedemptionReceipt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410":
+          description: The code expired or the reward was withdrawn.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
 webhooks:
   interaction.decided:
@@ -338,6 +505,22 @@ webhooks:
     post:
       summary: A customer disconnected; pending interactions were cancelled
       requestBody: { $ref: "#/components/requestBodies/RelationshipEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  reward.redeemed:
+    post:
+      summary: A redemption code was consumed
+      description: Sent once when you consume a code. `data` is the same `RedemptionReceipt` the consume call returned (pseudonymous).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: reward.redeemed }
+                    data: { $ref: "#/components/schemas/RedemptionReceipt" }
       responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
   consent.updated:
     post:
@@ -581,7 +764,8 @@ components:
         title: { type: string, maxLength: 80 }
         body: { type: string, maxLength: 1000 }
         documentURL: { type: string, format: uri }
-        documentVersion: { type: string }
+        documentVersion: { type: string, maxLength: 40 }
+        documentDigest: { type: string, pattern: "^[0-9a-f]{64}$", description: Lowercase hex SHA-256 of the document shown. It is kept in the customer's acknowledgment record. }
     ReplyPayload:
       type: object
       required: [prompt]
@@ -649,7 +833,7 @@ components:
         sessionId: { $ref: "#/components/schemas/Uuid" }
     RewardPayload:
       type: object
-      description: Reserved (rewards are not available yet).
+      description: Announces a reward in the customer's inbox. Create the reward itself with `POST /v1/business/rewards`.
       required: [rewardId, title]
       properties:
         rewardId: { $ref: "#/components/schemas/Uuid" }
@@ -659,15 +843,20 @@ components:
         walletPassId: { $ref: "#/components/schemas/Uuid" }
     TicketPayload:
       type: object
-      description: Reserved.
+      description: |
+        A ticket, pass or admission. `venue`, `seat` and `startsAt` appear on the customer's Activity row and on the Wallet pass. Tickets,
+        status updates and confirmations that share a `correlationId` (an order, trip or appointment id) are shown as one Activity item.
       required: [title, ticketType]
       properties:
         title: { type: string }
-        ticketType: { type: string }
+        ticketType: { type: string, description: "boarding_pass, event, admission, reservation…" }
         holderName: { type: string }
         validFrom: { $ref: "#/components/schemas/Timestamp" }
         validUntil: { $ref: "#/components/schemas/Timestamp" }
         walletPassId: { $ref: "#/components/schemas/Uuid" }
+        venue: { type: string, maxLength: 80, description: "e.g. Orpheum Theatre, or Gate B4." }
+        seat: { type: string, maxLength: 80, description: "e.g. Row F · Seat 12." }
+        startsAt: { $ref: "#/components/schemas/Timestamp" }
     InteractionPayload:
       description: The payload object for the declared `kind` (payload shapes overlap, so the sibling `kind` is the discriminator).
       anyOf:
@@ -820,6 +1009,101 @@ components:
         status: { $ref: "#/components/schemas/StatusPayload" }
         activityKey: { type: string, minLength: 1, maxLength: 64, description: Stable key for the ongoing event (an order id) so updates replace earlier ones. }
         idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        correlationId: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$", description: Groups this status with the tickets and confirmations of the same order, trip or appointment in the customer's Activity feed. }
+
+    RewardKind:
+      type: string
+      enum: [coupon, perk, offer, pointsReward]
+    RewardRecurrence:
+      type: object
+      required: [weekdays, perDayLimit, timeZone]
+      properties:
+        weekdays: { type: array, minItems: 1, items: { type: integer, minimum: 1, maximum: 7 }, description: ISO weekdays, 1 = Monday. }
+        perDayLimit: { type: integer, minimum: 1, maximum: 20, description: Redemptions allowed per local day per customer. }
+        timeZone: { type: string, description: IANA zone; its midnight is the day boundary (DST-aware). }
+    IssueRewardRequest:
+      type: object
+      required: [title, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        title: { type: string, minLength: 1, maxLength: 80 }
+        kind: { $ref: "#/components/schemas/RewardKind" }
+        details: { type: string, maxLength: 300 }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        recurrence: { $ref: "#/components/schemas/RewardRecurrence" }
+        pointsCost: { type: integer, minimum: 1, description: Required for `pointsReward`. }
+        issueWalletPass: { type: boolean, default: false, description: For a reward issued to one customer, also issue a Wallet coupon pass. }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    Reward:
+      type: object
+      required: [id, business, title, status]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        business: { type: object, description: Your verified business summary. }
+        title: { type: string }
+        details: { type: string }
+        status: { type: string, enum: [available, redeemed, expired, revoked] }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        recurrence: { $ref: "#/components/schemas/RewardRecurrence" }
+    LoyaltyTier:
+      type: object
+      required: [name, minimumPoints]
+      properties:
+        name: { type: string, maxLength: 30 }
+        minimumPoints: { type: integer, minimum: 0 }
+    UpsertLoyaltyProgramRequest:
+      type: object
+      required: [programName, summary, termsVersion, timeZone]
+      properties:
+        programName: { type: string, maxLength: 60 }
+        summary: { type: string, maxLength: 280 }
+        termsVersion: { type: string, maxLength: 32 }
+        timeZone: { type: string }
+        tiers: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/LoyaltyTier" } }
+    BusinessLoyaltyProgram:
+      allOf:
+        - { $ref: "#/components/schemas/UpsertLoyaltyProgramRequest" }
+        - type: object
+          required: [memberCount, updatedAt]
+          properties:
+            memberCount: { type: integer }
+            updatedAt: { $ref: "#/components/schemas/Timestamp" }
+    AdjustLoyaltyPointsRequest:
+      type: object
+      required: [relationshipId, delta, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        delta: { type: integer, description: Non-zero; at most 1,000,000 in magnitude. }
+        reason: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9_.-]+$" }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    LoyaltyPointsResult:
+      type: object
+      required: [relationshipId, pointsBalance, applied]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        pointsBalance: { type: integer }
+        statusName: { type: string }
+        applied: { type: boolean, description: "False when this call replayed an earlier request with the same key." }
+    ConsumeRedemptionRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "The code the customer shows, e.g. K7M2Q-9XPB4." }
+        locationCode: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$", description: Optional till or store id recorded with the redemption. }
+    RedemptionReceipt:
+      type: object
+      required: [redemptionId, rewardId, rewardTitle, kind, consumerReference, redeemedAt]
+      properties:
+        redemptionId: { $ref: "#/components/schemas/Uuid" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        rewardTitle: { type: string }
+        kind: { $ref: "#/components/schemas/RewardKind" }
+        consumerReference: { $ref: "#/components/schemas/Uuid" }
+        redeemedAt: { $ref: "#/components/schemas/Timestamp" }
+        pointsSpent: { type: integer }
+        locationCode: { type: string }
 
     WebhookEventType:
       type: string

@@ -2,7 +2,7 @@
 
 Vapor 4 backend for **Viadere — a trusted way to connect**: the verified, privacy-conscious business-to-consumer
 connection layer. This package implements phases **P0 (trust foundation), P1 (SMS broker), P2 (native minimal
-experience backend), P4 (rich external channels: RCS with SMS fallback, an inert Apple Messages for Business placeholder) and
+experience backend), P3 (utility: rewards and loyalty, Wallet passes, Live Activity pushes, household delegation, acknowledgments), P4 (rich external channels: RCS with SMS fallback, an inert Apple Messages for Business placeholder) and
 P5 (platform: business dashboard, operator console, metering, abuse controls, embeddable connect button)** of [`docs/COMPLETE-PRODUCT-SPEC.md`](../docs/COMPLETE-PRODUCT-SPEC.md). Wire formats are the
 normative ones in [`docs/SECURITY.md`](../docs/SECURITY.md); all shared logic (identifiers, interaction protocol,
 assurance policy, request/decision/webhook signing, SMS state machine) comes from
@@ -18,7 +18,8 @@ Server/
     Models/ Migrations/         Fluent models + one schema migration (Postgres + SQLite)
     Security/                   auth middlewares, replay guard, tokens, rate limiter, headers, log redaction
     Services/                   Auth, Directory/Registry, Relationships/Consent, Interactions, Webhooks,
-                                Conversations, Phone links, Audit, PasskeyVerifier
+                                Conversations, Phone links, Audit, PasskeyVerifier, Rewards (+ RewardEligibility), Household,
+                                LiveActivity, Acknowledgments
     SMS/                        SMSProvider, Twilio adapter, DB DirectoryLookup, GatewayService, outbound queue
     Channels/                   ChannelAdapter protocol (SMS, RCS, AMB placeholder), RCSProvider + generic RBM adapter,
                                 ChannelRouter (durable outbox, capability, SMS fallback), RCS postback tokens + inbound
@@ -26,7 +27,9 @@ Server/
                                 server-rendered pages (one hashed stylesheet, one hashed passkey script on sign-in pages)
     Platform/                   onboarding / verification / suspension, abuse thresholds + auto-throttle, business controls,
                                 usage metering + invoice preview, QR encoder
-    Push/                       APNsSender protocol + APNSwift implementation
+    Push/                       APNsSender protocol (+ Live Activity pushes), PassPushSender, APNSwift implementations
+    Wallet/                     PassSigner (+ X509PassSigner: PKCS#7 via swift-certificates), PKPass builder (ZIP, manifest, PNG),
+                                WalletService (issue, PassKit web service, update-push outbox)
     Routes/ Web/                route registration from `APIRoutes`; /c /l /h pages, AASA, health, /connect-button/v1/*
     Jobs/                       background runner (webhooks, SMS + channel outboxes, expiry sweeps, abuse sweep), seed command
   Public/connect-button/v1/     the embeddable "Connect with Viadere" button (web component + plain CSS), immutable and SRI-pinned
@@ -39,15 +42,15 @@ Server/
 * **Contract-first routing.** Every route in `APIRoutes.all` is registered by `RoutesBuilder.api(_:)`, which attaches the
   middleware demanded by the endpoint's `AuthRequirement` (`none`, `bearer`, `deviceSignedBearer`, `businessAPIKey`,
   `providerSignature`). A test walks the whole catalog and asserts each route exists and rejects unauthenticated calls.
-  P3 routes (rewards, Wallet, delegation) are registered, authenticated, and answer `501 unavailable`. The dashboard,
-  operator console and connect-button routes are web pages, not part of the JSON catalog.
+  The PassKit web service (`/wallet/v1/*`), the dashboard, operator console and connect-button routes are not part of the JSON catalog.
+  `501 unavailable` is returned only when Wallet passes are not configured (no pass certificate).
 * **State in the database, not in memory.** Replay nonces, single-use tokens, conversation state, queues and webhook
   deliveries are rows. Races are decided by unique indexes or compare-and-swap (`UPDATE … WHERE col = expected RETURNING`),
   so any number of instances can run the background jobs safely.
 * **One transaction per inbound SMS.** dedup marker (unique insert) → context load → `SMSGatewayEngine` → CAS on
   `revision` → effects (queue rows, webhook deliveries, link tokens, consent, audit). A lost CAS rolls back everything and
   retries; nothing is half-applied. External I/O (SMS send, webhook HTTP) happens afterwards from durable queues.
-* **Pluggable edges.** `APNsSender`, `SMSProvider`, `PasskeyVerifier`, `WebhookTransport`, `RateLimitStore` and the clock are
+* **Pluggable edges.** `APNsSender`, `PassSigner`, `PassPushSender`, `SMSProvider`, `PasskeyVerifier`, `WebhookTransport`, `RateLimitStore` and the clock are
   injected through `ServerContext`; tests replace them, production wires APNSwift, Twilio and webauthn-swift.
 
 ## Running
@@ -102,6 +105,7 @@ the process refuses to start without them; in development missing secrets get ra
 | `RUN_BACKGROUND_JOBS`, `JOB_INTERVAL_SECONDS` | in-process delivery/maintenance loop (default on, 5 s) |
 | `MAX_BODY_BYTES`, `FREE_DAILY_INTERACTION_QUOTA`, `LOG_LEVEL`, `PORT`, `BIND_HOST` | limits and runtime |
 | `ALLOW_INSECURE_WEBHOOKS` | development only: allow `http://`/localhost webhook URLs |
+| `PASS_TYPE_IDENTIFIER`, `PASS_CERTIFICATE_PEM` or `PASS_CERTIFICATE_PATH`, `PASS_PRIVATE_KEY_PEM` or `PASS_PRIVATE_KEY_PATH`, `PASS_WWDR_CERTIFICATE_PEM` or `PASS_WWDR_CERTIFICATE_PATH` | Wallet pass signing: **all four or none**. The Pass Type ID certificate (`pass.…`) and its **unencrypted** private key (PKCS#8, PKCS#1 or SEC1 PEM, RSA or EC) from the Apple Developer portal, plus Apple's WWDR intermediate certificate. Inline values accept `\n` escapes. Validated at startup (parseable, key matches certificate, not expired), never committed. The same certificate and key also authenticate the "pass changed" pushes to APNs. None configured = passes off (`501`). The team id is `APPLE_TEAM_ID` |
 | `RCS_PROVIDER_BASE_URL`, `RCS_PROVIDER_TOKEN`, `RCS_AGENT_ID`, `RCS_WEBHOOK_SECRET` | generic RBM-style RCS provider; **all four or none** (none = RCS off, SMS only). The secret is base64url, ≥ 32 bytes |
 | `FEATURE_APPLE_MESSAGES_FOR_BUSINESS` | defaults `false`; the AMB adapter is a non-functional placeholder even when `true` |
 | `DASHBOARD_ORIGIN` | optional separate origin (same `RP_ID`) for dashboard passkeys, e.g. a `business.` sub-domain |
@@ -148,7 +152,18 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `GET /healthz` · `/readyz` | none | `{"status":"ok"}` only |
 | `POST /v1/providers/rcs/inbound` | provider | RCS webhook: `X-RCS-Signature: t=…,v1=…` (HMAC-SHA256, ±300 s, constant time); text, suggestion postbacks, receipts |
 | `GET /connect-button/v1/{viadere-connect.js,viadere-connect.css,integrity.json}` | none | immutable, SRI-ready assets (see below) |
-| rewards, Wallet pass, delegations, `POST /v1/business/rewards` | as catalog | registered, authenticated, `501 unavailable` (P3) |
+| `GET /v1/rewards` · `/v1/rewards/overview` | device+bearer | rewards with the **server-computed** `RewardEligibility` (recurrence in the business's zone, per-day limits, points) |
+| `GET /v1/loyalty/{businessId}` · `POST …/enroll` | device+bearer | program overview (`404` = none); enroll needs the current `termsVersion` (`409` if stale); member reference AES-GCM encrypted |
+| `POST /v1/rewards/{id}/claim` · `/redeem` | device+bearer | claim (`409` if not claimable); redeem re-checks eligibility, reserves the slot/points and returns a single-use code (120 s) |
+| `GET/POST /v1/wallet/passes` · `GET /v1/wallet/passes/{id}` | device+bearer | list / issue; the download is the signed `.pkpass` (`410` once voided, `501` without a pass certificate) |
+| `/wallet/v1/devices/…/registrations/…`, `/wallet/v1/passes/{type}/{serial}`, `/wallet/v1/log` | pass token (`ApplePass`) | Apple's PassKit web service: register/unregister, changed serials, latest pass, device logs |
+| `GET /v1/household` · `GET /v1/household/audit` | device+bearer | given/received grants with server-computed status · the household audit feed |
+| `POST /v1/household/invitations` · `/preview` · `/accept` | device+bearer | hashed single-use 24 h codes, attempt-limited; sensitive scopes need an `approvalBiometric` step-up proof |
+| `GET /v1/delegations` · `DELETE /v1/delegations/{id}` | device+bearer | active grants · revoke (grantor or delegate); `POST /v1/delegations` is `410` (use invitations) |
+| `GET /v1/acknowledgments` | device+bearer | acknowledgment records with the server's timestamp |
+| `PUT/GET /v1/business/loyalty/program`, `POST /v1/business/loyalty/points` | API key `rewards:write` | program, points (idempotent ledger) |
+| `GET/POST /v1/business/rewards`, `POST …/{id}/revoke` | API key `rewards:write` | create (idempotent) / list / withdraw |
+| `POST /v1/business/redemptions/consume` | API key `rewards:write` | validate **and** consume a code in one compare-and-swap; rate-limited |
 
 ### Business dashboard (`/dashboard`) and operator console (`/operator`)
 

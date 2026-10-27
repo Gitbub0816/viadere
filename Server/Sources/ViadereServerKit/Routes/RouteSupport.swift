@@ -21,14 +21,6 @@ extension RoutesBuilder {
         let path = endpoint.descriptor.vaporPathComponents.map { PathComponent(stringLiteral: $0) }
         group.on(method, path, body: .collect(maxSize: nil), use: handler)
     }
-
-    /// Registers a catalog route whose feature ships in a later phase (P3–P5). Authentication is still
-    /// enforced, so the surface is already protected when the implementation lands.
-    func unavailable<Req, Res>(_ endpoint: Endpoint<Req, Res>) {
-        api(endpoint, scope: endpoint.auth == .businessAPIKey ? BusinessAPIKeys.Scope.rewardsWrite : nil) { _ in
-            throw APIError.unavailable("This feature is not available yet.")
-        }
-    }
 }
 
 extension Request {
