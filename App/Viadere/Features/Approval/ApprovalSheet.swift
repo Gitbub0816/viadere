@@ -48,6 +48,12 @@ struct ApprovalSheet: View {
             }
         }
         .onChange(of: capture.isCaptured, initial: true) { _, captured in model.isScreenBeingCaptured = captured }
+        .onChange(of: model.contextRevision) { _, _ in
+            // The request changed: nothing chosen or typed against the old details carries over.
+            multiSelection = []
+            replyText = ""
+            slideKey = UUID()
+        }
         .onChange(of: model.phase) { _, phase in
             if phase == .ready { slideKey = UUID() }
         }
@@ -60,6 +66,9 @@ struct ApprovalSheet: View {
         .sensoryFeedback(.success, trigger: isDone)
         .sensoryFeedback(.warning, trigger: isFailed)
     }
+
+    /// Approving is unavailable: the screen is being recorded, or the new-device cool-down pauses it. Denying never is.
+    private var approveBlocked: Bool { model.approvalBlockedByCapture || model.approvalPausedByCoolDown }
 
     private var isDone: Bool { if case .done = model.phase { true } else { false } }
     private var isFailed: Bool { if case .failed = model.phase { true } else { false } }
@@ -113,7 +122,16 @@ struct ApprovalSheet: View {
         } else {
             switch model.availability {
             case .actionable:
+                if model.showsChangedNotice {
+                    ViadereNotice("This request changed while you were looking at it. The details below are the current ones. Review them before deciding.", kind: .warning)
+                }
+                if model.approvalPausedByCoolDown {
+                    ViadereNotice("\(model.coolDownMessage) \(model.coolDownStillAvailable)", kind: .info)
+                }
                 requestBody
+            case .updateRequired:
+                StateMessage(symbol: "arrow.down.app", title: "Update Viadere",
+                             message: "Update Viadere to respond to this request. For your safety it can't be approved from this version, but you can still deny it.")
             case .expired:
                 StateMessage(symbol: "clock", title: "This request expired",
                              message: "Nothing was approved. If you were trying to do something, start again with \(model.envelope.business.safeName).")
@@ -266,6 +284,11 @@ struct ApprovalSheet: View {
             .frame(maxWidth: .infinity, minHeight: 52)
         } else if isDone {
             Button("Close") { dismiss() }.buttonStyle(.viadere(.secondary))
+        } else if case .updateRequired = model.availability {
+            VStack(spacing: ViadereSpace.xs) {
+                Button("Deny") { Task { await model.deny() } }.buttonStyle(.viadere(.destructive))
+                Button("Close") { dismiss() }.buttonStyle(.viadere(.quiet))
+            }
         } else if model.availability.isActionable {
             actionFooter
         } else {
@@ -283,24 +306,25 @@ struct ApprovalSheet: View {
                         Task { await model.approve() }
                     }
                     .id(slideKey)
-                    .disabled(model.approvalBlockedByCapture)
-                    .opacity(model.approvalBlockedByCapture ? 0.4 : 1)
+                    .disabled(approveBlocked)
+                    .opacity(approveBlocked ? 0.4 : 1)
                     Button("Deny") { Task { await model.deny() } }
                         .buttonStyle(.viadere(.destructive))
                 } else {
                     ViadereApprovalButtons(
                         approveTitle: model.interaction.kind == .authenticate ? "Yes, it's me" : "Approve",
                         denyTitle: model.interaction.kind == .authenticate ? "No" : "Deny",
-                        onApprove: { if !model.approvalBlockedByCapture { Task { await model.approve() } } },
+                        onApprove: { if !approveBlocked { Task { await model.approve() } } },
                         onDeny: { Task { await model.deny() } })
-                    .opacity(model.approvalBlockedByCapture ? 0.6 : 1)
+                    .opacity(approveBlocked ? 0.6 : 1)
                 }
                 Button("I don't recognize this") { withAnimation(ViadereMotion.standard) { confirmingReport.toggle() } }
                     .buttonStyle(.viadere(.quiet))
             }
         case .confirm:
             ViadereApprovalButtons(approveTitle: "Confirm", denyTitle: "Decline",
-                                   onApprove: { Task { await model.approve() } }, onDeny: { Task { await model.deny() } })
+                                   onApprove: { if !approveBlocked { Task { await model.approve() } } }, onDeny: { Task { await model.deny() } })
+                .opacity(approveBlocked ? 0.6 : 1)
         case .choose(let payload):
             if payload.allowsMultiple {
                 Button("Send") { Task { await model.submit(.select, selected: Array(multiSelection)) } }

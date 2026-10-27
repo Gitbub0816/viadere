@@ -69,7 +69,7 @@ public struct NotificationActionHandler: Sendable {
             case .deviceCannotSatisfy, .keyInvalidated, .keysUnavailable, .notEnrolled, .userCancelled, .authenticationFailed: return .requiresApp(id)
             case .invalidSelection, .decisionNotAllowed: return .requiresApp(id)
             // The request changed or this device is in its cool-down: the secure sheet shows the current details and the reason.
-            case .contextChanged, .deviceCoolingDown: return .requiresApp(id)
+            case .contextChanged, .deviceCoolingDown, .updateRequired: return .requiresApp(id)
             default: return .failed(id, error.userMessage)
             }
         } catch {

@@ -12,6 +12,8 @@ final class ClipFlowModel {
     private(set) var accountError: String?
     var displayName = ""
     let connect: ConnectViewModel
+    /// The explanation shown before the passkey sheet when the clip's device enrollment needs an assertion.
+    let passkeyGate = PasskeyExplanationGate()
     private let services: ViadereServices
     private var invocation: DeepLink?
 
@@ -46,7 +48,7 @@ final class ClipFlowModel {
         accountError = nil
         do {
             if !(await services.sessions.isSignedIn) { try await services.account.signUp(displayName: displayName) }
-            if (try? await services.records.load()) == nil { _ = try await services.account.enrollThisDevice(name: "iPhone") }
+            if (try? await services.records.load()) == nil { _ = try await services.account.enrollThisDevice(name: "iPhone", explain: passkeyGate.explainer) }
             await finish()
         } catch let error as PasskeyError {
             accountError = error == .cancelled ? nil : error.userMessage

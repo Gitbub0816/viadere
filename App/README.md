@@ -86,12 +86,19 @@ extensions and the App Clip are not entitled to it and cannot even see those key
 are `AfterFirstUnlockThisDeviceOnly` (shared group) so the notification service extension can fetch interaction details
 while the phone is locked; the **refresh token** is `WhenUnlockedThisDeviceOnly`, so a locked phone's extension cannot
 rotate the session and shows a generic banner instead. If a key is invalidated (`errSecItemNotFound` for a key the device
-enrolled), `EnrollmentHealth` reports `needsReenrollment` and the app shows the re-enrollment screen; the old device is
-revoked best-effort and approvals are paused. A locked or unavailable keychain (`errSecInteractionNotAllowed`, -25308, and
+enrolled), `EnrollmentHealth` reports `needsReenrollment` and the app shows the re-enrollment screen ("Set up again");
+approvals are paused until it completes. The old device is **not** revoked beforehand (the server cascades a device revoke
+to the caller's session): the enrollment carries `replacesDeviceId` and the server revokes it atomically. A locked or unavailable keychain (`errSecInteractionNotAllowed`, -25308, and
 other transient statuses) is **not** invalidation: it reports `unavailable`, the app stays usable and re-checks later.
-Enrollment proves possession of every key (`VIADERE-ENROLL-V1`). The App Clip enrolls a request-key-only device marked
-`clipDevice: true` (the server refuses approvals from it and expires it); the full app revokes the person's clip devices
-(best effort) after enrolling.
+**Passkey-bound enrollment.** Enrollment proves possession of every key (`VIADERE-ENROLL-V1`) **and of the account's
+passkey**: `POST /v1/devices/enroll/begin` returns `{challenge, expiresAt, assertion, assertionOptional}`; unless
+`assertionOptional` is true (only right after sign-up or sign-in), `AccountService` performs a user-verified passkey assertion
+over `assertion` (checking it carries the same challenge and `userVerification: required`) and sends it in
+`POST /v1/devices`. "Set up again" (`EnrollmentPurpose.setUpAgain`) **always** asserts, whatever the server says. Before
+the system sheet, `Shared/UI/PasskeyExplanationView` explains why (`PasskeyExplanationGate` bridges it to the account
+flow; declining changes nothing). The App Clip uses Core's `clientKind: .appClip` (request key only; the server refuses
+approvals from it and expires it); the full app revokes the person's clip devices (read from Core's `Device.clipDevice`
+and `revokedAt`) after enrolling. `passkey_assertion_required` is reported as such (never as an expired session).
 
 **Requests.** `APIClient` signs every `deviceSigned*` request with `RequestSigner` (fresh timestamp and nonce on each
 attempt) and sends bearer tokens only to bearer routes. `401` triggers one **single-flight** refresh
@@ -101,13 +108,27 @@ network call is covered by a short-lived lease file, and it **fails closed**: if
 lock isn't acquired in time, no refresh runs and a retryable error surfaces. A generation counter stops a refresh that was
 in flight at sign-out from resurrecting the session. Two consecutive `signature_invalid` responses mean the device was revoked: everything local is wiped.
 
-**Approvals.** `ApprovalService` builds a `DecisionPayload`, picks the key from `AssurancePolicy` (never weaker),
+**Approvals.** `ApprovalService` builds a **v2** `DecisionPayload` whose `contextDigest` is
+`interaction.displayContextDigest()` of the exact interaction the sheet displayed. Before signing it re-fetches, compares
+digests and, if the request changed, signs nothing: the sheet re-renders the current details with a notice and clears any
+selection (`ApprovalError.contextChanged`). A server `context_mismatch` does the same (refresh, show, never auto-retry).
+An interaction with a `schemaVersion` newer than the app supports shows "Update Viadere to respond to this request": it can
+be denied (v1, no digest) but never approved. It picks the key from `AssurancePolicy` (never weaker),
 signs with an `LAContext` whose reason names the business and amount ("Approve $285.28 at Northfield Market"), and
 submits. Sensitive kinds (`authenticate`, `authorize`, unknown) are **never approved from a notification action**:
 the action opens the secure sheet (`.foreground` + authentication required). Only refusals (deny/report) can run from
 the lock screen, and only `choose`/`confirm`/`acknowledge`/`reply` at low assurance run inline. Slide-to-approve is used
 for money and high-risk sign-ins. Expired or already-handled requests show a clear state. While the screen is being
 recorded or mirrored the sheet shows a notice and approving is paused (denying never is).
+
+**New-device cool-down.** A device enrolled while another trusted device exists has `approvalsLockedUntil` (24 h). Home and
+the approval sheet say so calmly ("For your security, this iPhone can approve high-risk requests after {time}, or confirm
+it from your other device."); high and critical approvals are paused before any Face ID prompt (`CoolDownPolicy`), while
+deny, decline and report always work. `device_cool_down` from the server is handled the same way. In Settings → Trusted
+devices a trusted device (not itself cooling down, with a Face ID key) can **Confirm this device**:
+`ConfirmationService` signs `ConfirmationProof` (subject `device`) with the biometric approval key and posts it to
+`POST /v1/devices/{id}/confirm`; likewise `POST /v1/phone-links/{id}/confirm` (subject `phoneLink`) for a phone linked from
+an SMS token, whose `usableFrom` is shown in Linked phones.
 
 **Storage and privacy.** Tokens, device record and keys live in the Keychain (`ThisDeviceOnly`), never in defaults or
 logs. Sign-out first revokes this device on the server (best effort, bounded), then removes delivered notifications, ends Live
@@ -147,8 +168,9 @@ sheet, notification, card, watch list, Live Activity and Activity/Home/Messages 
 truncation can never hide it. The card's verification badge uses the real `isVerified` flag.
 
 **SMS account links.** Only the https universal link `https://viadere.com/l/{token}` is accepted (no `viadere://l/`). The
-confirmation sheet first previews what the token would link (masked number, expiry), warns, and links only after an explicit
-"This is my phone". Silent status pushes (`content-available`, same `iid`) start or
+confirmation sheet first previews what the token would link (Core's `SMSLinkPreview`: masked number, expiry), warns, and
+links only after an explicit "This is my phone"; redeem sends `{token, confirmPhoneLast4, confirmMaskedPhone}` (both from the
+preview) and the result shows when the number starts working (`usableFrom`). Silent status pushes (`content-available`, same `iid`) start or
 update Live Activities; `pushType: .token` update tokens and the iOS 17.2 push-to-start token are registered through
 `/v1/live-activities/tokens`; the APNs token through `/v1/push/apns-token`.
 

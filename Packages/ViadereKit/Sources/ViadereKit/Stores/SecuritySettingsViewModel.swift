@@ -105,10 +105,10 @@ public final class SecuritySettingsViewModel {
         return until
     }
 
-    /// Whether this iPhone may confirm another device: it is not itself cooling down and has a Face ID or passcode approval key.
+    /// Whether this iPhone may confirm another device: it is not itself cooling down and has a Face ID / Touch ID approval key.
     public var canConfirmOthers: Bool {
         thisDeviceLockedUntil == nil && thisDevice?.isRevoked == false
-            && (thisDevicePurposes.contains(.approvalBiometric) || thisDevicePurposes.contains(.approvalUserPresence))
+            && thisDevicePurposes.contains(.approvalBiometric)
     }
 
     /// Other trusted devices' cool-down, as one calm line (`nil` when the device is trusted).

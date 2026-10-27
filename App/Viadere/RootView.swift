@@ -18,6 +18,7 @@ struct RootView: View {
             .accessibilityHidden(model.isLocked)
         .animation(ViadereMotion.gentle, value: model.phase)
         .viadereScreenBackground()
+        .passkeyExplanation(model.passkeyGate)
         .onChange(of: model.isLocked, initial: true) { _, locked in
             AppLockWindowController.shared.update(locked: locked, model: model)
         }
@@ -123,7 +124,7 @@ struct ReenrollmentView: View {
             Text("Set this iPhone up again")
                 .font(ViadereType.display)
                 .foregroundStyle(ViadereColor.textPrimary)
-            Text("Your Face ID or device security changed, so the keys that approve requests on this iPhone were retired. Confirm it's you to create new ones. Until then, requests can be approved on another device.")
+            Text("Your Face ID or device security changed, so the keys that approve requests on this iPhone were retired. You'll confirm it's you with your passkey to create new ones. Until then, requests can be approved on another device.")
                 .font(ViadereType.body)
                 .foregroundStyle(ViadereColor.textSecondary)
             if let errorMessage { ViadereNotice(errorMessage, kind: .danger) }
@@ -133,7 +134,8 @@ struct ReenrollmentView: View {
                     isWorking = true
                     errorMessage = nil
                     do { try await model.reenroll(deviceName: "iPhone") } catch {
-                        errorMessage = (error as? APIError)?.userMessage ?? "We couldn't set this iPhone up. Please try again."
+                        if let passkey = error as? PasskeyError { if passkey != .cancelled { errorMessage = passkey.userMessage } }
+                        else { errorMessage = (error as? APIError)?.userMessage ?? "We couldn't set this iPhone up. Please try again." }
                     }
                     isWorking = false
                 }

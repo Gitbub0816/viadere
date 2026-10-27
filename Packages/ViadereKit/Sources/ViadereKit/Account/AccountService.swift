@@ -75,7 +75,7 @@ public struct AccountService: Sendable {
     /// The App Clip registers a **request key only** and marks the device as a clip device; the full app registers
     /// all keys and then (best effort) revokes the person's clip devices, which are meant to be short-lived.
     @discardableResult
-    public func enrollThisDevice(name: String, purpose: EnrollmentPurpose = .firstDevice,
+    public func enrollThisDevice(name: String, purpose: EnrollmentPurpose = .firstDevice, replacing: DeviceID? = nil,
                                  explain: PasskeyExplainer? = nil) async throws -> DeviceRecord {
         guard let tokens = await sessions.tokens() else { throw APIError.sessionExpired }
         let challenge = try await api.beginDeviceEnrollment()
@@ -86,7 +86,8 @@ public struct AccountService: Sendable {
         guard provisioned.registrations.contains(where: { $0.purpose == .request }) else { throw KeyStoreError.unavailable }
         let device = try await api.enrollDevice(DeviceEnrollRequest(
             name: String(name.prefix(64)), platform: platform, challenge: challenge.challenge, keys: provisioned.registrations,
-            assertion: assertion, clientKind: isAppClip ? .appClip : .app))
+            assertion: assertion, clientKind: isAppClip ? .appClip : .app,
+            replacesDeviceId: replacing))
         let record = DeviceRecord(deviceId: device.id, consumerId: tokens.consumerId, name: device.name,
                                   purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
         try await records.save(record)
@@ -119,17 +120,20 @@ public struct AccountService: Sendable {
         }
     }
 
-    /// Replaces keys after invalidation (biometrics changed, restore). The old device record is revoked
-    /// best-effort *before* its request key is deleted (revocation is device-signed). The new enrollment always needs a
-    /// passkey assertion (`EnrollmentPurpose.setUpAgain`).
+    /// Replaces keys after invalidation (biometrics changed, restore). The new enrollment always needs a passkey assertion
+    /// (`EnrollmentPurpose.setUpAgain`).
+    ///
+    /// The old device is **not** revoked first: the server cascades a device revoke to the caller's own session, which would make
+    /// the enrollment 401 and sign the person out. The enrollment carries `replacesDeviceId` instead, and the server revokes the
+    /// old device atomically after enrolling the new one.
     @discardableResult
     public func reenrollThisDevice(name: String, explain: PasskeyExplainer? = nil) async throws -> DeviceRecord {
         // Explain first, so declining leaves everything as it was; the system sheet follows during the enrollment itself.
         if let explain { guard await explain(.make(.setUpAgain)) else { throw PasskeyError.cancelled } }
-        if let old = try? await records.load() { try? await api.revokeDevice(old.deviceId) }
+        let old = try? await records.load()
         try? await records.clear()
         try? await keys.deleteAllKeys()
-        return try await enrollThisDevice(name: name, purpose: .setUpAgain, explain: nil)
+        return try await enrollThisDevice(name: name, purpose: .setUpAgain, replacing: old?.deviceId, explain: nil)
     }
 
     public func health() async -> EnrollmentHealth {

@@ -10,6 +10,8 @@ public enum ApprovalAvailability: Sendable, Equatable {
     case alreadyHandled(InteractionStatus)
     /// Unknown interaction kind (newer server): never rendered as actionable.
     case unsupported
+    /// The request uses a newer schema than this app understands: it may be denied or reported, never approved.
+    case updateRequired
     /// This device's keys cannot meet the required assurance (e.g. no biometrics enrolled).
     case needsStrongerDevice(RequiredAssurance)
     case notEnrolled
@@ -40,6 +42,7 @@ public enum ApprovalPolicy {
         if envelope.interaction.kind.isUnknown { return .unsupported }
         if envelope.status != .pending { return .alreadyHandled(envelope.status) }
         if envelope.interaction.isExpired(at: now) { return .expired }
+        if envelope.interaction.schemaVersionIsNewerThanSupported { return .updateRequired }
         guard let device else { return .notEnrolled }
         guard let plan = plan(for: envelope.interaction, device: device) else {
             return .needsStrongerDevice(AssurancePolicy.requiredAssurance(for: envelope.interaction))
@@ -89,6 +92,11 @@ public enum ApprovalPolicy {
         }
         return UntrustedText.truncate(text, max: promptLimit)
     }
+}
+
+extension Interaction {
+    /// Newer than this app understands: fields it can't see would be missing from what it shows and from the digest it signs.
+    public var schemaVersionIsNewerThanSupported: Bool { schemaVersion > Interaction.currentSchemaVersion }
 }
 
 extension InteractionKind {

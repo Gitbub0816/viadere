@@ -14,7 +14,7 @@ public enum ConfirmationError: Error, Equatable, Sendable {
     public var userMessage: String {
         switch self {
         case .notEnrolled: "Set up this iPhone before confirming other devices."
-        case .cannotConfirm: "Confirming needs Face ID or your passcode, which isn't set up on this iPhone."
+        case .cannotConfirm: "Confirming needs Face ID or Touch ID, which isn't set up on this iPhone."
         case .keyInvalidated: "Your device security changed. Set this iPhone up again to confirm other devices."
         case .keysUnavailable: "Your keys aren't available right now. Unlock your iPhone and try again."
         case .userCancelled: "Not confirmed. You can try again."
@@ -32,8 +32,7 @@ public enum ConfirmationError: Error, Equatable, Sendable {
 /// Confirms a security-relevant addition from a device that is already trusted: a **new device** in its cool-down
 /// (`POST /v1/devices/{id}/confirm`) or a **newly linked phone** (`POST /v1/phone-links/{id}/confirm`).
 ///
-/// The proof is `ConfirmationProof.sign(...)` made with this device's user-verified approval key (the biometric key when it
-/// has one, else the passcode key), so Face ID, Touch ID or the passcode appears. A stolen session plus the new device
+/// The proof is `ConfirmationProof.sign(...)` made with this device's biometric approval key, so Face ID or Touch ID appears. A stolen session plus the new device
 /// cannot confirm itself: only a different, trusted device's key can.
 public struct ConfirmationService: Sendable {
     private let api: any ViadereAPI
@@ -70,11 +69,10 @@ public struct ConfirmationService: Sendable {
             guard let loaded = try await records.load() else { throw ConfirmationError.notEnrolled }
             record = loaded
         } catch let error as ConfirmationError { throw error } catch { throw ConfirmationError.notEnrolled }
-        let assurance: DecisionAssurance
-        if record.purposes.contains(.approvalBiometric) { assurance = .biometric }
-        else if record.purposes.contains(.approvalUserPresence) { assurance = .devicePasscode }
-        else { throw ConfirmationError.cannotConfirm }
-        let purpose = DeviceKeyPurpose.required(for: assurance)
+        // Only the biometric key confirms: a passcode is known to a shoulder-surfer or thief (`ConfirmationProof.requiredKeyPurpose`).
+        guard record.purposes.contains(.approvalBiometric) else { throw ConfirmationError.cannotConfirm }
+        let assurance = DecisionAssurance.biometric
+        let purpose = DeviceKeyPurpose.approvalBiometric
         do {
             let key = try await keys.requireKey(for: purpose)
             return try await ConfirmationProof.sign(subject: subject, subjectId: subjectId.lowercased(), deviceId: record.deviceId,

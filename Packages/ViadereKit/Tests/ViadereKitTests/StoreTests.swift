@@ -254,9 +254,26 @@ struct AppModelTests {
         let model = AppModel(services: services)
         await model.bootstrap()
         #expect(model.phase == .needsReenrollment)
-        try await model.reenroll(deviceName: "iPhone")
+        // The person is told why a passkey is needed before the system sheet; here they continue.
+        let work = Task { @MainActor in try await model.reenroll(deviceName: "iPhone") }
+        while model.passkeyGate.pending == nil { await Task.yield() }
+        #expect(model.passkeyGate.pending?.context == .setUpAgain)
+        model.passkeyGate.resolve(true)
+        try await work.value
         #expect(model.phase == .ready)
         #expect(await services.account.health() == .healthy)
+    }
+
+    @Test func decliningTheSetUpAgainExplanationLeavesTheAppWhereItWas() async throws {
+        let services = await ViadereServices.mock()
+        try await services.keys.deleteKey(for: .approvalBiometric)
+        let model = AppModel(services: services)
+        await model.bootstrap()
+        let work = Task { @MainActor in try await model.reenroll(deviceName: "iPhone") }
+        while model.passkeyGate.pending == nil { await Task.yield() }
+        model.passkeyGate.resolve(false)
+        await #expect(throws: PasskeyError.cancelled) { try await work.value }
+        #expect(model.phase == .needsReenrollment)
     }
 
     @Test func appLockOnColdLaunchAndAfterGracePeriod() async throws {

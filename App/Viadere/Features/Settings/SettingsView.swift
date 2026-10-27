@@ -85,6 +85,10 @@ struct SettingsView: View {
                     Spacer()
                 }
             }
+            if let until = vm.thisDeviceLockedUntil {
+                ViadereNotice("\(CoolDownPolicy.message(until: until, now: Date())) \(CoolDownPolicy.stillAvailable)", kind: .info)
+                    .padding(.top, ViadereSpace.s)
+            }
         }
     }
 
@@ -277,6 +281,15 @@ struct DevicesView: View {
                         ViadereRow(device.name, subtitle: subtitle(device),
                                    leading: { ViadereIconTile(systemName: device.platform == .watchOS ? "applewatch" : "iphone") },
                                    trailing: { badge(device) })
+                        if let note = vm.coolDownNote(for: device) {
+                            Text(note).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if vm.canConfirm(device) {
+                            Button(vm.confirmingId == device.id.description ? "Confirming…" : "Confirm this device") { Task { await vm.confirm(device) } }
+                                .buttonStyle(.viadere(.secondary, fullWidth: false))
+                                .disabled(vm.confirmingId != nil)
+                        }
                         if device.id != vm.currentDeviceId, !device.isRevoked {
                             if confirming == device.id {
                                 HStack(spacing: ViadereSpace.s) {
@@ -293,7 +306,7 @@ struct DevicesView: View {
                     if index < vm.devices.count - 1 { ViadereHairline() }
                 }
             }
-            Text("Removing a device stops it from approving requests immediately.")
+            Text("A device added recently can't approve high-risk requests for 24 hours, unless you confirm it here with Face ID on a device you already trust. Removing a device stops it from approving requests immediately.")
                 .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
         }
     }
@@ -323,13 +336,21 @@ struct PhonesView: View {
 
     var body: some View {
         SubScreen(title: "Linked phones", subtitle: "Numbers that can reach your businesses by text.") {
+            if let error = vm.errorMessage { ViadereNotice(error, kind: .danger) }
             if !vm.phones.isEmpty {
                 ViadereRowGroup {
                     ForEach(Array(vm.phones.enumerated()), id: \.element.id) { index, phone in
-                        HStack {
-                            ViadereRow(phone.maskedPhone, subtitle: "Verified \(phone.verifiedAt.formatted(date: .abbreviated, time: .omitted))",
-                                       leading: { ViadereIconTile(systemName: "phone") }, trailing: { EmptyView() })
-                            Button("Unlink") { Task { await vm.removePhone(phone) } }.buttonStyle(.viadere(.quiet, fullWidth: false))
+                        VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+                            HStack {
+                                ViadereRow(phone.maskedPhone, subtitle: vm.coolDownNote(for: phone) ?? "Verified \(phone.verifiedAt.formatted(date: .abbreviated, time: .omitted))",
+                                           leading: { ViadereIconTile(systemName: "phone") }, trailing: { EmptyView() })
+                                Button("Unlink") { Task { await vm.removePhone(phone) } }.buttonStyle(.viadere(.quiet, fullWidth: false))
+                            }
+                            if vm.canConfirm(phone) {
+                                Button(vm.confirmingId == phone.id.description ? "Confirming…" : "Confirm this phone now") { Task { await vm.confirm(phone) } }
+                                    .buttonStyle(.viadere(.secondary, fullWidth: false))
+                                    .disabled(vm.confirmingId != nil)
+                            }
                         }
                         if index < vm.phones.count - 1 { ViadereHairline() }
                     }
@@ -432,11 +453,13 @@ struct AccountLinkSheet: View {
     @State private var confirmedOwnPhone = false
     @State private var failed = false
     @State private var working = false
+    /// Set after a successful link: says when the number starts working.
+    @State private var linkedMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.l) {
             ViadereGrabber()
-            Text("Link this phone").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
+            Text(linkedMessage == nil ? "Link this phone" : "Phone linked").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
             content
             Spacer()
             footer
@@ -448,6 +471,13 @@ struct AccountLinkSheet: View {
     }
 
     @ViewBuilder private var content: some View {
+        if let linkedMessage {
+            Text(linkedMessage).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let phone = vm.lastLinkedPhone, let until = phone.usableFrom {
+                ViadereRowGroup { ViadereValueRow("Starts working", CoolDownPolicy.timeText(until, now: Date()), emphasized: true) }
+            }
+        } else {
         switch vm.accountLinkPhase {
         case .idle, .loading:
             HStack { Spacer(); ViadereLoading(); Spacer() }.padding(.vertical, ViadereSpace.xl)
@@ -471,16 +501,28 @@ struct AccountLinkSheet: View {
             }
             if failed { ViadereNotice(vm.errorMessage ?? "We couldn't link that number.", kind: .danger) }
         }
+        }
     }
 
     @ViewBuilder private var footer: some View {
-        if case .ready = vm.accountLinkPhase {
+        if linkedMessage != nil {
+            if let phone = vm.lastLinkedPhone, vm.canConfirm(phone) {
+                Button("Confirm now with Face ID") {
+                    Task {
+                        await vm.confirm(phone)
+                        if vm.lastLinkedPhone.map({ !vm.canConfirm($0) }) ?? true, vm.errorMessage == nil { onDone() }
+                    }
+                }
+                .buttonStyle(.viadere(.primary))
+            }
+            Button("Done", action: onDone).buttonStyle(.viadere(.quiet))
+        } else if case .ready = vm.accountLinkPhase {
             Button(working ? "Linking…" : "Link phone") {
                 Task {
                     working = true
                     failed = !(await vm.redeemAccountLink(token: token, confirmedOwnPhone: confirmedOwnPhone))
                     working = false
-                    if !failed { onDone() }
+                    if !failed { linkedMessage = vm.accountLinkResultMessage ?? "Your phone is linked." }
                 }
             }
             .buttonStyle(.viadere(.primary))

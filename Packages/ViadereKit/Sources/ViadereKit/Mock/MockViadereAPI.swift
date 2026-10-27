@@ -210,6 +210,10 @@ public actor MockViadereAPI: ViadereAPI {
                             approvalsLockedUntil: coolDown ? now.addingTimeInterval(Self.newDeviceCoolDown) : nil,
                             expiresAt: kind == .appClip ? now.addingTimeInterval(Self.appClipLifetime) : nil)
         deviceList.append(device)
+        // "Set up again": the replaced device is revoked together with the enrollment (it still counted for the cool-down above).
+        if let replaced = request.replacesDeviceId, let index = deviceList.firstIndex(where: { $0.id == replaced && $0.revokedAt == nil }) {
+            deviceList[index].revokedAt = now
+        }
         enrollmentLog.append((deviceId, request.assertion != nil))
         freshSession = false
         deviceKeys[deviceId] = Dictionary(uniqueKeysWithValues: keys.map { ($0.purpose, $0.publicKey) })

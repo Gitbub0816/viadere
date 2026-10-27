@@ -38,6 +38,8 @@ public final class AppModel {
     public private(set) var keysNeedRecheck = false
 
     public let services: ViadereServices
+    /// The explanation shown before the passkey sheet when setting this iPhone up again.
+    public let passkeyGate = PasskeyExplanationGate()
     public let home: HomeViewModel
     public let activity: ActivityViewModel
     public let rewards: RewardsViewModel
@@ -272,7 +274,7 @@ public final class AppModel {
     }
 
     public func reenroll(deviceName: String) async throws {
-        _ = try await services.account.reenrollThisDevice(name: deviceName)
+        _ = try await services.account.reenrollThisDevice(name: deviceName, explain: passkeyGate.explainer)
         phase = .ready
         await home.load()
     }

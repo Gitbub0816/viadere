@@ -5,6 +5,8 @@ public enum ApprovalError: Error, Equatable, Sendable {
     case expired
     case notActionable(InteractionStatus)
     case unsupportedKind
+    /// The request uses a newer schema than this app supports: only deny, decline and report are possible.
+    case updateRequired
     case decisionNotAllowed
     case notEnrolled
     /// No key on this device can meet the required assurance.
@@ -65,6 +67,9 @@ public struct ApprovalService: Sendable {
         guard envelope.status == .pending else { throw ApprovalError.notActionable(envelope.status) }
         guard !interaction.isExpired(at: now) else { throw ApprovalError.expired }
         guard Decision.allowed(for: interaction.kind).contains(decision) else { throw ApprovalError.decisionNotAllowed }
+        // A newer schema may carry fields this app can't show or digest: refuse to approve, but let the person say no.
+        let newerSchema = interaction.schemaVersionIsNewerThanSupported
+        if newerSchema, !CoolDownPolicy.alwaysAllowed.contains(decision) { throw ApprovalError.updateRequired }
         try Self.validate(decision: decision, selectedOptionIds: selectedOptionIds, reply: reply, payload: interaction.payload)
 
         let record: DeviceRecord
@@ -83,8 +88,8 @@ public struct ApprovalService: Sendable {
         // What the person saw is what gets signed. The digest comes from `interaction` (the displayed instance); a fresh
         // copy is only used to notice that it has changed.
         let digest = interaction.displayContextDigest()
-        guard Interaction.isValidContextDigest(digest) else { throw ApprovalError.unsupportedKind }
-        if verifyFresh, let fresh = try? await api.interaction(interaction.id) {
+        guard newerSchema || Interaction.isValidContextDigest(digest) else { throw ApprovalError.unsupportedKind }
+        if verifyFresh, !newerSchema, let fresh = try? await api.interaction(interaction.id) {
             guard fresh.status == .pending else { throw ApprovalError.notActionable(fresh.status) }
             guard fresh.interaction.displayContextDigest() == digest else { throw ApprovalError.contextChanged(fresh) }
         }
@@ -104,7 +109,8 @@ public struct ApprovalService: Sendable {
         let payload = DecisionPayload(
             interactionId: interaction.id, businessId: interaction.businessId, decision: decision,
             selectedOptionIds: selectedOptionIds, reply: reply, challenge: interaction.challenge,
-            signedAt: now, deviceId: record.deviceId, assurance: plan.assurance, contextDigest: digest)
+            signedAt: now, deviceId: record.deviceId, assurance: plan.assurance,
+            contextDigest: newerSchema ? nil : digest) // a refusal of a newer-schema request is v1: its digest would not match
         let prompt = SigningPrompt(reason: ApprovalPolicy.promptReason(for: envelope, decision: decision, onBehalfOf: onBehalfOf))
         let signed: SignedDecision
         do {
@@ -173,7 +179,7 @@ extension ApprovalError {
         switch self {
         case .expired: "This request has expired."
         case .notActionable: "This was already handled."
-        case .unsupportedKind: "Update Viadere to view this request."
+        case .unsupportedKind, .updateRequired: "Update Viadere to respond to this request."
         case .decisionNotAllowed, .invalidSelection: "That option isn't available."
         case .notEnrolled: "Set up this device to approve requests."
         case .deviceCannotSatisfy: "This request needs Face ID or Touch ID, which isn't available on this device."

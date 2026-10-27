@@ -17,6 +17,7 @@ struct ClipRootView: View {
         }
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
+        .passkeyExplanation(flow.passkeyGate)
         .animation(ViadereMotion.gentle, value: flow.step)
         .animation(ViadereMotion.gentle, value: flow.connect.phase)
         .appStoreOverlay(isPresented: $showOverlay) { SKOverlay.AppClipConfiguration(position: .bottom) }

@@ -36,6 +36,7 @@ struct OnboardingView: View {
         .animation(ViadereMotion.gentle, value: vm.step)
         .transition(.opacity)
         .viadereScreenBackground()
+        .passkeyExplanation(vm.passkeyGate)
     }
 }
 

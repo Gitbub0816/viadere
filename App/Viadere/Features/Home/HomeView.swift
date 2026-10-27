@@ -14,6 +14,9 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
+                    if let notice = home.coolDownNotice {
+                        ViadereNotice("\(notice) \(CoolDownPolicy.stillAvailable)", kind: .info).padding(.bottom, ViadereSpace.s)
+                    }
                     if home.content.isEmpty, home.phase != .loading {
                         ViadereEmptyState(
                             "You're all set",
@@ -69,7 +72,7 @@ struct HomeView: View {
             ViadereSectionHeader(home.content.pending.count == 1 ? "Needs you" : "Needs you · \(home.content.pending.count)")
             VStack(spacing: ViadereSpace.s) {
                 ForEach(home.content.pending) { envelope in
-                    PendingActionCard(envelope: envelope) {
+                    PendingActionCard(envelope: envelope, pausedNote: home.isPausedByCoolDown(envelope) ? "Approval paused on this iPhone" : nil) {
                         Task { await model.openInteraction(envelope.id) }
                     }
                 }
@@ -135,6 +138,8 @@ enum HomeRoute: Hashable { case rewards }
 /// A request waiting on the person. Prominent by design: champagne edge, large headline, live countdown.
 struct PendingActionCard: View {
     let envelope: InteractionEnvelope
+    /// Shown when the new-device cool-down pauses approving this request (denying still works).
+    var pausedNote: String?
     let action: () -> Void
 
     var body: some View {
@@ -163,6 +168,11 @@ struct PendingActionCard: View {
                     .foregroundStyle(ViadereColor.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let pausedNote {
+                    Label(pausedNote, systemImage: "pause.circle")
+                        .font(ViadereType.footnote)
+                        .foregroundStyle(ViadereColor.textSecondary)
+                }
                 HStack {
                     Text(envelope.interaction.kind.isSecuritySensitive ? "Review" : "Respond")
                         .font(ViadereType.subhead.weight(.semibold))

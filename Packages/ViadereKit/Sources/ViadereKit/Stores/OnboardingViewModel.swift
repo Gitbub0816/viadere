@@ -40,6 +40,8 @@ public final class OnboardingViewModel {
     public private(set) var phoneStage: PhoneStage = .entry
     private var phoneLinkId: PhoneLinkID?
     private let services: ViadereServices
+    /// Shows the passkey explanation before the system sheet when this enrollment needs an assertion.
+    public let passkeyGate = PasskeyExplanationGate()
     public var onFinished: (@MainActor () -> Void)?
 
     public init(services: ViadereServices, deviceName: String = "My iPhone", start: OnboardingStep = .welcome) {
@@ -97,7 +99,7 @@ public final class OnboardingViewModel {
 
     public func enrollDevice() async {
         await run {
-            let record = try await services.account.enrollThisDevice(name: deviceName)
+            let record = try await services.account.enrollThisDevice(name: deviceName, explain: passkeyGate.explainer)
             enrolled = record
             skippedKeys = DeviceKeyPurpose.allCases.filter { !record.purposes.contains($0) }
             step = .notifications

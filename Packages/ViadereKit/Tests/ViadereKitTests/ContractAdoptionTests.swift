@@ -102,7 +102,9 @@ struct PasskeyEnrollmentTests {
             #expect(log.count == 2 && log[1].hadAssertion, "the re-enrollment carried an assertion")
             #expect(record.deviceId != old.deviceId)
             let devices = try await api.devices()
+            // The old device is replaced by the enrollment itself (`replacesDeviceId`), never revoked before it.
             #expect(devices.first { $0.id == old.deviceId }?.revokedAt != nil)
+            #expect(await api.enrollmentLog.count == 2)
             #expect(devices.first { $0.id == record.deviceId }?.revokedAt == nil)
         }
     }
@@ -174,7 +176,7 @@ final class Box<Value>: @unchecked Sendable {
 
 // MARK: - v2 decisions
 
-@MainActor @Suite("Decisions are bound to what was displayed") @MainActor
+@MainActor @Suite("Decisions are bound to what was displayed")
 struct DisplayedContextTests {
     func world() async -> (ViadereServices, MockViadereAPI) {
         let api = MockViadereAPI(seed: false)
@@ -252,13 +254,28 @@ struct DisplayedContextTests {
         #expect(model.phase == .ready)
         #expect(model.showsChangedNotice)
         #expect(model.contextRevision == 1)
-        #expect(model.headline.contains("1,999.00"))
+        #expect(model.headline.contains("1999.00"))
         #expect(await api.decisionLog.isEmpty, "no signature without a new, explicit decision")
 
         await model.approve()
         let outcome = try #require(model.outcome)
         #expect(try payload(of: outcome).contextDigest == changed.interaction.displayContextDigest())
         #expect(await api.decideAttempts == 1)
+    }
+
+    @Test func aNewerSchemaCanBeDeniedButNeverApproved() async throws {
+        let (services, api) = await world()
+        var envelope = PreviewData.authorize(sensitivity: .high)
+        envelope.interaction.schemaVersion = Interaction.currentSchemaVersion + 1
+        await api.add(envelope)
+        let record = try await services.records.load()
+        #expect(ApprovalPolicy.availability(of: envelope, device: record, now: Date()) == .updateRequired)
+        await #expect(throws: ApprovalError.updateRequired) { _ = try await services.approvals.submit(envelope, decision: .approve) }
+        #expect(ApprovalError.updateRequired.userMessage == "Update Viadere to respond to this request.")
+        #expect(await api.decideAttempts == 0)
+        let denied = try await services.approvals.submit(envelope, decision: .deny)
+        #expect(denied.status == .denied)
+        #expect(try payload(of: denied).contextDigest == nil, "a refusal doesn't claim to have shown details the app can't see")
     }
 
     @Test func theMockVerifiesLikeTheServer() async throws {
@@ -428,11 +445,12 @@ struct ConfirmationTests {
         }
     }
 
-    @Test func withoutABiometricKeyThePasscodeKeySigns() async throws {
+    @Test func aPasscodeOnlyDeviceCannotConfirm() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api, unsupportedKeys: [.approvalBiometric])
-        let proof = try await services.confirmations.makeProof(subject: .phoneLink, subjectId: UUID().uuidString, reason: "Confirm")
-        #expect(proof.assurance == .devicePasscode && proof.requiredKeyPurpose == .approvalUserPresence)
+        await #expect(throws: ConfirmationError.cannotConfirm) {
+            _ = try await services.confirmations.makeProof(subject: .phoneLink, subjectId: UUID().uuidString, reason: "Confirm")
+        }
     }
 
     @Test func aRequestKeyOnlyDeviceCannotConfirm() async throws {

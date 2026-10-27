@@ -32,7 +32,8 @@ public enum CoolDownPolicy {
         time.timeZone = calendar.timeZone
         time.dateStyle = .none
         time.timeStyle = .short
-        let clock = time.string(from: date)
+        // Newer ICU puts a narrow no-break space before AM/PM; plain spaces read the same and compare simply.
+        let clock = time.string(from: date).replacingOccurrences(of: "\u{202F}", with: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
         if calendar.isDate(date, inSameDayAs: now) { return clock }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
             return "tomorrow at \(clock)"
