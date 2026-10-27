@@ -183,14 +183,14 @@ final class SecurityTests: XCTestCase {
         }
     }
 
-    func testForwardedForIsIgnoredUnlessProxiesAreTrusted() {
-        let app = Application(.testing)
-        defer { app.shutdown() }
+    func testForwardedForIsIgnoredUnlessProxiesAreTrusted() async throws {
+        let app = try await Application.make(.testing)
         let request = Request(application: app, method: .GET, url: URI(path: "/"), headers: ["X-Forwarded-For": "203.0.113.9, 198.51.100.7"], on: app.eventLoopGroup.next())
         XCTAssertEqual(ClientIP.resolve(request, trustedProxies: 0), "unknown")
         XCTAssertEqual(ClientIP.resolve(request, trustedProxies: 1), "198.51.100.7")
         XCTAssertEqual(ClientIP.resolve(request, trustedProxies: 2), "203.0.113.9")
         XCTAssertEqual(ClientIP.resolve(request, trustedProxies: 5), "unknown")
+        try await app.asyncShutdown()
     }
 
     // MARK: Audit log
@@ -288,7 +288,7 @@ final class SecurityTests: XCTestCase {
 
     func testStructuredLogHandlerEmitsRedactedJSON() throws {
         let captured = NIOLockedBox<[String]>([])
-        let handler = StructuredLogHandler(label: "test", level: .trace) { line in captured.append(line) }
+        let handler = StructuredLogHandler(label: "test", level: .trace) { line in captured.mutate { $0.append(line) } }
         var logger = Logger(label: "test") { _ in handler }
         logger.logLevel = .trace
         logger.info("login with Bearer supersecrettoken1234", metadata: ["phone": "+14805550123", "requestId": "r-1"])
@@ -444,8 +444,8 @@ final class SecurityTests: XCTestCase {
         let harness = try await TestHarness.make()
         // Simulate a production-configured context for the command's guard.
         let console = Terminal()
-        var input = CommandInput(arguments: [])
-        let context = CommandContext(console: console, input: input)
+        let input = CommandInput(arguments: [])
+        var context = CommandContext(console: console, input: input)
         context.userInfo["application"] = harness.app
         harness.app.ctx = ServerContext(config: production, clock: harness.clock, apns: harness.push, sms: harness.texts, passkeys: FakePasskeyVerifier(), webhookTransport: harness.webhooks)
         do {
@@ -454,7 +454,6 @@ final class SecurityTests: XCTestCase {
         } catch {}
         let count = try await BusinessRecord.query(on: harness.db).count()
         XCTAssertEqual(count, 0)
-        input = CommandInput(arguments: [])
         try await harness.shutdown()
     }
 }
@@ -464,8 +463,5 @@ final class NIOLockedBox<T>: @unchecked Sendable {
     private var storage: T
     init(_ value: T) { storage = value }
     var values: T { lock.withLock { storage } }
-}
-
-extension NIOLockedBox where T == [String] {
-    func append(_ line: String) { lock.withLock { storage.append(line) } }
+    func mutate(_ body: (inout T) -> Void) { lock.withLock { body(&storage) } }
 }
