@@ -236,6 +236,26 @@ struct LoyaltyEnrollSheet: View {
     }
 }
 
+#Preview("Join a program") {
+    PreviewHost { services in
+        EnrollPreview(services: services)
+    }
+}
+
+private struct EnrollPreview: View {
+    let services: ViadereServices
+    @State private var vm: BusinessRewardsViewModel
+
+    init(services: ViadereServices) {
+        self.services = services
+        _vm = State(initialValue: BusinessRewardsViewModel(business: PreviewData.lumenTheater, services: services))
+    }
+
+    var body: some View {
+        LoyaltyEnrollSheet(vm: vm) {}.task { await vm.load() }
+    }
+}
+
 #Preview("Business rewards · join") {
     PreviewHost { services in
         NavigationStack { BusinessRewardsView(business: PreviewData.lumenTheater, model: AppModel(services: services, walletLibrary: MockWalletLibrary())) }

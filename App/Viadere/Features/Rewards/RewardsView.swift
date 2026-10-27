@@ -325,4 +325,40 @@ struct RewardDetailSheet: View {
         NavigationStack { RewardsView(model: AppModel(services: services, walletLibrary: MockWalletLibrary())) }
     }
 }
+
+#Preview("Reward · free coffee on Tuesdays") {
+    PreviewHost { services in
+        RewardDetailPreview(services: services, title: "Free coffee on Tuesdays")
+    }
+}
+
+#Preview("Reward · points shortfall") {
+    PreviewHost { services in
+        RewardDetailPreview(services: services, title: "Free bag of beans")
+    }
+}
+
+private struct RewardDetailPreview: View {
+    let services: ViadereServices
+    let title: String
+    @State private var model: AppModel?
+
+    var body: some View {
+        Group {
+            if let model, let entry = model.rewards.overview.rewards.first(where: { $0.reward.title == title }) {
+                RewardDetailSheet(
+                    entryId: entry.id, lookup: { model.rewards.entry($0) }, presentation: { model.rewards.presentation(for: $0) },
+                    message: nil, busy: false, wallet: model.wallet, onClaim: { await model.rewards.claim($0) },
+                    makeRedemption: { model.rewards.redemption(for: $0) }, onRefresh: {})
+            } else {
+                ViadereLoading()
+            }
+        }
+        .task {
+            let created = AppModel(services: services, walletLibrary: MockWalletLibrary())
+            await created.rewards.load()
+            model = created
+        }
+    }
+}
 #endif
