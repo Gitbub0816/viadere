@@ -23,6 +23,8 @@ public final class ServerContext: Sendable {
     let metrics = MetricsRegistry()
     /// Resolves and checks business domains (DNS TXT and well-known file) for onboarding and ongoing assurance.
     let domains: any DomainChecker
+    /// Calls to Google Cloud (token exchange, KMS, Cloud Storage) and R2 for the audit-head export.
+    let outbound: any OutboundHTTP
     public let limiter: RateLimiter
     public let apns: any APNsSender
     public let sms: any SMSProvider
@@ -50,7 +52,7 @@ public final class ServerContext: Sendable {
                 dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
                 passPush: any PassPushSender = DisabledPassPushSender(),
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
-                email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil) {
+                email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
@@ -70,6 +72,7 @@ public final class ServerContext: Sendable {
         self.integrity = integrity
         self.email = email
         self.domains = domains ?? UnconfiguredDomainChecker()
+        self.outbound = outbound ?? UnconfiguredOutboundHTTP()
     }
 
     public var now: Date { clock.now() }

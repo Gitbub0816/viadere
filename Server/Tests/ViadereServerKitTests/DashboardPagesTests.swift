@@ -14,16 +14,24 @@ final class DashboardPagesTests: XCTestCase {
             let expectations: [(path: String, allowed: Set<OrgRole>)] = [
                 ("/dashboard", Set(OrgRole.allCases)),
                 ("/dashboard/templates", Set(OrgRole.allCases)),
-                ("/dashboard/api-keys", [.owner, .admin, .developer]),
-                ("/dashboard/webhooks", [.owner, .admin, .developer]),
-                ("/dashboard/webhooks/deliveries", [.owner, .admin, .developer]),
-                ("/dashboard/campaigns", [.owner, .admin, .developer]),
-                ("/dashboard/consent", [.owner, .admin, .support, .analyst]),
-                ("/dashboard/audit", [.owner, .admin]),
-                ("/dashboard/team", [.owner, .admin]),
-                ("/dashboard/billing", [.owner, .admin, .analyst]),
-                ("/dashboard/organization", [.owner, .admin]),
+                ("/dashboard/api-keys", DashboardPermission.viewAPIKeys.roles),
+                ("/dashboard/webhooks", DashboardPermission.viewWebhooks.roles),
+                ("/dashboard/webhooks/deliveries", DashboardPermission.viewWebhooks.roles),
+                ("/dashboard/campaigns", DashboardPermission.manageCampaigns.roles),
+                ("/dashboard/consent", DashboardPermission.viewConsent.roles),
+                ("/dashboard/audit", DashboardPermission.viewAudit.roles),
+                ("/dashboard/team", DashboardPermission.viewTeam.roles),
+                ("/dashboard/billing", DashboardPermission.viewBilling.roles),
+                ("/dashboard/organization", DashboardPermission.viewOrganization.roles.union(DashboardPermission.manageOrganization.roles)),
+                ("/dashboard/verification", DashboardPermission.viewVerify.roles),
+                ("/dashboard/approve", DashboardPermission.viewApprove.roles),
+                ("/dashboard/security", DashboardPermission.viewSecurity.roles),
+                ("/dashboard/compliance", DashboardPermission.viewCompliance.roles),
+                ("/dashboard/support", Set(OrgRole.allCases)),
             ]
+            // The five legacy roles keep what they could do before the nine-role matrix.
+            XCTAssertEqual(DashboardPermission.viewAPIKeys.roles.intersection([.owner, .admin, .developer, .support, .analyst]), [.owner, .admin, .developer])
+            XCTAssertEqual(DashboardPermission.viewConsent.roles.intersection([.owner, .admin, .developer, .support, .analyst]), [.owner, .admin, .support, .analyst])
             var sessions: [OrgRole: DashSession] = [.owner: owner]
             for role in OrgRole.allCases where role != .owner {
                 sessions[role] = try await h.addMember(owner: owner, role: role, email: "\(role.rawValue)@example.com").session
@@ -36,12 +44,16 @@ final class DashboardPagesTests: XCTestCase {
             }
             // Navigation only offers what the role can open.
             let support = try await h.page("/dashboard", sessions[.support]).text
-            XCTAssertFalse(support.contains("href=\"/dashboard/api-keys\""))
-            XCTAssertFalse(support.contains("href=\"/dashboard/team\""))
-            XCTAssertTrue(support.contains("href=\"/dashboard/consent\""))
+            XCTAssertFalse(support.contains("href=\"/dashboard/organization\""))
+            XCTAssertFalse(support.contains("href=\"/dashboard/security\""))
+            XCTAssertFalse(support.contains("href=\"/dashboard/billing\""))
+            XCTAssertTrue(support.contains("href=\"/dashboard/messaging\""))
             let developer = try await h.page("/dashboard", sessions[.developer]).text
-            XCTAssertTrue(developer.contains("href=\"/dashboard/api-keys\""))
+            XCTAssertTrue(developer.contains("href=\"/dashboard/developers\""))
             XCTAssertFalse(developer.contains("href=\"/dashboard/billing\""))
+            XCTAssertFalse(developer.contains("href=\"/dashboard/security\""))
+            let developerKeys = try await h.page("/dashboard/api-keys", sessions[.developer]).text
+            XCTAssertTrue(developerKeys.contains("href=\"/dashboard/webhooks\""), "section pages list their children")
         }
     }
 
@@ -92,7 +104,7 @@ final class DashboardPagesTests: XCTestCase {
             let (owner, ownerAccount, _) = try await h.verifiedOwner()
             let admin = try await h.addMember(owner: owner, role: .admin, email: "admin@example.com").session
             let ownerMembership = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "owner").first()!
-            let adminMembership = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "admin").first()!
+            let adminMembership = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "org_admin").first()!
             // Admins cannot invite owners, promote to owner, demote an owner or remove one.
             try await eq(try await h.formPost("/dashboard/team/invite", admin, [("email", "o2@example.com"), ("role", "owner")]).status, .forbidden)
             try await eq(try await h.formPost("/dashboard/team/members/\(adminMembership.id!.uuidString.lowercased())/role", admin, [("role", "owner")]).status, .conflict)
@@ -106,7 +118,7 @@ final class DashboardPagesTests: XCTestCase {
             let denied = try await h.formPost("/dashboard/team/members/\(adminMembership.id!.uuidString.lowercased())/role", owner, [("role", "owner")])
             XCTAssertEqual(denied.status, .forbidden)
             XCTAssertTrue(denied.text.contains("Confirm with passkey"))
-            try await eq(try await OrgMembershipRecord.find(adminMembership.id!, on: h.db)?.role, "admin")
+            try await eq(try await OrgMembershipRecord.find(adminMembership.id!, on: h.db)?.role, "org_admin")
             try await h.dashReauth(owner, ownerAccount)
             try await eq(try await h.formPost("/dashboard/team/members/\(adminMembership.id!.uuidString.lowercased())/role", owner, [("role", "owner")]).status, .seeOther)
             try await eq(try await OrgMembershipRecord.find(adminMembership.id!, on: h.db)?.role, "owner")
@@ -170,7 +182,7 @@ final class DashboardPagesTests: XCTestCase {
             // A different signed-in user (the inviter) cannot accept it for themselves.
             try await eq(try await h.formPost("/dashboard/invite/\(token)/accept", ownerA).status, .forbidden)
             try await eq(try await h.formPost("/dashboard/invite/\(token)/accept", ownerB).status, .seeOther)
-            let member = try await OrgMembershipRecord.query(on: h.db).filter(\.$businessId == aId).filter(\.$role == "support").first()
+            let member = try await OrgMembershipRecord.query(on: h.db).filter(\.$businessId == aId).filter(\.$role == "messaging_operator").first()
             XCTAssertNotNil(member)
             // B's session moved to Org Alpha with the support role; it can still return to its own organization.
             try await eq(try await h.get(ownerB, "/dashboard/consent"), .ok)

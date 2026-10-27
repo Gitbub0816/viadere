@@ -51,12 +51,30 @@ struct BackgroundJobs {
         if await ctx.limiter.allow("retention-purge", key: "all", rule: .perMinute(1, burst: 1)) {
             try await RetentionService(db: db, ctx: ctx).purge()
         }
+        // WP6: each task is isolated, so one failing integration (the cloud bucket, a resolver) never stops delivery or the other tasks.
+        func guarded(_ name: String, _ body: () async throws -> Void) async {
+            do { try await body() } catch {
+                app.logger.warning("background task failed", metadata: ["task": "\(name)", "type": "\(type(of: error))"])
+                ctx.metrics.jobRan(at: ctx.now, failed: true)
+            }
+        }
+        await guarded("api-key-sweep") { _ = try await APIKeyLifecycle(db: db, ctx: ctx).sweep() }
+        await guarded("operator-notices") { _ = try await OperatorNotices(db: db, ctx: ctx).deliverDue() }
+        await guarded("consumer-exports") { _ = try await ConsumerExports(db: db, ctx: ctx).processQueued() }
+        if await ctx.limiter.allow("assurance-run", key: "all", rule: .perMinute(1, burst: 1)) {
+            await guarded("assurance") { _ = try await OnboardingAssurance(db: db, ctx: ctx).run() }
+            await guarded("pending-changes") { try await PendingChanges(db: db, ctx: ctx).expireDue() }
+        }
+        if ctx.config.operations.auditExport != nil, await ctx.limiter.allow("audit-export", key: "all", rule: .perMinute(1, burst: 1)) {
+            await guarded("audit-export") { _ = try await AuditHeadExporter(db: db, ctx: ctx).runIfDue() }
+        }
         try await DatabaseReplayGuard.purge(on: db, now: ctx.now)
         let now = ctx.now
         let staleCeremonies = PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600))
         if try await staleCeremonies.count() > 0 {
             try await PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
         }
+        ctx.metrics.jobRan(at: ctx.now, failed: false)
         return report
     }
 }

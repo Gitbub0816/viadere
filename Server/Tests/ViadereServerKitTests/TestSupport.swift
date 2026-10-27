@@ -146,11 +146,18 @@ final class ScriptedWebhookTransport: WebhookTransport, @unchecked Sendable {
     private var requests: [WebhookHTTPRequest] = []
     private var statuses: [Int] = []
     private var fallback = 200
+    private var scripted: (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?
     var received: [WebhookHTTPRequest] { lock.withLock { requests } }
     func respond(with codes: [Int], then fallback: Int = 200) { lock.withLock { statuses = codes; self.fallback = fallback } }
+    /// Answers requests with a function (for example one that echoes an ownership challenge); `nil` falls back to the scripted status codes.
+    func respond(_ handler: (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?) { lock.withLock { scripted = handler } }
     func send(_ request: WebhookHTTPRequest) async throws -> WebhookHTTPResponse {
-        lock.withLock {
+        let handler = lock.withLock { () -> (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)? in
             requests.append(request)
+            return scripted
+        }
+        if let handler, let response = try handler(request) { return response }
+        return lock.withLock {
             let code = statuses.isEmpty ? fallback : statuses.removeFirst()
             return WebhookHTTPResponse(statusCode: code)
         }
@@ -208,6 +215,8 @@ final class TestHarness: @unchecked Sendable {
     let signer: FakePassSigner
     let passPush: RecordingPassPush
     let emails: RecordingEmailSender
+    /// Scripted DNS and well-known answers for domain verification.
+    var domainChecker = FakeDomainChecker()
 
     init(app: Application, clock: ManualClock, config: ServerConfig, signer: FakePassSigner, passPush: RecordingPassPush,
          emails: RecordingEmailSender = RecordingEmailSender()) {
@@ -219,7 +228,8 @@ final class TestHarness: @unchecked Sendable {
         self.passPush = passPush
     }
 
-    static func make(rcs: (any RCSProvider)? = nil, passes: Bool = true, _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
+    static func make(rcs: (any RCSProvider)? = nil, passes: Bool = true, outbound: (any OutboundHTTP)? = nil,
+                     _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
         var config = ServerConfig.testing()
         adjust(&config)
         // Set TEST_DATABASE_URL to run the whole suite against a real PostgreSQL instance.
@@ -232,12 +242,14 @@ final class TestHarness: @unchecked Sendable {
         let signer = FakePassSigner()
         let passPush = RecordingPassPush()
         let emails = RecordingEmailSender()
+        let domains = FakeDomainChecker()
         // TEST_RATE_LIMIT_STORE=database runs the whole suite on the shared database rate limiter (the production default).
         if ProcessInfo.processInfo.environment["TEST_RATE_LIMIT_STORE"] == "database" { config.rateLimitStore = .database }
         let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
             clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil,
-            passSigner: passes ? signer : nil, passPush: passPush, emailSender: emails))
+            passSigner: passes ? signer : nil, passPush: passPush, emailSender: emails, domainChecker: domains, outboundHTTP: outbound))
         let harness = TestHarness(app: app, clock: clock, config: config, signer: signer, passPush: passPush, emails: emails)
+        harness.domainChecker = domains
         harness.bind(apns: apns, sms: sms, transport: transport)
         return harness
     }
@@ -490,8 +502,9 @@ final class TestHarness: @unchecked Sendable {
 }
 
 /// Runs a test body with a fresh application, always shutting it down.
-func withHarness(rcs: (any RCSProvider)? = nil, passes: Bool = true, _ adjust: (inout ServerConfig) -> Void = { _ in }, _ body: (TestHarness) async throws -> Void) async throws {
-    let harness = try await TestHarness.make(rcs: rcs, passes: passes, adjust)
+func withHarness(rcs: (any RCSProvider)? = nil, passes: Bool = true, outbound: (any OutboundHTTP)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in },
+                 _ body: (TestHarness) async throws -> Void) async throws {
+    let harness = try await TestHarness.make(rcs: rcs, passes: passes, outbound: outbound, adjust)
     do {
         try await body(harness)
     } catch {

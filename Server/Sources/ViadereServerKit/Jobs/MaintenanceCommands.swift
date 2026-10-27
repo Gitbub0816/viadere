@@ -232,6 +232,8 @@ struct RetentionService {
             removed += old.count
         }
         removed += try await DeviceLifecycle(db: db, ctx: ctx).revokeExpired()
+        // The class-based purges of docs/ops/DATA-INVENTORY.md §5 (retention settings, tenant shortening, legal holds).
+        _ = await RetentionPurger(db: db, ctx: ctx).run()
         // Sealed refresh-token successors are only needed for the grace window after a rotation.
         try await RefreshTokenRecord.query(on: db).filter(\.$successorSealed != nil)
             .filter(\.$usedAt < now.addingTimeInterval(-ConsumerTokenService.graceWindow)).set(\.$successorSealed, to: nil).update()

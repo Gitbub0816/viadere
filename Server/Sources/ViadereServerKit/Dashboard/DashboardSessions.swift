@@ -75,6 +75,7 @@ struct DashboardSessionStore {
             try await record.update(on: db)
             return nil
         }
+        record.priorSeenAt = record.lastSeenAt
         if now.timeIntervalSince(record.lastSeenAt) > 10 {
             record.lastSeenAt = now
             try await record.update(on: db)
@@ -146,6 +147,11 @@ struct DashboardPrincipal {
 
     func can(_ permission: DashboardPermission) -> Bool { role?.permits(permission) ?? false }
 
+    /// How long the session sat idle before this request (zero for a request within seconds of the previous one).
+    func idleBeforeRequest(ctx: ServerContext) -> TimeInterval {
+        max(0, ctx.now.timeIntervalSince(session.priorSeenAt ?? session.lastSeenAt))
+    }
+
     func hasFreshReauth(ctx: ServerContext) -> Bool {
         guard let at = session.reauthAt else { return false }
         return ctx.now.timeIntervalSince(at) <= ctx.config.dashboard.reauthWindow
@@ -209,6 +215,20 @@ struct DashboardAuthMiddleware: AsyncMiddleware {
             }
             membership = found
             business = org
+        }
+        // Console IP allow-list (Security > Network): refuses every request from outside it, without ending the session.
+        if realm == .business, let businessId = business?.id, let settings = try await SecuritySettings(db: db, ctx: ctx).existing(businessId: businessId),
+           !settings.consoleIPAllowlist.isEmpty {
+            let client = ClientIP.rawAddress(request, trustedProxies: ctx.config.trustedProxyCount)
+            if !IPNetwork.allows(client, in: IPNetwork.parseList(settings.consoleIPAllowlist) ?? []) {
+                ctx.metrics.count(.dashboardIPDenied)
+                if await ctx.limiter.allow("console-ip-deny-audit", key: "\(businessId.uuidString)|\(user.id?.uuidString ?? "")", rule: RateRule(capacity: 1, perMinute: 0.2)) {
+                    _ = try? await AuditService(db: db, ctx: ctx).record("dashboard.ip_denied", outcome: .denied, actor: AuditActor(kind: .business, id: user.id?.uuidString.lowercased()),
+                                                                         businessId: BusinessID(businessId), metadata: ["source": IPNetwork.masked(client)])
+                }
+                if json { return DashboardResponses.json(status: .forbidden, ["error": ["code": "forbidden", "message": "This network is not allowed to use the console."]]) }
+                return DashboardUI.errorPage(nil, status: .forbidden, title: "Network not allowed", message: "Your organization restricts the console to approved networks, and this one is not on the list.")
+            }
         }
         let csrf = DashboardSessionStore.csrfToken(sessionToken: token, hasher: ctx.hasher)
         let principal = DashboardPrincipal(user: user, session: session, realm: realm, sessionToken: token, csrf: csrf,

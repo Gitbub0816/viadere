@@ -6,7 +6,7 @@ import Vapor
 import ViadereCore
 
 /// Looks at the outside world on behalf of domain verification. Replaceable in tests; the network implementation is `NetworkDomainChecker`.
-protocol DomainChecker: Sendable {
+public protocol DomainChecker: Sendable {
     /// The TXT strings published at `name`. Throws when the resolver cannot answer (so "no record" and "could not look" stay different).
     func txtRecords(name: String) async throws -> [String]
     /// The first 4 KiB of `https://<domain>/.well-known/viadere-verification.txt`, or `nil` when the file is not there (non-200, redirect).

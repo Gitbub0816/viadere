@@ -139,6 +139,11 @@ struct BusinessOnboarding {
     /// check the status on every call, consumer decisions on its interactions are refused, and every pending
     /// interaction is cancelled (without webhooks — the business is suspended).
     func suspend(businessId: UUID, operatorId: UUID, reason: String) async throws {
+        try await suspend(businessId: businessId, actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()), updatedBy: operatorId, reason: reason)
+    }
+
+    /// The system suspends a business whose ongoing assurance failed past its grace period (`OnboardingAssurance`).
+    func suspend(businessId: UUID, actor: AuditActor, updatedBy: UUID?, reason: String) async throws {
         let now = ctx.now
         try await db.transaction { tx in
             guard let business = try await BusinessRecord.find(businessId, on: tx) else { throw Failure.notFound }
@@ -150,13 +155,13 @@ struct BusinessOnboarding {
             let controls = try await BusinessControls.loadOrCreate(businessId, now: now, on: tx)
             controls.suspensionReason = String(reason.prefix(300))
             controls.updatedAt = now
-            controls.updatedBy = operatorId
+            controls.updatedBy = updatedBy
             try await controls.update(on: tx)
             let pending = try await InteractionRecord.query(on: tx).filter(\.$businessId == businessId)
                 .filter(\.$status == InteractionStatus.pending.rawValue).all()
             for record in pending { _ = try await InteractionService(db: tx, ctx: ctx).cancelPending(record, notify: false) }
             _ = try await AuditService(db: tx, ctx: ctx).record("business.suspended", outcome: .denied,
-                actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()), businessId: BusinessID(businessId),
+                actor: actor, businessId: BusinessID(businessId),
                 subjectType: "organization", subjectId: businessId.uuidString.lowercased(), metadata: ["pending_cancelled": String(pending.count)])
         }
         ctx.metrics.count(.businessSuspended)
@@ -171,6 +176,10 @@ struct BusinessOnboarding {
     }
 
     func unsuspend(businessId: UUID, operatorId: UUID) async throws {
+        try await unsuspend(businessId: businessId, actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()), updatedBy: operatorId)
+    }
+
+    func unsuspend(businessId: UUID, actor: AuditActor, updatedBy: UUID?) async throws {
         let now = ctx.now
         try await db.transaction { tx in
             guard let business = try await BusinessRecord.find(businessId, on: tx) else { throw Failure.notFound }
@@ -182,10 +191,10 @@ struct BusinessOnboarding {
             if let controls = try await BusinessControls.load(businessId, on: tx) {
                 controls.suspensionReason = nil
                 controls.updatedAt = now
-                controls.updatedBy = operatorId
+                controls.updatedBy = updatedBy
                 try await controls.update(on: tx)
             }
-            _ = try await AuditService(db: tx, ctx: ctx).record("business.unsuspended", actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()),
+            _ = try await AuditService(db: tx, ctx: ctx).record("business.unsuspended", actor: actor,
                 businessId: BusinessID(businessId), subjectType: "organization", subjectId: businessId.uuidString.lowercased())
         }
     }

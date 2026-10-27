@@ -42,6 +42,15 @@ enum DashboardFormat {
         "approved": "Business verified. Its handle and code have been issued.", "rejected": "Application declined.",
         "suspended": "Business suspended. Its API keys and interactions are blocked.", "unsuspended": "Business reinstated.",
         "ceiling": "Priority ceiling updated.", "throttle": "Throttle updated.",
+        "domain-added": "Domain added. Publish the record, then check it.", "domain-verified": "Domain verified.", "domain-removed": "Domain removed.",
+        "legal": "Legal entity submitted for review.", "accepted": "Agreement accepted.", "golive": "Production access requested. A Viadere reviewer will respond.",
+        "rotated": "Key rotated. The old key keeps working until the overlap ends.", "pending": "Waiting for a second person to approve it.",
+        "paused": "Endpoint paused.", "resumed": "Endpoint resumed.", "verified": "Endpoint verified.", "test": "Test event queued.",
+        "sandbox": "Sandbox customer created.", "reply": "Simulated reply queued.", "saved": "Saved.", "session": "Session signed out.",
+        "approved-change": "Approved.", "rejected-change": "Rejected.", "cancelled": "Cancelled.", "ticket": "Ticket received.", "requested": "Request received.",
+        "cert": "Certificate saved.", "cert-removed": "Certificate removed.", "switch": "Switch updated.", "frozen": "Account frozen and signed out.",
+        "unfrozen": "Account unfrozen.", "notice": "Notice queued for delivery.", "revoked-all": "Keys revoked.", "hold": "Legal hold recorded.",
+        "golive-approved": "Production access approved.", "golive-rejected": "Request declined.", "reviewed": "Review recorded.",
     ]
 
     static func flash(_ request: Request) -> String? { request.query[String.self, at: "m"].flatMap { flash[$0] } }
@@ -57,11 +66,14 @@ enum DashboardFormat {
         }
     }
 
-    static func table(_ headers: [String], _ rows: [[String]], empty: String = "Nothing here yet.") -> String {
+    /// A data table. `caption` names it for screen-reader users (visually hidden); header cells carry `scope="col"`; an empty header cell (an
+    /// actions column) is labelled "Actions".
+    static func table(_ headers: [String], _ rows: [[String]], empty: String = "Nothing here yet.", caption: String? = nil) -> String {
         guard !rows.isEmpty else { return "<p class=\"mu\">\(DashboardUI.esc(empty))</p>" }
-        let head = headers.map { "<th>\(DashboardUI.esc($0))</th>" }.joined()
+        let head = headers.map { $0.isEmpty ? "<th scope=\"col\"><span class=\"vh\">Actions</span></th>" : "<th scope=\"col\">\(DashboardUI.esc($0))</th>" }.joined()
         let body = rows.map { "<tr>" + $0.map { "<td>\($0)</td>" }.joined() + "</tr>" }.joined()
-        return "<div class=\"tw\"><table><thead><tr>\(head)</tr></thead><tbody>\(body)</tbody></table></div>"
+        let cap = caption.map { "<caption class=\"vh\">\(DashboardUI.esc($0))</caption>" } ?? ""
+        return "<div class=\"tw\"><table>\(cap)<thead><tr>\(head)</tr></thead><tbody>\(body)</tbody></table></div>"
     }
 
     static func stat(_ value: String, _ label: String) -> String {

@@ -14,6 +14,13 @@ public struct AuditHeadExportSettings: Sendable, Equatable {
     public var interval: TimeInterval
     /// Sign the head with the KMS signing key as well as the chain MAC (`AUDIT_HEAD_KMS_KEY`, a full KMS crypto key version resource name).
     public var kmsKey: String?
+    /// Workload identity federation (`GCP_WORKLOAD_IDENTITY_AUDIENCE`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_SUBJECT_TOKEN_FILE`): for `gcs` and for the KMS key.
+    public var googleAudience: String?
+    public var googleServiceAccount: String?
+    public var subjectTokenFile: String?
+    /// R2 only (secrets): `AUDIT_HEAD_EXPORT_ACCESS_KEY_ID`, `AUDIT_HEAD_EXPORT_SECRET_ACCESS_KEY`.
+    public var r2AccessKeyId: String?
+    public var r2SecretAccessKey: String?
 }
 
 /// Server settings added by WP6 (operations, key rotation, edge lock, metrics, webhooks, API keys).
@@ -60,6 +67,8 @@ public struct OperationsSettings: Sendable {
     /// `DATABASE_MIGRATION_URL`: the DDL-capable role the `migrate` command uses. The runtime role (`DATABASE_URL`) needs no DDL.
     public var migrationDatabaseURL: String?
     public var auditExport: AuditHeadExportSettings?
+    /// Where new support tickets and appeals are announced (`SUPPORT_NOTIFY_EMAIL`); `nil` = operators watch the console.
+    public var supportEmail: String?
 
     public init() {}
 }
@@ -142,6 +151,10 @@ extension ServerConfig {
         }
         ops.connectKeyId = try keyId("CONNECT_LINK_SIGNING_KEY_ID", fallback: ConnectKeyring.legacyKeyId)
         for (id, data) in try previous("CONNECT_LINK_SIGNING_KEYS_PREVIOUS", minimum: 32) { ops.previousConnectKeys[id] = SymmetricKey(data: data) }
+        if let raw = env["SUPPORT_NOTIFY_EMAIL"], !raw.isEmpty {
+            guard let email = DashboardAuthService.normalizeEmail(raw) else { throw ServerConfigError.invalid("SUPPORT_NOTIFY_EMAIL") }
+            ops.supportEmail = email
+        }
         // Database roles.
         if let url = env["DATABASE_MIGRATION_URL"], !url.isEmpty {
             guard url.hasPrefix("postgres://") || url.hasPrefix("postgresql://") else { throw ServerConfigError.invalid("DATABASE_MIGRATION_URL (postgres URL)") }
@@ -159,9 +172,24 @@ extension ServerConfig {
             }
             let hours = env["AUDIT_HEAD_EXPORT_INTERVAL_HOURS"].flatMap(Double.init) ?? 6
             guard (0.01...168).contains(hours) else { throw ServerConfigError.invalid("AUDIT_HEAD_EXPORT_INTERVAL_HOURS") }
-            ops.auditExport = AuditHeadExportSettings(kind: kind, target: target, prefix: env["AUDIT_HEAD_EXPORT_PREFIX"] ?? "audit-heads/",
-                                                      endpoint: endpoint, interval: hours * 3600,
-                                                      kmsKey: env["AUDIT_HEAD_KMS_KEY"].flatMap { $0.isEmpty ? nil : $0 })
+            var export = AuditHeadExportSettings(kind: kind, target: target, prefix: env["AUDIT_HEAD_EXPORT_PREFIX"] ?? "audit-heads/",
+                                                 endpoint: endpoint, interval: hours * 3600,
+                                                 kmsKey: env["AUDIT_HEAD_KMS_KEY"].flatMap { $0.isEmpty ? nil : $0 })
+            func value(_ name: String) -> String? { env[name].flatMap { $0.isEmpty ? nil : $0 } }
+            export.googleAudience = value("GCP_WORKLOAD_IDENTITY_AUDIENCE")
+            export.googleServiceAccount = value("GCP_SERVICE_ACCOUNT_EMAIL")
+            export.subjectTokenFile = value("GCP_SUBJECT_TOKEN_FILE")
+            export.r2AccessKeyId = value("AUDIT_HEAD_EXPORT_ACCESS_KEY_ID")
+            export.r2SecretAccessKey = value("AUDIT_HEAD_EXPORT_SECRET_ACCESS_KEY")
+            if kind == .gcs || export.kmsKey != nil {
+                guard export.googleAudience != nil, export.googleServiceAccount != nil, export.subjectTokenFile != nil else {
+                    throw ServerConfigError.missing("GCP_WORKLOAD_IDENTITY_AUDIENCE, GCP_SERVICE_ACCOUNT_EMAIL and GCP_SUBJECT_TOKEN_FILE (required for a gcs export or a KMS-signed head)")
+                }
+            }
+            if kind == .r2, export.r2AccessKeyId == nil || export.r2SecretAccessKey == nil {
+                throw ServerConfigError.missing("AUDIT_HEAD_EXPORT_ACCESS_KEY_ID and AUDIT_HEAD_EXPORT_SECRET_ACCESS_KEY")
+            }
+            ops.auditExport = export
         }
         operations = ops
     }

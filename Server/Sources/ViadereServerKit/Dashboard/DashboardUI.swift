@@ -10,11 +10,11 @@ enum DashboardUI {
     // MARK: Assets
 
     static let css = """
-    :root{color-scheme:light dark;--bg:#F5F2EC;--sf:#FCFBF8;--sr:#FFFFFF;--fg:#1F1E1C;--mu:#6B675F;--ac:#8C7550;--acs:rgba(194,174,142,.16);--hl:rgba(31,30,28,.10);--dg:#A3412E;--ok:#4C7458;--pf:#1F1E1C;--op:#F5F2EC}
+    :root{color-scheme:light dark;--bg:#F5F2EC;--sf:#FCFBF8;--sr:#FFFFFF;--fg:#1F1E1C;--mu:#625D55;--ac:#745E3F;--acs:rgba(194,174,142,.16);--hl:rgba(31,30,28,.10);--dg:#A3412E;--ok:#3F6149;--pf:#1F1E1C;--op:#F5F2EC}
     @media(prefers-color-scheme:dark){:root{--bg:#121211;--sf:#1C1B1A;--sr:#262523;--fg:#F3F0EA;--mu:#A29D94;--ac:#CDB993;--acs:rgba(205,185,147,.14);--hl:rgba(243,240,234,.12);--dg:#E08068;--ok:#8DBB98;--pf:#F3F0EA;--op:#1F1E1C}}
     *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
     body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-    a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
+    a{color:var(--ac)}a:hover{text-decoration-thickness:2px}
     h1{font-size:1.65rem;font-weight:300;letter-spacing:-.01em;margin:0 0 .25rem}h2{font-size:1.05rem;font-weight:600;margin:0 0 .75rem}h3{font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:0 0 .5rem}
     p{margin:.4rem 0 .9rem}.mu{color:var(--mu)}.sm{font-size:.86rem}.mono,code,pre{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.84rem}
     .shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
@@ -41,6 +41,17 @@ enum DashboardUI {
     .qr{width:224px;height:224px;background:#fff;border-radius:12px;padding:8px;display:block}.qr svg{width:100%;height:100%;display:block}
     .bars rect.b{fill:var(--ac)}.bars rect.t{fill:var(--hl)}.bars text{fill:var(--mu);font:11px -apple-system,system-ui,sans-serif}
     .err{color:var(--dg)}.auth{max-width:30rem;margin:8vh auto;padding:0 1rem}.auth .card{padding:1.75rem}.auth .brand{margin-bottom:1.5rem;justify-content:center}
+    .vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    .skip{position:absolute;left:.5rem;top:-3rem;z-index:10;background:var(--pf);color:var(--op);padding:.6rem 1rem;border-radius:999px;font-weight:600}.skip:focus{top:.5rem}
+    main:focus{outline:none}
+    .tabs{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 1.25rem;padding:0;border-bottom:1px solid var(--hl)}.tabs a{display:inline-flex;align-items:center;min-height:2rem;padding:.35rem .8rem;border-radius:10px 10px 0 0;color:var(--fg)}.tabs a[aria-current=page]{background:var(--acs);color:var(--ac);font-weight:600}
+    table caption{caption-side:top;text-align:left;font-weight:600;padding:.25rem .6rem .5rem}
+    .btn{min-height:2rem}.btn.sm{min-height:1.75rem}
+    input[type=text],input[type=email],input[type=url],input[type=number],select,textarea{min-height:2.25rem}
+    .ck{min-height:1.75rem}.ck input{width:1.25rem;height:1.25rem}
+    .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}.steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.6rem .8rem;border:1px solid var(--hl);border-radius:12px;background:var(--bg)}
+    .steps .done{border-color:var(--ok)}
+    a{text-decoration:underline;text-underline-offset:2px}nav a,.btn,.tabs a,.brand{text-decoration:none}
     @media(max-width:820px){.shell{grid-template-columns:1fr}.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.75rem;border-right:0;border-bottom:1px solid var(--hl)}.side nav{flex-direction:row;flex-wrap:wrap}.org{display:none}.side .foot{margin-top:0}main{padding-top:1.25rem}}
     """
 
@@ -89,24 +100,78 @@ enum DashboardUI {
     struct NavItem {
         var title: String
         var path: String
-        var permission: DashboardPermission?
+        /// Shown to a member holding **any** of these.
+        var permissions: [DashboardPermission]
+
+        func visible(to p: DashboardPrincipal) -> Bool { permissions.isEmpty || permissions.contains(where: p.can) }
     }
 
-    static let businessNav: [NavItem] = [
-        NavItem(title: "Overview", path: "/dashboard", permission: .viewOverview),
-        NavItem(title: "API keys", path: "/dashboard/api-keys", permission: .viewAPIKeys),
-        NavItem(title: "Webhooks", path: "/dashboard/webhooks", permission: .viewWebhooks),
-        NavItem(title: "Templates", path: "/dashboard/templates", permission: .viewTemplates),
-        NavItem(title: "Campaigns", path: "/dashboard/campaigns", permission: .manageCampaigns),
-        NavItem(title: "Consent", path: "/dashboard/consent", permission: .viewConsent),
-        NavItem(title: "Audit log", path: "/dashboard/audit", permission: .viewAudit),
-        NavItem(title: "Team", path: "/dashboard/team", permission: .viewTeam),
-        NavItem(title: "Organization", path: "/dashboard/organization", permission: .manageOrganization),
-        NavItem(title: "Billing", path: "/dashboard/billing", permission: .viewBilling),
+    /// A console section (spec §9.1). The landing page is `path`; `children` are the pages inside it, shown as tabs.
+    struct NavSection {
+        var title: String
+        var path: String
+        var permissions: [DashboardPermission]
+        var children: [NavItem]
+        /// Paths that belong to the section besides its landing page and children.
+        var prefixes: [String] = []
+
+        func visible(to p: DashboardPrincipal) -> Bool { permissions.isEmpty || permissions.contains(where: p.can) }
+        func contains(_ path: String) -> Bool {
+            ([self.path] + children.map(\.path) + prefixes).contains { path == $0 || (self.path != "/dashboard" && path.hasPrefix($0 + "/")) }
+        }
+    }
+
+    static let sections: [NavSection] = [
+        NavSection(title: "Dashboard", path: "/dashboard", permissions: [.viewOverview], children: []),
+        NavSection(title: "Organization", path: "/dashboard/organization", permissions: [.viewOrganization, .viewTeam, .manageOrganization], children: [
+            NavItem(title: "Profile and onboarding", path: "/dashboard/organization", permissions: [.viewOrganization, .manageOrganization]),
+            NavItem(title: "Domains", path: "/dashboard/organization/domains", permissions: [.viewOrganization, .manageOrganization]),
+            NavItem(title: "Team", path: "/dashboard/team", permissions: [.viewTeam]),
+        ]),
+        NavSection(title: "Developers", path: "/dashboard/developers", permissions: [.viewAPIKeys, .viewWebhooks, .viewTemplates], children: [
+            NavItem(title: "Overview", path: "/dashboard/developers", permissions: []),
+            NavItem(title: "API keys", path: "/dashboard/api-keys", permissions: [.viewAPIKeys]),
+            NavItem(title: "Webhooks", path: "/dashboard/webhooks", permissions: [.viewWebhooks]),
+            NavItem(title: "Sandbox", path: "/dashboard/developers/sandbox", permissions: [.viewWebhooks, .manageWebhooks]),
+            NavItem(title: "Templates", path: "/dashboard/templates", permissions: [.viewTemplates]),
+        ]),
+        NavSection(title: "Messaging", path: "/dashboard/messaging", permissions: [.viewMessaging, .viewConsent, .manageCampaigns], children: [
+            NavItem(title: "Overview", path: "/dashboard/messaging", permissions: []),
+            NavItem(title: "Campaigns", path: "/dashboard/campaigns", permissions: [.manageCampaigns]),
+            NavItem(title: "Consent", path: "/dashboard/consent", permissions: [.viewConsent]),
+        ]),
+        NavSection(title: "Verify", path: "/dashboard/verification", permissions: [.viewVerify], children: []),
+        NavSection(title: "Approve", path: "/dashboard/approve", permissions: [.viewApprove], children: []),
+        NavSection(title: "Security", path: "/dashboard/security", permissions: [.viewSecurity], children: [
+            NavItem(title: "Overview", path: "/dashboard/security", permissions: []),
+            NavItem(title: "Sessions", path: "/dashboard/security/sessions", permissions: []),
+            NavItem(title: "Network", path: "/dashboard/security/network", permissions: []),
+            NavItem(title: "Certificates", path: "/dashboard/security/certificates", permissions: []),
+            NavItem(title: "Alerts and contacts", path: "/dashboard/security/alerts", permissions: []),
+            NavItem(title: "Approvals", path: "/dashboard/security/approvals", permissions: []),
+            NavItem(title: "Audit log", path: "/dashboard/audit", permissions: [.viewAudit]),
+        ]),
+        NavSection(title: "Compliance", path: "/dashboard/compliance", permissions: [.viewCompliance], children: [
+            NavItem(title: "Agreements", path: "/dashboard/compliance", permissions: []),
+            NavItem(title: "Retention", path: "/dashboard/compliance/retention", permissions: []),
+            NavItem(title: "Data requests", path: "/dashboard/compliance/requests", permissions: []),
+        ]),
+        NavSection(title: "Billing", path: "/dashboard/billing", permissions: [.viewBilling], children: []),
+        NavSection(title: "Support", path: "/dashboard/support", permissions: [.viewSupport], children: [
+            NavItem(title: "Help and tickets", path: "/dashboard/support", permissions: []),
+            NavItem(title: "Integration health", path: "/dashboard/support/health", permissions: []),
+            NavItem(title: "Notices", path: "/dashboard/support/notices", permissions: []),
+            NavItem(title: "Appeals", path: "/dashboard/support/appeals", permissions: []),
+        ]),
     ]
+
+    static func section(for path: String) -> NavSection? {
+        sections.first { $0.contains(path) && $0.path != "/dashboard" } ?? (path == "/dashboard" ? sections.first : nil)
+    }
 
     static let operatorNav: [(String, String)] = [
         ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"), ("Capability policy", "/operator/policy"),
+        ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"),
     ]
 
     static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
@@ -128,52 +193,59 @@ enum DashboardUI {
 
     /// Unauthenticated page (sign-in, sign-up, invitations).
     static func authPage(title: String, body: String, script: Bool = true, status: HTTPStatus = .ok) -> Response {
-        response(document(title: title, body: "<div class=\"auth\">\(brand)<div class=\"card\">\(body)</div></div>", script: script), status: status, script: script)
+        response(document(title: title, body: "<main id=\"main\" class=\"auth\">\(brand)<div class=\"card\">\(body)</div></main>", script: script), status: status, script: script)
     }
 
-    /// Signed-in business page.
+    /// Signed-in business page. Landmarks: skip link, `aside` with the console navigation, `header` with the page heading, `main`.
     static func businessPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, actions: String = "",
                              flash: String? = nil, body: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
-        let items = businessNav.filter { item in item.permission.map(p.can) ?? true }
-            .map { "<a href=\"\($0.path)\"\($0.path == active ? " aria-current=\"page\"" : "")>\(esc($0.title))</a>" }.joined()
+        let current = section(for: active)
+        let items = sections.filter { $0.visible(to: p) }
+            .map { "<a href=\"\($0.path)\"\($0.path == current?.path ? " aria-current=\"page\"" : "")>\(esc($0.title))</a>" }.joined()
+        var tabs = ""
+        if let current, current.children.count > 1 {
+            let links = current.children.filter { $0.visible(to: p) }
+                .map { "<a href=\"\($0.path)\"\($0.path == active ? " aria-current=\"page\"" : "")>\(esc($0.title))</a>" }.joined()
+            tabs = "<nav class=\"tabs\" aria-label=\"\(esc(current.title)) pages\">\(links)</nav>"
+        }
         var banner = ""
         if let business = p.business, business.status != .verified {
             let text: String
             switch business.status {
-            case .pending: text = "Your organization is <strong>awaiting verification</strong>. API keys, webhooks and campaign links unlock when Viadere approves it. You can invite your team in the meantime."
+            case .pending: text = "Your organization is <strong>awaiting verification</strong>. Verify a domain to unlock the sandbox; production keys unlock when Viadere approves your application and your go-live review. You can invite your team in the meantime."
             case .suspended: text = "This organization is <strong>suspended</strong>. API keys and interactions are blocked. Contact Viadere support."
             default: text = "This organization is <strong>not active</strong>."
             }
-            banner = "<div class=\"notice\(business.status == .pending ? "" : " dg")\">\(text)</div>"
+            banner = "<div class=\"notice\(business.status == .pending ? "" : " dg")\" role=\"status\">\(text)</div>"
         }
-        let flashHTML = flash.map { "<div class=\"notice ok\">\(esc($0))</div>" } ?? ""
+        let flashHTML = flash.map { "<div class=\"notice ok\" role=\"status\">\(esc($0))</div>" } ?? ""
         let side = """
         <aside class="side">\(brand)<div class="org"><span class="mu sm">Organization</span><strong>\(esc(p.business?.displayName ?? ""))</strong>\
-        <span class="badge mu">\(esc(p.role?.title ?? ""))</span></div><nav aria-label="Dashboard">\(items)</nav>\
-        <form class="foot" method="post" action="/dashboard/logout"><input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn s sm" type="submit">Sign out</button></form></aside>
+        <span class="badge mu">\(esc(p.role?.title ?? ""))</span></div><nav aria-label="Console">\(items)</nav>\
+        <div class="foot"><p class="sm"><a href="/dashboard/security/sessions">Your sessions</a></p><form method="post" action="/dashboard/logout"><input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn s sm" type="submit">Sign out</button></form></div></aside>
         """
-        let head = "<div class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div><div class=\"row\">\(actions)</div></div>"
-        return response(document(title: title, body: "<div class=\"shell\">\(side)<main>\(head)\(banner)\(flashHTML)\(body)</main></div>", script: script),
+        let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div><div class=\"row\">\(actions)</div></header>"
+        return response(document(title: title, body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(tabs)\(banner)\(flashHTML)\(body)</main></div>", script: script),
                         status: status, script: script)
     }
 
     /// Signed-in operator page.
     static func operatorPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, flash: String? = nil,
                              body: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
-        let items = operatorNav.map { "<a href=\"\($0.1)\"\($0.1 == active ? " aria-current=\"page\"" : "")>\(esc($0.0))</a>" }.joined()
+        let items = operatorNav.map { "<a href=\"\($0.1)\"\($0.1 == active || (active.hasPrefix($0.1 + "/") && $0.1 != "/operator") ? " aria-current=\"page\"" : "")>\(esc($0.0))</a>" }.joined()
         let side = """
         <aside class="side">\(brand)<div class="org"><span class="mu sm">Operator console</span><strong>\(esc(p.user.displayName))</strong></div>\
         <nav aria-label="Operator">\(items)</nav><form class="foot" method="post" action="/operator/logout">\
         <input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn s sm" type="submit">Sign out</button></form></aside>
         """
-        let flashHTML = flash.map { "<div class=\"notice ok\">\(esc($0))</div>" } ?? ""
-        let head = "<div class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div></div>"
-        return response(document(title: title + " · Operator", body: "<div class=\"shell\">\(side)<main>\(head)\(flashHTML)\(body)</main></div>", script: script), status: status, script: script)
+        let flashHTML = flash.map { "<div class=\"notice ok\" role=\"status\">\(esc($0))</div>" } ?? ""
+        let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div></header>"
+        return response(document(title: title + " · Operator", body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(flashHTML)\(body)</main></div>", script: script), status: status, script: script)
     }
 
     /// Error page inside the signed-in shell.
     static func errorPage(_ p: DashboardPrincipal?, status: HTTPStatus, title: String, message: String) -> Response {
-        let body = "<div class=\"notice dg\">\(esc(message))</div><p><a href=\"\(p?.realm.home ?? "/dashboard")\">Back to the dashboard</a></p>"
+        let body = "<div class=\"notice dg\" role=\"alert\">\(esc(message))</div><p><a href=\"\(p?.realm.home ?? "/dashboard")\">Back to the dashboard</a></p>"
         if let p, p.realm == .business { return businessPage(p, title: title, active: "", body: body, status: status) }
         if let p { return operatorPage(p, title: title, active: "", body: body, status: status) }
         return authPage(title: title, body: "<h1>\(esc(title))</h1><p>\(esc(message))</p>", script: false, status: status)

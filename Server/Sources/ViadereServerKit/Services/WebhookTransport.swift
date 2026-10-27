@@ -12,6 +12,13 @@ public struct WebhookHTTPRequest: Sendable {
 
 public struct WebhookHTTPResponse: Sendable {
     public var statusCode: Int
+    /// At most the first 4 KiB of the response body (read only for the ownership-verification challenge; delivery ignores it).
+    public var body: Data
+
+    public init(statusCode: Int, body: Data = Data()) {
+        self.statusCode = statusCode
+        self.body = body
+    }
 }
 
 public enum WebhookTransportError: Error, Sendable { case blockedDestination, network }
@@ -121,7 +128,8 @@ public struct VaporWebhookTransport: WebhookTransport {
                     for (name, value) in request.headers { out.headers.replaceOrAdd(name: name, value: value) }
                     out.body = ByteBuffer(data: request.body)
                 }
-                return WebhookHTTPResponse(statusCode: Int(response.status.code))
+                var buffer = response.body ?? ByteBuffer()
+                return WebhookHTTPResponse(statusCode: Int(response.status.code), body: Data(buffer.readBytes(length: min(buffer.readableBytes, 4096)) ?? []))
             } catch { throw WebhookTransportError.network }
         }
         let port = request.url.port ?? 443
@@ -140,8 +148,14 @@ public struct VaporWebhookTransport: WebhookTransport {
             for (name, value) in request.headers { out.headers.replaceOrAdd(name: name, value: value) }
             out.body = .bytes(request.body)
             let response = try await pinnedClient.execute(out, timeout: .seconds(15))
+            // Keep the first 4 KiB and stop reading: a large body must not turn a successful delivery into a failure.
+            var kept = Data()
+            for try await chunk in response.body {
+                kept.append(contentsOf: chunk.readableBytesView.prefix(4096 - kept.count))
+                if kept.count >= 4096 { break }
+            }
             try await pinnedClient.shutdown()
-            return WebhookHTTPResponse(statusCode: Int(response.status.code))
+            return WebhookHTTPResponse(statusCode: Int(response.status.code), body: kept)
         } catch {
             try? await pinnedClient.shutdown()
             throw WebhookTransportError.network

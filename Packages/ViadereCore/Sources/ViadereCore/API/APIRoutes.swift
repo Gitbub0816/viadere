@@ -245,6 +245,25 @@ public enum APIRoutes {
         "business.webhooks.delete", .DELETE, "/v1/business/webhooks/{webhookId}", auth: .businessAPIKey)
     public static let businessWebhookRotate = Endpoint<EmptyBody, WebhookSecretResponse>(
         "business.webhooks.rotate", .POST, "/v1/business/webhooks/{webhookId}/rotate-secret", auth: .businessAPIKey)
+    /// Proves ownership of the endpoint with a signed, single-use challenge it must echo. Needed before the endpoint receives events.
+    public static let businessWebhookVerify = Endpoint<EmptyBody, WebhookVerificationResult>(
+        "business.webhooks.verify", .POST, "/v1/business/webhooks/{webhookId}/verify", auth: .businessAPIKey)
+    /// Sends one signed `webhook.test` event to the endpoint through the normal delivery path.
+    public static let businessWebhookTest = Endpoint<EmptyBody, EmptyBody>(
+        "business.webhooks.test", .POST, "/v1/business/webhooks/{webhookId}/test", auth: .businessAPIKey)
+    /// Pauses delivery to the endpoint. Queued deliveries stay queued until it is resumed or they expire.
+    public static let businessWebhookPause = Endpoint<PauseWebhookRequest, EmptyBody>(
+        "business.webhooks.pause", .POST, "/v1/business/webhooks/{webhookId}/pause", auth: .businessAPIKey)
+    public static let businessWebhookResume = Endpoint<EmptyBody, EmptyBody>(
+        "business.webhooks.resume", .POST, "/v1/business/webhooks/{webhookId}/resume", auth: .businessAPIKey)
+
+    // MARK: Subject access export (LEG-PR-004): a device-signed request, an asynchronous job, a download sealed to the device
+    public static let accountExportCreate = Endpoint<AccountExportRequest, AccountExportStatus>(
+        "account.exports.create", .POST, "/v1/account/exports", auth: .deviceSignedBearer)
+    public static let accountExportGet = Endpoint<EmptyBody, AccountExportStatus>(
+        "account.exports.get", .GET, "/v1/account/exports/{exportId}", auth: .deviceSignedBearer)
+    public static let accountExportDownload = Endpoint<EmptyBody, AccountExportBundle>(
+        "account.exports.download", .GET, "/v1/account/exports/{exportId}/download", auth: .deviceSignedBearer)
 
     // MARK: Credential vault sync (Phase 4; behind `VAULT_SYNC_ENABLED`, ciphertext and public keys only)
     public static let vaultStatus = Endpoint<EmptyBody, VaultStatus>(
@@ -385,7 +404,9 @@ public enum APIRoutes {
         businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
         businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
-        businessWebhookRotate.descriptor, businessSandboxRelationship.descriptor, businessCapabilities.descriptor,
+        businessWebhookRotate.descriptor, businessWebhookVerify.descriptor, businessWebhookTest.descriptor, businessWebhookPause.descriptor,
+        businessWebhookResume.descriptor, accountExportCreate.descriptor, accountExportGet.descriptor, accountExportDownload.descriptor,
+        businessSandboxRelationship.descriptor, businessCapabilities.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
         vaultStatus.descriptor, vaultPut.descriptor, vaultDelete.descriptor, vaultManifests.descriptor, vaultBlobs.descriptor, vaultEnvelope.descriptor,
         vaultRecoveryEnvelope.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,

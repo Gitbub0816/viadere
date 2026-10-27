@@ -263,19 +263,33 @@ struct CreatePlatformWP6Schema: AsyncMigration {
         for (column, type) in [("kid", DatabaseSchema.DataType.string), ("ip_allowlist", .string), ("last_used_ip_hash", .string),
                                ("auto_revoke_at", .datetime), ("rotated_to", .uuid), ("rotated_from", .uuid), ("cert_binding", .uuid),
                                ("created_by", .uuid), ("revoked_by", .string), ("revoke_reason", .string)] {
-            try await addColumn(db, "business_api_keys") { $0.field(.definition(name: .key(column), dataType: type, constraints: [])) }
+            try await addColumn(db, "business_api_keys") { $0.field(.definition(name: .key(.string(column)), dataType: type, constraints: [])) }
         }
         try await addColumn(db, "business_api_keys") { $0.field("requires_mtls", .bool, .required, .sql(.default(false))) }
         for (column, type) in [("verified_at", DatabaseSchema.DataType.datetime), ("verification_challenge_hash", .string),
                                ("verification_expires_at", .datetime), ("last_verify_error", .string), ("paused_at", .datetime),
                                ("paused_by", .string), ("pause_reason", .string)] {
-            try await addColumn(db, "webhook_subscriptions") { $0.field(.definition(name: .key(column), dataType: type, constraints: [])) }
+            try await addColumn(db, "webhook_subscriptions") { $0.field(.definition(name: .key(.string(column)), dataType: type, constraints: [])) }
         }
         for (column, type) in [("ip_hash", DatabaseSchema.DataType.string), ("ip_masked", .string), ("ua_hash", .string), ("ua_label", .string),
                                ("country", .string)] {
-            try await addColumn(db, "dashboard_sessions") { $0.field(.definition(name: .key(column), dataType: type, constraints: [])) }
+            try await addColumn(db, "dashboard_sessions") { $0.field(.definition(name: .key(.string(column)), dataType: type, constraints: [])) }
         }
         try await addColumn(db, "audit_events") { $0.field("key_epoch", .int) }
+        try await addColumn(db, "interactions") { $0.field("content_erased", .bool, .required, .sql(.default(false))) }
+        try await addColumn(db, "conversation_messages") { $0.field("content_erased", .bool, .required, .sql(.default(false))) }
+
+        // Audit events removed by the retention job leave a checkpoint (the last removed event's sequence number and hash), so the chain from the
+        // first remaining event onward still verifies. The job runs only for events whose signed head was exported to write-once storage.
+        try await db.schema("audit_checkpoints")
+            .id()
+            .field("seq", .int, .required)
+            .field("hash", .string, .required)
+            .field("key_epoch", .int)
+            .field("removed", .int, .required)
+            .field("created_at", .datetime, .required)
+            .unique(on: "seq")
+            .create()
 
         if let sql = db as? any SQLDatabase {
             let indexes: [(String, String, String)] = [
@@ -304,7 +318,7 @@ struct CreatePlatformWP6Schema: AsyncMigration {
 
     func revert(on db: any Database) async throws {
         guard let sql = db as? any SQLDatabase else { return }
-        for table in ["account_freezes", "consumer_exports", "legal_holds", "retention_settings", "platform_flags", "data_requests", "operator_notices",
+        for table in ["audit_checkpoints", "account_freezes", "consumer_exports", "legal_holds", "retention_settings", "platform_flags", "data_requests", "operator_notices",
                       "support_tickets", "pending_changes", "dashboard_known_contexts", "business_mtls_certs", "business_security_settings",
                       "contract_acceptances", "business_domains", "business_onboarding"] {
             try await sql.raw(SQLQueryString("DROP TABLE IF EXISTS \(unsafeRaw: table)")).run()

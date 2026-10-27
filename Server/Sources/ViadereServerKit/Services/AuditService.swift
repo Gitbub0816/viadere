@@ -164,11 +164,15 @@ struct AuditService {
     }
 
     static func verifyChain(on db: any Database, keyring: AuditKeyring, legacyThroughSeq: Int = 0) async throws -> ChainVerification {
-        let events = try await AuditEventRecord.query(on: db).sort(\.$seq, .ascending).all()
-        var expectedPrev = genesisHash
-        var expectedSeq = 1
-        var sawKeyed = false
-        var lastEpoch = 1
+        // Events removed by the retention job leave a checkpoint; the chain is verified from the newest one.
+        let checkpoint = try await AuditCheckpointRecord.query(on: db).sort(\.$seq, .descending).first()
+        var remaining = AuditEventRecord.query(on: db).sort(\.$seq, .ascending)
+        if let checkpoint { remaining = remaining.filter(\.$seq > checkpoint.seq) }
+        let events = try await remaining.all()
+        var expectedPrev = checkpoint?.hash ?? genesisHash
+        var expectedSeq = (checkpoint?.seq ?? 0) + 1
+        var sawKeyed = checkpoint != nil
+        var lastEpoch = checkpoint?.keyEpoch ?? 1
         for event in events {
             if event.chainVersion >= 2 { sawKeyed = true } else if sawKeyed || event.seq > legacyThroughSeq {
                 // Only the pre-upgrade prefix may be unkeyed, and a keyed event can never be followed by an unkeyed one: a downgrade.

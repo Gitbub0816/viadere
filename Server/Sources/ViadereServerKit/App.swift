@@ -72,16 +72,22 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
                             rateLimitStore: rateStore, rcs: rcs,
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
-                            domains: domains)
+                            domains: domains, outbound: overrides.outboundHTTP ?? VaporOutboundHTTP(client: app.client))
 
     // MARK: Database
-    if let url = config.databaseURL {
+    // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL); every other process uses the runtime role (DATABASE_URL).
+    let migrating = app.environment.arguments.dropFirst().contains("migrate")
+    if let url = migrating ? (config.operations.migrationDatabaseURL ?? config.databaseURL) : config.databaseURL {
         try app.databases.use(.postgres(url: url), as: .psql)
     } else {
         guard !config.isStrict else { throw ServerConfigError.missing("DATABASE_URL") }
         app.databases.use(.sqlite(.memory), as: .sqlite)
     }
     app.migrations.add(Migrations.all)
+    // The serving process must not hold DDL rights when the deployment split the roles (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
+    if config.isStrict, !migrating, config.operations.migrationDatabaseURL != nil, config.databaseURL != nil, try await DatabaseRoles.runtimeCanChangeSchema(app.db) {
+        throw ServerConfigError.invalid("DATABASE_URL (the runtime role can change the schema; use a data-only role and DATABASE_MIGRATION_URL for migrations)")
+    }
     PolicyRegistration.configure(app, config: config)
     VerifyRegistration.configure(app, config: config)
     if config.databaseURL == nil || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
@@ -128,13 +134,15 @@ public struct Overrides: Sendable {
     public var emailSender: (any EmailSender)?
     /// Domain checks for onboarding (DNS TXT and well-known file). `nil` = the network checker.
     public var domainChecker: (any DomainChecker)?
+    /// Cloud API calls of the audit-head export. `nil` = the real HTTPS client.
+    public var outboundHTTP: (any OutboundHTTP)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,
                 rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false,
                 passSigner: (any PassSigner)? = nil, passPush: (any PassPushSender)? = nil,
                 integrity: (any DeviceIntegrityVerifier)? = nil, emailSender: (any EmailSender)? = nil,
-                domainChecker: (any DomainChecker)? = nil) {
+                domainChecker: (any DomainChecker)? = nil, outboundHTTP: (any OutboundHTTP)? = nil) {
         self.clock = clock
         self.apns = apns
         self.sms = sms
@@ -148,6 +156,7 @@ public struct Overrides: Sendable {
         self.integrity = integrity
         self.emailSender = emailSender
         self.domainChecker = domainChecker
+        self.outboundHTTP = outboundHTTP
     }
 }
 

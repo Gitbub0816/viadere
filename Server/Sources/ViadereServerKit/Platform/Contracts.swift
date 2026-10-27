@@ -74,7 +74,8 @@ struct ContractService {
     }
 
     func statuses(businessId: UUID, documents: [LegalDocument]? = nil) async throws -> [Status] {
-        let docs = try await documents ?? required(businessId: businessId)
+        let docs: [LegalDocument]
+        if let documents { docs = documents } else { docs = try await required(businessId: businessId) }
         let accepted = try await ContractAcceptanceRecord.query(on: db).filter(\.$businessId == businessId).all()
         return docs.map { document in
             let valid = accepted.filter { $0.slug == document.slug && LegalCatalog.compare($0.version, document.materialSince) >= 0 }

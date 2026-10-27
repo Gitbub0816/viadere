@@ -29,6 +29,8 @@ final class InteractionRecord: Model, @unchecked Sendable {
     @OptionalField(key: "decided_at") var decidedAt: Date?
     @OptionalField(key: "outcome_json") var outcomeJSON: String?
     @Field(key: "expiry_notified") var expiryNotified: Bool
+    /// The retention job replaced the payload and outcome with placeholders (WP6).
+    @Field(key: "content_erased") var contentErased: Bool
 
     init() {}
 
@@ -51,6 +53,7 @@ final class InteractionRecord: Model, @unchecked Sendable {
         createdAt = interaction.createdAt
         expiresAt = interaction.expiresAt
         expiryNotified = false
+        contentErased = false
     }
 
     func interaction() throws -> Interaction {
@@ -143,6 +146,8 @@ final class ConversationMessageRecord: Model, @unchecked Sendable {
     @OptionalField(key: "delivered_at") var deliveredAt: Date?
     @OptionalField(key: "read_at") var readAt: Date?
     @OptionalField(key: "interaction_id") var interactionId: UUID?
+    /// The retention job replaced the body with a placeholder (WP6).
+    @Field(key: "content_erased") var contentErased: Bool
     /// Business-supplied idempotency key (business → consumer messages).
     @OptionalField(key: "idempotency_key") var idempotencyKey: String?
     @OptionalField(key: "request_hash") var requestHash: String?

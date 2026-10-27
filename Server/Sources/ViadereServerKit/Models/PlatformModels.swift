@@ -78,6 +78,8 @@ final class DashboardSessionRecord: Model, @unchecked Sendable {
     /// A short, fixed-vocabulary description such as "Safari on macOS".
     @OptionalField(key: "ua_label") var uaLabel: String?
     @OptionalField(key: "country") var country: String?
+    /// `lastSeenAt` as it was before the current request refreshed it (not stored). Privileged operations compare it with the inactivity timeout.
+    var priorSeenAt: Date?
 
     init() {}
 }

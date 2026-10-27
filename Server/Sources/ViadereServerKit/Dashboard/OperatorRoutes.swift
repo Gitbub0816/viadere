@@ -70,7 +70,10 @@ enum OperatorRoutes {
             """)
         }
         let ceremonies = routes.grouped(authLimiter)
-        @Sendable func session(_ created: DashboardSessionStore.Created, _ req: Request) -> Response {
+        @Sendable func session(_ created: DashboardSessionStore.Created, _ req: Request) async -> Response {
+            if let user = try? await DashboardUserRecord.find(created.record.userId, on: req.db) {
+                await SessionSecurity(db: req.db, ctx: req.ctx).recordSignIn(session: created.record, user: user, client: ClientContext(req), realm: .operator)
+            }
             let response = DashboardResponses.json(["redirect": "/operator"])
             response.cookies[DashboardRealm.operator.cookieName] = DashboardSessionStore(db: req.db, ctx: req.ctx).cookie(for: created, realm: .operator)
             return response
@@ -80,7 +83,7 @@ enum OperatorRoutes {
         }
         ceremonies.post("operator", "auth", "login", "finish") { req in
             let body: PasskeyLoginFinishRequest = try req.decodeBody()
-            return session(try await DashboardAuthService(db: req.db, ctx: req.ctx).loginFinish(realm: .operator, body, previousCookie: req.requireCookie(.operator)), req)
+            return await session(try await DashboardAuthService(db: req.db, ctx: req.ctx).loginFinish(realm: .operator, body, previousCookie: req.requireCookie(.operator)), req)
         }
         ceremonies.post("operator", "auth", "enroll", "begin") { req in
             let body: EnrollBeginBody = try req.decodeBody()
@@ -88,7 +91,7 @@ enum OperatorRoutes {
         }
         ceremonies.post("operator", "auth", "enroll", "finish") { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
-            return session(try await DashboardAuthService(db: req.db, ctx: req.ctx).enrollFinish(body, previousCookie: req.requireCookie(.operator)), req)
+            return await session(try await DashboardAuthService(db: req.db, ctx: req.ctx).enrollFinish(body, previousCookie: req.requireCookie(.operator)), req)
         }
         let json = routes.grouped(DashboardAuthMiddleware(realm: .operator, json: true))
         json.post("operator", "auth", "reauth", "begin") { req in
@@ -162,6 +165,7 @@ enum OperatorRoutes {
             return DashboardResponses.redirect("/operator/businesses/\(id.uuidString.lowercased())?m=throttle")
         }
         pages.get("operator", "abuse") { req in try await abuse(req) }
+        OperatorOps.register(pages)
     }
 
     private static func operatorPrincipal(_ req: Request) throws -> DashboardPrincipal {
@@ -183,8 +187,9 @@ enum OperatorRoutes {
                     DashboardUI.esc(b?.category.replacingOccurrences(of: "_", with: " ") ?? ""), DashboardUI.esc(a.requestedHandle.map { "@" + $0 } ?? "—"),
                     DashboardUI.esc(a.website ?? "—"), DashboardFormat.date(a.submittedAt)]
         }
+        let queues = try await OperatorOps.queues(req)
         return DashboardUI.operatorPage(p, title: "Applications", active: "/operator", subtitle: "Pending business verification.", flash: DashboardFormat.flash(req),
-                                        body: "<div class=\"card\">\(DashboardFormat.table(["Organization", "Category", "Handle", "Website", "Submitted"], rows, empty: "No pending applications."))</div>")
+                                        body: "<div class=\"card\">\(DashboardFormat.table(["Organization", "Category", "Handle", "Website", "Submitted"], rows, empty: "No pending applications.", caption: "Pending applications"))</div>" + queues)
     }
 
     private static func application(_ req: Request) async throws -> Response {
@@ -240,7 +245,7 @@ enum OperatorRoutes {
         guard let business = try await BusinessRecord.find(id, on: req.db) else { throw APIError.notFound }
         let controls = try await BusinessControls.load(id, on: req.db)
         let m = try await AbuseService(db: req.db, ctx: req.ctx).metrics(for: id)
-        let settings = req.ctx.config.abuse
+        let settings = await AbuseService(db: req.db, ctx: req.ctx).thresholds()
         let tiles = """
         <div class="grid">\(DashboardFormat.stat(String(m.issued), "Interactions (window)"))\(DashboardFormat.stat(DashboardFormat.percent(m.complaintRate), "Complaint rate (limit \(DashboardFormat.percent(settings.complaintRate)))"))\
         \(DashboardFormat.stat(DashboardFormat.percent(m.optOutRate), "Opt-out rate (limit \(DashboardFormat.percent(settings.optOutRate)))"))\(DashboardFormat.stat(String(m.rateLimitHits), "Rate-limit hits"))</div>
@@ -267,7 +272,8 @@ enum OperatorRoutes {
         <p><button class="btn s" type="submit">\(controls?.throttled == true ? "Clear throttle (currently \(DashboardUI.esc(controls?.throttleSource ?? "")))" : "Throttle")</button></p></form></div></div>
         """
         let entitlements = PolicyOperatorRoutes.summaryCard(businessId: id, snapshot: try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: id))
-        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", flash: DashboardFormat.flash(req), body: tiles + status + entitlements + controlsCard)
+        let ops = try await OperatorOps.businessPanel(req, p: p, business: business)
+        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", flash: DashboardFormat.flash(req), body: tiles + status + ops + entitlements + controlsCard)
     }
 
     private static func abuse(_ req: Request) async throws -> Response {
@@ -285,7 +291,7 @@ enum OperatorRoutes {
              DashboardFormat.percent(m.complaintRate), String(m.optOuts), DashboardFormat.percent(m.optOutRate), String(m.rateLimitHits),
              c?.throttled == true ? DashboardFormat.badge("Throttled: \(c?.throttleReason ?? "")", "dg") : DashboardFormat.badge("OK", "ok")]
         }
-        let days = Int(req.ctx.config.abuse.window / 86_400)
+        let days = Int(await AbuseService(db: req.db, ctx: req.ctx).thresholds().window / 86_400)
         return DashboardUI.operatorPage(p, title: "Abuse signals", active: "/operator/abuse", subtitle: "Last \(days) days. Aggregates only.",
             body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Issued", "Reports", "Complaint rate", "Opt-outs", "Opt-out rate", "Rate-limit hits", "State"], rows))</div>")
     }

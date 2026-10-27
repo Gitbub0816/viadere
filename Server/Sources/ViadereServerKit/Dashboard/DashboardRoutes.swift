@@ -50,22 +50,6 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
 
 // MARK: - Forms
 
-private struct CreateKeyForm: Content {
-    var name: String
-    var mode: String?
-    var scopes: [String]?
-    /// Capability scopes (`capabilities[]`), chosen within the organization's entitlements.
-    var capabilities: [String]?
-    /// `1` when the form showed the capability boxes: an empty selection then means "none" rather than "default".
-    var capabilitiesChosen: String?
-    var expires: Int?
-}
-
-private struct CreateWebhookForm: Content {
-    var url: String
-    var events: [String]?
-}
-
 private struct CampaignForm: Content {
     var campaign: String
     var action: String?
@@ -134,7 +118,11 @@ enum DashboardRoutes {
         pub.get("dashboard", "verify") { _ in verifyPage() }
 
         let ceremonies = routes.grouped(authLimiter)
-        @Sendable func sessionResponse(_ created: DashboardSessionStore.Created, req: Request, realm: DashboardRealm) throws -> Response {
+        @Sendable func sessionResponse(_ created: DashboardSessionStore.Created, req: Request, realm: DashboardRealm) async throws -> Response {
+            // Record where the sign-in came from and warn the person (and the organization's security contacts) if it is new.
+            if let user = try await DashboardUserRecord.find(created.record.userId, on: req.db) {
+                await SessionSecurity(db: req.db, ctx: req.ctx).recordSignIn(session: created.record, user: user, client: ClientContext(req), realm: realm)
+            }
             let response = DashboardResponses.json(["redirect": realm.home])
             response.cookies[realm.cookieName] = DashboardSessionStore(db: req.db, ctx: req.ctx).cookie(for: created, realm: realm)
             return response
@@ -189,7 +177,7 @@ enum DashboardRoutes {
         ceremonies.post("dashboard", "auth", "login", "finish") { req in
             let body: PasskeyLoginFinishRequest = try req.decodeBody()
             let created = try await DashboardAuthService(db: req.db, ctx: req.ctx).loginFinish(realm: .business, body, previousCookie: req.requireCookie(.business))
-            return try sessionResponse(created, req: req, realm: .business)
+            return try await sessionResponse(created, req: req, realm: .business)
         }
         ceremonies.post("dashboard", "auth", "invite", "begin") { req in
             let body: InviteBeginBody = try req.decodeBody()
@@ -198,7 +186,7 @@ enum DashboardRoutes {
         ceremonies.post("dashboard", "auth", "invite", "finish") { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
             let created = try await DashboardAuthService(db: req.db, ctx: req.ctx).inviteFinish(body, previousCookie: req.requireCookie(.business))
-            return try sessionResponse(created, req: req, realm: .business)
+            return try await sessionResponse(created, req: req, realm: .business)
         }
 
         // MARK: Authenticated JSON (re-authentication)
@@ -224,28 +212,6 @@ enum DashboardRoutes {
         }
 
         pages.get("dashboard") { req in try await overview(req) }
-        pages.get("dashboard", "api-keys") { req in try await apiKeysPage(req) }
-        pages.post("dashboard", "api-keys") { req in try await createKey(req) }
-        pages.post("dashboard", "api-keys", ":id", "revoke") { req -> Response in
-            let (p, _) = try req.businessDashboard
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).revokeAPIKey(id: try req.uuid("id"))
-            return DashboardResponses.redirect("/dashboard/api-keys?m=revoked")
-        }
-        pages.get("dashboard", "webhooks") { req in try await webhooksPage(req) }
-        pages.post("dashboard", "webhooks") { req in try await createWebhook(req) }
-        pages.post("dashboard", "webhooks", ":id", "rotate") { req in try await rotateWebhook(req) }
-        pages.post("dashboard", "webhooks", ":id", "delete") { req -> Response in
-            let (p, _) = try req.businessDashboard
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).deleteWebhook(id: try req.uuid("id"))
-            return DashboardResponses.redirect("/dashboard/webhooks?m=deleted")
-        }
-        pages.get("dashboard", "webhooks", "deliveries") { req in try await deliveriesPage(req) }
-        pages.get("dashboard", "webhooks", "deliveries", ":id") { req in try await deliveryPage(req) }
-        pages.post("dashboard", "webhooks", "deliveries", ":id", "replay") { req -> Response in
-            let (p, _) = try req.businessDashboard
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).replayDelivery(id: try req.uuid("id"))
-            return DashboardResponses.redirect("/dashboard/webhooks/deliveries?m=replayed")
-        }
         pages.get("dashboard", "templates") { req in try await templatesPage(req) }
         pages.get("dashboard", "campaigns") { req in try await campaignsPage(req) }
         pages.post("dashboard", "campaigns") { req in try await createCampaign(req) }
@@ -262,8 +228,9 @@ enum DashboardRoutes {
         pages.post("dashboard", "team", "members", ":id", "role") { req -> Response in
             let (p, _) = try req.businessDashboard
             let form = try req.content.decode(RoleForm.self)
-            guard let role = OrgRole(rawValue: form.role) else { throw APIError.validation("Choose a valid role.") }
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).changeRole(membershipId: try req.uuid("id"), to: role)
+            guard let role = OrgRole.parse(form.role) else { throw APIError.validation("Choose a valid role.") }
+            let change = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).changeRole(membershipId: try req.uuid("id"), to: role)
+            if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/team?m=pending") }
             return DashboardResponses.redirect("/dashboard/team?m=role")
         }
         pages.post("dashboard", "team", "members", ":id", "remove") { req -> Response in
@@ -286,7 +253,7 @@ enum DashboardRoutes {
             return DashboardResponses.redirect("/dashboard?m=switched")
         }
         pages.get("dashboard", "billing") { req in try await billingPage(req) }
-        pages.get("dashboard", "organization") { req in try await organizationPage(req) }
+        ConsoleRoutes.register(pages)
         pages.post("dashboard", "organization") { req -> Response in
             let (p, _) = try req.businessDashboard
             let form = try req.content.decode(ApplicationForm.self)
@@ -379,172 +346,6 @@ enum DashboardRoutes {
         let note = "<p class=\"mu sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>"
         return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "The last \(o.days) days", actions: periods,
                                         flash: DashboardFormat.flash(req), body: tiles + chart + byKind + verifyCard + note)
-    }
-
-    // MARK: API keys
-
-    private static func apiKeysPage(_ req: Request) async throws -> Response {
-        let (p, businessId) = try req.businessDashboard
-        try p.require(.viewAPIKeys)
-        let keys = try await BusinessAPIKeyRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$createdAt, .descending).all()
-        let now = req.ctx.now
-        let rows = keys.map { key -> [String] in
-            let status: String
-            if key.revokedAt != nil { status = DashboardFormat.badge("Revoked", "dg") }
-            else if let exp = key.expiresAt, exp <= now { status = DashboardFormat.badge("Expired", "mu") }
-            else { status = DashboardFormat.badge(key.livemode ? "Live" : "Test", key.livemode ? "ok" : "mu") }
-            var action = ""
-            if key.revokedAt == nil, p.can(.manageAPIKeys), let id = key.id {
-                action = "<form method=\"post\" action=\"/dashboard/api-keys/\(id.uuidString.lowercased())/revoke\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Revoke</button></form>"
-            }
-            return [DashboardUI.esc(key.name), "<code>\(DashboardUI.esc(key.prefix))…\(DashboardUI.esc(key.last4))</code>",
-                    DashboardUI.esc(key.scopes.replacingOccurrences(of: ",", with: " ")),
-                    key.capabilities.isEmpty ? "<span class=\"mu\">none</span>" : "<code>\(DashboardUI.esc(key.capabilities.replacingOccurrences(of: ",", with: " ")))</code>",
-                    DashboardFormat.optional(key.lastUsedAt),
-                    DashboardFormat.date(key.createdAt), status, action]
-        }
-        var form = ""
-        if p.can(.manageAPIKeys) {
-            if p.business?.isVerified == true {
-                let scopes = BusinessAPIKeys.Scope.all.map { scope in
-                    "<label class=\"ck\"><input type=\"checkbox\" name=\"scopes[]\" value=\"\(scope)\"\(scope == "interactions:write" || scope == "interactions:read" ? " checked" : "")> <code>\(scope)</code></label>"
-                }.joined()
-                let entitled = try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: businessId)
-                let capabilityBoxes = CapabilityCatalog.definitions.map { definition -> String in
-                    let capability = definition.capability
-                    let isEntitled = entitled.capabilities.contains(capability) && entitled.tiers.contains(definition.minimumTier)
-                    let checked = Capability.messaging.contains(capability) ? " checked" : ""
-                    return "<label class=\"ck\"><input type=\"checkbox\" name=\"capabilities[]\" value=\"\(capability.rawValue)\"\(isEntitled ? checked : " disabled")> <code>\(capability.rawValue)</code>"
-                        + (isEntitled ? "" : " <span class=\"mu sm\">not enabled for your organization</span>") + "</label>"
-                }.joined()
-                form = """
-                <div class="card"><h2>Create a key</h2><form method="post" action="/dashboard/api-keys">\(DashboardUI.csrf(p))\
-                <div class="cols"><div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="64" required placeholder="Production server"></div>\
-                <div><label for="mode">Mode</label><select id="mode" name="mode"><option value="test">Test (no real delivery)</option><option value="live">Live</option></select></div>\
-                <div><label for="expires">Expires</label><select id="expires" name="expires"><option value="0">Never</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option></select></div></div>\
-                <label>Scopes</label>\(scopes)<label>Capabilities</label><input type="hidden" name="capabilitiesChosen" value="1">\(capabilityBoxes)\
-                <p class="mu sm">Give a key only the scopes and capabilities it needs. A key can never do more than your organization is entitled to, and it loses a capability the moment Viadere withdraws the entitlement. Creating a key asks you to confirm with your passkey. The secret is shown once.</p>\
-                <button class="btn" type="submit">Create key</button></form></div>
-                """
-            } else {
-                form = "<div class=\"notice\">Keys can be created after Viadere verifies your organization.</div>"
-            }
-        }
-        let table = "<div class=\"card\"><h2>Keys</h2>\(DashboardFormat.table(["Name", "Key", "Scopes", "Capabilities", "Last used", "Created", "Status", ""], rows, empty: "No keys yet."))</div>"
-        return DashboardUI.businessPage(p, title: "API keys", active: "/dashboard/api-keys", subtitle: "Credentials for your server integration.",
-                                        flash: DashboardFormat.flash(req), body: form + table)
-    }
-
-    private static func createKey(_ req: Request) async throws -> Response {
-        let (p, _) = try req.businessDashboard
-        let form = try req.content.decode(CreateKeyForm.self)
-        let issued = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).createAPIKey(
-            name: form.name, live: form.mode == "live", scopes: form.scopes ?? [],
-            capabilities: form.capabilitiesChosen == "1" ? (form.capabilities ?? []) : form.capabilities, expiresInDays: form.expires)
-        let body = """
-        <div class="card"><h2>Copy your key now</h2><p>This is the only time the full key is shown. Store it in your secrets manager.</p>\
-        <div class="secret mono">\(DashboardUI.esc(issued.key))</div>\
-        <p class="mu sm">Name: \(DashboardUI.esc(issued.record.name)) · Scopes: \(DashboardUI.esc(issued.record.scopes.replacingOccurrences(of: ",", with: " "))) · Capabilities: \(DashboardUI.esc(issued.record.capabilities.replacingOccurrences(of: ",", with: " ").isEmpty ? "none" : issued.record.capabilities.replacingOccurrences(of: ",", with: " "))) · \(issued.record.livemode ? "Live" : "Test")</p>\
-        <p><a class="btn s" href="/dashboard/api-keys">Done</a></p></div>
-        """
-        return DashboardUI.businessPage(p, title: "New API key", active: "/dashboard/api-keys", body: body)
-    }
-
-    // MARK: Webhooks
-
-    private static func webhooksPage(_ req: Request) async throws -> Response {
-        let (p, businessId) = try req.businessDashboard
-        try p.require(.viewWebhooks)
-        let subs = try await WebhookSubscriptionRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$active == true)
-            .sort(\.$createdAt, .descending).all()
-        let rows = subs.map { sub -> [String] in
-            var actions = ""
-            if p.can(.manageWebhooks), let id = sub.id?.uuidString.lowercased() {
-                actions = "<div class=\"row\"><form method=\"post\" action=\"/dashboard/webhooks/\(id)/rotate\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Rotate secret</button></form>"
-                    + "<form method=\"post\" action=\"/dashboard/webhooks/\(id)/delete\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Delete</button></form></div>"
-            }
-            return ["<code>\(DashboardUI.esc(sub.url))</code>", DashboardUI.esc(sub.events.replacingOccurrences(of: ",", with: ", ")),
-                    DashboardFormat.date(sub.createdAt), actions]
-        }
-        var form = ""
-        if p.can(.manageWebhooks) {
-            if p.business?.isVerified == true {
-                let events = WebhookService.knownEvents.map { "<label class=\"ck\"><input type=\"checkbox\" name=\"events[]\" value=\"\($0.rawValue)\" checked> <code>\($0.rawValue)</code></label>" }.joined()
-                form = """
-                <div class="card"><h2>Add an endpoint</h2><form method="post" action="/dashboard/webhooks">\(DashboardUI.csrf(p))\
-                <label for="url">HTTPS URL</label><input id="url" name="url" type="url" required placeholder="https://example.com/viadere/webhooks" maxlength="500">\
-                <label>Events</label>\(events)<p class="mu sm">Each delivery is signed with <code>Viadere-Signature</code>. The signing secret is shown once, after you confirm with your passkey.</p>\
-                <button class="btn" type="submit">Add endpoint</button></form></div>
-                """
-            } else {
-                form = "<div class=\"notice\">Webhooks can be added after Viadere verifies your organization.</div>"
-            }
-        }
-        let list = "<div class=\"card\"><h2>Endpoints</h2>\(DashboardFormat.table(["URL", "Events", "Created", ""], rows, empty: "No endpoints yet."))</div>"
-        return DashboardUI.businessPage(p, title: "Webhooks", active: "/dashboard/webhooks", subtitle: "Signed event delivery with retries and a dead-letter queue.",
-                                        actions: "<a class=\"btn s sm\" href=\"/dashboard/webhooks/deliveries\">Delivery log</a>",
-                                        flash: DashboardFormat.flash(req), body: form + list)
-    }
-
-    private static func secretPage(_ p: DashboardPrincipal, response: WebhookSecretResponse, heading: String) -> Response {
-        let body = """
-        <div class="card"><h2>\(DashboardUI.esc(heading))</h2><p>This signing secret is shown once. Verify the <code>Viadere-Signature</code> header with it.</p>\
-        <div class="secret mono">\(DashboardUI.esc(response.secret))</div><p class="mu sm">Endpoint: <code>\(DashboardUI.esc(response.subscription.url.absoluteString))</code></p>\
-        <p><a class="btn s" href="/dashboard/webhooks">Done</a></p></div>
-        """
-        return DashboardUI.businessPage(p, title: "Webhook secret", active: "/dashboard/webhooks", body: body)
-    }
-
-    private static func createWebhook(_ req: Request) async throws -> Response {
-        let (p, _) = try req.businessDashboard
-        let form = try req.content.decode(CreateWebhookForm.self)
-        let created = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).createWebhook(url: form.url, events: form.events ?? [])
-        return secretPage(p, response: created, heading: "Endpoint added")
-    }
-
-    private static func rotateWebhook(_ req: Request) async throws -> Response {
-        let (p, _) = try req.businessDashboard
-        let rotated = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).rotateWebhook(id: try req.uuid("id"))
-        return secretPage(p, response: rotated, heading: "Secret rotated")
-    }
-
-    private static func deliveriesPage(_ req: Request) async throws -> Response {
-        let (p, businessId) = try req.businessDashboard
-        try p.require(.viewWebhooks)
-        let deliveries = try await WebhookDeliveryRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$createdAt, .descending).limit(50).all()
-        let rows = deliveries.map { d -> [String] in
-            let id = d.id?.uuidString.lowercased() ?? ""
-            let kind = d.status == "succeeded" ? "ok" : (d.status == "dead" ? "dg" : "mu")
-            var action = "<a href=\"/dashboard/webhooks/deliveries/\(id)\">View</a>"
-            if d.status == "dead", p.can(.manageWebhooks) {
-                action += " <form method=\"post\" action=\"/dashboard/webhooks/deliveries/\(id)/replay\" class=\"row\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Replay</button></form>"
-            }
-            return [DashboardUI.esc(d.eventType), DashboardFormat.badge(d.status, kind), String(d.attempts), d.lastStatusCode.map(String.init) ?? "—",
-                    DashboardUI.esc(d.lastError ?? "—"), DashboardFormat.date(d.createdAt), action]
-        }
-        let body = "<div class=\"card\">\(DashboardFormat.table(["Event", "Status", "Attempts", "Last HTTP", "Last error", "Created", ""], rows, empty: "No deliveries yet."))</div>"
-        return DashboardUI.businessPage(p, title: "Delivery log", active: "/dashboard/webhooks", subtitle: "The 50 most recent deliveries. Payloads are redacted.",
-                                        actions: "<a class=\"btn s sm\" href=\"/dashboard/webhooks\">Endpoints</a>", flash: DashboardFormat.flash(req), body: body)
-    }
-
-    private static func deliveryPage(_ req: Request) async throws -> Response {
-        let (p, businessId) = try req.businessDashboard
-        try p.require(.viewWebhooks)
-        let id = try req.uuid("id")
-        guard let d = try await WebhookDeliveryRecord.query(on: req.db).filter(\.$id == id).filter(\.$businessId == businessId).first() else { throw APIError.notFound }
-        let attempts = try await WebhookAttemptRecord.query(on: req.db).filter(\.$deliveryId == id).sort(\.$attempt, .ascending).all()
-        let attemptRows = attempts.map { [String($0.attempt), DashboardFormat.date($0.attemptedAt), $0.statusCode.map(String.init) ?? "—", "\($0.durationMs) ms", DashboardUI.esc($0.error ?? "—")] }
-        var replay = ""
-        if d.status == "dead", p.can(.manageWebhooks) {
-            replay = "<form method=\"post\" action=\"/dashboard/webhooks/deliveries/\(id.uuidString.lowercased())/replay\">\(DashboardUI.csrf(p))<button class=\"btn\" type=\"submit\">Replay this delivery</button></form>"
-        }
-        let body = """
-        <div class="card"><h2>\(DashboardUI.esc(d.eventType)) \(DashboardFormat.badge(d.status, d.status == "succeeded" ? "ok" : (d.status == "dead" ? "dg" : "mu")))</h2>\
-        <p class="mu sm">Created \(DashboardFormat.date(d.createdAt)) · \(d.attempts) attempt(s)</p>\
-        <h3>Payload (redacted)</h3><pre>\(DashboardUI.esc(PayloadRedactor.display(body: WebhookService(db: req.db, ctx: req.ctx).deliveryBody(d).map { String(decoding: $0, as: UTF8.self) } ?? "")))</pre>\(replay)</div>\
-        <div class="card"><h2>Attempts</h2>\(DashboardFormat.table(["#", "When", "HTTP", "Duration", "Error"], attemptRows, empty: "No attempts yet."))</div>
-        """
-        return DashboardUI.businessPage(p, title: "Delivery", active: "/dashboard/webhooks", actions: "<a class=\"btn s sm\" href=\"/dashboard/webhooks/deliveries\">Back</a>", body: body)
     }
 
     // MARK: Templates
@@ -665,14 +466,14 @@ enum DashboardRoutes {
         let byId = Dictionary(users.compactMap { u in u.id.map { ($0, u) } }, uniquingKeysWith: { a, _ in a })
         let ctx = req.ctx
         let canManage = p.can(.manageTeam)
-        let assignable = OrgRole.allCases.sorted(by: >).filter { p.role == .owner || $0 != .owner }
+        let assignable = OrgRole.allCases.sorted(by: >).filter { p.role?.grantableRoles.contains($0) == true }
         let memberRows = members.map { m -> [String] in
             let user = byId[m.userId]
             let email = user.flatMap { try? ctx.cipher.openString($0.emailCiphertext, context: "dashboard_users.email", rowId: $0.id!) } ?? ""
             let isSelf = m.userId == p.user.id
             var role = DashboardFormat.badge(OrgRole(rawValue: m.role)?.title ?? m.role)
             var actions = ""
-            let touchable = canManage && !isSelf && (p.role == .owner || m.role != OrgRole.owner.rawValue)
+            let touchable = canManage && !isSelf && (OrgRole(rawValue: m.role).map { p.role?.grantableRoles.contains($0) == true } ?? false)
             if touchable, let id = m.id?.uuidString.lowercased() {
                 let options = assignable.map { "<option value=\"\($0.rawValue)\"\($0.rawValue == m.role ? " selected" : "")>\($0.title)</option>" }.joined()
                 role = "<form method=\"post\" action=\"/dashboard/team/members/\(id)/role\" class=\"row\">\(DashboardUI.csrf(p))<select name=\"role\" aria-label=\"Role\">\(options)</select><button class=\"btn s sm\" type=\"submit\">Save</button></form>"
@@ -701,18 +502,19 @@ enum DashboardRoutes {
             <button class="btn" type="submit">Send invitation</button></form></div>
             """
         }
-        let roles = OrgRole.allCases.sorted(by: >).map { "<tr><td><strong>\($0.title)</strong></td><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
+        let roles = OrgRole.allCases.sorted(by: >).map { "<tr><th scope=\"row\">\($0.title)</th><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
         let body = form + "<div class=\"card\"><h2>Members</h2>\(DashboardFormat.table(["Name", "Email", "Role", "Joined", ""], memberRows))</div>"
             + "<div class=\"card\"><h2>Pending invitations</h2>\(DashboardFormat.table(["Email", "Role", "Expires", ""], inviteRows, empty: "None."))</div>"
-            + "<div class=\"card\"><h2>Roles</h2><div class=\"tw\"><table><tbody>\(roles)</tbody></table></div></div>"
+            + "<div class=\"card\"><h2>Roles</h2><div class=\"tw\"><table><caption class=\"vh\">Roles and what they can do</caption><tbody>\(roles)</tbody></table></div></div>"
         return DashboardUI.businessPage(p, title: "Team", active: "/dashboard/team", subtitle: "Everyone signs in with their own passkey.", flash: DashboardFormat.flash(req), body: body)
     }
 
     private static func invite(_ req: Request) async throws -> Response {
         let (p, _) = try req.businessDashboard
         let form = try req.content.decode(InviteForm.self)
-        guard let role = OrgRole(rawValue: form.role) else { throw APIError.validation("Choose a valid role.") }
-        try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).invite(email: form.email, role: role)
+        guard let role = OrgRole.parse(form.role) else { throw APIError.validation("Choose a valid role.") }
+        let change = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).invite(email: form.email, role: role)
+        if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/team?m=pending") }
         let body = """
         <div class="card"><h2>Invitation sent</h2><p>We emailed a single-use link to the address you entered. It expires in \(Int(req.ctx.config.dashboard.inviteTTL / 86_400)) days. \
         To join, your teammate opens it and confirms a code that we email to the same address.</p><p><a class="btn s" href="/dashboard/team">Done</a></p></div>
@@ -742,39 +544,5 @@ enum DashboardRoutes {
         <p class="mu sm">\(DashboardFormat.date(invoice.periodStart)) – \(DashboardFormat.date(invoice.periodEnd)). This is a usage preview, not an invoice: no payment processor is connected, rates are configurable and final pricing is not yet set. Your plan affects quotas only — it never changes the priority of your messages or bypasses a customer's consent.</p></div>
         """
         return DashboardUI.businessPage(p, title: "Billing and usage", active: "/dashboard/billing", subtitle: "Metered usage and an invoice preview for this month.", body: body)
-    }
-
-    // MARK: Organization
-
-    private static func organizationPage(_ req: Request) async throws -> Response {
-        let (p, businessId) = try req.businessDashboard
-        try p.require(.manageOrganization)
-        guard let business = p.business else { throw APIError.notFound }
-        let application = try await BusinessApplicationRecord.query(on: req.db).filter(\.$businessId == businessId).first()
-        var body = "<div class=\"card\"><h2>\(DashboardUI.esc(business.displayName)) \(DashboardFormat.statusBadge(business.status))</h2>"
-        if business.isVerified {
-            let summary = try await DirectoryService(db: req.db).summary(for: business)
-            body += "<p>Handle: <strong>\(DashboardUI.esc(summary?.handle?.display ?? "none"))</strong> · Code: <strong>\(DashboardUI.esc(summary?.code.display ?? ""))</strong></p>"
-            body += "<p class=\"mu sm\">Verified \(DashboardFormat.optional(business.verifiedAt)). Your permanent code is never reassigned.</p>"
-        } else if let application {
-            switch application.state {
-            case "pending": body += "<p>Your application was submitted \(DashboardFormat.date(application.submittedAt)) and is awaiting review. Handles and codes are issued only after verification.</p>"
-            case "rejected":
-                body += "<div class=\"notice dg\">Your application was declined\(application.decisionNote.map { ": " + DashboardUI.esc($0) } ?? ".")</div>"
-                body += """
-                <form method="post" action="/dashboard/organization">\(DashboardUI.csrf(p))\
-                <label for="legalName">Legal name</label><input id="legalName" name="legalName" type="text" maxlength="120" value="\(DashboardUI.esc(application.legalName ?? ""))">\
-                <label for="website">Website (https)</label><input id="website" name="website" type="url" maxlength="200" value="\(DashboardUI.esc(application.website ?? ""))">\
-                <label for="requestedHandle">Requested handle</label><input id="requestedHandle" name="requestedHandle" type="text" maxlength="30" value="\(DashboardUI.esc(application.requestedHandle ?? ""))">\
-                <label for="description">What will you use Viadere for?</label><textarea id="description" name="description" maxlength="500">\(DashboardUI.esc(application.detail ?? ""))</textarea>\
-                <p><button class="btn" type="submit">Apply again</button></p></form>
-                """
-            default: body += "<p>Status: \(DashboardUI.esc(application.state)).</p>"
-            }
-        } else {
-            body += "<p>This organization is \(DashboardUI.esc(business.verificationStatus)).</p>"
-        }
-        body += "</div>"
-        return DashboardUI.businessPage(p, title: "Organization", active: "/dashboard/organization", flash: DashboardFormat.flash(req), body: body)
     }
 }

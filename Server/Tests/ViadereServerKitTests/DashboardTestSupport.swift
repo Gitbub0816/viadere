@@ -182,7 +182,24 @@ extension TestHarness {
     /// Verifies an organization the way an operator does (handle and code are issued here).
     @discardableResult
     func verifyOrganization(_ businessId: UUID) async throws -> BusinessRecord {
-        try await BusinessOnboarding(db: db, ctx: ctx).approve(businessId: businessId, operatorId: UUID(), handleOverride: nil, note: nil)
+        let business = try await BusinessOnboarding(db: db, ctx: ctx).approve(businessId: businessId, operatorId: UUID(), handleOverride: nil, note: nil)
+        try await markProductionReady(businessId)
+        return business
+    }
+
+    /// Test fixture: the onboarding steps after the application's approval (domain, legal entity, go-live) are recorded as done, so suites that are
+    /// not about onboarding can use production keys. `OnboardingTests` walks the real steps instead.
+    func markProductionReady(_ businessId: UUID) async throws {
+        let row = try await OnboardingService(db: db, ctx: ctx).row(businessId)
+        row.controlVerifiedAt = row.controlVerifiedAt ?? clock.now()
+        row.controlMethod = row.controlMethod ?? "dns"
+        row.controlDomain = row.controlDomain ?? "fixture.example.com"
+        row.legalStatus = "approved"
+        row.enhancedStatus = row.enhancedStatus == "pending" ? "approved" : row.enhancedStatus
+        row.goLiveStatus = "approved"
+        row.goLiveDecidedAt = clock.now()
+        row.goLiveDecidedBy = "fixture"
+        try await row.update(on: db)
     }
 
     /// Reads a hidden CSRF input out of an HTML page.
@@ -247,8 +264,8 @@ extension TestHarness {
 
     /// Pulls the one-time secret out of a "copy it now" page.
     func shownSecret(_ html: String) -> String? {
-        guard let r = html.range(of: "class=\"secret mono\">") else { return nil }
-        return String(html[r.upperBound...].prefix { $0 != "<" })
+        guard let r = html.range(of: "class=\"secret mono\""), let close = html[r.upperBound...].firstIndex(of: ">") else { return nil }
+        return String(html[html.index(after: close)...].prefix { $0 != "<" })
     }
 
     func get(_ session: DashSession, _ path: String) async throws -> HTTPStatus { try await page(path, session).status }

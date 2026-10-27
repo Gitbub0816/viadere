@@ -19,6 +19,9 @@ do {
     app.asyncCommands.use(AuditVerifyCommand(), as: "audit-verify")
     app.asyncCommands.use(ExportDisputeCommand(), as: "export-dispute")
     app.asyncCommands.use(ReencryptFieldsCommand(), as: "reencrypt-fields")
+    app.asyncCommands.use(RotateDataKeyCommand(), as: "rotate-data-key")
+    app.asyncCommands.use(VerifyDataKeyCommand(), as: "verify-data-key")
+    app.asyncCommands.use(AuditExportCommand(), as: "audit-export")
 } catch {
     // Configuration errors are safe to print (they name variables, never values).
     FileHandle.standardError.write(Data("Startup failed: \(error)\n".utf8))

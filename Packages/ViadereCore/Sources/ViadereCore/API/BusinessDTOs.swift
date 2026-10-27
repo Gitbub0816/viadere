@@ -430,8 +430,14 @@ public struct WebhookSubscription: Codable, Sendable, Hashable, Identifiable {
     public var envelopeVersion: String?
     /// The version of the signing secret (starts at 1, increases at every rotation); also in the `Viadere-Key-Id` header of each delivery.
     public var secretVersion: Int?
+    /// When ownership of the endpoint was proven (`/verify`). Until then it receives no events.
+    public var verifiedAt: Date?
+    /// Set while delivery to the endpoint is paused.
+    public var pausedAt: Date?
     public init(id: WebhookSubscriptionID, url: URL, events: [WebhookEventType], active: Bool, createdAt: Date, envelopeVersion: String? = nil,
-                secretVersion: Int? = nil) {
+                secretVersion: Int? = nil, verifiedAt: Date? = nil, pausedAt: Date? = nil) {
+        self.verifiedAt = verifiedAt
+        self.pausedAt = pausedAt
         self.id = id
         self.url = url
         self.events = events

@@ -14,6 +14,7 @@ enum BusinessRoutes {
             try await req.requireCapability(Capability.required(forInteractionKind: body.kind))
             try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
             let result = try await InteractionService(db: req.db, ctx: req.ctx).issue(principal: principal, request: body, headerKey: req.idempotencyHeader)
+            if !principal.livemode { try? await OnboardingService(db: req.db, ctx: req.ctx).testEventSent(businessId: principal.businessId.uuid) }
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessInteractionOutcome, scope: Scope.interactionsRead) { req in
@@ -37,6 +38,7 @@ enum BusinessRoutes {
             try await req.requireCapability(.messageSend)
             try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
             let result = try await ConversationService(db: req.db, ctx: req.ctx).businessSend(principal: principal, request: body, headerKey: req.idempotencyHeader)
+            if !principal.livemode { try? await OnboardingService(db: req.db, ctx: req.ctx).testEventSent(businessId: principal.businessId.uuid) }
             return try req.jsonResponse(result.message, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessUpdateStatus, scope: Scope.statusesWrite) { req in
@@ -48,7 +50,9 @@ enum BusinessRoutes {
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessSandboxRelationship, scope: Scope.interactionsWrite) { req in
-            let result = try await Sandbox(db: req.db).create(principal: try req.business, now: req.ctx.now, ctx: req.ctx)
+            let principal = try req.business
+            let result = try await Sandbox(db: req.db).create(principal: principal, now: req.ctx.now, ctx: req.ctx)
+            try? await OnboardingService(db: req.db, ctx: req.ctx).sandboxRelationshipCreated(businessId: principal.businessId.uuid)
             return try req.jsonResponse(result, status: .created)
         }
         routes.api(APIRoutes.businessWebhooksList, scope: Scope.webhooksManage) { req in
@@ -63,6 +67,31 @@ enum BusinessRoutes {
         routes.api(APIRoutes.businessWebhookDelete, scope: Scope.webhooksManage) { req in
             let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
             try await WebhookService(db: req.db, ctx: req.ctx).delete(businessId: try req.business.businessId, id: id)
+            return try req.emptyOK()
+        }
+        routes.api(APIRoutes.businessWebhookVerify, scope: Scope.webhooksManage) { req in
+            let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
+            let result = try await WebhookService(db: req.db, ctx: req.ctx).verifyOwnership(businessId: try req.business.businessId, id: id)
+            return try req.jsonResponse(WebhookVerificationResult(verified: result.verified, failure: result.failure))
+        }
+        routes.api(APIRoutes.businessWebhookTest, scope: Scope.webhooksManage) { req in
+            let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
+            try await WebhookService(db: req.db, ctx: req.ctx).sendTestEvent(businessId: try req.business.businessId, id: id)
+            return try req.emptyOK()
+        }
+        routes.api(APIRoutes.businessWebhookPause, scope: Scope.webhooksManage) { req in
+            let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
+            let body: PauseWebhookRequest = req.bodyBytes.isEmpty ? PauseWebhookRequest() : try req.decodeBody()
+            let principal = try req.business
+            try await WebhookService(db: req.db, ctx: req.ctx).setPaused(businessId: principal.businessId, id: id, paused: true, reason: body.reason ?? "paused through the API",
+                                                                         actor: AuditActor(kind: .business, id: principal.businessId.description))
+            return try req.emptyOK()
+        }
+        routes.api(APIRoutes.businessWebhookResume, scope: Scope.webhooksManage) { req in
+            let id: WebhookSubscriptionID = try req.uuidParameter("webhookId")
+            let principal = try req.business
+            try await WebhookService(db: req.db, ctx: req.ctx).setPaused(businessId: principal.businessId, id: id, paused: false, reason: "",
+                                                                         actor: AuditActor(kind: .business, id: principal.businessId.description))
             return try req.emptyOK()
         }
         routes.api(APIRoutes.businessWebhookRotate, scope: Scope.webhooksManage) { req in

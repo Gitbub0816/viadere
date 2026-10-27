@@ -25,7 +25,7 @@ struct WebhookService {
         return WebhookSubscription(id: WebhookSubscriptionID(id), url: url,
                                    events: record.events.split(separator: ",").map { WebhookEventType(rawValue: String($0)) },
                                    active: record.active, createdAt: record.createdAt, envelopeVersion: record.envelopeVersion,
-                                   secretVersion: record.secretVersion)
+                                   secretVersion: record.secretVersion, verifiedAt: record.verifiedAt, pausedAt: record.pausedAt)
     }
 
     func list(businessId: BusinessID) async throws -> [WebhookSubscription] {
@@ -112,6 +112,8 @@ struct WebhookService {
         let subscriptions = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
             .filter(\.$active == true).all().filter { onlySubscription == nil || $0.id == onlySubscription }
             .filter { $0.events.split(separator: ",").contains { Substring(type.rawValue) == $0 } }
+            // Ownership of the endpoint must be proven before it receives events (SEC-API-006); the check cannot be switched off in production.
+            .filter { !ctx.config.operations.webhookOwnershipVerification || $0.verifiedAt != nil }
         guard !subscriptions.isEmpty else { return }
         let now = ctx.now
         let data = try ViadereJSON.decode(JSONValue.self, from: ViadereJSON.encode(payload))
@@ -200,12 +202,22 @@ struct WebhookService {
     @discardableResult
     func deliverDue(limit: Int = 50) async throws -> Int {
         let now = ctx.now
-        let due = try await WebhookDeliveryRecord.query(on: db)
+        // Paused endpoints and businesses (G-5) keep their queued deliveries; nothing is sent until the pause is lifted. They are excluded in
+        // the query so a long pause cannot starve the other tenants out of the batch.
+        let pausedEndpoints = try await WebhookSubscriptionRecord.query(on: db).filter(\.$pausedAt != nil).all().compactMap(\.id)
+        var pausedBusinesses = try await PlatformFlagRecord.query(on: db).filter(\.$flag == PlatformFlag.webhooksPause.rawValue).all()
+        if pausedBusinesses.contains(where: { $0.scope == PlatformFlags.globalScope }) { return 0 }
+        pausedBusinesses = pausedBusinesses.filter { $0.scope != PlatformFlags.globalScope }
+        let pausedBusinessIds = pausedBusinesses.compactMap { UUID(uuidString: $0.scope) }
+        var query = WebhookDeliveryRecord.query(on: db)
             .group(.or) { group in
                 group.filter(\.$status == "pending")
                 group.filter(\.$status == "sending")
             }
-            .filter(\.$nextAttemptAt <= now).sort(\.$nextAttemptAt, .ascending).limit(limit).all()
+            .filter(\.$nextAttemptAt <= now)
+        if !pausedEndpoints.isEmpty { query = query.filter(\.$subscriptionId !~ pausedEndpoints) }
+        if !pausedBusinessIds.isEmpty { query = query.filter(\.$businessId !~ pausedBusinessIds) }
+        let due = try await query.sort(\.$nextAttemptAt, .ascending).limit(limit).all()
         var attempted = 0
         for delivery in due {
             guard let id = delivery.id else { continue }
@@ -276,6 +288,10 @@ struct WebhookService {
             delivery.status = "succeeded"
             delivery.deliveredAt = now
             delivery.lastError = nil
+            // A delivered test event completes the "test event" step of onboarding.
+            if delivery.eventType == WebhookEventType.test.rawValue {
+                try? await OnboardingService(db: db, ctx: ctx).testEventSent(businessId: delivery.businessId)
+            }
         } else {
             delivery.lastError = errorText ?? "http_\(statusCode ?? 0)"
             if errorText == "blocked_destination" || delivery.attempts >= Self.maxAttempts {
@@ -296,6 +312,7 @@ struct WebhookService {
         attemptRecord.error = success ? nil : delivery.lastError
         try await attemptRecord.create(on: db)
         if delivery.status == "dead" {
+            ctx.metrics.count(.webhookDeadLettered)
             _ = try await AuditService(db: db, ctx: ctx).record("webhook.dead_lettered", outcome: .failure,
                 actor: AuditActor(kind: .system), businessId: BusinessID(delivery.businessId), subjectType: "webhook_delivery",
                 subjectId: id.uuidString.lowercased(), metadata: ["event_type": delivery.eventType, "attempts_made": String(delivery.attempts)])
