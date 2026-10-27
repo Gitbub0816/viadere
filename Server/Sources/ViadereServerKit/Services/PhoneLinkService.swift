@@ -11,8 +11,10 @@ struct PhoneLinkService {
     static let maxOTPAttempts = 5
     static let maxLinksPerConsumer = 5
     static let maxLinkConfirmAttempts = 5
-    /// A phone linked from an SMS link token is not used for delivery or replies for this long unless a trusted device confirms it.
+    /// A phone linked from an SMS link token is not used for delivery, replies or routing for this long unless a trusted device confirms it.
     static let newLinkCoolDown: TimeInterval = 24 * 3600
+    /// The same, when the account has no *other* trusted device that could confirm it (nobody to ask, so the delay is the defence).
+    static let soleDeviceLinkCoolDown: TimeInterval = 72 * 3600
 
     private func otpHash(linkId: UUID, code: String) -> String { ctx.hasher.hmacHex("otp", "\(linkId.uuidString.lowercased())|\(code)") }
 
@@ -29,6 +31,8 @@ struct PhoneLinkService {
     // MARK: OTP
 
     func start(principal: ConsumerPrincipal, request: PhoneLinkStartRequest) async throws -> PhoneLinkStartResponse {
+        // Linking a phone by code is for a trusted device (not one enrolled in the last day, not an App Clip).
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         let limits = ctx.config.rateLimits
         let phoneHash = ctx.hasher.phoneHash(request.phone)
         // Toll-fraud defences: destination allowlist, a platform-wide ceiling, a per-prefix ceiling, and the attestation hook.
@@ -78,6 +82,7 @@ struct PhoneLinkService {
     }
 
     func verify(principal: ConsumerPrincipal, request: PhoneLinkVerifyRequest) async throws -> PhoneLink {
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         try await ctx.limiter.enforce("phonelink-verify", key: principal.consumerId.description, rule: ctx.config.rateLimits.phoneLinkVerify)
         guard request.code.count == 6, request.code.allSatisfy({ $0.isASCII && $0.isNumber }) else {
             throw APIError.validation("The code must be 6 digits.", details: ["code": "invalid"])
@@ -103,14 +108,10 @@ struct PhoneLinkService {
         guard try await DB.swap(db, table: PhoneLinkRecord.schema, id: link.id!, column: "state", expected: "pending", newValue: "verified")
         else { throw APIError.conflict("This code was already used.") }
         guard let phone = PhoneNumber(try ctx.cipher.openString(link.phoneCiphertext, context: "phone_links.phone", rowId: link.id!)) else { throw APIError.internalError }
-        // Proving control of the number through a code sent to it is enough to use it now, unless the device doing so is itself new.
-        var usableFrom: Date?
-        if let deviceId = principal.deviceId, let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.isCoolingDown(at: now) {
-            usableFrom = device.approvalsLockedUntil
-        }
-        let verified = try await makeVerified(link: link, consumerId: principal.consumerId, phone: phone, now: now, source: "otp", usableFrom: usableFrom)
+        // Proving control of the number through a code sent to it is enough to use it now: the device doing so is trusted (checked above).
+        let verified = try await makeVerified(link: link, consumerId: principal.consumerId, phone: phone, now: now, source: "otp", usableFrom: nil)
         try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
-        return PhoneLink(id: PhoneLinkID(verified.id!), maskedPhone: verified.phoneMasked, verifiedAt: now, usableFrom: usableFrom)
+        return PhoneLink(id: PhoneLinkID(verified.id!), maskedPhone: verified.phoneMasked, verifiedAt: now, usableFrom: nil)
     }
 
     /// Marks a link verified and makes it the only verified link for that number.
@@ -193,12 +194,22 @@ struct PhoneLinkService {
             .filter(\.$consumerId == principal.consumerId.uuid).first()
         let record: PhoneLinkRecord
         if let existing { record = existing } else {
-            // A number linked this way is not an interaction target or a reply decider for 24 hours unless a trusted device confirms it.
-            record = try await makeVerified(link: nil, consumerId: principal.consumerId, phone: phone, now: now, source: "sms_link",
-                                            usableFrom: now.addingTimeInterval(Self.newLinkCoolDown))
-            await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .newPhone)
+            // A number linked this way is not an interaction target, a reply decider or an SMS routing identity until `usableFrom`, unless a
+            // trusted device confirms it. 24 h; 72 h when no other trusted device exists to confirm it; never before the redeeming device's own
+            // cool-down ends.
+            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).all()
+            let otherTrusted = devices.contains { $0.id != principal.deviceId?.uuid && $0.isTrusted(at: now) }
+            var usableFrom = now.addingTimeInterval(otherTrusted ? Self.newLinkCoolDown : Self.soleDeviceLinkCoolDown)
+            if let locked = devices.first(where: { $0.id == principal.deviceId?.uuid })?.approvalsLockedUntil { usableFrom = max(usableFrom, locked) }
+            record = try await makeVerified(link: nil, consumerId: principal.consumerId, phone: phone, now: now, source: "sms_link", usableFrom: usableFrom)
+            // The account is told even when it has no other device or push token: an in-app notice on its next open, plus the push.
+            await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .newPhone,
+                                                                       subjectId: record.id?.uuidString.lowercased())
         }
-        try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
+        // While the link is cooling down the thread stays unlinked (the gateway treats the link as absent); it is attached on confirmation.
+        if record.usableFrom == nil || record.usableFrom! <= now {
+            try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
+        }
         return PhoneLink(id: PhoneLinkID(record.id!), maskedPhone: record.phoneMasked, verifiedAt: record.verifiedAt ?? now, usableFrom: record.usableFrom)
     }
 
@@ -207,22 +218,21 @@ struct PhoneLinkService {
         try await ctx.limiter.enforce("phone-confirm", key: principal.consumerId.description, rule: .perHour(30, burst: 10))
         let now = ctx.now
         guard let deviceId = principal.deviceId, proof.deviceId == deviceId,
-              let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.revokedAt == nil, device.kind == .app,
-              !device.isExpired(at: now), !device.isCoolingDown(at: now),
+              let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.consumerId == principal.consumerId.uuid, device.isTrusted(at: now),
               let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
                   .filter(\.$state == "verified").first() else { throw APIError.notFound }
         if link.usableFrom != nil {
             guard let purpose = proof.requiredKeyPurpose,
                   let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == deviceId.uuid).filter(\.$purpose == purpose.rawValue).first(),
                   let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else {
-                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID or your passcode.")
+                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID.")
             }
             do {
                 try await proof.verify(subject: .phoneLink, subjectId: id.description, publicKey: publicKey, now: now, replayGuard: DatabaseReplayGuard(db: db))
             } catch ConfirmationProof.Failure.replayed {
                 throw APIError(.unauthorized, .replayDetected, "This confirmation was already used.")
             } catch ConfirmationProof.Failure.assuranceTooLow {
-                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID or your passcode.")
+                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID.")
             } catch {
                 throw APIError.signatureInvalid
             }
@@ -232,6 +242,10 @@ struct PhoneLinkService {
                 try await link.update(on: tx)
                 _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.confirmed", principal: principal, subjectType: "phone_link",
                                                                    subjectId: id.description, metadata: ["assurance": proof.assurance.rawValue])
+            }
+            // The thread was left unlinked while the link cooled down: attach it now.
+            if let phone = PhoneNumber(try ctx.cipher.openString(link.phoneCiphertext, context: "phone_links.phone", rowId: link.id!)) {
+                try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
             }
         }
         return PhoneLink(id: id, maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt, usableFrom: link.usableFrom)

@@ -96,7 +96,9 @@ public struct Interaction: Codable, Sendable, Hashable, Identifiable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
-        guard (1...Self.currentSchemaVersion).contains(schemaVersion) else {
+        // A newer schema is decoded leniently and kept as sent (`schemaVersion > currentSchemaVersion`): the client lists it, shows an
+        // "update to respond" state, refuses to approve it and still allows deny/report. The server validates strictly on issue.
+        guard schemaVersion >= 1 else {
             throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: c, debugDescription: "Unsupported schema version")
         }
         id = try c.decode(InteractionID.self, forKey: .id)
@@ -105,7 +107,12 @@ public struct Interaction: Codable, Sendable, Hashable, Identifiable {
         kind = try c.decode(InteractionKind.self, forKey: .kind)
         // Unknown enum values in these fields fall back to the most conservative interpretation.
         purpose = (try? c.decode(InteractionPurpose.self, forKey: .purpose)) ?? .security
-        payload = try InteractionPayload.decode(kind: kind, from: c, forKey: .payload)
+        if schemaVersion > Self.currentSchemaVersion {
+            // Fields this build does not know may change a payload's shape: keep whatever it is verbatim rather than failing the list.
+            payload = (try? InteractionPayload.decode(kind: kind, from: c, forKey: .payload)) ?? .unknown((try? c.decode(JSONValue.self, forKey: .payload)) ?? .null)
+        } else {
+            payload = try InteractionPayload.decode(kind: kind, from: c, forKey: .payload)
+        }
         requestedActions = (try? c.decodeIfPresent([RequestedAction].self, forKey: .requestedActions)) ?? []
         priority = (try? c.decode(InteractionPriority.self, forKey: .priority)) ?? .normal
         sensitivity = (try? c.decode(Sensitivity.self, forKey: .sensitivity)) ?? .critical

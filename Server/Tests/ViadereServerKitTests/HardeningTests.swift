@@ -954,41 +954,65 @@ final class HardeningTests: XCTestCase {
         XCTAssertEqual(ClientIP.normalize("unknown"), "unknown")
     }
 
-    func testFullRateLimiterFailsClosedForNewKeysAndSweepsIdleOnesAmortized() async {
-        let store = InMemoryRateLimitStore(maxBuckets: 100, sweepInterval: 60)
+    /// Round 3 #6: a flood of fresh keys in one namespace used to fill the single shared table and make the global IP limiter refuse
+    /// every new client (platform-wide denial of service).
+    func testAFloodInOneNamespaceCannotStarveTheGlobalIPLimiter() async {
+        let store = InMemoryRateLimitStore(maxBuckets: 100, namespaceCaps: ["ip": 100], sweepInterval: 60)
         let rule = RateRule.perMinute(10, burst: 5)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
-        // An attacker rotates through fresh keys, each taking one token, until the table is full.
-        for i in 0..<100 {
-            let decision = await store.take(key: "attacker-\(i)", rule: rule, cost: 1, now: start)
+        for i in 0..<5_000 {
+            _ = await store.take(key: "dashboard-signup-email|attacker-\(i)", rule: rule, cost: 1, now: start)
+        }
+        let flooded = await store.count(namespace: "dashboard-signup-email")
+        XCTAssertLessThanOrEqual(flooded, 100)
+        let evicted = await store.evictions
+        XCTAssertGreaterThan(evicted, 0, "eviction is counted")
+        // A brand new client IP is served.
+        for i in 0..<50 {
+            let decision = await store.take(key: "ip|198.51.100.\(i)", rule: rule, cost: 1, now: start)
             XCTAssertTrue(decision.allowed)
         }
-        let victimNew = await store.take(key: "someone-new", rule: rule, cost: 1, now: start)
-        XCTAssertFalse(victimNew.allowed, "new keys get nothing while the table is full of live buckets (fail closed, not fail open)")
-        XCTAssertGreaterThan(victimNew.retryAfter, 0)
-        // A key that is already tracked keeps its own, correct bucket.
-        for _ in 0..<4 { _ = await store.take(key: "attacker-0", rule: rule, cost: 1, now: start) }
-        let exhausted = await store.take(key: "attacker-0", rule: rule, cost: 1, now: start)
-        XCTAssertFalse(exhausted.allowed)
-        // Once the buckets have refilled they carry no state and are swept; new keys work again. The sweep runs at most once per interval.
-        let later = start.addingTimeInterval(120)
-        let afterRefill = await store.take(key: "someone-new", rule: rule, cost: 1, now: later)
-        XCTAssertTrue(afterRefill.allowed)
-        let size = await store.count
-        XCTAssertLessThanOrEqual(size, 100)
+        // And even when the ip namespace itself is flooded, new IPs are served (LRU, never fail closed) while a recently used bucket survives.
+        _ = await store.take(key: "ip|203.0.113.1", rule: rule, cost: 5, now: start)
+        for i in 0..<1_000 {
+            let decision = await store.take(key: "ip|flood-\(i)", rule: rule, cost: 1, now: start)
+            XCTAssertTrue(decision.allowed, "the global IP limiter never fails closed")
+            _ = await store.take(key: "ip|203.0.113.1", rule: rule, cost: 0, now: start)
+        }
+        let ipCount = await store.count(namespace: "ip")
+        XCTAssertLessThanOrEqual(ipCount, 100)
+        let exhausted = await store.take(key: "ip|203.0.113.1", rule: rule, cost: 1, now: start)
+        XCTAssertFalse(exhausted.allowed, "a recently used bucket keeps its exact state")
     }
 
-    func testEvictionIsAmortizedNotPerRequest() async {
-        let store = InMemoryRateLimitStore(maxBuckets: 50, sweepInterval: 60)
+    func testFailClosedIsOptInPerNamespaceAndIdleBucketsAreSweptAmortized() async {
+        let store = InMemoryRateLimitStore(maxBuckets: 50, failClosedNamespaces: ["strict"], sweepInterval: 60)
         let rule = RateRule.perMinute(10, burst: 5)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
-        for i in 0..<50 { _ = await store.take(key: "k\(i)", rule: rule, cost: 1, now: start) }
-        // Everything is still live, so the first refused request sweeps once and later ones within the interval do not sweep again.
+        for i in 0..<50 { _ = await store.take(key: "strict|k\(i)", rule: rule, cost: 1, now: start) }
         let t0 = start.addingTimeInterval(1)
-        _ = await store.take(key: "new-1", rule: rule, cost: 1, now: t0)
-        _ = await store.take(key: "new-2", rule: rule, cost: 1, now: t0.addingTimeInterval(1))
+        let refused1 = await store.take(key: "strict|new-1", rule: rule, cost: 1, now: t0)
+        let refused2 = await store.take(key: "strict|new-2", rule: rule, cost: 1, now: t0.addingTimeInterval(1))
+        XCTAssertFalse(refused1.allowed)
+        XCTAssertFalse(refused2.allowed)
         let refused = await store.refusedWhileFull
         XCTAssertEqual(refused, 2)
+        // Other namespaces are untouched.
+        let other = await store.take(key: "other|x", rule: rule, cost: 1, now: t0)
+        XCTAssertTrue(other.allowed)
+        // Once idle buckets have refilled they are swept.
+        let later = start.addingTimeInterval(120)
+        let afterRefill = await store.take(key: "strict|new-3", rule: rule, cost: 1, now: later)
+        XCTAssertTrue(afterRefill.allowed)
+    }
+
+    func testSignupEmailBucketsAreKeyedByIPAndEmail() async throws {
+        try await withHarness { h in
+            let rule = RateRule.perHour(5, burst: 5)
+            for _ in 0..<5 { try await h.app.ctx.limiter.enforce("dashboard-signup-email", key: "203.0.113.1|h", rule: rule) }
+            // The same email from another address is a different bucket: one attacker can't lock the victim's address for everyone.
+            try await h.app.ctx.limiter.enforce("dashboard-signup-email", key: "203.0.113.2|h", rule: rule)
+        }
     }
 
     func testTheGlobalIPLimiterUsesTheNormalisedAddress() async throws {
@@ -1163,34 +1187,65 @@ final class HardeningTests: XCTestCase {
         }
     }
 
-    func testAnInvitationClaimsAnUnusedPreRegistrationOfTheInvitedAddress() async throws {
+    /// Round 3 #4: the round-2 "invite claims an unused signup" feature let whoever held the invitation link take over the account of the
+    /// invited address (passkeys deleted, sessions revoked). An invitation now only ever creates a new account.
+    func testAnInvitationNeverClaimsAnExistingAccount() async throws {
         try await withHarness { h in
             let owner = try await h.verifiedOwner(email: "owner@acme.test", org: "Acme Roasters", handle: "acmeroasters")
-            // Mallory pre-registers the address of the person Acme is about to invite (nothing proves the address is hers).
-            let squatter = try await h.dashSignup(email: "victim@acme.test", name: "Mallory", org: "Squat Co", handle: nil)
-            // Before the fix this invitation could never be accepted: "an account with this email already exists".
-            let member = try await h.addMember(owner: owner.session, role: .admin, email: "victim@acme.test", name: "Real Victim")
-            try await eq(try await DashboardUserRecord.query(on: h.db).filter(\.$emailHash == h.ctx.hasher.hmacHex("dashboard-email", "victim@acme.test")).count(), 1)
-            let memberships = try await OrgMembershipRecord.query(on: h.db).filter(\.$userId == squatter.account.userId).all()
-            XCTAssertEqual(memberships.filter { $0.removedAt == nil }.map(\.businessId), [owner.businessId], "the squatter's own application is detached")
-            // Mallory's passkey and session no longer work; the real person's do.
-            try await isNil(try await h.dashLogin(squatter.account).session)
-            try await eq(try await h.page("/dashboard", squatter.session).status.code >= 300, true)
-            try await notNil(try await h.dashLogin(member.account).session)
-            try await isTrue(try await AuditEventRecord.query(on: h.db).filter(\.$action == "team.invite_claimed_signup").count() == 1)
+            // The real Alice signed up but has not come back yet (the case the old feature let anyone with an invitation take over).
+            let alice = try await h.dashSignup(email: "alice@acme.test", name: "Alice", org: "Alice Org", handle: nil)
+            let invite = try await h.formPost("/dashboard/team/invite", owner.session, [("email", "alice@acme.test"), ("role", "admin")])
+            let range = try XCTUnwrap(invite.text.range(of: "/dashboard/invite/"))
+            let token = String(invite.text[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+            // `begin` answers exactly as it would for a fresh address (no enumeration) ...
+            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Mallory"))
+            XCTAssertEqual(begin.status, .ok, begin.text)
+            XCTAssertFalse(begin.text.lowercased().contains("exist"), begin.text)
+            let options = try begin.json(PasskeyRegistrationOptions.self)
+            // ... and `finish` is a generic refusal; nothing was claimed.
+            let finish = try await h.jsonPost("/dashboard/auth/invite/finish", PasskeyRegistrationFinishRequest(
+                ceremonyId: options.ceremonyId, credential: h.registrationCredential(for: options, credentialId: SecureToken.generate(byteCount: 16), publicKey: SecureToken.generate(byteCount: 32))))
+            XCTAssertEqual(finish.status, .unauthorized, finish.text)
+            XCTAssertFalse(finish.text.lowercased().contains("exists"), finish.text)
+            // Alice's passkey, session and own organization are untouched; the invitation is still open (she can sign in and accept it).
+            try await notNil(try await h.dashLogin(alice.account).session)
+            try await eq(try await h.page("/dashboard", alice.session).status.code < 300, true)
+            let memberships = try await OrgMembershipRecord.query(on: h.db).filter(\.$userId == alice.account.userId).filter(\.$removedAt == nil).all()
+            XCTAssertEqual(memberships.map(\.businessId), [alice.account.businessId!])
+            try await eq(try await DashboardPasskeyRecord.query(on: h.db).filter(\.$userId == alice.account.userId).count(), 1)
+            try await eq(try await OrgInviteRecord.query(on: h.db).filter(\.$state == "open").count(), 1)
+            try await eq(try await AuditEventRecord.query(on: h.db).filter(\.$action == "team.invite_claimed_signup").count(), 0)
         }
     }
 
-    func testAnInvitationDoesNotClaimAnAccountThatWasUsed() async throws {
+    func testBeginIsIndistinguishableForAFreshAddressAndAnEstablishedAccount() async throws {
         try await withHarness { h in
             let owner = try await h.verifiedOwner(email: "owner@acme.test", org: "Acme Roasters", handle: "acmeroasters")
             let other = try await h.dashSignup(email: "other@acme.test", org: "Other Org", handle: "otherorg")
             try await h.verifyOrganization(other.account.businessId!)
-            let invite = try await h.formPost("/dashboard/team/invite", owner.session, [("email", "other@acme.test"), ("role", "admin")])
-            let range = try XCTUnwrap(invite.text.range(of: "/dashboard/invite/"))
-            let token = String(invite.text[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-            let begin = try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Other"))
-            XCTAssertEqual(begin.status, .conflict, "an established account must sign in and accept instead")
+            var results: [HTTPResult] = []
+            for email in ["other@acme.test", "brand-new@acme.test"] {
+                let invite = try await h.formPost("/dashboard/team/invite", owner.session, [("email", email), ("role", "admin")])
+                let range = try XCTUnwrap(invite.text.range(of: "/dashboard/invite/"))
+                let token = String(invite.text[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+                results.append(try await h.jsonPost("/dashboard/auth/invite/begin", InviteBeginBody(token: token, displayName: "Other")))
+            }
+            XCTAssertEqual(results[0].status, results[1].status)
+            XCTAssertEqual(results[0].status, .ok)
+        }
+    }
+
+    func testASignupCountsAsAFirstSignIn() async throws {
+        try await withHarness { h in
+            let owner = try await h.dashSignup(email: "owner@acme.test", org: "Acme", handle: "acmeone")
+            let user = try await XCTUnwrapAsync(try await DashboardUserRecord.find(owner.account.userId, on: h.db))
+            XCTAssertNotNil(user.lastLoginAt)
+            let member = try await {
+                let verified = try await h.verifiedOwner(email: "o2@acme.test", org: "Two", handle: "acmetwo")
+                return try await h.addMember(owner: verified.session, role: .admin, email: "m@acme.test")
+            }()
+            let invited = try await XCTUnwrapAsync(try await DashboardUserRecord.find(member.account.userId, on: h.db))
+            XCTAssertNotNil(invited.lastLoginAt)
         }
     }
 }

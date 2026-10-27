@@ -18,47 +18,85 @@ public protocol RateLimitStore: Sendable {
 /// multiplied by the instance count; a deployment with more than one instance must supply a shared `RateLimitStore` (Redis or
 /// the database) through `Overrides.rateLimitStore`.
 ///
-/// Memory is bounded and the bound **fails closed**: when `maxBuckets` distinct keys are tracked, buckets that have fully refilled (they
-/// carry no state) are swept, at most once per `sweepInterval` so a flood of new keys cannot make every request O(n); if the table is
-/// still full, requests for *new* keys are refused until space frees up. An attacker rotating keys therefore cannot obtain fresh full
-/// buckets by exhausting the table.
+/// Memory is bounded **per namespace** (the part of the key before the first `|`, e.g. `ip`, `sms-phone`): every namespace has its own
+/// table, so a flood of fresh keys in one namespace (a signup-email spray, rotating phone numbers) can never exhaust the space of another
+/// one — in particular never the global per-IP limiter, which would otherwise turn a cheap flood into a platform-wide outage. When a
+/// namespace table is full, buckets that have fully refilled (they carry no state) are swept, at most once per `sweepInterval`, and if it
+/// is still full the **least recently used** tenth of that namespace is evicted (amortised: one sort per `cap/10` insertions). A namespace
+/// listed in `failClosedNamespaces` refuses new keys instead (`refusedWhileFull`); the default is none, because refusing is exactly the
+/// denial of service this design avoids. Evictions and refusals are counted and logged as warnings (at most once a minute per namespace).
 public actor InMemoryRateLimitStore: RateLimitStore {
     private struct Bucket {
         var tokens: Double
         var updatedAt: Date
         var capacity: Double
         var refillPerSecond: Double
+        var lastUsed: UInt64
 
         func refilled(at now: Date) -> Double {
             min(capacity, tokens + max(0, now.timeIntervalSince(updatedAt)) * refillPerSecond)
         }
     }
 
-    private var buckets: [String: Bucket] = [:]
-    private let maxBuckets: Int
+    private var tables: [String: [String: Bucket]] = [:]
+    private let maxBucketsPerNamespace: Int
+    private let namespaceCaps: [String: Int]
+    private let failClosedNamespaces: Set<String>
     private let sweepInterval: TimeInterval
-    private var lastSweep = Date.distantPast
+    private var lastSweep: [String: Date] = [:]
+    private var lastWarning: [String: Date] = [:]
+    private var tick: UInt64 = 0
+    private let logger = Logger(label: "viadere.ratelimit")
+    /// Requests refused because a fail-closed namespace was full.
     private(set) var refusedWhileFull = 0
+    /// Buckets evicted (least recently used) to make room, across all namespaces.
+    private(set) var evictions = 0
+    private(set) var evictionsByNamespace: [String: Int] = [:]
 
-    public init(maxBuckets: Int = 200_000, sweepInterval: TimeInterval = 1) {
-        self.maxBuckets = maxBuckets
+    /// - Parameters:
+    ///   - maxBuckets: the cap of each namespace table (default 50 000); `namespaceCaps` overrides it per namespace.
+    public init(maxBuckets: Int = 50_000, namespaceCaps: [String: Int] = ["ip": 200_000, "dashboard-signup-email": 10_000], failClosedNamespaces: Set<String> = [],
+                sweepInterval: TimeInterval = 1) {
+        self.maxBucketsPerNamespace = max(1, maxBuckets)
+        self.namespaceCaps = namespaceCaps
+        self.failClosedNamespaces = failClosedNamespaces
         self.sweepInterval = sweepInterval
+    }
+
+    static func namespace(of key: String) -> String {
+        key.firstIndex(of: "|").map { String(key[..<$0]) } ?? ""
     }
 
     public func take(key: String, rule: RateRule, cost: Double, now: Date) async -> RateDecision {
         let refillPerSecond = rule.perMinute / 60
-        if buckets[key] == nil, buckets.count >= maxBuckets {
-            sweep(now: now)
-            if buckets.count >= maxBuckets {
-                refusedWhileFull += 1
-                return RateDecision(allowed: false, retryAfter: 60)
+        let ns = Self.namespace(of: key)
+        var table = tables[ns] ?? [:]
+        defer { tables[ns] = table }
+        tick &+= 1
+        if table[key] == nil {
+            let cap = max(1, namespaceCaps[ns] ?? maxBucketsPerNamespace)
+            if table.count >= cap {
+                sweep(&table, namespace: ns, now: now)
+                if table.count >= cap {
+                    if failClosedNamespaces.contains(ns) {
+                        refusedWhileFull += 1
+                        warn(ns, "rate-limit namespace is full; refusing new keys")
+                        return RateDecision(allowed: false, retryAfter: 60)
+                    }
+                    let n = max(1, cap / 10)
+                    for victim in table.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }).prefix(n) { table.removeValue(forKey: victim.key) }
+                    evictions += n
+                    evictionsByNamespace[ns, default: 0] += n
+                    warn(ns, "rate-limit namespace is full; evicted \(n) least recently used buckets")
+                }
             }
         }
-        var bucket = buckets[key] ?? Bucket(tokens: rule.capacity, updatedAt: now, capacity: rule.capacity, refillPerSecond: refillPerSecond)
+        var bucket = table[key] ?? Bucket(tokens: rule.capacity, updatedAt: now, capacity: rule.capacity, refillPerSecond: refillPerSecond, lastUsed: tick)
         bucket.capacity = rule.capacity
         bucket.refillPerSecond = refillPerSecond
         bucket.tokens = bucket.refilled(at: now)
         bucket.updatedAt = now
+        bucket.lastUsed = tick
         let decision: RateDecision
         if bucket.tokens >= cost {
             bucket.tokens -= cost
@@ -67,19 +105,28 @@ public actor InMemoryRateLimitStore: RateLimitStore {
             let missing = cost - bucket.tokens
             decision = RateDecision(allowed: false, retryAfter: refillPerSecond > 0 ? missing / refillPerSecond : 3600)
         }
-        buckets[key] = bucket
+        table[key] = bucket
         return decision
     }
 
-    /// Drops buckets that have fully refilled (they carry no state), at most once per `sweepInterval`.
-    private func sweep(now: Date) {
-        guard now.timeIntervalSince(lastSweep) >= sweepInterval || lastSweep > now else { return }
-        lastSweep = now
-        buckets = buckets.filter { $0.value.refilled(at: now) < $0.value.capacity }
+    /// Drops buckets that have fully refilled (they carry no state), at most once per `sweepInterval` per namespace.
+    private func sweep(_ table: inout [String: Bucket], namespace: String, now: Date) {
+        let last = lastSweep[namespace] ?? .distantPast
+        guard now.timeIntervalSince(last) >= sweepInterval || last > now else { return }
+        lastSweep[namespace] = now
+        table = table.filter { $0.value.refilled(at: now) < $0.value.capacity }
     }
 
-    /// Number of tracked buckets (tests).
-    var count: Int { buckets.count }
+    private func warn(_ namespace: String, _ message: String) {
+        let now = Date()
+        if let last = lastWarning[namespace], now.timeIntervalSince(last) < 60 { return }
+        lastWarning[namespace] = now
+        logger.warning("\(message)", metadata: ["namespace": "\(namespace)", "evictions": "\(evictions)", "refusedWhileFull": "\(refusedWhileFull)"])
+    }
+
+    /// Number of tracked buckets, all namespaces (tests).
+    var count: Int { tables.values.reduce(0) { $0 + $1.count } }
+    func count(namespace: String) -> Int { tables[namespace]?.count ?? 0 }
 }
 
 /// Convenience facade: named limiters over a store.

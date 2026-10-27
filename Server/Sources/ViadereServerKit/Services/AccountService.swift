@@ -12,7 +12,8 @@ struct AccountService {
     func phoneLinks(for consumer: ConsumerID) async throws -> [PhoneLink] {
         try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$state == "verified")
             .sort(\.$createdAt, .ascending).all().compactMap { link in
-                link.id.map { PhoneLink(id: PhoneLinkID($0), maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt) }
+                link.id.map { PhoneLink(id: PhoneLinkID($0), maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt,
+                                        usableFrom: link.usableFrom.flatMap { $0 > ctx.now ? $0 : nil }) }
             }
     }
 
@@ -49,6 +50,8 @@ struct AccountService {
     func revokeSession(principal: ConsumerPrincipal, id: UUID) async throws {
         guard try await RefreshTokenRecord.query(on: db).filter(\.$familyId == id).filter(\.$consumerId == principal.consumerId.uuid).count() > 0
         else { throw APIError.notFound }
+        // Ending another session (and the devices enrolled through it) needs a trusted device.
+        if id != principal.familyId { try await DeviceTrust.require(principal, db: db, now: ctx.now) }
         try await ConsumerTokenService(db: db, ctx: ctx).revokeFamily(id, now: ctx.now)
         _ = try await AuditService(db: db, ctx: ctx).record("session.revoked", principal: principal, subjectType: "session", subjectId: id.uuidString.lowercased())
     }
@@ -59,6 +62,8 @@ struct AccountService {
     /// message bodies, push tokens, SMS threads) and keeps pseudonymous security records (audit chain, consent history,
     /// signed decisions) that contain only opaque ids. Businesses are told each relationship ended.
     func deleteAccount(principal: ConsumerPrincipal) async throws {
+        // Irreversible: only a trusted device (not one enrolled in the last day, not an App Clip) can do it.
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         let consumer = principal.consumerId
         let id = consumer.uuid
         let now = ctx.now
@@ -116,9 +121,13 @@ struct AccountService {
                 invitation.labelCiphertext = try ctx.cipher.seal("Someone", context: "delegation.label", rowId: invitation.id!)
                 try await invitation.update(on: tx)
             }
-            // Signed decisions are append-only; the only permitted edit erases the payload, which carries any free-text reply.
-            // The signature, decision, assurance, channel and ids stay (pseudonymous security record).
-            try await DecisionRecord.query(on: tx).filter(\.$consumerId == id).set(\.$signedPayload, to: CreateSecurityHardeningSchema.erased).update()
+            // Signed decisions are append-only (non-repudiation: a business and Viadere must be able to prove what a device signed).
+            // Only decisions that carry free text (`reply`, which can contain anything the person typed) are erased, by the one permitted
+            // edit. The others hold ids, the challenge, timestamps and the context digest, no personal data, and stay verifiable and
+            // exportable (`export-dispute`) under the retention basis in SECURITY.md §2.20 (legitimate interest in dispute handling).
+            for decision in try await DecisionRecord.query(on: tx).filter(\.$consumerId == id).all() where Self.carriesFreeText(decision.signedPayload) {
+                try await DecisionRecord.query(on: tx).filter(\.$id == decision.id!).set(\.$signedPayload, to: CreateSecurityHardeningSchema.erased).update()
+            }
             // Loyalty: the business-side member reference is personal data; balances stay as pseudonymous records.
             try await LoyaltyAccountRecord.query(on: tx).filter(\.$consumerId == id)
                 .set(\.$memberReferenceCiphertext, to: nil).set(\.$memberReferenceMasked, to: nil).update()
@@ -163,6 +172,16 @@ struct AccountService {
                 consumerId: consumer, subjectType: "consumer", subjectId: consumer.description,
                 metadata: ["relationships_closed": String(relationships.count), "devices_revoked": String(deviceIds.count)])
         }
+    }
+
+    /// True when a stored signed-decision payload (base64url canonical JSON) contains a free-text `reply`. An unreadable payload is
+    /// treated as carrying text (erased), never kept by accident.
+    static func carriesFreeText(_ signedPayload: String) -> Bool {
+        guard signedPayload != CreateSecurityHardeningSchema.erased else { return false }
+        guard let data = Base64URL.decode(signedPayload), let payload = try? ViadereJSON.decode(JSONValue.self, from: data),
+              case .object(let members) = payload else { return true }
+        if let reply = members["reply"], case .string = reply { return true }
+        return false
     }
 
     /// Removes the number from the SMS queue and the thread state of `phoneHash`. An opted-out number stays suppressed (a fresh thread

@@ -62,6 +62,14 @@ struct FieldReencryptor {
             try await delivery.update(on: db)
             report.rewritten += 1
         }
+        // Queued `interaction.decided` bodies written before businesses stopped receiving the raw signed decision: strip it at rest
+        // (and `WebhookService.deliveryBody` strips it again on read, so a delivery is never sent with one).
+        for delivery in try await WebhookDeliveryRecord.query(on: db).filter(\.$eventType == WebhookEventType.interactionDecided.rawValue).all() {
+            guard let stored = WebhookService(db: db, ctx: ctx).storedBody(delivery), let clean = WebhookService.strippingSignedDecision(stored) else { continue }
+            delivery.body = try ctx.cipher.seal(clean, context: "webhook_deliveries.body", rowId: delivery.id!)
+            try await delivery.update(on: db)
+            report.rewritten += 1
+        }
         return report
     }
 }
@@ -224,6 +232,9 @@ struct RetentionService {
             removed += old.count
         }
         removed += try await DeviceLifecycle(db: db, ctx: ctx).revokeExpired()
+        // Sealed refresh-token successors are only needed for the grace window after a rotation.
+        try await RefreshTokenRecord.query(on: db).filter(\.$successorSealed != nil)
+            .filter(\.$usedAt < now.addingTimeInterval(-ConsumerTokenService.graceWindow)).set(\.$successorSealed, to: nil).update()
         return removed
     }
 }

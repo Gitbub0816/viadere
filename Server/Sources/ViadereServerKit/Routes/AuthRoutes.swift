@@ -98,6 +98,15 @@ enum DeviceRoutes {
             try await AccountService(db: req.db, ctx: req.ctx).revokeSession(principal: try req.consumer, id: id)
             return try req.emptyOK()
         }
+        routes.api(APIRoutes.securityNotices) { req in
+            let principal = try req.consumer
+            return try req.jsonResponse(try await SecurityNotices(db: req.db, ctx: req.ctx).pending(for: principal.consumerId.uuid, viewedBy: principal.deviceId?.uuid))
+        }
+        routes.api(APIRoutes.securityNoticeDismiss) { req in
+            guard let raw = req.parameters.get("noticeId"), let id = UUID(uuidString: raw) else { throw APIError.notFound }
+            try await SecurityNotices(db: req.db, ctx: req.ctx).dismiss(id, principal: try req.consumer)
+            return try req.emptyOK()
+        }
         routes.api(APIRoutes.accountDelete) { req in
             try await AccountService(db: req.db, ctx: req.ctx).deleteAccount(principal: try req.consumer)
             return try req.emptyOK()

@@ -91,61 +91,138 @@ struct ConsumerTokenService {
 
     enum RefreshFailure: Error { case invalid, reuseDetected(consumerId: UUID, familyId: UUID) }
 
-    /// Rotates a refresh token. A token that was already rotated indicates theft: the whole family is revoked, **and so are the
-    /// devices that were enrolled through it** (a thief who enrolled a device from the stolen session loses it too).
-    func rotate(refreshToken: String) async throws -> (consumerId: UUID, session: IssuedSession) {
-        guard refreshToken.hasPrefix(Self.refreshPrefix), refreshToken.count <= 80,
-              let record = try await RefreshTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(refreshToken)).first(),
-              let id = record.id else { throw RefreshFailure.invalid }
-        let now = ctx.now
-        if record.state == "revoked" { throw RefreshFailure.invalid }
-        if record.state != "active" {
-            // Reuse of an already-rotated token means it was copied: burn the whole family.
-            try await revokeFamily(record.familyId, now: now)
-            throw RefreshFailure.reuseDetected(consumerId: record.consumerId, familyId: record.familyId)
-        }
-        guard record.expiresAt > now else { throw RefreshFailure.invalid }
-        if let family = try await TokenFamilyRecord.find(record.familyId, on: db) {
-            guard family.revokedAt == nil, (family.expiresAt ?? .distantFuture) > now else { throw RefreshFailure.invalid }
-        }
-        // Atomically flip active -> used; only one concurrent rotation can win.
-        guard try await DB.swap(db, table: RefreshTokenRecord.schema, id: id, column: "state", expected: "active", newValue: "used")
-        else {
-            try await revokeFamily(record.familyId, now: now)
-            throw RefreshFailure.reuseDetected(consumerId: record.consumerId, familyId: record.familyId)
-        }
-        try await RefreshTokenRecord.query(on: db).filter(\.$id == id).set(\.$usedAt, to: now).update()
-        // Revoke the access tokens of the previous generation; the new pair replaces them.
-        try await AccessTokenRecord.query(on: db).filter(\.$familyId == record.familyId).filter(\.$revokedAt == nil)
-            .set(\.$revokedAt, to: now).update()
-        let session = try await issue(consumerId: record.consumerId, familyId: record.familyId)
-        return (record.consumerId, session)
+    /// For this long after a refresh token was rotated, presenting it again returns the **same** new pair (idempotent): a response that
+    /// was lost on the wire, or the app and an extension racing with the same token, is not theft. Afterwards it is reuse.
+    static let graceWindow: TimeInterval = 60
+
+    /// Which devices a revoked session takes with it.
+    enum DeviceCascade {
+        /// Every device enrolled through the session, and the one it is bound to (a user revoking a session).
+        case all
+        /// None: the session ends, the devices stay (logout).
+        case none
+        /// Only devices enrolled through the session after `Date` (refresh-token reuse: what a thief with the copied token could have
+        /// added), not the device the session belonged to before the token was copied.
+        case enrolledAfter(Date)
     }
 
-    /// Revokes a session. With `cascadeToDevices` (the default) every device enrolled through it is revoked as well.
-    func revokeFamily(_ familyId: UUID, now: Date, cascadeToDevices: Bool = true) async throws {
+    private struct SealedSession: Codable {
+        var accessToken: String
+        var accessExpiresAt: Date
+        var refreshToken: String
+        var refreshExpiresAt: Date
+        var familyId: UUID
+    }
+
+    private struct RotationLost: Error {}
+
+    struct Rotation {
+        var consumerId: UUID
+        var session: IssuedSession
+        /// True when this was the idempotent replay of a token rotated moments ago.
+        var replayed: Bool
+    }
+
+    /// The session record of a family, created on first sight for a legacy family (tokens from before families existed), optionally
+    /// bound to `deviceId`. Without it a legacy session could never be bound to a device or marked revoked.
+    @discardableResult
+    func ensureFamily(_ familyId: UUID, consumerId: UUID, deviceId: UUID? = nil) async throws -> TokenFamilyRecord {
+        if let existing = try await TokenFamilyRecord.find(familyId, on: db) { return existing }
+        let legacy = TokenFamilyRecord(id: familyId, consumerId: consumerId, origin: "legacy", now: ctx.now, enrollUntil: nil)
+        legacy.deviceId = deviceId
+        do {
+            try await legacy.create(on: db)
+            return legacy
+        } catch {
+            if error.isConstraintViolation, let existing = try await TokenFamilyRecord.find(familyId, on: db) { return existing }
+            throw error
+        }
+    }
+
+    /// Rotates a refresh token.
+    ///
+    /// * An expired token is simply invalid (checked first: an old token is not evidence of theft).
+    /// * A token rotated less than `graceWindow` ago returns the pair it was rotated into.
+    /// * A token rotated earlier indicates theft: the family is revoked, **and so are the devices enrolled through it after that token
+    ///   was issued** (what a thief could have added), not the device the session already belonged to.
+    func rotate(refreshToken: String) async throws -> Rotation {
+        guard refreshToken.hasPrefix(Self.refreshPrefix), refreshToken.count <= 80,
+              let record = try await RefreshTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(refreshToken)).first(),
+              record.id != nil else { throw RefreshFailure.invalid }
+        let now = ctx.now
+        if record.state == "revoked" { throw RefreshFailure.invalid }
+        guard record.expiresAt > now else { throw RefreshFailure.invalid }
+        let family = try await ensureFamily(record.familyId, consumerId: record.consumerId)
+        guard family.revokedAt == nil, (family.expiresAt ?? .distantFuture) > now else { throw RefreshFailure.invalid }
+        if record.state != "active" { return try await usedToken(record, now: now) }
+        do {
+            let session = try await db.transaction { tx -> IssuedSession in
+                // Atomically flip active -> used; only one concurrent rotation can win (the loser's UPDATE matches nothing).
+                guard try await DB.swap(tx, table: RefreshTokenRecord.schema, id: record.id!, column: "state", expected: "active", newValue: "used")
+                else { throw RotationLost() }
+                // Revoke the access tokens of the previous generation; the new pair replaces them.
+                try await AccessTokenRecord.query(on: tx).filter(\.$familyId == record.familyId).filter(\.$revokedAt == nil)
+                    .set(\.$revokedAt, to: now).update()
+                let issued = try await ConsumerTokenService(db: tx, ctx: ctx).issue(consumerId: record.consumerId, familyId: record.familyId)
+                let sealed = SealedSession(accessToken: issued.accessToken, accessExpiresAt: issued.accessExpiresAt, refreshToken: issued.refreshToken,
+                                           refreshExpiresAt: issued.refreshExpiresAt, familyId: issued.familyId)
+                try await RefreshTokenRecord.query(on: tx).filter(\.$id == record.id!).set(\.$usedAt, to: now)
+                    .set(\.$successorSealed, to: try ctx.cipher.seal(try JSONEncoder().encode(sealed), context: "refresh_tokens.successor", rowId: record.id!)).update()
+                // Older generations' sealed successors are past their grace window: wipe them.
+                try await RefreshTokenRecord.query(on: tx).filter(\.$familyId == record.familyId).filter(\.$state == "used")
+                    .filter(\.$usedAt < now.addingTimeInterval(-Self.graceWindow)).set(\.$successorSealed, to: nil).update()
+                return issued
+            }
+            return Rotation(consumerId: record.consumerId, session: session, replayed: false)
+        } catch is RotationLost {
+            // A concurrent request rotated the same token first: treat ours as the replay it is.
+            guard let fresh = try await RefreshTokenRecord.find(record.id!, on: db) else { throw RefreshFailure.invalid }
+            if fresh.state == "revoked" { throw RefreshFailure.invalid }
+            return try await usedToken(fresh, now: now)
+        }
+    }
+
+    /// A refresh token that is no longer active: the idempotent replay inside the grace window, otherwise reuse.
+    private func usedToken(_ record: RefreshTokenRecord, now: Date) async throws -> Rotation {
+        if let usedAt = record.usedAt, now >= usedAt, now.timeIntervalSince(usedAt) <= Self.graceWindow, let sealed = record.successorSealed,
+           let data = try? ctx.cipher.open(sealed, context: "refresh_tokens.successor", rowId: record.id!),
+           let pair = try? JSONDecoder().decode(SealedSession.self, from: data) {
+            return Rotation(consumerId: record.consumerId, session: IssuedSession(
+                accessToken: pair.accessToken, accessExpiresAt: pair.accessExpiresAt, refreshToken: pair.refreshToken,
+                refreshExpiresAt: pair.refreshExpiresAt, familyId: pair.familyId), replayed: true)
+        }
+        // Reuse of an already-rotated token means it was copied: burn the family and what was enrolled through it since.
+        try await revokeFamily(record.familyId, now: now, devices: .enrolledAfter(record.createdAt))
+        throw RefreshFailure.reuseDetected(consumerId: record.consumerId, familyId: record.familyId)
+    }
+
+    /// Revokes a session. `devices` says which devices go with it (default: every device enrolled through it).
+    func revokeFamily(_ familyId: UUID, now: Date, devices: DeviceCascade = .all) async throws {
         try await AccessTokenRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil)
             .set(\.$revokedAt, to: now).update()
-        try await RefreshTokenRecord.query(on: db).filter(\.$familyId == familyId).set(\.$state, to: "revoked").update()
-        if let family = try await TokenFamilyRecord.find(familyId, on: db) {
-            if family.revokedAt == nil {
-                try await TokenFamilyRecord.query(on: db).filter(\.$id == familyId).set(\.$revokedAt, to: now).update()
-            }
-            guard cascadeToDevices else { return }
-            var deviceIds = try await DeviceRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil).all().compactMap(\.id)
-            if let bound = family.deviceId, !deviceIds.contains(bound) { deviceIds.append(bound) }
-            try await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: deviceIds, now: now, cascadeToFamilies: false)
-        } else if cascadeToDevices {
-            let ids = try await DeviceRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil).all().compactMap(\.id)
-            try await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: ids, now: now, cascadeToFamilies: false)
+        try await RefreshTokenRecord.query(on: db).filter(\.$familyId == familyId).set(\.$state, to: "revoked").set(\.$successorSealed, to: nil).update()
+        let family = try await TokenFamilyRecord.find(familyId, on: db)
+        if let family, family.revokedAt == nil {
+            try await TokenFamilyRecord.query(on: db).filter(\.$id == familyId).set(\.$revokedAt, to: now).update()
         }
+        var deviceIds: [UUID]
+        switch devices {
+        case .none: return
+        case .all:
+            deviceIds = try await DeviceRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil).all().compactMap(\.id)
+            if let bound = family?.deviceId, !deviceIds.contains(bound) { deviceIds.append(bound) }
+        case .enrolledAfter(let date):
+            deviceIds = try await DeviceRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil)
+                .filter(\.$createdAt > date).all().compactMap(\.id)
+        }
+        try await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: deviceIds, now: now, cascadeToFamilies: false)
     }
 
     /// Revokes every session of a consumer (e.g. after suspicious activity).
     func revokeAll(consumerId: UUID, now: Date) async throws {
         try await AccessTokenRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$revokedAt == nil)
             .set(\.$revokedAt, to: now).update()
-        try await RefreshTokenRecord.query(on: db).filter(\.$consumerId == consumerId).set(\.$state, to: "revoked").update()
+        try await RefreshTokenRecord.query(on: db).filter(\.$consumerId == consumerId).set(\.$state, to: "revoked").set(\.$successorSealed, to: nil).update()
         try await TokenFamilyRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$revokedAt == nil)
             .set(\.$revokedAt, to: now).update()
     }
@@ -172,8 +249,9 @@ struct DeviceLifecycle {
     let db: any Database
     let ctx: ServerContext
 
-    /// Marks devices revoked, drops their push tokens, and (by default) revokes the sessions bound to them.
-    func revoke(deviceIds: [UUID], now: Date, cascadeToFamilies: Bool = true) async throws {
+    /// Marks devices revoked, drops their push tokens, and (by default) revokes the sessions bound to them, except `keepFamily` (the
+    /// session of the caller that is replacing a device: it moves to the new device instead of ending).
+    func revoke(deviceIds: [UUID], now: Date, cascadeToFamilies: Bool = true, keepFamily: UUID? = nil) async throws {
         guard !deviceIds.isEmpty else { return }
         try await DeviceRecord.query(on: db).filter(\.$id ~~ deviceIds).filter(\.$revokedAt == nil).set(\.$revokedAt, to: now).update()
         try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).delete()
@@ -184,7 +262,8 @@ struct DeviceLifecycle {
             if let family = device.familyId { familyIds.insert(family) }
         }
         let tokens = ConsumerTokenService(db: db, ctx: ctx)
-        for family in familyIds { try await tokens.revokeFamily(family, now: now, cascadeToDevices: false) }
+        familyIds.remove(keepFamily ?? UUID())
+        for family in familyIds { try await tokens.revokeFamily(family, now: now, devices: .none) }
     }
 
     /// Revokes devices whose own lifetime has passed (App Clips after 7 days).

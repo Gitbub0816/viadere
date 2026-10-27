@@ -547,5 +547,5 @@ struct CreateInitialSchema: AsyncMigration {
 
 /// Business-side invariants that SQL cannot express portably.
 enum Migrations {
-    static let all: [any AsyncMigration] = [CreateInitialSchema(), CreatePlatformSchema(), CreateP3Schema(), CreateSecurityHardeningSchema()]
+    static let all: [any AsyncMigration] = [CreateInitialSchema(), CreatePlatformSchema(), CreateP3Schema(), CreateSecurityHardeningSchema(), CreateSecurityRound3Schema()]
 }

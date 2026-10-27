@@ -119,6 +119,7 @@ struct HouseholdService {
 
     func createInvitation(principal: ConsumerPrincipal, request: DelegationInvitationRequest) async throws -> DelegationInvitation {
         guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         let consumer = principal.consumerId
         try await ctx.limiter.enforce("household-invite-create", key: consumer.description, rule: ctx.config.rateLimits.inviteCreatePerConsumer)
         let now = ctx.now
@@ -266,6 +267,7 @@ struct HouseholdService {
     }
 
     func accept(principal: ConsumerPrincipal, code: String) async throws -> HouseholdGrant {
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
         let consumer = principal.consumerId
         let invitation = try await lookup(code: code, consumer: consumer)
         let now = ctx.now

@@ -107,8 +107,10 @@ struct InteractionService {
                 try await record.create(on: tx)
                 try await InteractionChallengeRecord(interaction: issued).create(on: tx)
                 if let activityKey {
-                    // A newer status for the same ongoing event replaces the earlier ones.
+                    // A newer status for the same ongoing event replaces the earlier ones: of the same relationship and the same mode only,
+                    // so one activity key cannot supersede another person's (or a live) status.
                     try await InteractionRecord.query(on: tx).filter(\.$businessId == principal.businessId.uuid)
+                        .filter(\.$relationshipId == relationship.id!).filter(\.$livemode == principal.livemode)
                         .filter(\.$activityKey == activityKey).filter(\.$status == InteractionStatus.pending.rawValue)
                         .filter(\.$id != issued.id.uuid).set(\.$status, to: InteractionStatus.delivered.rawValue).update()
                 }
@@ -182,14 +184,16 @@ struct InteractionService {
 
     // MARK: Business outcome / cancel
 
-    func record(id: InteractionID, businessId: BusinessID) async throws -> InteractionRecord {
+    /// The business's own interaction. A test-mode key sees only test interactions and a live key only live ones (`livemode`), so a
+    /// leaked test key cannot read or cancel real traffic, and a live key cannot touch the sandbox.
+    func record(id: InteractionID, businessId: BusinessID, livemode: Bool) async throws -> InteractionRecord {
         guard let record = try await InteractionRecord.query(on: db).filter(\.$id == id.uuid)
-            .filter(\.$businessId == businessId.uuid).first() else { throw APIError.notFound }
+            .filter(\.$businessId == businessId.uuid).filter(\.$livemode == livemode).first() else { throw APIError.notFound }
         return record
     }
 
     func cancel(principal: BusinessPrincipal, id: InteractionID) async throws -> InteractionOutcome {
-        let record = try await record(id: id, businessId: principal.businessId)
+        let record = try await record(id: id, businessId: principal.businessId, livemode: principal.livemode)
         if record.statusValue != .pending { return try outcome(record) }
         if record.expiresAt <= ctx.now { _ = try await expireIfNeeded(record); return try outcome(record) }
         try await db.transaction { tx in

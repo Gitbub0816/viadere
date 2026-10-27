@@ -6,9 +6,14 @@ extension Interaction {
     public static let contextDigestDomain = "VIADERE-CONTEXT-V1\n"
 
     /// The part of an interaction a person actually sees and decides on, as canonical JSON:
-    /// `{"businessId", "expiresAt", "kind", "payload"}` (see `CanonicalJSON`; `payload` is the interaction payload as
+    /// `{"businessId", "expiresAt", "kind", "payload", "schemaVersion"}` (see `CanonicalJSON`; `payload` is the interaction payload as
     /// it appears on the wire; absent optionals omitted; any non-integer number becomes the string `"n:<shortest decimal>"`;
     /// `expiresAt` is ISO-8601 UTC with milliseconds).
+    ///
+    /// `schemaVersion` is part of the digest on purpose. **The server bumps `Interaction.currentSchemaVersion` whenever a payload
+    /// field is added or its meaning changes**, so a client that does not know a field (and therefore cannot display it) refuses the
+    /// interaction (`Interaction` decoding rejects a newer schema) instead of signing a digest over a context that differs from the one
+    /// the server recomputes. Never add a payload field without bumping the version.
     ///
     /// It deliberately excludes everything that differs between the app and the business view (the challenge and the
     /// consumer reference) or that the person never sees (priority, channels, idempotency key).
@@ -20,6 +25,7 @@ extension Interaction {
             "kind": .string(kind.rawValue),
             "payload": Self.canonicalized(payload),
             "expiresAt": .string(ViadereDate.format(expiresAt)),
+            "schemaVersion": .integer(Int64(schemaVersion)),
         ]
         return try CanonicalJSON.serialize(.object(context))
     }

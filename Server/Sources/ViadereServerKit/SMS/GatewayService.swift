@@ -132,7 +132,14 @@ struct GatewayService {
         let record = try await SMSContextRecord.query(on: db).filter(\.$phoneHash == hash).first()
         var context = try record.map(decode) ?? ConversationContext(phone: phone, consentVersion: ConsentService.currentPolicyVersion)
         let link = try await PhoneLinkRecord.query(on: db).filter(\.$verifiedPhoneHash == hash).first()
-        context.consumerId = link.map { ConsumerID($0.consumerId) }
+        // A link that is still cooling down (or was never verified) is not a link: the number is **unlinked** for the gateway, so it
+        // cannot open sessions, forward text, list recent businesses or answer as the account. Otherwise anyone who redeemed a link token
+        // from their own device could use the victim's account over SMS at once, bypassing the cool-down that guards the other channels.
+        if let link, link.state == "verified", link.isUsable(at: ctx.now) {
+            context.consumerId = ConsumerID(link.consumerId)
+        } else {
+            context.consumerId = nil
+        }
         return (context, record)
     }
 

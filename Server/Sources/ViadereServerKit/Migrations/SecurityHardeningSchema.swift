@@ -109,3 +109,30 @@ struct CreateSecurityHardeningSchema: AsyncMigration {
         }
     }
 }
+
+/// Security hardening, review round 3: the refresh-token grace window (the sealed successor pair) and in-app security notices.
+struct CreateSecurityRound3Schema: AsyncMigration {
+    var name: String { "CreateSecurityRound3Schema.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema("refresh_tokens").field("successor_sealed", .string).update()
+        try await db.schema("security_notices")
+            .id()
+            .field("consumer_id", .uuid, .required, .references("consumers", "id"))
+            .field("kind", .string, .required)
+            .field("message", .string, .required)
+            .field("subject_id", .string)
+            .field("origin_device_id", .uuid)
+            .field("created_at", .datetime, .required)
+            .field("dismissed_at", .datetime)
+            .create()
+        if let sql = db as? any SQLDatabase {
+            try await sql.raw("CREATE INDEX IF NOT EXISTS idx_security_notices_consumer ON security_notices (consumer_id, created_at)").run()
+        }
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema("security_notices").delete()
+        try await db.schema("refresh_tokens").deleteField("successor_sealed").update()
+    }
+}

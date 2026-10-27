@@ -54,8 +54,10 @@ struct ChannelRouter {
         guard record.livemode else { return }
         let allowed = Set(interaction.allowedChannels)
         guard allowed.contains(.rcs) || allowed.contains(.sms) else { return }
-        guard let link = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == record.consumerId)
-            .filter(\.$state == "verified").sort(\.$verifiedAt, .descending).first(), let phoneHash = link.verifiedPhoneHash else { return }
+        // The newest link that is past its cool-down: a phone someone just linked does not displace the person's established one.
+        let links = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == record.consumerId)
+            .filter(\.$state == "verified").sort(\.$verifiedAt, .descending).all()
+        guard let link = links.first(where: { $0.isUsable(at: ctx.now) }) ?? links.first, let phoneHash = link.verifiedPhoneHash else { return }
         let audit = AuditService(db: tx, ctx: ctx)
         func skip(_ reason: String) async throws {
             _ = try await audit.record("channel.skipped", outcome: .denied, actor: AuditActor(kind: .system),
@@ -204,6 +206,43 @@ struct ChannelRouter {
             try await endpoint.update(on: db)
         }
         guard endpoint.capability == "capable" else { return .fallback("not_capable") }
+
+        // The phone's conversation thread is shared by every business (RCS and SMS alike). While it is connected to another business,
+        // that business's reply handling would receive the person's answer to *this* message, so only a content-free notice is sent.
+        if let active = try await activeOtherBusiness(phoneHash: row.phoneHash, sender: row.businessId) {
+            let notice = GatewayCopy.newMessageNotice(from: summary, whileConnectedTo: active)
+            let environment = ChannelEnvironment(db: db, ctx: ctx, reference: row.id?.uuidString.lowercased() ?? "", sensitive: false,
+                                                 businessId: BusinessID(row.businessId))
+            do {
+                let result = try await adapter.send(OutboundChannelMessage(text: notice), to: phone, environment: environment)
+                row.providerMessageId = result.providerMessageId
+                row.sentAt = now
+                row.attempts += 1
+                row.status = "sent"
+                row.fallbackReason = "thread_connected_elsewhere"
+                try await row.update(on: db)
+                try await UsageMeter.record(.rcsMessage, businessId: row.businessId, livemode: true, ref: "rcs:" + (row.id?.uuidString.lowercased() ?? ""), at: now, on: db)
+                _ = try await AuditService(db: db, ctx: ctx).record("channel.rcs_notice_only", actor: AuditActor(kind: .gateway, id: phone.masked),
+                    consumerId: ConsumerID(row.consumerId), businessId: BusinessID(row.businessId), subjectType: "interaction",
+                    subjectId: row.interactionId.uuidString.lowercased(), metadata: ["reason": "thread_connected_elsewhere"])
+                return .sent
+            } catch let error as ChannelError {
+                row.attempts += 1
+                switch error {
+                case .notCapable:
+                    endpoint.capability = "incapable"
+                    endpoint.capabilityCheckedAt = now
+                    try await endpoint.update(on: db)
+                    return .fallback("not_capable")
+                case .transient:
+                    if row.attempts >= Self.maxAttempts { return .fallback("provider_error") }
+                    try await requeue(row)
+                    return .retry
+                default:
+                    return .fallback("provider_error")   // the SMS path sends the same notice
+                }
+            }
+        }
 
         // Render: sensitive (or not inline-presentable) → secure handoff via ChannelRenderer; answerable kinds the chips
         // cannot express → a plain "open in Viadere" link; everything else → suggested replies.

@@ -10,9 +10,13 @@ struct AuthService {
     static let ceremonyTTL: TimeInterval = 5 * 60
     static let enrollChallengeTTL: TimeInterval = 5 * 60
     static let maxDevicesPerConsumer = 10
-    /// A device enrolled while the account already has another trusted device cannot approve high or critical requests for this
-    /// long, unless an existing trusted device confirms it (`confirm`).
+    /// A device enrolled by an account that had any device in the last `coolDownLookback` cannot approve high or critical requests for
+    /// this long, unless an existing trusted device confirms it (`confirm`).
     static let newDeviceCoolDown: TimeInterval = 24 * 3600
+    /// An account that had a device (revoked ones included) this recently is not "new": revoking the owner's devices does not reset it.
+    static let coolDownLookback: TimeInterval = 30 * 86_400
+    /// A revoked device can still be named by `replacesDeviceId` for this long.
+    static let replaceWindow: TimeInterval = 30 * 86_400
     /// App Clip devices stop working on their own after this long.
     static let appClipLifetime: TimeInterval = 7 * 24 * 3600
 
@@ -128,6 +132,10 @@ struct AuthService {
     func refresh(_ request: AuthRefreshRequest) async throws -> AuthSession {
         do {
             let result = try await tokens.rotate(refreshToken: request.refreshToken)
+            if result.replayed {
+                _ = try? await AuditService(db: db, ctx: ctx).record("auth.refresh_replayed", actor: AuditActor(kind: .system),
+                    consumerId: ConsumerID(result.consumerId), metadata: ["reason": "grace_window"])
+            }
             return session(consumerId: result.consumerId, issued: result.session)
         } catch ConsumerTokenService.RefreshFailure.reuseDetected(let consumerId, let familyId) {
             _ = try? await AuditService(db: db, ctx: ctx).record("auth.refresh_reuse_detected", outcome: .denied,
@@ -140,7 +148,9 @@ struct AuthService {
     }
 
     func logout(_ principal: ConsumerPrincipal) async throws {
-        try await tokens.revokeFamily(principal.familyId, now: ctx.now)
+        // Logout ends this session and nothing else: the device it belongs to stays enrolled (an extension or a replayed request must
+        // never be able to take the owner's device away by logging out).
+        try await tokens.revokeFamily(principal.familyId, now: ctx.now, devices: .none)
         _ = try await AuditService(db: db, ctx: ctx).record("auth.logout", actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
                                                            consumerId: principal.consumerId)
     }
@@ -208,7 +218,22 @@ struct AuthService {
             throw APIError.validation("An App Clip device can only register a request key.", details: ["keys": "appClipRequestKeyOnly"])
         }
         let existing = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$revokedAt == nil).count()
-        guard existing < Self.maxDevicesPerConsumer else { throw APIError.conflict("Too many devices are enrolled. Revoke one first.") }
+        // "Set up again": the device being replaced must be this session's own device, or one revoked recently (the app lost its keys).
+        let replaced: DeviceRecord?
+        if let replacesId = request.replacesDeviceId {
+            guard request.effectiveClientKind == .app,
+                  let old = try await DeviceRecord.query(on: db).filter(\.$id == replacesId.uuid).filter(\.$consumerId == principal.consumerId.uuid).first(),
+                  try await Self.mayReplace(old, principal: principal, now: ctx.now, db: db) else {
+                _ = await enrollmentFailure(principal, "replace_not_allowed")
+                throw APIError.forbidden
+            }
+            replaced = old
+        } else {
+            replaced = nil
+        }
+        guard existing - (replaced?.revokedAt == nil && replaced != nil ? 1 : 0) < Self.maxDevicesPerConsumer else {
+            throw APIError.conflict("Too many devices are enrolled. Revoke one first.")
+        }
         // The challenge is single-use, short-lived, and good only for the session that asked for it.
         guard request.challenge.count <= 128, let challengeRecord = try await DeviceEnrollChallengeRecord.query(on: db)
             .filter(\.$challengeHash == SecureToken.hash(request.challenge)).filter(\.$consumerId == principal.consumerId.uuid).first(),
@@ -223,16 +248,24 @@ struct AuthService {
         }
         // Possession of the account's passkey, fresh, user-verified and bound to this very challenge.
         let method = try await verifyPasskeyPossession(principal, request: request)
+        // Replacing (and so revoking) a device is never covered by the "fresh sign-in" shortcut: it needs the assertion.
+        if replaced != nil, method != "assertion" {
+            _ = await enrollmentFailure(principal, "replace_needs_assertion")
+            throw APIError(.unauthorized, .passkeyAssertionRequired, "Confirm with your passkey to set this device up again.")
+        }
         guard try await DB.swap(db, table: DeviceEnrollChallengeRecord.schema, id: challengeRecord.id!, column: "state", expected: "open", newValue: "used")
         else { throw APIError(.unauthorized, .unauthorized, "The enrollment challenge is invalid or expired.") }
 
         let now = ctx.now
         let attestation = await ctx.integrity.verifyEnrollment(request.appAttest, challenge: request.challenge, keys: request.keys)
-        // Cool-down: another trusted device exists that can be asked, and this one could approve.
+        // Cool-down: an account that had any app device in the last 30 days (revoked ones included, so deleting the owner's devices does
+        // not make a thief's device the "first") cannot approve high-risk requests from this new device for 24 h, unless confirmed.
         let hasApprovalKey = request.keys.contains { $0.purpose != .request }
-        let others = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$revokedAt == nil)
-            .filter(\.$clientKind == DeviceClientKind.app.rawValue).all().filter { !$0.isExpired(at: now) }
-        let coolDown = request.effectiveClientKind == .app && hasApprovalKey && !others.isEmpty
+        let lookback = now.addingTimeInterval(-Self.coolDownLookback)
+        let priorDevices = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid)
+            .filter(\.$clientKind == DeviceClientKind.app.rawValue).all()
+            .filter { $0.revokedAt.map { $0 > lookback } ?? !$0.isExpired(at: now) }
+        let coolDown = request.effectiveClientKind == .app && hasApprovalKey && !priorDevices.isEmpty
         let device = DeviceRecord(consumerId: principal.consumerId.uuid, name: name, platform: request.platform, now: now, clientKind: request.effectiveClientKind)
         device.familyId = principal.familyId
         device.enrollmentMethod = method
@@ -247,16 +280,31 @@ struct AuthService {
             for key in keyRecords { try await key.create(on: tx) }
             try await Self.bindFamily(family, consumerId: principal.consumerId.uuid, to: device.id!, method: method,
                                       clipExpiry: device.expiresAt, now: now, on: tx)
+            if let replaced, replaced.revokedAt == nil, let oldId = replaced.id {
+                // The old device goes, with every *other* session bound to it; the caller's own session moved to the new device above.
+                try await DeviceLifecycle(db: tx, ctx: ctx).revoke(deviceIds: [oldId], now: now, cascadeToFamilies: true, keepFamily: family)
+                _ = try await AuditService(db: tx, ctx: ctx).record("device.replaced", actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
+                    consumerId: principal.consumerId, subjectType: "device", subjectId: DeviceID(oldId).description,
+                    metadata: ["new_device": DeviceID(device.id!).description])
+            }
             _ = try await AuditService(db: tx, ctx: ctx).record("device.enrolled", actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
                 consumerId: principal.consumerId, subjectType: "device", subjectId: DeviceID(device.id!).description,
                 metadata: ["platform": request.platform.rawValue, "max_assurance": Device.maxAssurance(keys: request.keys).rawValue,
                            "method": method, "client_kind": request.effectiveClientKind.rawValue, "cool_down": coolDown ? "true" : "false",
                            "attested": attestation.attested ? "true" : "false", "attestation": attestation.reason])
         }
-        if request.effectiveClientKind == .app {
-            await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: device.id!, notice: .newDevice)
-        }
+        // Every enrollment is announced (an App Clip too): in-app notice plus push to the other devices.
+        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(
+            of: principal.consumerId.uuid, except: device.id!, notice: request.effectiveClientKind == .appClip ? .appClip
+                : (replaced != nil ? .deviceReplaced : .newDevice), subjectId: DeviceID(device.id!).description)
         return deviceDTO(device, keys: keyRecords)
+    }
+
+    /// This session's own device (the one it is bound to, or enrolled through it), or any device of the account revoked in the last 30 days.
+    private static func mayReplace(_ old: DeviceRecord, principal: ConsumerPrincipal, now: Date, db: any Database) async throws -> Bool {
+        if let revoked = old.revokedAt { return now.timeIntervalSince(revoked) <= replaceWindow }
+        if old.familyId == principal.familyId { return true }
+        return try await TokenFamilyRecord.find(principal.familyId, on: db)?.deviceId == old.id
     }
 
     /// Either a fresh passkey assertion over the enrollment challenge, or (once) the unused passkey session. Returns the method.
@@ -335,6 +383,9 @@ struct AuthService {
             .filter(\.$consumerId == principal.consumerId.uuid).first() else { throw APIError.notFound }
         guard device.revokedAt == nil else { return }
         let now = ctx.now
+        // Signing out of this very device is always allowed; removing another device needs a trusted one, so a device an attacker just
+        // enrolled cannot lock the owner out.
+        if principal.deviceId != deviceId { try await DeviceTrust.require(principal, db: db, now: now) }
         try await db.transaction { tx in
             try await DeviceLifecycle(db: tx, ctx: ctx).revoke(deviceIds: [deviceId.uuid], now: now)
             _ = try await AuditService(db: tx, ctx: ctx).record("device.revoked", principal: principal, subjectType: "device", subjectId: deviceId.description)
@@ -348,14 +399,14 @@ struct AuthService {
         let now = ctx.now
         guard let confirmerId = principal.deviceId, proof.deviceId == confirmerId, confirmerId != target,
               let confirmer = try await DeviceRecord.find(confirmerId.uuid, on: db), confirmer.consumerId == principal.consumerId.uuid,
-              confirmer.revokedAt == nil, confirmer.kind == .app, !confirmer.isExpired(at: now), !confirmer.isCoolingDown(at: now),
+              confirmer.isTrusted(at: now),
               let device = try await DeviceRecord.query(on: db).filter(\.$id == target.uuid)
                   .filter(\.$consumerId == principal.consumerId.uuid).first(), device.revokedAt == nil else { throw APIError.forbidden }
         if device.approvalsLockedUntil != nil {
             guard let purpose = proof.requiredKeyPurpose,
                   let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == confirmerId.uuid)
                       .filter(\.$purpose == purpose.rawValue).first(), let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else {
-                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID or your passcode on a device you already trust.")
+                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID on a device you already trust.")
             }
             do {
                 try await proof.verify(subject: .device, subjectId: target.description, publicKey: publicKey, now: now,
@@ -363,7 +414,7 @@ struct AuthService {
             } catch ConfirmationProof.Failure.replayed {
                 throw APIError(.unauthorized, .replayDetected, "This confirmation was already used.")
             } catch ConfirmationProof.Failure.assuranceTooLow {
-                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID or your passcode on a device you already trust.")
+                throw APIError(.forbidden, .insufficientAssurance, "Confirm with Face ID on a device you already trust.")
             } catch {
                 _ = try? await AuditService(db: db, ctx: ctx).record("device.confirm_failed", outcome: .failure, principal: principal,
                                                                     subjectType: "device", subjectId: target.description)

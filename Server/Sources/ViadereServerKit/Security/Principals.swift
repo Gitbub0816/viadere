@@ -53,6 +53,8 @@ struct BearerAuthMiddleware: AsyncMiddleware {
               let id = record.id,
               let consumer = try await ConsumerRecord.find(record.consumerId, on: request.db), consumer.status == "active"
         else { throw APIError.unauthorized }
+        // A session from before token families existed gets its record on first use (it can then be bound and revoked like any other).
+        try await ConsumerTokenService(db: request.db, ctx: request.ctx).ensureFamily(record.familyId, consumerId: record.consumerId)
         request.auth.login(ConsumerPrincipal(consumerId: ConsumerID(record.consumerId), tokenId: id, familyId: record.familyId,
                                              deviceId: nil))
         return try await next.respond(to: request)
@@ -101,8 +103,10 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             try? await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: [headers.deviceId.uuid], now: now)
             throw APIError(.unauthorized, .signatureInvalid, "This device has expired.")
         }
-        // A session is bound to the device it enrolled: a stolen bearer token is useless without that device's key.
-        if let family = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db) {
+        // A session is bound to the device it enrolled: a stolen bearer token is useless without that device's key. A legacy session has no
+        // record yet; it is created and bound to this device once the signature below verifies.
+        let knownFamily = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db)
+        if let family = knownFamily {
             if family.revokedAt != nil { throw APIError.unauthorized }
             if let bound = family.deviceId {
                 guard bound == headers.deviceId.uuid else {
@@ -131,12 +135,18 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
             default: throw APIError.signatureInvalid
             }
         }
-        // An unbound session (signed in on this device without re-enrolling) binds to the first device that proves its key.
-        // It also stops being an "unused sign-in" that could enroll a new device.
-        if let family = try await TokenFamilyRecord.find(tokenRecord.familyId, on: db), family.deviceId == nil {
-            if try await DB.swapFromNull(db, table: TokenFamilyRecord.schema, id: tokenRecord.familyId, column: "device_id", newValue: headers.deviceId.uuid) {
-                try await TokenFamilyRecord.query(on: db).filter(\.$id == tokenRecord.familyId).set(\.$enrollUntil, to: nil).update()
-            }
+        // An unbound session (signed in on this device without re-enrolling) binds to the first device that proves its key. It also stops
+        // being an "unused sign-in" that could enroll a new device. A legacy session (no record) is created already bound to this device.
+        let tokens = ConsumerTokenService(db: db, ctx: ctx)
+        let family: TokenFamilyRecord
+        if let knownFamily { family = knownFamily } else {
+            family = try await tokens.ensureFamily(tokenRecord.familyId, consumerId: tokenRecord.consumerId, deviceId: headers.deviceId.uuid)
+        }
+        if let bound = family.deviceId {
+            // Covers the race where another device bound (or created) the record between the check above and now.
+            guard bound == headers.deviceId.uuid else { throw APIError.forbidden }
+        } else if try await DB.swapFromNull(db, table: TokenFamilyRecord.schema, id: tokenRecord.familyId, column: "device_id", newValue: headers.deviceId.uuid) {
+            try await TokenFamilyRecord.query(on: db).filter(\.$id == tokenRecord.familyId).set(\.$enrollUntil, to: nil).update()
         }
         // 5. Rate limit per device after authentication.
         try await ctx.limiter.enforce("device", key: headers.deviceId.description, rule: ctx.config.rateLimits.device)

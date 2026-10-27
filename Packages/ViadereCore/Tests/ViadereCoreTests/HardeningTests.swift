@@ -317,8 +317,30 @@ struct ContextDigestTests {
     func canonicalContext() throws {
         let i = Fixtures.interaction(.confirm(ConfirmPayload(title: "T", reference: "R-1")), businessId: BusinessID("22222222-2222-2222-2222-222222222222")!)
         let json = String(decoding: try i.displayContext(), as: UTF8.self)
-        #expect(json == #"{"businessId":"22222222-2222-2222-2222-222222222222","expiresAt":"2027-01-15T08:05:00.000Z","kind":"confirm","payload":{"reference":"R-1","title":"T"}}"#)
+        #expect(json == #"{"businessId":"22222222-2222-2222-2222-222222222222","expiresAt":"2027-01-15T08:05:00.000Z","kind":"confirm","payload":{"reference":"R-1","title":"T"},"schemaVersion":1}"#)
         #expect(i.displayContextDigest() == SecureToken.sha256Hex(Data(("VIADERE-CONTEXT-V1\n" + json).utf8)))
+    }
+
+    @Test("the digest includes schemaVersion, so a client that predates a payload field refuses instead of mismatching")
+    func digestCoversSchemaVersion() {
+        var i = Fixtures.interaction(.confirm(ConfirmPayload(title: "T", reference: "R-1")))
+        let v1 = i.displayContextDigest()
+        i.schemaVersion = 2
+        #expect(i.displayContextDigest() != v1)
+        // An interaction whose version this build does not know does not decode at all (the client refuses it).
+        let json = String(decoding: (try? ViadereJSON.encode(i)) ?? Data(), as: UTF8.self)
+        #expect(json.contains("\"schemaVersion\":2"))
+        // A newer schema decodes leniently (kept as sent) so lists still load; validation (server, on issue) refuses it.
+        let newer = Interaction.currentSchemaVersion + 1
+        let lenient = try ViadereJSON.decode(Interaction.self, from: Data(json.replacingOccurrences(of: "\"schemaVersion\":2", with: "\"schemaVersion\":\(newer)").utf8))
+        #expect(lenient.schemaVersion == newer)
+        #expect(InteractionValidation.issues(in: lenient, now: lenient.createdAt).contains { $0.code == .unsupportedVersion })
+        // A payload of a shape this build cannot read is preserved verbatim instead of failing.
+        let reshaped = json.replacingOccurrences(of: "\"schemaVersion\":2", with: "\"schemaVersion\":\(newer)").replacingOccurrences(of: "\"title\":\"T\"", with: "\"title\":{\"x\":1}")
+        let odd = try ViadereJSON.decode(Interaction.self, from: Data(reshaped.utf8))
+        if case .unknown = odd.payload {} else { Issue.record("expected .unknown payload") }
+        // Version 0 is still corrupt.
+        #expect(throws: (any Error).self) { try ViadereJSON.decode(Interaction.self, from: Data(json.replacingOccurrences(of: "\"schemaVersion\":2", with: "\"schemaVersion\":0").utf8)) }
     }
 
     @Test("an approval signed without the digest is refused (v1 is no longer enough)")
@@ -411,16 +433,30 @@ struct EnrollmentContractTests {
         // The assurance claim is part of what is signed: a passcode proof cannot be relabelled as biometric.
         var relabelled = proof
         relabelled.assurance = .devicePasscode
+        #expect(throws: ConfirmationProof.Failure.assuranceTooLow) { try relabelled.verify(subject: .device, subjectId: target, publicKey: confirmer.publicKey, now: at) }
+        relabelled.assurance = .biometric
+        relabelled.deviceId = DeviceID()
         #expect(throws: ConfirmationProof.Failure.badSignature) { try relabelled.verify(subject: .device, subjectId: target, publicKey: confirmer.publicKey, now: at) }
         var none = proof
         none.assurance = .none
         #expect(throws: ConfirmationProof.Failure.assuranceTooLow) { try none.verify(subject: .device, subjectId: target, publicKey: confirmer.publicKey, now: at) }
     }
 
+    @Test("a passcode confirmation is no longer enough: confirming needs biometric assurance")
+    func confirmationNeedsBiometric() async throws {
+        let target = UUID().uuidString.lowercased()
+        let passcode = try await ConfirmationProof.sign(subject: .device, subjectId: target, deviceId: deviceId, assurance: .devicePasscode,
+                                                        key: confirmer, now: now)
+        #expect(passcode.requiredKeyPurpose == nil)
+        #expect(throws: ConfirmationProof.Failure.assuranceTooLow) {
+            try passcode.verify(subject: .device, subjectId: target, publicKey: confirmer.publicKey, now: now)
+        }
+    }
+
     @Test("a confirmation proof is single use, even when its signature is re-encoded")
     func confirmationReplay() async throws {
         let target = UUID().uuidString.lowercased()
-        let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: target, deviceId: deviceId, assurance: .devicePasscode,
+        let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: target, deviceId: deviceId, assurance: .biometric,
                                                      key: confirmer, now: now)
         let guardian = InMemoryReplayGuard()
         try await proof.verify(subject: .phoneLink, subjectId: target, publicKey: confirmer.publicKey, now: now, replayGuard: guardian)
@@ -435,7 +471,10 @@ struct EnrollmentContractTests {
     func backwardCompatibleDecoding() throws {
         let request = #"{"name":"iPhone","platform":"iOS","challenge":"abc","keys":[]}"#
         let decoded = try ViadereJSON.decode(DeviceEnrollRequest.self, from: Data(request.utf8))
-        #expect(decoded.clientKind == .app && decoded.assertion == nil && decoded.appAttest == nil)
+        #expect(decoded.clientKind == .app && decoded.assertion == nil && decoded.appAttest == nil && decoded.replacesDeviceId == nil)
+        let replaced = DeviceID()
+        let replacing = DeviceEnrollRequest(name: "n", platform: .iOS, challenge: "c", keys: [], replacesDeviceId: replaced)
+        #expect(try ViadereJSON.decode(DeviceEnrollRequest.self, from: ViadereJSON.encode(replacing)).replacesDeviceId == replaced)
         let challenge = try ViadereJSON.decode(DeviceEnrollmentChallenge.self, from: Data(#"{"challenge":"c","expiresAt":"2027-01-15T08:00:00.000Z"}"#.utf8))
         #expect(challenge.assertion == nil && !challenge.assertionOptional)
         let key = SoftwareP256SigningKey().publicKey

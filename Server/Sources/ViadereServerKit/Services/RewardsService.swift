@@ -466,6 +466,8 @@ struct RewardsService {
     }
 
     func upsertProgram(principal: BusinessPrincipal, request: UpsertLoyaltyProgramRequest) async throws -> BusinessLoyaltyProgram {
+        // The program is shared by every real member: test-mode keys never edit it.
+        try Sandbox.requireLive(principal, "change the loyalty program")
         let name = try validateText(request.programName, field: "programName", max: 60)
         let summary = try validateText(request.summary, field: "summary", max: 280)
         let terms = try validateText(request.termsVersion, field: "termsVersion", max: 32)
@@ -580,7 +582,11 @@ struct RewardsService {
             guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == relationshipId.uuid)
                 .filter(\.$businessId == businessId).first() else { throw APIError.notFound }
             guard relationship.isActive else { throw APIError.conflict("The consumer is not connected to your business.") }
+            try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
             targetConsumer = relationship.consumerId
+        } else {
+            // A reward for every member reaches real people: a test-mode key can only target a sandbox relationship.
+            try Sandbox.requireLive(principal, "issue rewards to every member")
         }
         let consumerId = targetConsumer
         let record = RewardRecord()
@@ -614,7 +620,7 @@ struct RewardsService {
             throw error
         }
         // A reward issued to one person can come with a Wallet pass. Best effort: the reward exists either way.
-        if request.issueWalletPass, let consumerId, ctx.passSigner != nil {
+        if request.issueWalletPass, principal.livemode, let consumerId, ctx.passSigner != nil {
             _ = try? await WalletService(db: db, ctx: ctx).issue(consumer: ConsumerID(consumerId), request:
                 WalletPassIssueRequest(kind: .coupon, businessId: principal.businessId, rewardId: RewardID(record.id!)))
         }
@@ -631,6 +637,10 @@ struct RewardsService {
         guard let reward = try await RewardRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$businessId == principal.businessId.uuid).first() else {
             throw APIError.notFound
         }
+        // A reward for one person is that person's: test keys revoke only sandbox rewards, live keys only real ones (broadcast rewards are live).
+        if let target = reward.consumerId {
+            guard try await Sandbox(db: db).matches(consumerId: target, livemode: principal.livemode) else { throw APIError.notFound }
+        } else if !principal.livemode { throw APIError.notFound }
         let summary = try await businessSummary(principal)
         if !reward.isRevoked {
             try await db.transaction { tx in
@@ -670,6 +680,7 @@ struct RewardsService {
         let businessId = principal.businessId.uuid
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == request.relationshipId.uuid)
             .filter(\.$businessId == businessId).first() else { throw APIError.notFound }
+        try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
         func result(applied: Bool) async throws -> LoyaltyPointsResult {
             guard let account = try await LoyaltyAccountRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$consumerId == relationship.consumerId).first(),
                   let program = try await LoyaltyProgramRecord.query(on: db).filter(\.$businessId == businessId).first() else { throw APIError.notFound }
@@ -724,7 +735,8 @@ struct RewardsService {
         // Malformed, unknown and another business's codes are the same 404: nothing to learn from the difference.
         guard let normalized = Self.normalizeCode(request.code),
               let row = try await RewardRedemptionRecord.query(on: db).filter(\.$codeHash == codeHash(normalized))
-                .filter(\.$businessId == principal.businessId.uuid).first(), let rowId = row.id else { throw APIError.notFound }
+                .filter(\.$businessId == principal.businessId.uuid).first(), let rowId = row.id,
+              try await Sandbox(db: db).matches(consumerId: row.consumerId, livemode: principal.livemode) else { throw APIError.notFound }
         let now = ctx.now
         switch row.status {
         case "consumed":

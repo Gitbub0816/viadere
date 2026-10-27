@@ -116,11 +116,29 @@ struct WebhookService {
     // MARK: Bodies at rest
 
     /// The exact body bytes of a delivery. Rows written before bodies were encrypted hold plaintext JSON; they are read as-is.
-    func deliveryBody(_ delivery: WebhookDeliveryRecord) -> Data? {
+    func storedBody(_ delivery: WebhookDeliveryRecord) -> Data? {
         if delivery.body.hasPrefix("v1.") || delivery.body.hasPrefix("v2.") {
             return try? ctx.cipher.open(delivery.body, context: "webhook_deliveries.body", rowId: delivery.id!)
         }
         return Data(delivery.body.utf8)
+    }
+
+    func deliveryBody(_ delivery: WebhookDeliveryRecord) -> Data? {
+        let raw = storedBody(delivery)
+        // Deliveries queued before businesses stopped receiving the raw signed decision can still hold it (it names the global device
+        // id). Whatever is queued is stripped on the way out, so a deploy never sends one.
+        guard let raw, delivery.eventType == WebhookEventType.interactionDecided.rawValue else { return raw }
+        return Self.strippingSignedDecision(raw) ?? raw
+    }
+
+    /// The event body without `data.signedDecision`; `nil` when there is nothing to strip (or the body is not an event).
+    static func strippingSignedDecision(_ body: Data) -> Data? {
+        guard var event = try? ViadereJSON.decode(JSONValue.self, from: body), case .object(var members) = event,
+              case .object(var data)? = members["data"], data["signedDecision"] != nil else { return nil }
+        data.removeValue(forKey: "signedDecision")
+        members["data"] = .object(data)
+        event = .object(members)
+        return try? ViadereJSON.encode(event)
     }
 
     /// Account deletion: replaces the body of every delivery that mentions this consumer's relationships, sessions or interactions.

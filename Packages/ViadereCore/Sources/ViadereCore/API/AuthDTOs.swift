@@ -258,11 +258,16 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
     public var clipDevice: Bool?
     /// App Attest evidence (recorded; not yet trusted).
     public var appAttest: AppAttestEvidence?
+    /// "Set up again": the caller's own device (or one revoked within the last 30 days) that this enrollment replaces. After a
+    /// successful enrollment the server revokes it atomically and moves the session's device binding to the new device. The
+    /// new device is still subject to the new-device cool-down. Omitted for an ordinary enrollment.
+    public var replacesDeviceId: DeviceID?
 
     public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration],
                 assertion: PasskeyAssertionCredential? = nil, clientKind: DeviceClientKind = .app, appAttest: AppAttestEvidence? = nil,
-                clipDevice: Bool? = nil) {
+                clipDevice: Bool? = nil, replacesDeviceId: DeviceID? = nil) {
         self.clipDevice = clipDevice
+        self.replacesDeviceId = replacesDeviceId
         self.name = name
         self.platform = platform
         self.challenge = challenge
@@ -272,7 +277,7 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
         self.appAttest = appAttest
     }
 
-    enum CodingKeys: String, CodingKey { case name, platform, challenge, keys, assertion, clientKind, appAttest, clipDevice }
+    enum CodingKeys: String, CodingKey { case name, platform, challenge, keys, assertion, clientKind, appAttest, clipDevice, replacesDeviceId }
 
     /// The effective client kind: `clipDevice == true` or `clientKind == .appClip` both mean App Clip.
     public var effectiveClientKind: DeviceClientKind { clipDevice == true || clientKind == .appClip ? .appClip : .app }
@@ -287,6 +292,7 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
         clientKind = try c.decodeIfPresent(DeviceClientKind.self, forKey: .clientKind) ?? .app
         appAttest = try c.decodeIfPresent(AppAttestEvidence.self, forKey: .appAttest)
         clipDevice = try c.decodeIfPresent(Bool.self, forKey: .clipDevice)
+        replacesDeviceId = try c.decodeIfPresent(DeviceID.self, forKey: .replacesDeviceId)
     }
 }
 
@@ -295,8 +301,8 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
 /// Used for (a) a **new device** that is in its cool-down (`POST /v1/devices/{deviceId}/confirm`, signed by *another*
 /// device of the same account that is not itself cooling down) and (b) a **newly linked phone**
 /// (`POST /v1/phone-links/{phoneLinkId}/confirm`). `signature` is the confirming device's ECDSA P-256 / SHA-256 signature
-/// (raw r‖s, base64url) over `signingInput()`, made with its `approvalBiometric` key (`assurance` = biometric) or its
-/// `approvalUserPresence` key (`assurance` = devicePasscode); a request key cannot confirm.
+/// (raw r‖s, base64url) over `signingInput()`, made with its
+/// `approvalBiometric` key (`assurance` = biometric); a passcode or request key cannot confirm.
 public struct ConfirmationProof: Codable, Sendable, Hashable {
     public enum Subject: String, Codable, Sendable { case device, phoneLink }
 
@@ -348,11 +354,12 @@ public struct ConfirmationProof: Codable, Sendable, Hashable {
         case wrongSubject, assuranceTooLow, malformedSignature, signedInFuture, tooOld, badSignature, replayed
     }
 
-    /// The key purpose that must have signed this proof.
+    /// The key purpose that must have signed this proof. Only `biometric` assurance confirms: a device passcode is known to a
+    /// shoulder-surfer or thief, and a request key never counts, so those are `nil` (`Failure.assuranceTooLow`).
     public var requiredKeyPurpose: DeviceKeyPurpose? {
         switch assurance {
         case .none: nil
-        case .devicePasscode: .approvalUserPresence
+        case .devicePasscode: nil
         case .biometric: .approvalBiometric
         }
     }
@@ -512,6 +519,38 @@ public struct SessionInfo: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.current = current
+    }
+}
+
+// MARK: - Security notices
+
+/// What happened. Unknown values decode as `.unknown` so older apps survive new kinds.
+public enum SecurityNoticeKind: String, Codable, Sendable, Hashable {
+    case newDevice, newPhone, appClip, deviceReplaced, unknown
+
+    public init(from decoder: any Decoder) throws {
+        self = SecurityNoticeKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// An in-app notice about a sensitive change to the account (a device or phone was added, an App Clip session started, a device was set
+/// up again). `GET /v1/security-notices` returns the undismissed ones, newest first, without the ones the calling device caused; the app
+/// shows them when it opens, so an account whose other devices received no push still hears about it. Dismissing needs a trusted device.
+public struct SecurityNotice: Codable, Sendable, Hashable, Identifiable {
+    public var id: UUID
+    public var kind: SecurityNoticeKind
+    /// Plain text, safe to show as-is.
+    public var message: String
+    public var createdAt: Date
+    /// The device or phone link id the notice is about, when there is one.
+    public var subjectId: String?
+
+    public init(id: UUID, kind: SecurityNoticeKind, message: String, createdAt: Date, subjectId: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.message = message
+        self.createdAt = createdAt
+        self.subjectId = subjectId
     }
 }
 

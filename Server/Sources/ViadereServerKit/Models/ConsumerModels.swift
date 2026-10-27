@@ -114,6 +114,10 @@ final class RefreshTokenRecord: Model, @unchecked Sendable {
     @Field(key: "expires_at") var expiresAt: Date
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "used_at") var usedAt: Date?
+    /// The pair this token was rotated into, sealed (AES-GCM, row-bound). Kept for `ConsumerTokenService.graceWindow` so that a client
+    /// that lost the response (or two processes that share the session) presenting the same token again receives the same pair
+    /// instead of tripping reuse detection; wiped afterwards.
+    @OptionalField(key: "successor_sealed") var successorSealed: String?
 
     init() {}
 
@@ -194,6 +198,33 @@ final class TokenFamilyRecord: Model, @unchecked Sendable {
     }
 }
 
+/// An in-app security notice (a device or phone was added, an App Clip started): shown on the account's next app open, in addition to
+/// the push to its other devices, so a single-device or push-less account still hears about it.
+final class SecurityNoticeRecord: Model, @unchecked Sendable {
+    static let schema = "security_notices"
+    @ID(key: .id) var id: UUID?
+    @Field(key: "consumer_id") var consumerId: UUID
+    @Field(key: "kind") var kind: String
+    @Field(key: "message") var message: String
+    @OptionalField(key: "subject_id") var subjectId: String?
+    /// The device that did it; it does not need to be told.
+    @OptionalField(key: "origin_device_id") var originDeviceId: UUID?
+    @Field(key: "created_at") var createdAt: Date
+    @OptionalField(key: "dismissed_at") var dismissedAt: Date?
+
+    init() {}
+
+    init(consumerId: UUID, kind: String, message: String, subjectId: String?, originDeviceId: UUID?, now: Date) {
+        id = UUID()
+        self.consumerId = consumerId
+        self.kind = kind
+        self.message = message
+        self.subjectId = subjectId
+        self.originDeviceId = originDeviceId
+        createdAt = now
+    }
+}
+
 final class DeviceKeyRecord: Model, @unchecked Sendable {
     static let schema = "device_keys"
     @ID(key: .id) var id: UUID?
@@ -266,6 +297,10 @@ final class PhoneLinkRecord: Model, @unchecked Sendable {
     /// `otp` or `sms_link`.
     @OptionalField(key: "source") var source: String?
     @OptionalField(key: "confirmed_at") var confirmedAt: Date?
+
+    /// Verified and past its cool-down (or confirmed). The only state in which the number acts as the account: interaction delivery, RCS
+    /// and SMS replies, and SMS routing (`GatewayService.loadContext`).
+    func isUsable(at now: Date) -> Bool { state == "verified" && (usableFrom.map { $0 <= now } ?? true) }
 
     init() {}
 

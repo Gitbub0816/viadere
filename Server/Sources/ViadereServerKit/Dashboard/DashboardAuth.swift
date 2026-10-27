@@ -142,6 +142,8 @@ struct DashboardAuthService {
         user.userHandle = handle
         user.status = status
         user.createdAt = ctx.now
+        // A sign-up or invitation that ends in a session is a first sign-in.
+        if status == "active", kind == "business" { user.lastLoginAt = ctx.now }
         return user
     }
 
@@ -170,7 +172,7 @@ struct DashboardAuthService {
         }
         let legal = body.legalName.flatMap { cleanName($0, max: 120) }
         let detail = body.description.flatMap { cleanName($0, max: 500) }
-        try await ctx.limiter.enforce("dashboard-signup-email", key: emailHash(email), rule: .perHour(5, burst: 5))
+        try await ctx.limiter.enforce("dashboard-signup-email", key: "\(ip)|\(emailHash(email))", rule: .perHour(5, burst: 5))
         // Deliberately no "this email is taken" answer here: it would let anyone enumerate addresses, and the ceremony proves nothing
         // about the address. A taken address fails at the end with the same generic error as any other failed registration.
         let userHandle = SecureToken.generate(byteCount: 32)
@@ -310,32 +312,20 @@ struct DashboardAuthService {
 
     // MARK: Invitations
 
+    /// Registration through an invitation link. The link proves nothing about who controls the address beyond "someone holding the
+    /// email", so it can only ever create a **new** account. An address that already has an account (used or not) cannot be claimed
+    /// this way: that account signs in and accepts the invitation from its own session (`acceptInvite`). The answer here is the
+    /// same whether or not an account exists, so the link cannot be used to probe addresses; the difference only shows at `finish`
+    /// as a generic registration error.
     func inviteBegin(_ body: InviteBeginBody) async throws -> PasskeyRegistrationOptions {
         guard let name = cleanName(body.displayName, max: 64), let invite = try await openInvite(token: body.token) else {
             throw APIError.validation("This invitation is not valid.", details: ["token": "invalid"])
         }
         let email = try ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!)
-        // The invitation token proves control of the address. A sign-up that only pre-registered it (never signed in, organization
-        // still unverified) must not block the real owner: the invitation claims it. A used account still needs the sign-in route.
-        if let existing = try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).first(),
-           try await !isUnusedSignup(existing) {
-            throw APIError.conflict("An account with this email already exists. Sign in, then accept the invitation.")
-        }
         let handle = SecureToken.generate(byteCount: 32)
         let payload = String(decoding: try JSONEncoder().encode(["inviteId": invite.id!.uuidString, "displayName": name, "userHandle": handle]), as: UTF8.self)
         let (ceremony, challenge) = try await newCeremony(kind: "invite", userId: nil, sealedPayload: payload)
         return registrationOptions(ceremony, challenge: challenge, handle: handle, email: email, displayName: name)
-    }
-
-    /// A self-service sign-up that was never used: the user has not signed in since registering and belongs only to organizations that are
-    /// not verified yet.
-    func isUnusedSignup(_ user: DashboardUserRecord) async throws -> Bool {
-        guard user.kind == "business", user.lastLoginAt == nil, user.status == "active" else { return false }
-        let memberships = try await OrgMembershipRecord.query(on: db).filter(\.$userId == user.id!).filter(\.$removedAt == nil).all()
-        for membership in memberships {
-            if let business = try await BusinessRecord.find(membership.businessId, on: db), business.isVerified { return false }
-        }
-        return true
     }
 
     func openInvite(token: String) async throws -> OrgInviteRecord? {
@@ -354,39 +344,31 @@ struct DashboardAuthService {
               let invite = try await OrgInviteRecord.find(inviteId, on: db), invite.state == "open", invite.expiresAt > ctx.now,
               let email = try? ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!) else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
-        let existingUser = try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).first()
-        if let existingUser, try await !isUnusedSignup(existingUser) {
-            throw APIError.conflict("An account with this email already exists. Sign in, then accept the invitation.")
-        }
-        let userId = existingUser?.id ?? UUID()
-        try await db.transaction { tx in
-            // Single use: exactly one acceptance can flip open → accepted.
-            guard try await DB.swap(tx, table: OrgInviteRecord.schema, id: inviteId, column: "state", expected: "open", newValue: "accepted",
-                                    extra: [("accepted_at", ctx.now)]) else { throw APIError.unauthorized }
-            if let existingUser {
-                // Claim the unused pre-registration: its passkeys and sessions die, the pending application is detached.
-                try await DashboardSessionRecord.query(on: tx).filter(\.$userId == userId).filter(\.$revokedAt == nil).set(\.$revokedAt, to: ctx.now).update()
-                try await DashboardPasskeyRecord.query(on: tx).filter(\.$userId == userId).delete()
-                try await OrgMembershipRecord.query(on: tx).filter(\.$userId == userId).filter(\.$removedAt == nil).set(\.$removedAt, to: ctx.now).update()
-                existingUser.displayName = name
-                existingUser.userHandle = handle
-                existingUser.status = "active"
-                try await existingUser.update(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("team.invite_claimed_signup", actor: AuditActor(kind: .business, id: userId.uuidString.lowercased()),
-                    businessId: BusinessID(invite.businessId), subjectType: "user", subjectId: userId.uuidString.lowercased())
-            } else {
+        let taken = APIError(.unauthorized, .unauthorized,
+                             "Registration could not be completed. If you already have an account, sign in and accept the invitation from your team page.")
+        // Never claim an existing account (used or not): the invitation link does not prove the address is the invitee's.
+        guard try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).count() == 0 else { throw taken }
+        let userId = UUID()
+        do {
+            try await db.transaction { tx in
+                // Single use: exactly one acceptance can flip open → accepted.
+                guard try await DB.swap(tx, table: OrgInviteRecord.schema, id: inviteId, column: "state", expected: "open", newValue: "accepted",
+                                        extra: [("accepted_at", ctx.now)]) else { throw APIError.unauthorized }
                 try await makeUser(kind: "business", email: email, displayName: name, handle: handle, status: "active", id: userId).create(on: tx)
+                try await savePasskey(verified, userId: userId, on: tx)
+                let membership = OrgMembershipRecord()
+                membership.id = UUID()
+                membership.businessId = invite.businessId
+                membership.userId = userId
+                membership.role = invite.role
+                membership.createdAt = ctx.now
+                try await membership.create(on: tx)
+                _ = try await AuditService(db: tx, ctx: ctx).record("team.invite_accepted", actor: AuditActor(kind: .business, id: userId.uuidString.lowercased()),
+                    businessId: BusinessID(invite.businessId), subjectType: "user", subjectId: userId.uuidString.lowercased(), metadata: ["role": invite.role])
             }
-            try await savePasskey(verified, userId: userId, on: tx)
-            let membership = OrgMembershipRecord()
-            membership.id = UUID()
-            membership.businessId = invite.businessId
-            membership.userId = userId
-            membership.role = invite.role
-            membership.createdAt = ctx.now
-            try await membership.create(on: tx)
-            _ = try await AuditService(db: tx, ctx: ctx).record("team.invite_accepted", actor: AuditActor(kind: .business, id: userId.uuidString.lowercased()),
-                businessId: BusinessID(invite.businessId), subjectType: "user", subjectId: userId.uuidString.lowercased(), metadata: ["role": invite.role])
+        } catch {
+            if error.isConstraintViolation { throw taken }
+            throw error
         }
         return try await store.create(userId: userId, realm: .business, businessId: invite.businessId, replacing: previousCookie)
     }

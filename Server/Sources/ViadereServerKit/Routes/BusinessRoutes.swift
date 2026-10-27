@@ -16,7 +16,8 @@ enum BusinessRoutes {
         routes.api(APIRoutes.businessInteractionOutcome, scope: Scope.interactionsRead) { req in
             let id: InteractionID = try req.uuidParameter("interactionId")
             let service = InteractionService(db: req.db, ctx: req.ctx)
-            let record = try await service.record(id: id, businessId: try req.business.businessId)
+            let principal = try req.business
+            let record = try await service.record(id: id, businessId: principal.businessId, livemode: principal.livemode)
             _ = try await service.expireIfNeeded(record)
             return try req.jsonResponse(try service.outcome(record))
         }

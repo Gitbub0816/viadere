@@ -17,8 +17,10 @@ public enum APIRoutes {
     /// Public: the refresh token itself is the credential (single-use, rotated, reuse revokes the family).
     public static let authRefresh = Endpoint<AuthRefreshRequest, AuthSession>(
         "auth.refresh", .POST, "/v1/auth/refresh", auth: .none)
+    /// Ends **this session only** (its tokens). It never revokes devices: use `devices.revoke` for that. Device-signed, so a stolen
+    /// bearer token alone cannot sign the owner out.
     public static let logout = Endpoint<EmptyBody, EmptyBody>(
-        "auth.logout", .POST, "/v1/auth/logout", auth: .bearer)
+        "auth.logout", .POST, "/v1/auth/logout", auth: .deviceSignedBearer)
 
     // MARK: Devices
     /// Returns the enrollment challenge **and** WebAuthn assertion options over that same challenge (`DeviceEnrollmentChallenge`).
@@ -53,6 +55,12 @@ public enum APIRoutes {
         "sessions.list", .GET, "/v1/sessions", auth: .deviceSignedBearer)
     public static let sessionRevoke = Endpoint<EmptyBody, EmptyBody>(
         "sessions.revoke", .DELETE, "/v1/sessions/{sessionId}", auth: .deviceSignedBearer)
+    /// Undismissed in-app security notices (device or phone added, App Clip started, device set up again), newest first.
+    public static let securityNotices = Endpoint<EmptyBody, [SecurityNotice]>(
+        "securityNotices.list", .GET, "/v1/security-notices", auth: .deviceSignedBearer)
+    /// Dismisses a notice. Needs a trusted device (`403 device_cool_down` while the device is new).
+    public static let securityNoticeDismiss = Endpoint<EmptyBody, EmptyBody>(
+        "securityNotices.dismiss", .POST, "/v1/security-notices/{noticeId}/dismiss", auth: .deviceSignedBearer)
     /// Revokes every device and token, erases/anonymizes personal data, keeps a redacted audit record.
     public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
         "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
@@ -225,7 +233,7 @@ public enum APIRoutes {
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, deviceConfirm.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
         phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkPreview.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
         phoneLinkConfirm.descriptor,
-        phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, accountDelete.descriptor,
+        phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
         relationshipConnect.descriptor, relationshipsList.descriptor, relationshipDisconnect.descriptor,
         consentsGet.descriptor, consentsUpdate.descriptor,

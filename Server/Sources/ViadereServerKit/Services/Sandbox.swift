@@ -20,6 +20,19 @@ struct Sandbox {
         }
     }
 
+    /// True when `consumerId` is on the same side of the test/live line as the key (sandbox consumer ⇔ test key).
+    func matches(consumerId: UUID, livemode: Bool) async throws -> Bool {
+        guard let consumer = try await ConsumerRecord.find(consumerId, on: db) else { return false }
+        return consumer.isSandbox != livemode
+    }
+
+    /// Business-wide state (the loyalty program, broadcast rewards) is live-only: a test-mode key never touches it.
+    static func requireLive(_ principal: BusinessPrincipal, _ what: String) throws {
+        guard principal.livemode else {
+            throw APIError(.forbidden, .forbidden, "Test-mode keys cannot \(what). Use a sandbox relationship (POST /v1/business/sandbox/relationships) or a live key.")
+        }
+    }
+
     func create(principal: BusinessPrincipal, now: Date, ctx: ServerContext) async throws -> SandboxRelationship {
         guard !principal.livemode else {
             throw APIError(.forbidden, .forbidden, "Sandbox relationships are created with a test-mode key.")
