@@ -86,6 +86,24 @@ jobs:
           TEST_RATE_LIMIT_STORE: database
         run: swift test
 
+  connect-button-browser:
+    name: Connect button in a real browser (Python + Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The runner's preinstalled python3 (no extra action to pin). Playwright is pinned to an exact version; its Chromium is
+      # downloaded by `playwright install` in CI only.
+      - name: Install Playwright and Chromium
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pw"
+          "$RUNNER_TEMP/pw/bin/pip" install --no-input playwright==1.64.1
+          "$RUNNER_TEMP/pw/bin/playwright" install --with-deps chromium
+      - name: Test the web component in headless Chromium
+        run: '"$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_connect_button.py'
+
   site:
     name: Site (build + lint)
     runs-on: ubuntu-24.04
