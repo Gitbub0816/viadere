@@ -124,20 +124,26 @@ do {
 }
 ```
 
-Without the SDK (any language), the same check in Node.js:
+Without the SDK (any language), the same check in Python (standard library only):
 
-```js
-const crypto = require('crypto');
-function verify(header, rawBody, secrets, now = Date.now() / 1000) {
-  const parts = header.split(',').map(p => p.trim().split('='));
-  const t = Number(parts.find(([k]) => k === 't')?.[1]);
-  const sigs = parts.filter(([k]) => k === 'v1').map(([, v]) => Buffer.from(v, 'hex'));
-  if (!Number.isFinite(t) || Math.abs(now - t) > 300 || sigs.length === 0) return false;
-  return secrets.some(secret => {
-    const mac = crypto.createHmac('sha256', secret).update(`${t}.`).update(rawBody).digest();
-    return sigs.some(s => s.length === mac.length && crypto.timingSafeEqual(s, mac));
-  });
-}
+```python
+import hashlib, hmac, time
+
+def verify(header: str, raw_body: bytes, secrets: list[str], now: float | None = None, tolerance: int = 300) -> bool:
+    now = time.time() if now is None else now
+    parts = [p.strip().split("=", 1) for p in header.split(",") if "=" in p]
+    try:
+        t = int(next(v for k, v in parts if k == "t"))
+    except (StopIteration, ValueError):
+        return False
+    sigs = [v for k, v in parts if k == "v1"]
+    if not sigs or abs(now - t) > tolerance:
+        return False
+    for secret in secrets:                      # during rotation, try every active secret
+        mac = hmac.new(secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256).hexdigest()
+        if any(hmac.compare_digest(mac, s.lower()) for s in sigs):   # constant-time compare
+            return True
+    return False
 ```
 
 ### Events
