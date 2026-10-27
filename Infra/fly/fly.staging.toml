@@ -19,6 +19,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   max_unavailable = 1
 
 [env]
+  VAULT_SYNC_ENABLED = "true"
   # ---- runtime / mode -------------------------------------------------------------------------------
   ENVIRONMENT = "staging"               # production rules: every secret mandatory, https only, `seed` refused
   LOG_LEVEL = "debug"

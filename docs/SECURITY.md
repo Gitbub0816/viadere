@@ -507,3 +507,37 @@ Spec: SEC-DEV-005, §5.1 (third-party passkey vault), §13 (passkey private keys
 - *Item metadata the server sees*: item count, revisions and blob sizes (bucketed), device count, join timing, write times.
 - *Credential Exchange import* (iOS 26) is parsed and tested against CXF-shaped JSON but not yet connected to `ASCredentialImportManager`; export is not implemented.
 - *Apple code paths* (Secure Enclave/Keychain provider, extension, scanner) cannot be built or run on Linux: they need device verification (App/README.md).
+
+### 2.50 End-to-end encryption (WP1: `ViadereCore/E2EE`, HPKE RFC 9180)
+
+Public API (stable; other work packages such as Verify call it to deliver identity results to businesses):
+
+```swift
+let envelope = try E2EE.seal(plaintext, to: recipientPublicKey,           // E2EEPublicKey (kid + X9.63)
+                             context: E2EEContext(purpose:, requestId:, sender:, recipient:, expiresAt:))
+let wire     = try envelope.serialized()                                  // canonical JSON bytes
+let parsed   = try E2EEEnvelope.parse(wire)                               // strict; rejects unknown version/suite/members
+let opened   = try E2EE.open(parsed, using: privateKey,                   // any E2EEPrivateKey (software, KMS, Keychain)
+                             expecting: E2EEExpectation(purpose:, requestId:, sender:, recipient:), now: now)
+```
+
+**Suite.** `suite = "hpke-0010-0001-0002"`: base mode, KEM `DHKEM(P-256, HKDF-SHA256)` (0x0010), KDF `HKDF-SHA256` (0x0001), AEAD `AES-256-GCM` (0x0002), via CryptoKit / swift-crypto `HPKE`. Nothing is negotiated: an unknown `suite` or `v` is rejected (`E2EEError.unsupportedSuite` / `.unsupportedVersion`), as is every unknown or missing member.
+
+**Envelope** (members exactly `v, suite, kid, enc, ct, ctx`; canonical JSON, section 2.2):
+
+| Member | Meaning |
+|---|---|
+| `v` | `1` |
+| `suite` | as above |
+| `kid` | recipient key ID: `base64url(SHA-256(DER SubjectPublicKeyInfo of the recipient's P-256 key))`, **not truncated** (43 characters). A lookup handle only: verifiers compare the full public key. |
+| `enc` | HPKE encapsulated key, base64url of 65 bytes (X9.63), validated as a curve point |
+| `ct` | AEAD ciphertext plus 16-byte tag, base64url, at most 64 KiB plaintext |
+| `ctx` | `{"exp": unix seconds, "purpose": [a-z0-9._-]{1,64}, "recipient": id, "request_id": id, "sender": id}` (ids `[A-Za-z0-9._:-]{1,128}`) |
+
+**Binding (SEC-CR-001).** `header = canonicalJSON({v, suite, kid, ctx})`. HPKE `info = "VIADERE-E2EE-INFO-V1\n" ‖ header`; AEAD `aad = "VIADERE-E2EE-V1\n" ‖ header`. Changing the purpose, request, sender, recipient, expiry or recipient key makes opening fail with one error (`authenticationFailed`), so there is no decryption oracle. `open` additionally requires the caller's `purpose` (always) and `request_id`, `sender`, `recipient` when given, and refuses an expired envelope **before** decrypting.
+
+**Nonces (SEC-CR-008).** One fresh HPKE sender context (fresh ephemeral key) per envelope and exactly one `seal` at sequence number 0, so an AEAD nonce is never reused under a key.
+
+**Sender authentication.** HPKE base mode does not authenticate the sender (anyone with the public key can encrypt). Every protocol that uses an envelope therefore authenticates the sender **inside the plaintext** with a signature from a key published in the authenticated business key directory (section 2.51); for Approve, `ApprovalRequest` (section 2.54). A relay that holds a device's public key can produce an envelope that decrypts, but not one with a valid business signature.
+
+**Keys.** A device keeps one HPKE key per business relationship in the Keychain (`WhenUnlockedThisDeviceOnly`; CryptoKit HPKE with Secure Enclave keys is OS-version dependent, so it is not relied on). A business keeps its HPKE key in its KMS; its public part is published as a root-signed directory statement (purpose `hpke-encryption`).

@@ -19,6 +19,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   max_unavailable = 1
 
 [env]
+  VAULT_SYNC_ENABLED = "false"   # Phase 4 gate: independent vault crypto/recovery review must pass first
   # ---- runtime / mode -------------------------------------------------------------------------------
   ENVIRONMENT = "production"
   LOG_LEVEL = "info"

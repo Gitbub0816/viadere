@@ -23,6 +23,9 @@ public enum CBORValue: Equatable, Sendable {
     case map([Entry])
     case bool(Bool)
     case null
+    /// A tagged item (RFC 8949 §3.4). Only produced when the decoder was told to accept the tag (`CBOR.Limits.allowedTags`); every other
+    /// tag is refused, as before. ISO 18013-5 uses tag 24 (encoded CBOR data item), 0 (date-time) and 1004 (full-date).
+    indirect case tagged(UInt64, CBORValue)
 
     /// A map from text keys to values, in the given order (`CBOR.encode(_, deterministic:)` sorts them).
     public static func textMap(_ pairs: [(String, CBORValue)]) -> CBORValue {
@@ -61,6 +64,8 @@ public enum CBORValue: Equatable, Sendable {
         }
     }
     public var mapEntries: [Entry]? { if case .map(let entries) = self { entries } else { nil } }
+    /// The content of an item tagged `tag` (`nil` for anything else).
+    public func content(taggedWith tag: UInt64) -> CBORValue? { if case .tagged(let t, let inner) = self, t == tag { inner } else { nil } }
 }
 
 public enum CBORError: Error, Equatable, Sendable { case truncated, malformed, unsupported, tooDeep, tooLarge, trailingBytes, duplicateKey, notCanonical }
@@ -71,10 +76,13 @@ public enum CBOR {
         public var maxDepth: Int
         public var maxBytes: Int
         public var maxItems: Int
-        public init(maxDepth: Int = 8, maxBytes: Int = 64 * 1024, maxItems: Int = 1024) {
+        /// Tags the decoder accepts (none by default: a tag is refused). Each accepted tag wraps exactly one item.
+        public var allowedTags: Set<UInt64>
+        public init(maxDepth: Int = 8, maxBytes: Int = 64 * 1024, maxItems: Int = 1024, allowedTags: Set<UInt64> = []) {
             self.maxDepth = maxDepth
             self.maxBytes = maxBytes
             self.maxItems = maxItems
+            self.allowedTags = allowedTags
         }
         public static let standard = Limits()
     }
@@ -181,6 +189,10 @@ public enum CBOR {
                     entries.append(.init(key: key, value: try read(depth: depth + 1)))
                 }
                 return .map(entries)
+            case 6:
+                let tag = try argument(info)
+                guard limits.allowedTags.contains(tag) else { throw CBORError.unsupported }
+                return .tagged(tag, try read(depth: depth + 1))
             case 7:
                 switch info {
                 case 20: return .bool(false)
@@ -227,6 +239,7 @@ public enum CBOR {
                 }
             case .bool(let b): out.append(b ? 0xF5 : 0xF4)
             case .null: out.append(0xF6)
+            case .tagged(let tag, let inner): head(6, tag); write(inner)
             }
         }
         write(value)

@@ -322,7 +322,7 @@ public enum APIRoutes {
         vaultStatus.descriptor, vaultPut.descriptor, vaultDelete.descriptor, vaultManifests.descriptor, vaultBlobs.descriptor, vaultEnvelope.descriptor,
         vaultRecoveryEnvelope.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,
         vaultJoinRequest.descriptor, vaultJoinCancel.descriptor,
-    ]
+    ] + verifyEndpoints
 
     /// Web (non-API) paths served on `viadere.com`.
     public enum Web {
