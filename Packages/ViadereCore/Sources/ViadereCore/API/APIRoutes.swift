@@ -14,6 +14,9 @@ public enum APIRoutes {
         "auth.login.begin", .POST, "/v1/auth/login/begin", auth: .none)
     public static let loginFinish = Endpoint<PasskeyLoginFinishRequest, AuthSession>(
         "auth.login.finish", .POST, "/v1/auth/login/finish", auth: .none)
+    /// Public: the refresh token itself is the credential (single-use, rotated, reuse revokes the family).
+    public static let authRefresh = Endpoint<AuthRefreshRequest, AuthSession>(
+        "auth.refresh", .POST, "/v1/auth/refresh", auth: .none)
     public static let logout = Endpoint<EmptyBody, EmptyBody>(
         "auth.logout", .POST, "/v1/auth/logout", auth: .bearer)
 
@@ -35,6 +38,10 @@ public enum APIRoutes {
     /// Web flow: the one-time SMS link token is redeemed after passkey sign-in.
     public static let smsLinkRedeem = Endpoint<SMSLinkRedeemRequest, PhoneLink>(
         "sms.linkTokens.redeem", .POST, "/v1/sms/link-tokens/redeem", auth: .bearer)
+
+    /// App-side redemption of an SMS secure-handoff token; the token must have been minted for this consumer.
+    public static let handoffRedeem = Endpoint<HandoffRedeemRequest, HandoffRedeemResponse>(
+        "handoff.redeem", .POST, "/v1/handoff/redeem", auth: .deviceSignedBearer)
 
     // MARK: Directory (public, rate-limited)
     /// Query: `q` (required), `limit` (≤ 20), `cursor`.
@@ -134,9 +141,10 @@ public enum APIRoutes {
 
     /// Every endpoint, for route registration, docs and contract tests.
     public static let all: [AnyEndpoint] = [
-        registerBegin.descriptor, registerFinish.descriptor, loginBegin.descriptor, loginFinish.descriptor, logout.descriptor,
+        registerBegin.descriptor, registerFinish.descriptor, loginBegin.descriptor, loginFinish.descriptor,
+        authRefresh.descriptor, logout.descriptor,
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
-        phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkRedeem.descriptor,
+        phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
         relationshipConnect.descriptor, relationshipsList.descriptor, relationshipDisconnect.descriptor,
         consentsGet.descriptor, consentsUpdate.descriptor,

@@ -147,6 +147,28 @@ struct APIRouteTests {
         #expect(APIRoutes.registerBegin.auth == .none)
     }
 
+    @Test("Session rotation and handoff routes exist with the right auth")
+    func sessionRotationRoutes() throws {
+        #expect(APIRoutes.authRefresh.auth == .none)
+        #expect(APIRoutes.authRefresh.template == "/v1/auth/refresh")
+        #expect(APIRoutes.handoffRedeem.auth == .deviceSignedBearer)
+        #expect(APIRoutes.all.contains { $0.name == "auth.refresh" })
+        #expect(APIRoutes.all.contains { $0.name == "handoff.redeem" })
+    }
+
+    @Test("AuthSession decodes with and without a refresh token")
+    func authSessionRefreshToken() throws {
+        let id = ConsumerID()
+        let legacy = Data(#"{"accessToken":"a","consumerId":"\#(id)","expiresAt":"2026-10-27T12:00:00.000Z","tokenType":"Bearer"}"#.utf8)
+        let old = try ViadereJSON.decode(AuthSession.self, from: legacy)
+        #expect(old.refreshToken == nil && old.refreshExpiresAt == nil)
+        let full = AuthSession(consumerId: id, accessToken: "a", expiresAt: Date(timeIntervalSince1970: 1_800_000_000),
+                               refreshToken: "r", refreshExpiresAt: Date(timeIntervalSince1970: 1_900_000_000))
+        #expect(try ViadereJSON.decode(AuthSession.self, from: ViadereJSON.encode(full)) == full)
+        let handoff = HandoffRedeemResponse(purpose: .manageBusinesses, interactionId: InteractionID())
+        #expect(try ViadereJSON.decode(HandoffRedeemResponse.self, from: ViadereJSON.encode(handoff)) == handoff)
+    }
+
     @Test("Spec-required endpoints exist", arguments: [
         "auth.register.begin", "auth.register.finish", "auth.login.begin", "auth.login.finish", "devices.enroll", "devices.list",
         "devices.revoke", "phoneLinks.start", "phoneLinks.verify", "directory.search", "directory.resolve", "directory.handle",

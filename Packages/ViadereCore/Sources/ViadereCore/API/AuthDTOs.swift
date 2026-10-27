@@ -122,17 +122,48 @@ public struct PasskeyLoginFinishRequest: Codable, Sendable, Hashable {
 }
 
 /// A consumer session. `accessToken` is opaque (the server stores only its SHA-256).
+///
+/// `refreshToken` is also opaque and single-use: redeeming it (`APIRoutes.authRefresh`) returns a new
+/// session with a **new** refresh token. Presenting an already-used refresh token revokes the whole
+/// session family. Both optional fields are absent in responses from servers that predate rotation.
 public struct AuthSession: Codable, Sendable, Hashable {
     public var consumerId: ConsumerID
     public var accessToken: String
     public var tokenType: String
     public var expiresAt: Date
+    public var refreshToken: String?
+    public var refreshExpiresAt: Date?
 
-    public init(consumerId: ConsumerID, accessToken: String, tokenType: String = "Bearer", expiresAt: Date) {
+    public init(consumerId: ConsumerID, accessToken: String, tokenType: String = "Bearer", expiresAt: Date,
+                refreshToken: String? = nil, refreshExpiresAt: Date? = nil) {
         self.consumerId = consumerId
         self.accessToken = accessToken
         self.tokenType = tokenType
         self.expiresAt = expiresAt
+        self.refreshToken = refreshToken
+        self.refreshExpiresAt = refreshExpiresAt
+    }
+}
+
+/// Rotates a session: exchange the current refresh token for a new access + refresh token pair.
+public struct AuthRefreshRequest: Codable, Sendable, Hashable {
+    public var refreshToken: String
+    public init(refreshToken: String) { self.refreshToken = refreshToken }
+}
+
+/// Redeems a secure-handoff token (`https://viadere.com/h/{token}`) inside the app.
+public struct HandoffRedeemRequest: Codable, Sendable, Hashable {
+    public var token: String
+    public init(token: String) { self.token = token }
+}
+
+/// What the app should continue after redeeming a handoff token.
+public struct HandoffRedeemResponse: Codable, Sendable, Hashable {
+    public var purpose: HandoffPurpose
+    public var interactionId: InteractionID?
+    public init(purpose: HandoffPurpose, interactionId: InteractionID? = nil) {
+        self.purpose = purpose
+        self.interactionId = interactionId
     }
 }
 

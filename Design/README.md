@@ -17,8 +17,8 @@ Every vector here comes from **one Bézier source** (`tools/geom.js` + `tools/fi
 | `svg/app-icon-light.svg` / `-dark.svg` / `-tinted.svg` | Full-bleed 1024 × 1024 icon artwork (iOS applies the mask) |
 | `png/*` | 1024-px renders (icons are opaque RGB; marks and lockups are transparent) |
 | `pdf/*` | Vector PDFs (the asset catalog uses these) |
-| `swift/ViadereMark.swift` | SwiftUI mark, wordmark, lockup and `ViadereBrand` palette (SwiftUI only, generated) |
-| `swift/ViadereDesignSystem.swift` | Custom components and tokens (buttons, field, card, row, toggle, segmented, badge, section header, slide-to-approve / approve–deny, empty state) |
+| `../App/Shared/DesignSystem/ViadereMark.swift` | SwiftUI mark, wordmark, lockup and `ViadereBrand` palette (SwiftUI only, generated). **Moved:** `App/Shared/DesignSystem` is now the source of truth |
+| `../App/Shared/DesignSystem/ViadereDesignSystem.swift` | Custom components and tokens (buttons, field, card, row, toggle, segmented, badge, section header, slide-to-approve / approve–deny, empty state). **Moved** with the mark; `ViadereComponents.swift` beside it adds the app-level components (tab bar, chips, code and OTP fields, countdown ring, notices) |
 | `tools/` | Generators (Node + Playwright/Chromium, Python + fontTools/Pillow). Paths inside assume the original scratch layout, so adjust them before re-running |
 | `../App/Resources/Assets.xcassets` | `AppIcon` (light, dark and tinted appearances), `BrandMark` (light/dark), `BrandMarkMonoDark`, `BrandMarkMonoLight`, `BrandMarkTemplate` (template rendering), `Wordmark`, `LockupHorizontal`, and `Colors/*` colour sets |
 | `../App/Resources/Fonts` | Outfit Light / Regular / SemiBold TTF + `OFL.txt` |
@@ -83,3 +83,5 @@ ViadereSlideToConfirm { approve() }
 
 - The AppIcon set uses the single-size 1024 format (Xcode 15+). The `dark` and `tinted` appearances are honoured on iOS 18 / Xcode 16; older toolchains use the light icon.
 - This is a high-fidelity vector interpretation of the reference images, not the original designer's source files. If a designer delivers final masters, replace `tools/final.json` (or the SVG/PDF files directly) and regenerate.
+
+> **Source of truth moved.** The SwiftUI files that used to live in `Design/swift/` are now part of the app target at `App/Shared/DesignSystem/` and are compiled into every UI target (app, App Clip, notification content, widgets, watch). Edit them there. The generators under `tools/` still emit the geometry; copy regenerated `ViadereMark.swift` output into `App/Shared/DesignSystem/`.
