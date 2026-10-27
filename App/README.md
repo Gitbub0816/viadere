@@ -18,6 +18,7 @@ App/
                               Household, Consent, Settings, Security, Push)
   ViadereNotificationService/ UNNotificationServiceExtension: opaque push -> rich, actionable notification
   ViadereNotificationContent/ Custom compact approval card for sign-in / approval notifications
+  ViadereCredentialProvider/  Authenticator credential-provider extension (passkeys iOS 17, one-time codes iOS 18; no network)
   ViadereWidgets/             Live Activities + Dynamic Island (order, delivery, flight, appointment), branded compact/expanded/lock layouts
   ViadereClip/                App Clip com.viadere.app.Clip: quick connect for /c/{code}
   ViadereWatch/               watchOS companion: compact approvals list
@@ -60,7 +61,7 @@ Override the server with `VIADERE_API_BASE_URL` in `Configs/Local.xcconfig`.
 | Team id | `Configs/Local.xcconfig` (`DEVELOPMENT_TEAM`) |
 | Server URL | `VIADERE_API_BASE_URL` in `Configs/*.xcconfig` (read from Info.plist key `ViadereAPIBaseURL`) |
 | **Certificate pins** (build-checked) | `ViadereConfiguration.productionPinning` in `Packages/ViadereKit/.../ViadereConfiguration.swift`. **TODO before release:** replace the two `REPLACE_ME_*` placeholders with the SPKI SHA-256 of the current key and a backup key (command in `PinningConfiguration`). Until then Release builds fail closed, and `Scripts/check-release-pins.sh` (a pre-build phase of the app and the clip) **fails a Release archive** while the placeholders are present. |
-| Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.Widgets`, `.Clip`, `.watchkitapp` |
+| Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.CredentialProvider`, `.Widgets`, `.Clip`, `.watchkitapp` |
 | App group | `group.com.viadere.shared` (app + notification service) |
 | Keychain groups | `$(AppIdentifierPrefix)com.viadere.shared` (app + notification service: request key and access token only) and `$(AppIdentifierPrefix)com.viadere.app.approval` (**app only**: the approval keys). The clip keeps its own private keychain and holds a request key only. |
 | Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.com`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip), **App Attest** (`com.apple.developer.devicecheck.appattest-environment` on the app and the clip, `$(APP_ATTEST_ENVIRONMENT)`: `development` in `Debug.xcconfig`, `production` in `Release.xcconfig`; the server's `APP_ATTEST_ENVIRONMENT` must match) |
@@ -269,6 +270,40 @@ All `deviceSignedBearer`. Every route below lives in ViadereCore's `APIRoutes` (
 | `DELETE /v1/delegations/{id}` (**Core**) | revoke |
 | `GET /v1/acknowledgments` | `[AcknowledgmentRecord]` (acknowledgments themselves are signed `acknowledge` decisions via **Core** `interactions/{id}/decide`) |
 
+## Authenticator (WP5): passkeys, one-time codes, optional end-to-end encrypted sync
+
+A third-party credential provider (`ViadereCredentialProvider`, an `ASCredentialProviderViewController`) plus an Authenticator section in the app
+(Home → Authenticator, Settings → Security → Authenticator). Protocol, wire formats and residual risks: `docs/SECURITY.md` §2.40. Logic lives in
+`ViadereCore/Vault` (WebAuthn authenticator engine, TOTP, vault crypto) and `ViadereKit/Vault` (engine, storage, sync client, view model);
+the app and the extension only host it.
+
+| What | Where |
+|---|---|
+| Passkeys | iOS 17: `prepareInterface(forPasskeyRegistration:)`, `prepareInterfaceToProvideCredential(for:)`, `prepareCredentialList(for:requestParameters:)`; `provideCredentialWithoutUserInteraction` always answers `userInteractionRequired` (the vault opens only with Face ID / Touch ID / passcode, and that verification is what sets the UV flag) |
+| One-time codes | iOS 18 (`#available`): `prepareOneTimeCodeCredentialList(for:)`, `ASOneTimeCodeCredential`. Codes are computed after unlock; the identity store gets a label only |
+| Identity store | `IdentityStoreSync` replaces `ASPasskeyCredentialIdentity`s (site, account name, credential id, user handle: **metadata only**). "Suggest in AutoFill" in Authenticator turns even that off |
+| Local vault | `FileVaultLocalStore` in the App Group container (`group.com.viadere.shared/Vault`): ciphertext, signed manifests, sync bookkeeping; excluded from backup; app and extension write it under `flock` with compare-and-swap on the manifest hash |
+| Keys | `AppleVaultKeyProvider`: Secure Enclave signing key (`.privateKeyUsage + .userPresence`) and a Keychain agreement key (`.userPresence`, `WhenUnlockedThisDeviceOnly`) in the **vault-only** keychain group `$(AppIdentifierPrefix)com.viadere.vault` (app + extension; no other target). One `LAContext` prompt per unlock |
+| Extension isolation | built with no sync API (`VaultRuntime.makeEngine(… api: nil …)`): it can't reach the network. Changes it makes upload the next time the app opens |
+| Add a device | scan or type the pairing code (QR payload `viadere-vault://pair?c=…`), biometric approval on the existing device |
+| Recovery key | shown once at "Turn on sync", must be typed back, verifiable later, replaceable (optionally rotating the vault key); restores through "Already use Authenticator on another device?" |
+| QR scanning | `AuthenticatorQRScanner` (AVFoundation); payloads are validated by `OTPAuthURI` and never opened |
+| Clipboard | codes copy through `SecurePasteboard` (local only, expires in 60 s); hidden while the screen is recorded |
+| Credential Exchange | `CredentialExchange` (ViadereKit) parses CXF JSON (ES256 passkeys and TOTP; everything else reported). The iOS 26 `ASCredentialImportManager` glue is a **TODO** (`CredentialExchangeImport.swift`): the button is `#available(iOS 26.0, *)`-gated and currently imports a CXF `.json` file. Export is not implemented |
+
+Entitlements: `com.apple.developer.authentication-services.autofill-credential-provider` on the app **and** the extension; both get the
+`group.com.viadere.shared` app group; app and extension share keychain group `$(AppIdentifierPrefix)com.viadere.vault`. The extension's Info.plist
+declares `ProvidesPasskeys`, `ProvidesOneTimeCodes` (iOS 18) and `SupportsConfiguration`, and `NSFaceIDUsageDescription`.
+
+**Export compliance (legal review required before release).** The app's `ITSAppUsesNonExemptEncryption = false` rests on "TLS and signatures
+only". Vault sync adds data-confidentiality encryption (AES-256-GCM, HPKE), which that basis does not cover: classify before submitting.
+
+**Needs a real device / Xcode** (nothing in `Platform/AppleVaultKeyProvider.swift`, the extension or the Authenticator screens was compiled here):
+Secure Enclave and Keychain key creation and `.userPresence` prompts (the keychain item needs a device passcode); the extension in the system
+sheets (registration, assertion, picker, one-time codes) against real relying parties and Apple's passkey test pages; `ASCredentialIdentityStore`
+state and `replaceCredentialIdentities`; the `ASExtensionError` codes and `ASPasskeyCredentialRequest` property names; the camera scanner;
+two-device pairing; the iOS 26 Credential Exchange types; whether `SecureEnclave.P256` HPKE conformance could replace the Keychain agreement key.
+
 ## Not verified by compilation
 
 This repository was authored on Linux, where there is no Xcode or iOS SDK. **Everything under `Packages/ViadereKit`
@@ -292,3 +327,4 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
    reports unsupported), the App Attest entitlement and `APP_ATTEST_ENVIRONMENT` xcconfig wiring, `RecoveryCodesView` (the
    `UIActivityViewController` share sheet), `Features/Recovery/*`, the recovery and replacement rows in Settings, the banner's
    action button, the Clip sources that now include `SecurePasteboard` and `ScreenCaptureObserver`.
+10. WP5 Authenticator: `ViadereCredentialProvider/*`, `Features/Authenticator/*`, `Platform/AppleVaultKeyProvider.swift` (see the Authenticator section above).

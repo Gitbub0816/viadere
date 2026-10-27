@@ -121,6 +121,7 @@ final class VaultJoinRecord: Model, @unchecked Sendable {
     @OptionalField(key: "request") var request: Data?
     @OptionalField(key: "approval") var approval: Data?
     @OptionalField(key: "approved_member_id") var approvedMemberId: String?
+    @OptionalField(key: "approved_version") var approvedVersion: Int?
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date
 

@@ -82,6 +82,8 @@ targets:
       - path: Shared/Privacy/PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: Resources
+      # WP5: keeps the system AutoFill identity store in step with the Authenticator vault (shared with the credential provider).
+      - path: ViadereCredentialProvider/IdentityStoreSync.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app
@@ -109,6 +111,10 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.viadere.shared
           - $(AppIdentifierPrefix)com.viadere.app.approval
+          # Authenticator vault keys: shared with the credential-provider extension only.
+          - $(AppIdentifierPrefix)com.viadere.vault
+        # Third-party passkey / one-time-code provider (Authenticator). The extension carries the same entitlement.
+        com.apple.developer.authentication-services.autofill-credential-provider: true
         com.apple.developer.usernotifications.time-sensitive: true
         # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement. The pass-type-identifiers
         # entitlement is only needed to read passes this app did not add, so it is deliberately not requested:
@@ -128,6 +134,7 @@ targets:
         product: ViadereCore
       - target: ViadereNotificationService
       - target: ViadereNotificationContent
+      - target: ViadereCredentialProvider
       - target: ViadereWidgets
       - target: ViadereClip
       - target: ViadereWatch
@@ -178,6 +185,39 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # -------------------------------------------------------------------------------- credential provider (WP5)
+  # Passkeys (iOS 17) and one-time codes (iOS 18) for Authenticator. No network code is linked in its use: it builds the vault engine without
+  # a sync client. It shares only the App Group container (ciphertext) and the vault-only keychain group with the app.
+  ViadereCredentialProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereCredentialProvider
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.CredentialProvider
+        INFOPLIST_FILE: ViadereCredentialProvider/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereCredentialProvider/ViadereCredentialProvider.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereCredentialProvider/ViadereCredentialProvider.entitlements
+      properties:
+        com.apple.developer.authentication-services.autofill-credential-provider: true
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.vault
     dependencies:
       - package: ViadereKit
         product: ViadereKit

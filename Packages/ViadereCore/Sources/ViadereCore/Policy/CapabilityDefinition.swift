@@ -178,7 +178,8 @@ public struct CapabilityDefinition: Sendable, Codable, Hashable {
     /// Fields recorded in the audit event of every decision (never values of personal data).
     public var auditFields: [String]
     public var revocation: RevocationBehavior
-    /// Whether a successful (allowed) decision is itself audited. Denials are always audited.
+    /// Whether a successful (allowed) decision is itself audited (`policy.allowed`). Denials are always audited. The interaction
+    /// capabilities set this to `false`: the request's own audit event (`interaction.issued`, `message.business_sent`) records the allow.
     public var auditsAllowedDecisions: Bool
 
     public init(capability: Capability, title: String, summary: String, parameters: [CapabilityParameter] = [], requiresPurpose: Bool = false,
@@ -301,7 +302,7 @@ public enum CapabilityCatalog {
             consent: ConsentRequirement(mode: .relationshipPurpose, purpose: "security"), customerUX: .notification,
             output: OutputSchema(decisionFields),
             maxResultRetentionSeconds: 400 * 86_400, auditFields: ["capability", "purpose", "kind", "subject_ref", "outcome"],
-            revocation: .cancelsPending, auditsAllowedDecisions: true),
+            revocation: .cancelsPending, auditsAllowedDecisions: false),
         CapabilityDefinition(
             capability: .transactionApprove, title: "Transaction approval",
             summary: "Ask a connected customer to approve one specific transaction. The result is signed over the exact displayed details and audience-bound.",
@@ -320,7 +321,7 @@ public enum CapabilityCatalog {
                 OutputField("expires_at", .timestamp, .metadata, "When the signed result stops being valid."),
             ]),
             maxResultRetentionSeconds: 400 * 86_400, auditFields: ["capability", "purpose", "subject_ref", "outcome", "request_id"],
-            revocation: .cancelsPending, auditsAllowedDecisions: true),
+            revocation: .cancelsPending, auditsAllowedDecisions: false),
         CapabilityDefinition(
             capability: .ageMinimum, title: "Minimum age",
             summary: "Whether the customer is at least N years old. Discloses only the yes/no result: never a birthdate, an age, a name or a document number (AGE-001, AGE-003).",

@@ -25,6 +25,28 @@ get the customer's decision back, exchange messages, and let customers connect w
 | `webhooks:manage` | manage webhook endpoints through the API |
 | `rewards:write` | loyalty program, rewards, points and redemption validation (`/v1/business/loyalty/*`, `/v1/business/rewards*`, `/v1/business/redemptions/consume`) |
 
+### Capabilities (what a key may do)
+
+Scopes say which **routes** a key may call. Each key also carries **capabilities**, which say what it may do, and Viadere decides every request on `entitlement ∩ key capability ∩ customer consent ∩ evidence ∩ law/policy`:
+
+| Capability | Tier | Needed for |
+|---|---|---|
+| `message.send` | M (default) | messages, statuses, and every interaction kind except the two below; reading or cancelling those |
+| `contact.reachable` | M (default) | checking that an existing connection can receive messages |
+| `consent.request` | M (default) | asking a customer to grant a purpose |
+| `auth.challenge` | A (granted) | interactions of kind `authenticate` |
+| `transaction.approve` | A (granted) | interactions of kind `authorize` |
+| `age.minimum`, `identity.name`, `identity.address`, `identity.verified` | V (granted) | Verify (not yet generally available); each disclosure needs a per-request customer receipt |
+
+* **Every verified business starts with the three messaging capabilities and nothing else.** Approval and verification capabilities are granted by a Viadere operator after review, with a recorded purpose; your category, plan or verified badge never grants them. Ask your Viadere contact.
+* **The dashboard only offers a key the capabilities you hold**, and a key can never do more than your business is entitled to *at the moment of the request*: if Viadere withdraws an entitlement, existing keys lose that capability on their next request.
+* Use **separate keys**: a messaging key (`message.send`) for your notification service and a distinct key for sign-in or payment approvals. A leaked messaging key then cannot approve anything: it gets `403 insufficient_scope`.
+* `GET /v1/business/capabilities` (SDK: `client.capabilities()`) shows your tiers, entitlements, the key's capabilities, what is `effective` now, and the catalog with each capability's inputs and the exact fields it discloses. Denials are `403` with `insufficient_scope` (the key lacks it), `not_entitled` (the business lacks it) or `capability_disabled` (Viadere switched it off); `error.details.capability` names it. Do not retry them unchanged.
+
+### Customer references
+
+Name a customer by `relationshipId`, by **`subjectRef`**, or both. `subjectRef` (`sub_…`) is a pairwise pseudonym: stable for your business, never the same as that person's reference at another business, and not guessable. It is returned on interactions (`scope.subjectRef`), sandbox relationships, redemption receipts, loyalty results and the `relationship.*`, `consent.updated` and `message.received` webhooks. A reference that is not yours is `404`. The older `scope.consumerId` / `consumerReference` pseudonym is deprecated; store `subjectRef`.
+
 Dashboard roles are least-privilege: **owner**, **admin** (no owner changes), **developer** (keys, webhooks, templates, campaign links),
 **support** (consent status), **analyst** (aggregate analytics and usage, read-only).
 
@@ -268,7 +290,11 @@ Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `req
 |---|---|---|
 | 400 | `bad_request` | Malformed body, or `Idempotency-Key` header ≠ body `idempotencyKey`. Fix the request. |
 | 401 | `unauthorized` | Missing, unknown, revoked or expired key. Check the key and its expiry. |
-| 403 | `forbidden` | Key lacks the scope, or your business is not active (pending or suspended). |
+| 403 | `forbidden` | Your business is not active (pending or suspended), or the key's mode does not match the relationship. |
+| 403 | `insufficient_scope` | The key lacks the route scope or the capability the request needs (for example a messaging key issuing an `authorize`). |
+| 403 | `not_entitled` | Your business does not (or no longer) hold the capability. |
+| 403 | `capability_disabled` | Viadere has switched the capability off. |
+| 403 | `policy_denied` | A policy rule or evidence requirement denies the request (`error.details.reason`). |
 | 403 | `consent_required` | The customer has not consented to this `purpose`. Do not retry; ask in your own channel or use an allowed purpose. |
 | 404 | `not_found` | Unknown id, or it belongs to another business (indistinguishable by design). |
 | 409 | `conflict` | State conflict, e.g. the customer is not connected to you. |

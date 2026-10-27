@@ -34,7 +34,7 @@ public struct VaultSnapshot: Sendable, Equatable {
 }
 
 /// What a mutation adds to the server: the new signed manifest plus only the blobs and envelopes that changed.
-public struct VaultDelta: Sendable, Equatable {
+public struct VaultDelta: Sendable, Equatable, Codable {
     public var manifest: SignedVaultManifest
     public var blobs: [UUID: Data]
     public var removedItems: [UUID]
@@ -217,11 +217,18 @@ public struct UnlockedVault: Sendable {
     /// read or forge), then unseals its envelope.
     public static func acceptingJoin(approval: Data, secret: PairingSecret, manifest signed: SignedVaultManifest, envelope: Data,
                                      identity: VaultDeviceIdentity) throws -> UnlockedVault {
+        let anchor = try pinningJoin(approval: approval, secret: secret, manifest: signed)
+        let snapshot = VaultSnapshot(verified: anchor, blobs: [:], envelopes: [identity.memberId: envelope])
+        return try open(snapshot, identity: identity)
+    }
+
+    /// Verifies that `manifest` is the one the approving device approved (hash and signer pinned through the pairing channel). The result is a
+    /// trust anchor: later versions are verified onward from it with `VaultChainVerifier.verifyChain`.
+    public static func pinningJoin(approval: Data, secret: PairingSecret, manifest signed: SignedVaultManifest) throws -> VerifiedManifest {
         let approved = try JoinApproval.open(approval, with: secret)
         let anchor = try VaultChainVerifier.anchor(signed, expectedHash: approved.manifestHash, signerKey: approved.approverSigningKey)
         guard anchor.manifest.vaultId == approved.vaultId else { throw VaultError.invalidChain("vault") }
-        let snapshot = VaultSnapshot(verified: anchor, blobs: [:], envelopes: [identity.memberId: envelope])
-        return try open(snapshot, identity: identity)
+        return anchor
     }
 
     // MARK: Removing a device, recovery key changes (vault key rotation)
@@ -304,7 +311,7 @@ public struct UnlockedVault: Sendable {
     /// Authenticates a server-supplied chain with **only the recovery key**. The recovery member's `binding` was computed by a genuine device
     /// while it held the key; matching it against the signer of one manifest proves that device's signing key is genuine, and the chain is
     /// verified onward from that manifest. A server that does not know the key cannot forge the binding. It *can* serve an older (but genuine)
-    /// state: see SECURITY.md §2.28 residual risks.
+    /// state: see SECURITY.md §2.40 residual risks.
     public static func authenticateChain(_ chain: [SignedVaultManifest], recoveryKey: RecoveryKey) throws -> VerifiedManifest {
         guard let last = chain.last, let latest = try? VaultManifest.decode(last.manifestBytes), let current = latest.recoveryMember, let tag = current.binding else {
             throw VaultError.invalidRecoveryKey

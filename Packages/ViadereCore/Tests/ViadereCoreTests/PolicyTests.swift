@@ -319,3 +319,31 @@ struct SubjectRefTests {
         }
     }
 }
+
+@Suite("Catalog documentation")
+struct CatalogDocumentationTests {
+    /// `docs/SECURITY.md` §2.28 is the normative table: every capability and every disclosed field in the code must be in it, and
+    /// `age.minimum`'s row must name exactly the five permitted fields.
+    @Test func theNormativeTableMatchesTheCatalog() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("docs/SECURITY.md")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }   // not available when built outside the repository
+        let section = try #require(text.range(of: "### 2.28 Capability catalog").map { String(text[$0.lowerBound...]) })
+        let table = section.components(separatedBy: "### 2.29").first ?? section
+        let rows = table.split(separator: "\n").filter { $0.hasPrefix("| `") }
+        for definition in CapabilityCatalog.definitions {
+            let id = "`\(definition.capability.rawValue)`"
+            let matching = rows.filter { $0.hasPrefix("| \(id) |") }
+            #expect(matching.count == 2, "\(id) needs a row in each normative table")
+            // The first table lists tier, evidence and consent; the second lists inputs and disclosed fields.
+            let outputRow = try #require(matching.last)
+            for name in definition.output.fieldNames { #expect(outputRow.contains("`\(name)`"), "\(id): documented fields must include \(name)") }
+        }
+        let age = try #require(rows.last { $0.hasPrefix("| `age.minimum` |") })
+        for forbidden in ["birthdate", "given_name", "family_name", "document_number"] {
+            // The row may say "never a birthdate ..." in prose, but must not list one as a disclosed field.
+            #expect(!age.contains("`\(forbidden)`"))
+        }
+    }
+}

@@ -36,6 +36,7 @@ struct HomeView: View {
                         rewardsSection
                         recentSection
                     }
+                    authenticatorSection
                     if case .failed(let message) = home.phase {
                         ViadereNotice(message, kind: .warning).padding(.top, ViadereSpace.l)
                     }
@@ -57,6 +58,7 @@ struct HomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .rewards: RewardsView(model: model)
+                case .authenticator: AuthenticatorView(backTitle: "Home")
                 }
             }
         }
@@ -119,6 +121,20 @@ struct HomeView: View {
         }
     }
 
+    /// Passkeys and one-time codes: always one quiet row, whether or not anything needs you.
+    private var authenticatorSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Authenticator")
+            ViadereRowGroup {
+                Button { path.append(HomeRoute.authenticator) } label: {
+                    ViadereRow("Authenticator", subtitle: "Passkeys and one-time codes", leading: { ViadereIconTile(systemName: "key.viewfinder") })
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, ViadereSpace.l)
+    }
+
     @ViewBuilder private var recentSection: some View {
         if !home.content.recent.isEmpty {
             ViadereSectionHeader("Your businesses", actionTitle: "Add") { model.selectedTab = .connect }
@@ -140,7 +156,7 @@ struct HomeView: View {
     }
 }
 
-enum HomeRoute: Hashable { case rewards }
+enum HomeRoute: Hashable { case rewards, authenticator }
 
 /// A calm, high-priority note that something changed on the account. Sits above everything else on Home. "This was me" dismisses it;
 /// "Review" opens the device list, where anything unfamiliar can be removed. Never red: it asks a question, it does not raise an alarm.

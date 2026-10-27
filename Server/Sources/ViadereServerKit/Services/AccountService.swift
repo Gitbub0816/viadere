@@ -84,6 +84,8 @@ struct AccountService {
             try await LiveActivityTokenRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await DeviceEnrollChallengeRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await PasskeyCredentialRecord.query(on: tx).filter(\.$consumerId == id).delete()
+            // The synced credential vault (ciphertext, public keys, join requests) goes with the account.
+            try await VaultService.wipe(consumer: id, on: tx)
             // Phone numbers: unlink, and overwrite the encrypted number and masked display. Everything that holds the same number
             // (outbound queues, link tokens, SMS thread state) is found by its phone hash *before* the hash is replaced.
             let links = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == id).all()

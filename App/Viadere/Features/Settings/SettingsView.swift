@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -53,6 +53,7 @@ struct SettingsView: View {
                 case .household: HouseholdView(vm: household)
                 case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
                 case .recovery: RecoveryCodesSettingsView(vm: vm)
+                case .authenticator: AuthenticatorView(backTitle: "Settings")
                 }
             }
             .task {
@@ -138,6 +139,8 @@ struct SettingsView: View {
                     navRow("Recovery codes", subtitle: vm.recoveryStatusLine, symbol: "list.number", route: .recovery)
                     ViadereHairline(inset: 50)
                 }
+                navRow("Authenticator", subtitle: "Passkeys and one-time codes", symbol: "key.viewfinder", route: .authenticator)
+                ViadereHairline(inset: 50)
                 navRow("Trusted devices", subtitle: "\(vm.devices.filter { !$0.isRevoked }.count) active", symbol: "iphone.gen3", route: .devices)
                 ViadereHairline(inset: 50)
                 if vm.phonesAvailable {

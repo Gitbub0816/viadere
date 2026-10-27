@@ -15,6 +15,23 @@ info:
     `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (sandbox only). Keys are created in the
     business dashboard, are scoped, revocable, and shown once. Suspended or unverified businesses receive `403`.
 
+    ## Capabilities and key scopes
+    Every key carries a set of **capabilities** (`message.send`, `auth.challenge`, `transaction.approve`, ...) besides its operational
+    scopes, and a capability is usable only if the **key carries it and the business is entitled to it now**: Viadere grants
+    entitlements, by an audited operator decision with a recorded purpose; every verified business holds the messaging capabilities
+    (`message.send`, `contact.reachable`, `consent.request`) and nothing else by default. Revoking an entitlement removes the
+    capability from every existing key on its next request. An interaction of kind `authenticate` needs `auth.challenge`, `authorize`
+    needs `transaction.approve`, every other kind `message.send`; reading or cancelling an interaction needs the capability of its
+    kind. A key without it gets `403 insufficient_scope`; a business without the entitlement `403 not_entitled`; a capability Viadere
+    switched off `403 capability_disabled`. `GET /v1/business/capabilities` lists what the key can do right now and the capability
+    catalog (inputs, evidence, disclosed output fields, retention, revocation behavior).
+
+    ## Customer references
+    A customer is addressed by `relationshipId`, by `subjectRef`, or by both (which must agree). `subjectRef` (`sub_…`) is a pairwise
+    pseudonym: stable for your business, unrelated to the same customer's reference at any other business, and not derivable by
+    anyone without Viadere's key. A reference or id that is not yours is `404`, the same as one that does not exist. The older
+    per-business `consumerId` / `consumerReference` pseudonym is still returned but deprecated: use `subjectRef`.
+
     ## Test mode
     A `vdk_test_…` key can **only address sandbox relationships**, never a real customer: create one with
     `POST /v1/business/sandbox/relationships`. Sandbox consumers have no device and no phone, so test traffic is never pushed,
@@ -62,15 +79,36 @@ tags:
   - name: Statuses
   - name: Webhooks
   - name: Rewards
+  - name: Capabilities
 
 paths:
+  /v1/business/capabilities:
+    get:
+      tags: [Capabilities]
+      operationId: getCapabilities
+      summary: What this key can do right now
+      description: |
+        Any valid key. Returns the business's risk tiers, the capabilities Viadere granted it (the ceiling), the capabilities this key
+        carries, their intersection minus anything switched off (`effective`), and the capability catalog. Informational: every request
+        is still evaluated by the policy engine, and a capability withdrawn a moment ago may still be listed until the next request.
+      responses:
+        "200":
+          description: The key's capabilities.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessCapabilitiesResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/business/interactions:
     post:
       tags: [Interactions]
       operationId: issueInteraction
       summary: Issue an interaction
       description: |
-        Requires scope `interactions:write`. The relationship must belong to your business and be active, the customer must have
+        Requires scope `interactions:write` and the capability of the interaction's kind (`authenticate` needs `auth.challenge`,
+        `authorize` needs `transaction.approve`, every other kind `message.send`). For `authenticate` and `authorize` the customer must also have a registered authenticator (an enrolled device), else `403 policy_denied`. The relationship must belong to your business and be active, the customer must have
         consented to the `purpose`, and your daily quota must not be exhausted. Priority is clamped by the Trust Engine
         (marketing and rewards never exceed `normal`; `urgent` is reserved for security authenticate/authorize).
       parameters:
@@ -119,7 +157,7 @@ paths:
       tags: [Interactions]
       operationId: getInteractionOutcome
       summary: Get an interaction's outcome
-      description: Requires scope `interactions:read`. Pending interactions past their expiry are reported as `expired`.
+      description: Requires scope `interactions:read` and the capability of the interaction's kind. Pending interactions past their expiry are reported as `expired`.
       parameters:
         - $ref: "#/components/parameters/InteractionId"
       responses:
@@ -138,7 +176,7 @@ paths:
       operationId: cancelInteraction
       summary: Cancel a pending interaction
       description: |
-        Requires scope `interactions:write` and an `Idempotency-Key` header. Cancelling an interaction that is already final returns
+        Requires scope `interactions:write`, the capability of the interaction's kind and an `Idempotency-Key` header. Cancelling an interaction that is already final returns
         its outcome unchanged. The same key with another interaction is `409 idempotency_conflict`.
       parameters:
         - $ref: "#/components/parameters/InteractionId"
@@ -161,7 +199,7 @@ paths:
       operationId: sendMessage
       summary: Send a message to a customer
       description: |
-        Requires scope `messages:write`. Delivered into the customer's active SMS session with you, or held in the
+        Requires scope `messages:write` and the capability `message.send`. Delivered into the customer's active SMS session with you, or held in the
         conversation history. Always attributed to your verified business name.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -193,7 +231,7 @@ paths:
       operationId: updateStatus
       summary: Publish an ongoing-event status
       description: |
-        Requires scope `statuses:write`. A newer status with the same `activityKey` replaces the earlier one. Eligible
+        Requires scope `statuses:write` and the capability `message.send`. A newer status with the same `activityKey` replaces the earlier one. Eligible
         purposes (`transactional`, `accountService`, `support`) may drive a Live Activity on the customer's device.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -665,7 +703,7 @@ components:
       description: Missing, malformed, unknown, revoked or expired API key.
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Forbidden:
-      description: The key lacks the required scope, the business is not active (unverified or suspended), or consent is required (`consent_required`).
+      description: The key lacks the required scope (`insufficient_scope`), the capability or the business's entitlement (`insufficient_scope`, `not_entitled`), the capability is switched off (`capability_disabled`), a policy rule or evidence requirement denies it (`policy_denied`), the business is not active (unverified or suspended), or consent is required (`consent_required`).
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     NotFound:
       description: Not found. Other businesses' resources are indistinguishable from missing ones.
@@ -715,7 +753,7 @@ components:
       type: string
       description: Stable machine codes. Unknown future codes should be treated as `unknown`.
       enum: [bad_request, validation_failed, unauthorized, signature_invalid, replay_detected, clock_skew, forbidden, not_found, conflict,
-             gone, expired, insufficient_assurance, consent_required, rate_limited, idempotency_conflict, internal_error, unavailable,
+             gone, expired, insufficient_assurance, consent_required, insufficient_scope, not_entitled, capability_disabled, policy_denied, rate_limited, idempotency_conflict, internal_error, unavailable,
              passkey_assertion_required, device_cool_down, context_digest_required, context_mismatch, unknown]
 
     InteractionKind:
@@ -929,11 +967,23 @@ components:
         - { $ref: "#/components/schemas/TicketPayload" }
         - { $ref: "#/components/schemas/MessagePayload" }
 
+    SubjectRef:
+      type: string
+      pattern: "^sub_[A-Za-z0-9_-]{43}$"
+      description: |
+        Pairwise customer reference: `sub_` + base64url(HMAC-SHA256(Viadere's subject key, "VIADERE-SUBJECT-V1\n{businessId}\n{customerId}")).
+        Stable for your business, unrelated at any other business, not enumerable.
+
     IssueInteractionRequest:
       type: object
-      required: [relationshipId, kind, purpose, payload, ttlSeconds, idempotencyKey]
+      required: [kind, purpose, payload, ttlSeconds, idempotencyKey]
+      description: Name the customer with `relationshipId`, `subjectRef`, or both (they must agree).
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         kind: { $ref: "#/components/schemas/InteractionKind" }
         purpose: { $ref: "#/components/schemas/InteractionPurpose" }
         payload: { $ref: "#/components/schemas/InteractionPayload" }
@@ -985,8 +1035,9 @@ components:
           type: object
           required: [consumerId, relationshipId]
           properties:
-            consumerId: { $ref: "#/components/schemas/Uuid" }
+            consumerId: { $ref: "#/components/schemas/Uuid", description: "Deprecated per-business pseudonym; use subjectRef." }
             relationshipId: { $ref: "#/components/schemas/Uuid" }
+            subjectRef: { $ref: "#/components/schemas/SubjectRef" }
             accountReference: { type: string }
         kind: { $ref: "#/components/schemas/InteractionKind" }
         purpose: { $ref: "#/components/schemas/InteractionPurpose" }
@@ -1042,6 +1093,7 @@ components:
       required: [relationshipId, createdAt]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
 
     MessageAttribution:
@@ -1069,18 +1121,26 @@ components:
         interactionId: { $ref: "#/components/schemas/Uuid" }
     BusinessSendMessageRequest:
       type: object
-      required: [relationshipId, body, idempotencyKey]
+      required: [body, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         sessionId: { $ref: "#/components/schemas/Uuid" }
         body: { type: string, minLength: 1, maxLength: 1600 }
         agentName: { type: string, maxLength: 40 }
         idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
     BusinessStatusUpdateRequest:
       type: object
-      required: [relationshipId, purpose, status, activityKey, idempotencyKey]
+      required: [purpose, status, activityKey, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         purpose: { $ref: "#/components/schemas/InteractionPurpose" }
         status: { $ref: "#/components/schemas/StatusPayload" }
         activityKey: { type: string, minLength: 1, maxLength: 64, description: Stable key for the ongoing event (an order id) so updates replace earlier ones. }
@@ -1102,6 +1162,7 @@ components:
       required: [title, idempotencyKey]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef", description: "Alternative to relationshipId: issues the reward to that one customer." }
         title: { type: string, minLength: 1, maxLength: 80 }
         kind: { $ref: "#/components/schemas/RewardKind" }
         details: { type: string, maxLength: 300 }
@@ -1148,9 +1209,13 @@ components:
             updatedAt: { $ref: "#/components/schemas/Timestamp" }
     AdjustLoyaltyPointsRequest:
       type: object
-      required: [relationshipId, delta, idempotencyKey]
+      required: [delta, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         delta: { type: integer, description: Non-zero; at most 1,000,000 in magnitude. }
         reason: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9_.-]+$" }
         idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
@@ -1159,6 +1224,7 @@ components:
       required: [relationshipId, pointsBalance, applied]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         pointsBalance: { type: integer }
         statusName: { type: string }
         applied: { type: boolean, description: "False when this call replayed an earlier request with the same key." }
@@ -1176,10 +1242,84 @@ components:
         rewardId: { $ref: "#/components/schemas/Uuid" }
         rewardTitle: { type: string }
         kind: { $ref: "#/components/schemas/RewardKind" }
-        consumerReference: { $ref: "#/components/schemas/Uuid" }
+        consumerReference: { $ref: "#/components/schemas/Uuid", description: "Deprecated per-business pseudonym; use subjectRef." }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         redeemedAt: { $ref: "#/components/schemas/Timestamp" }
         pointsSpent: { type: integer }
         locationCode: { type: string }
+
+    Capability:
+      type: string
+      description: Stable capability ID. Unknown future IDs must be treated as not granted.
+      enum: [message.send, contact.reachable, consent.request, auth.challenge, transaction.approve, age.minimum, identity.name, identity.address, identity.verified]
+    BusinessRiskTier:
+      type: string
+      description: "M messaging, A approvals, V verified attributes, E enterprise. Holding a tier grants no capability by itself."
+      enum: [M, A, V, E]
+    BusinessCapabilitiesResponse:
+      type: object
+      required: [businessId, environment, tiers, entitlements, keyScopes, effective, catalog]
+      properties:
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        environment: { type: string, enum: [live, test] }
+        tiers: { type: array, items: { $ref: "#/components/schemas/BusinessRiskTier" } }
+        entitlements: { type: array, description: What Viadere granted the business (the ceiling)., items: { $ref: "#/components/schemas/Capability" } }
+        keyScopes: { type: array, description: What this key carries., items: { $ref: "#/components/schemas/Capability" } }
+        effective: { type: array, description: Key scopes intersected with entitlements, minus anything switched off., items: { $ref: "#/components/schemas/Capability" } }
+        catalog: { type: array, items: { $ref: "#/components/schemas/CapabilityDefinition" } }
+    CapabilityDefinition:
+      type: object
+      required: [capability, title, summary, parameters, requiresPurpose, requiredEvidence, sensitivity, minimumTier, consent, customerUX, output, maxResultRetentionSeconds, auditFields, revocation, auditsAllowedDecisions]
+      properties:
+        capability: { $ref: "#/components/schemas/Capability" }
+        title: { type: string }
+        summary: { type: string }
+        parameters:
+          type: array
+          description: Typed inputs; unknown parameters are rejected.
+          items:
+            type: object
+            required: [name, type, required, summary]
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [string, integer, boolean, timestamp, object] }
+              required: { type: boolean }
+              allowedIntegers: { type: array, items: { type: integer } }
+              allowedStrings: { type: array, items: { type: string } }
+              maxLength: { type: integer }
+              minimum: { type: integer }
+              maximum: { type: integer }
+              summary: { type: string }
+        requiresPurpose: { type: boolean }
+        requiredEvidence: { type: string, enum: [none, registeredAuthenticator, verifiedAgeThreshold, verifiedIdentity] }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        minimumTier: { $ref: "#/components/schemas/BusinessRiskTier" }
+        consent:
+          type: object
+          required: [mode, purpose]
+          properties:
+            mode: { type: string, enum: [none, activeRelationship, relationshipPurpose, perRequestReceipt] }
+            purpose: { type: string }
+        customerUX: { type: string, enum: [none, notification, secureSheet, verificationFlow] }
+        output:
+          type: object
+          required: [fields]
+          description: The explicit list of fields a result may carry. `age.minimum` lists only meets_threshold, assurance, issued_at, expires_at and audience.
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                required: [name, type, class, summary]
+                properties:
+                  name: { type: string }
+                  type: { type: string, enum: [string, integer, boolean, timestamp, object] }
+                  class: { type: string, enum: [assertion, assurance, metadata, personal_data] }
+                  summary: { type: string }
+        maxResultRetentionSeconds: { type: integer }
+        auditFields: { type: array, items: { type: string } }
+        revocation: { type: string, enum: [stops_future_use, cancels_pending, expires_assertion] }
+        auditsAllowedDecisions: { type: boolean }
 
     WebhookEventType:
       type: string
@@ -1224,6 +1364,7 @@ components:
       properties:
         sessionId: { $ref: "#/components/schemas/Uuid" }
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         messageId: { $ref: "#/components/schemas/Uuid" }
         text: { type: string }
         channel: { $ref: "#/components/schemas/Channel" }
@@ -1233,6 +1374,7 @@ components:
       required: [relationshipId, occurredAt]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         source: { type: string, enum: [handle, code, qr, button, link, search, sms, appClip] }
         occurredAt: { $ref: "#/components/schemas/Timestamp" }
     ConsentUpdatedData:
@@ -1240,6 +1382,7 @@ components:
       required: [relationshipId, purpose, granted, occurredAt]
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         purpose: { $ref: "#/components/schemas/InteractionPurpose" }
         granted: { type: boolean }
         occurredAt: { $ref: "#/components/schemas/Timestamp" }

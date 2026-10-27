@@ -24,7 +24,7 @@ public enum VaultError: Error, Equatable, Sendable {
     case forbidden(String)
 }
 
-/// Wire-format and algorithm identifiers for the vault (SEC-CR-007). Documented in `docs/SECURITY.md` §2.28; changing any of them is a
+/// Wire-format and algorithm identifiers for the vault (SEC-CR-007). Documented in `docs/SECURITY.md` §2.40; changing any of them is a
 /// new format version, never an in-place change.
 public enum VaultFormat {
     /// Version of every vault structure below (manifest, item blob, envelope, sealed box).

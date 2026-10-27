@@ -894,7 +894,7 @@ final class HardeningTests: XCTestCase {
 
     func strictEnvironment(_ name: String) -> [String: String] {
         ["ENVIRONMENT": name, "DATABASE_URL": "postgres://u:p@db/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(), "SERVER_PEPPER": SecureToken.generate(),
-         "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate(),
+         "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(),
          "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG", "APNS_TEAM_ID": "TEAM123456",
          "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
          "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.com"]
@@ -903,7 +903,7 @@ final class HardeningTests: XCTestCase {
     func testStagingUsesProductionRulesAndSecretsAreNeverEphemeralWithADatabase() throws {
         for name in ["staging", "production"] {
             let env = strictEnvironment(name)
-            for key in ["DATABASE_URL", "SERVER_PEPPER", "DATA_ENCRYPTION_KEY", "AUDIT_CHAIN_KEY", "CONNECT_LINK_SIGNING_KEY", "TWILIO_AUTH_TOKEN"] {
+            for key in ["DATABASE_URL", "SERVER_PEPPER", "DATA_ENCRYPTION_KEY", "AUDIT_CHAIN_KEY", "SUBJECT_REF_KEY", "CONNECT_LINK_SIGNING_KEY", "TWILIO_AUTH_TOKEN"] {
                 var broken = env
                 broken[key] = nil
                 XCTAssertThrowsError(try ServerConfig.fromEnvironment(broken), "\(key) is mandatory in \(name)")
@@ -918,7 +918,8 @@ final class HardeningTests: XCTestCase {
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(["ENVIRONMENT": "development", "DATABASE_URL": "postgres://u:p@localhost/viadere"]))
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(["ENVIRONMENT": "development"]))
         var withSecrets = ["ENVIRONMENT": "development", "DATABASE_URL": "postgres://u:p@localhost/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(),
-                           "SERVER_PEPPER": SecureToken.generate(), "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate()]
+                           "SERVER_PEPPER": SecureToken.generate(), "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate(),
+                           "SUBJECT_REF_KEY": SecureToken.generate()]
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(withSecrets))
         // Reusing one value for two secrets is refused in strict environments.
         var reused = strictEnvironment("production")

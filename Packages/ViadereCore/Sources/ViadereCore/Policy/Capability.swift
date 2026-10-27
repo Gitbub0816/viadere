@@ -80,7 +80,8 @@ public enum Capability: Hashable, Sendable, Codable, CustomStringConvertible {
         case .authenticate: .authChallenge
         case .authorize: .transactionApprove
         case .confirm, .choose, .acknowledge, .reply, .status, .reward, .ticket, .message: .messageSend
-        case .unknown(let raw): .unknown("interaction.\(raw)")
+        // A fixed ID: the unrecognized kind is attacker-controlled text and must not flow into audit records.
+        case .unknown: .unknown("interaction.unknown")
         }
     }
 }

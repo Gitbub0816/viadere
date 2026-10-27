@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wire forms for vault sync (`/v1/vault/...`). Every binary value is unpadded base64url. The server stores and returns these
-/// opaquely; see `docs/SECURITY.md` §2.28 for what each one is.
+/// opaquely; see `docs/SECURITY.md` §2.40 for what each one is.
 
 /// `SignedVaultManifest` on the wire.
 public struct VaultManifestDTO: Codable, Sendable, Equatable {
@@ -143,14 +143,17 @@ public struct VaultDeviceInfo: Codable, Sendable, Equatable, Identifiable {
     public var addedAt: Date
     /// The account device bound to this member, if any.
     public var accountDeviceId: UUID?
+    /// The bound account device exists and is not revoked. A member whose account device was revoked should be removed (which rotates the key).
+    public var accountDeviceActive: Bool
     public var removed: Bool
     public var id: String { memberId }
 
-    public init(memberId: String, role: String, addedAt: Date, accountDeviceId: UUID?, removed: Bool) {
+    public init(memberId: String, role: String, addedAt: Date, accountDeviceId: UUID?, accountDeviceActive: Bool, removed: Bool) {
         self.memberId = memberId
         self.role = role
         self.addedAt = addedAt
         self.accountDeviceId = accountDeviceId
+        self.accountDeviceActive = accountDeviceActive
         self.removed = removed
     }
 }
@@ -170,8 +173,11 @@ public struct VaultJoinState: Codable, Sendable, Equatable {
     public var approval: String?
     /// The member the requesting account device was bound to by the approval.
     public var approvedMemberId: String?
+    /// The vault version of the manifest that added the device.
+    public var approvedVersion: UInt64?
 
-    public init(joinId: String, expiresAt: Date, request: String? = nil, approval: String? = nil, approvedMemberId: String? = nil) {
+    public init(joinId: String, expiresAt: Date, request: String? = nil, approval: String? = nil, approvedMemberId: String? = nil, approvedVersion: UInt64? = nil) {
+        self.approvedVersion = approvedVersion
         self.joinId = joinId
         self.expiresAt = expiresAt
         self.request = request

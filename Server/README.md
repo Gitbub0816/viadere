@@ -25,6 +25,10 @@ Server/
                                 ChannelRouter (durable outbox, capability, SMS fallback), RCS postback tokens + inbound
     Dashboard/                  business dashboard + operator console: passkey ceremonies, sessions, CSRF, roles,
                                 server-rendered pages (one hashed stylesheet, one hashed passkey script on sign-in pages)
+    Policy/                     WP2: capability policy (`PolicyService`: entitlement ∩ key scope ∩ consent ∩ evidence ∩ law/policy,
+                                audited), business entitlements + risk tiers (`EntitlementService`), operator kill switches and
+                                law/policy rules (`PolicyAdmin`), per-request disclosure receipts, pairwise `subject_ref` resolution,
+                                operator console pages. The pure engine and the capability catalog live in ViadereCore (`Policy/`)
     Platform/                   onboarding / verification / suspension, abuse thresholds + auto-throttle, business controls,
                                 usage metering + invoice preview, QR encoder
     Push/                       APNsSender protocol (+ Live Activity pushes), PassPushSender, APNSwift implementations
@@ -99,6 +103,7 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `SERVER_PEPPER` | base64url ≥ 32 B; keys OTP hashes, phone lookup hashes, per-business consumer pseudonyms |
 | `DATA_ENCRYPTION_KEY` | base64url ≥ 32 B; AES-256-GCM key for phones, message bodies, webhook secrets and bodies, SMS context (row-bound additional data) |
 | `AUDIT_CHAIN_KEY` | base64url ≥ 32 B; HMAC key of the audit hash chain (required in staging/production; keep it out of the database) |
+| `SUBJECT_REF_KEY` | base64url ≥ 32 B; HMAC key of the pairwise `subject_ref` derivation (`sub_…`). **Required in staging/production and whenever `DATABASE_URL` is set; must differ from every other secret** (startup refuses reuse). Rotating it changes every `subject_ref` businesses hold |
 | `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` | set once when upgrading an existing deployment to the last pre-upgrade audit `seq` (default 0 = every event must be keyed) |
 | `PUBLIC_BASE_URL` | public origin (https in production). Used for links and for Twilio signature URLs — never the Host header |
 | `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
@@ -120,6 +125,7 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `PASS_TYPE_IDENTIFIER`, `PASS_CERTIFICATE_PEM` or `PASS_CERTIFICATE_PATH`, `PASS_PRIVATE_KEY_PEM` or `PASS_PRIVATE_KEY_PATH`, `PASS_WWDR_CERTIFICATE_PEM` or `PASS_WWDR_CERTIFICATE_PATH` | Wallet pass signing: **all four or none**. The Pass Type ID certificate (`pass.…`) and its **unencrypted** private key (PKCS#8, PKCS#1 or SEC1 PEM, RSA or EC) from the Apple Developer portal, plus Apple's WWDR intermediate certificate. Inline values accept `\n` escapes. Validated at startup (parseable, key matches certificate, not expired), never committed. The same certificate and key also authenticate the "pass changed" pushes to APNs. None configured = passes off (`501`). The team id is `APPLE_TEAM_ID` |
 | `RCS_PROVIDER_BASE_URL`, `RCS_PROVIDER_TOKEN`, `RCS_AGENT_ID`, `RCS_WEBHOOK_SECRET` | generic RBM-style RCS provider; **all four or none** (none = RCS off, SMS only). The secret is base64url, ≥ 32 bytes |
 | `FEATURE_APPLE_MESSAGES_FOR_BUSINESS` | defaults `false`; the AMB adapter is a non-functional placeholder even when `true` |
+| `VAULT_SYNC_ENABLED` | **release gate and kill switch for credential-vault sync (WP5).** Defaults `false` everywhere; only the literal `true` enables it. Off: every `/v1/vault/**` route answers `404` (after authentication) and devices keep working from their local encrypted vaults. Keep it **off in production until the independent vault cryptography and recovery review passes** (spec §17, Phase 4 gate). Needs the `CreateVaultWP5Schema.v1` migration |
 | `DASHBOARD_ORIGIN` | optional separate origin (same `RP_ID`) for dashboard passkeys, e.g. a `business.` sub-domain |
 | `DASHBOARD_IDLE_MINUTES`, `DASHBOARD_ABSOLUTE_HOURS` | business session idle (30) and absolute (12) timeouts; operators are fixed shorter (15 min / 8 h) |
 | `ABUSE_COMPLAINT_RATE`, `ABUSE_OPTOUT_RATE`, `ABUSE_MIN_SAMPLE`, `ABUSE_WINDOW_DAYS`, `ABUSE_THROTTLE_FACTOR` | auto-throttle thresholds (defaults 2 %, 10 %, 20, 7 d, ×0.25) |
@@ -172,10 +178,11 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `POST /v1/interactions/{id}/decision` | device+bearer | `SignedDecision` verified with `DecisionVerifier` |
 | `GET/POST /v1/conversations`, `GET/POST /v1/conversations/{id}/messages` | device+bearer | tenant-scoped history |
 | `POST /v1/push/apns-token`, `POST /v1/live-activities/tokens` | device+bearer | token storage |
-| `POST /v1/business/interactions` | API key `interactions:write` | idempotent; consent + assurance + quota enforced |
-| `GET /v1/business/interactions/{id}` · `POST …/cancel` | API key | outcome / cancel (tenant-scoped) |
-| `POST /v1/business/messages` | API key `messages:write` | delivered to the active SMS session or held in history |
-| `POST /v1/business/statuses` | API key `statuses:write` | ongoing-event updates replace earlier ones |
+| `POST /v1/business/interactions` | API key `interactions:write` + capability of the kind | idempotent; policy (capability scope ∩ entitlement ∩ switches), consent + evidence + quota enforced; `authenticate` needs `auth.challenge`, `authorize` `transaction.approve`, others `message.send` (`403 insufficient_scope` / `not_entitled` / `capability_disabled`); the customer is named by `relationshipId` or `subjectRef` |
+| `GET /v1/business/interactions/{id}` · `POST …/cancel` | API key `interactions:read` / `:write` + capability of the interaction's kind | outcome / cancel (tenant-scoped) |
+| `POST /v1/business/messages` | API key `messages:write` + `message.send` | delivered to the active SMS session or held in history |
+| `POST /v1/business/statuses` | API key `statuses:write` + `message.send` | ongoing-event updates replace earlier ones |
+| `GET /v1/business/capabilities` | API key (any) | tiers, entitlements, the key's capabilities, `effective` now, and the capability catalog |
 | `GET/POST /v1/business/webhooks`, `DELETE …/{id}`, `POST …/{id}/rotate-secret` | API key `webhooks:manage` | HTTPS only, SSRF-checked, secrets shown once |
 | `POST /v1/providers/sms/inbound` · `/status` | provider | Twilio `X-Twilio-Signature` HMAC-SHA1, constant time |
 | `GET /c/{code}` · `/l/{token}` · `/h/{token}` | none | server-rendered fallback pages, strict CSP, Smart App Banner |
@@ -207,7 +214,7 @@ but separate credential tables, users and sessions, so a business passkey can ne
 |---|---|---|
 | `/dashboard/signup`, `/verify`, `/login`, `/invite/{token}` | public | sign-up creates an **unverified** user (passkey, no session); entering the emailed 6-digit code at `/dashboard/verify` activates it and creates a **pending** organization and an application (no handle, no code); then sign in with the passkey. Unverified accounts are purged after 24 h and never block the address (a sign-up under 15 minutes old is not replaced by another sign-up for the same address; 10 wrong codes per address per day, whatever the number of codes). An invitation page asks for a code emailed to the invited address |
 | `/dashboard` overview | all | aggregate analytics only: issued / decided by kind, decision latency, webhook and SMS/RCS delivery, opt-outs, reports |
-| `/dashboard/api-keys` | owner, admin, developer | create (scoped, live/test, expiry; **passkey re-auth**, secret shown once), revoke, last used |
+| `/dashboard/api-keys` | owner, admin, developer | create (operational scopes **and capability scopes within the organization's entitlements**, live/test, expiry; **passkey re-auth**, secret shown once), revoke, last used |
 | `/dashboard/webhooks`, `/webhooks/deliveries` | owner, admin, developer | endpoints, secret rotation (**re-auth**), delivery log with redacted payloads, replay dead letters (compare-and-swap) |
 | `/dashboard/templates` | all | copyable requests built from the real Core types (a test validates each one) |
 | `/dashboard/campaigns` | owner, admin, developer | signed `ConnectLink` with campaign context + server-rendered SVG QR code (own encoder, verified against an independent implementation) |
@@ -219,6 +226,8 @@ but separate credential tables, users and sessions, so a business passkey can ne
 | `/operator`, `/operator/applications/{id}` | operator | review and verify or decline applications (verification issues the handle and permanent code) |
 | `/operator/businesses[/{id}]` | operator | suspend / reinstate, priority ceiling (downward only), throttle |
 | `/operator/abuse` | operator | complaint / opt-out rates, rate-limit hits, throttle state |
+| `/operator/businesses/{id}/entitlements` | operator | grant / revoke risk tiers and capabilities with a recorded purpose justification (identity attributes also a heightened-review reference); every change needs a fresh passkey and is audited |
+| `/operator/policy` | operator | per-capability kill switches (global or per business) and law/policy rules (jurisdiction block / allow-only), reason required, audited |
 
 Operators are created with `ViadereServer create-operator --email … --name …` (prints a one-time, one-hour passkey enrollment link).
 
@@ -229,6 +238,15 @@ logout, role change and member removal take effect on the next request because t
 request needs the per-session CSRF token (an HMAC of the cookie under the server pepper, in a hidden `_csrf` field or `X-CSRF-Token`) and a
 same-site `Origin` when the browser sends one. Sensitive actions (create API key, create webhook, rotate secret, add an owner, and every operator
 mutation) need a passkey assertion from the last 5 minutes; the server answers with a "Confirm with passkey" page and does nothing until then.
+
+**Capabilities, entitlements and policy (WP2).** Every verified business holds Tier M (messaging) and nothing else until an operator grants more;
+an API key carries operational scopes **and** capabilities, and every capability request goes through `PolicyService`, which re-reads the
+business's entitlements, the operator switches and the policy rules on each call, so a revoked entitlement or a kill switch applies to
+existing keys at once (switch state is cached for at most 5 s). Normative catalog, decision order, error mapping, receipts, `subject_ref` and
+the data migration of existing keys: `docs/SECURITY.md` §2.28 to §2.31. **Deploying:** set `SUBJECT_REF_KEY` first, then migrate
+(`CreatePolicyWP2Schema.v1` grandfathers businesses that already issue `authenticate` / `authorize` interactions as tier A and gives existing keys
+the messaging capabilities, plus the approval capabilities for exactly those businesses); the background job fills `relationships.subject_ref`
+for existing rows within seconds. Tests: `PolicyWP2Tests` (acceptance 1, 2 and 6, ceiling at use time, kill switch, receipts, unlinkability).
 
 **Verification gate.** Unverified organizations cannot create API keys or webhooks, their keys are refused by the API-key middleware, and
 `InteractionService.issue` refuses them again; consumers cannot connect to them and the directory never lists them. Suspension flips the status
@@ -249,6 +267,23 @@ keeps the target. A postback is accepted only from the phone it was sent to, onl
 
 `AppleMessagesForBusinessAdapter` is a stub behind `FEATURE_APPLE_MESSAGES_FOR_BUSINESS` (default off) with **no functional sending**: Apple has not
 approved a single Viadere identity as a multi-merchant switchboard, and there must be no multi-merchant brokerage over AMB until it does in writing.
+
+### Credential vault sync (WP5; `VAULT_SYNC_ENABLED`, default off)
+
+The server is a verifying store for the Authenticator's end-to-end encrypted vault: it keeps **ciphertext, signed public manifests, public keys and HPKE envelopes only**, never item contents, device names or any key that opens them, and never logs bodies. Wire formats and the full protocol are in `docs/SECURITY.md` §2.40. All routes are `deviceSignedBearer`.
+
+| Route | Notes |
+|---|---|
+| `GET /v1/vault` | status: exists, version, epoch, whether *this* account device is bound to a vault member, device count, recovery configured |
+| `PUT /v1/vault` | one atomic compare-and-swap (`expectedVersion`, `0` creates): signed manifest + changed blobs + changed envelopes. Verified with Core's `VaultChainVerifier` (hash chain, signer is a member of the previous manifest, rotation and revision rules); blobs and envelopes must hash to the manifest; the calling account device must be bound to the signing member. Creating needs a trusted device. `409` carries `currentVersion`; up to 1 MiB while enabled |
+| `DELETE /v1/vault` | trusted + bound device: erases every vault row (devices keep local copies); notice `vaultDeleted` |
+| `GET /v1/vault/manifests?after=N` | signed history, 100 per page; bound devices, or a trusted unbound device (restoring) at a tighter rate |
+| `POST /v1/vault/blobs` · `GET /v1/vault/envelope` | ciphertext for bound devices (a trusted unbound device may read blobs; ciphertext opens nothing) |
+| `GET /v1/vault/recovery-envelope` | trusted device; 5 per hour per account; audited; useless without the recovery key |
+| `GET /v1/vault/devices` · `DELETE /v1/vault/devices/{memberId}` | members (names are sealed in the manifest) · ends a member's server access at once and notifies; the client then publishes a key-rotation manifest |
+| `PUT/GET/DELETE /v1/vault/joins/{joinId}` · `PUT …/request` | new-device pairing channel; payloads are sealed under a secret the server never sees; one request per join, 10 min, 3 open per account |
+
+Limits per account per hour: writes 120 (burst 30), reads 1,200, joins 30, recovery envelope 5; 16 devices, 2,000 items, 32 KiB per blob, 16 MiB per vault. Security notices (`vaultDeviceAdded`, `vaultDeviceRemoved`, `vaultDeleted`) and audit events (`vault.created`, `vault.updated`, `vault.device_removed`, `vault.deleted`, `vault.recovery_envelope_fetched`: counts and ids only). Account deletion wipes the vault whether or not the gate is on.
 
 ### "Connect with Viadere" button
 
@@ -317,6 +352,12 @@ DNS-pinned webhook connections (the destination is re-resolved and checked immed
 Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview
 only), no business-profile editing after verification, no operator-assisted recovery for a business user who loses every passkey (consumers have recovery codes),
 and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale).
+
+Policy (WP2): `contact.reachable`, `consent.request`, `age.minimum` and `identity.*` are in the catalog and the engine but have no endpoints yet
+(Verify ships them); the baseline messaging capabilities cannot be revoked one by one (suspend the business, or use a kill switch); `SUBJECT_REF_KEY`
+rotation has no tooling (clear `relationships.subject_ref`, the job re-derives, businesses must re-fetch references); the `consumerReference`
+pseudonym is deprecated but still returned; a denial is audited on every attempt, so a flooding compromised key also floods the audit chain (the
+per-business API rate limit bounds it).
 
 ## Security operations
 

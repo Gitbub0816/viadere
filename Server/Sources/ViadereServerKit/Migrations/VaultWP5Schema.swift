@@ -65,6 +65,7 @@ struct CreateVaultWP5Schema: AsyncMigration {
             .field("request", .data)
             .field("approval", .data)
             .field("approved_member_id", .string)
+            .field("approved_version", .int)
             .field("created_at", .datetime, .required)
             .field("expires_at", .datetime, .required)
             .unique(on: "join_id")

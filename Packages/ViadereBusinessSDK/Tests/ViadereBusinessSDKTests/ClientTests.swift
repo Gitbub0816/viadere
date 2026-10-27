@@ -110,7 +110,7 @@ struct ClientTests {
                                     "business.statuses.update", "business.webhooks.list", "business.webhooks.create", "business.webhooks.delete", "business.webhooks.rotate",
                                     "business.rewards.issue", "business.rewards.list", "business.rewards.revoke", "business.loyalty.program.get",
                                     "business.loyalty.program.put", "business.loyalty.points", "business.redemptions.consume",
-                                    "business.sandbox.relationships.create"]
+                                    "business.sandbox.relationships.create", "business.capabilities.get"]
         #expect(Set(business).subtracting(covered).isEmpty)
     }
 
