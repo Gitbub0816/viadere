@@ -1,0 +1,10 @@
+**/.build
+**/.swiftpm
+**/DerivedData
+.git
+App
+Design
+docs
+Packages/ViadereKit
+**/.env
+**/*.p8

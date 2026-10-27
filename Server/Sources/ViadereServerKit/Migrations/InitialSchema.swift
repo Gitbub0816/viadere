@@ -503,31 +503,44 @@ struct CreateInitialSchema: AsyncMigration {
         }
     }
 
-    // MARK: Append-only audit log
+    // MARK: Append-only tables
 
+    /// Audit events, consent history, decisions and SMS consent events are never edited or deleted.
+    /// The database enforces it, so even a bug (or a compromised application role) cannot rewrite history.
     private func createAuditTriggers(on db: any Database) async throws {
         guard let sql = db as? any SQLDatabase else { return }
+        let tables: [(table: String, name: String)] = [
+            ("audit_events", "audit_events_no_update"),
+            ("consent_grants", "consent_grants_no_update"),
+            ("decisions", "decisions_no_update"),
+            ("sms_consent_events", "sms_consent_events_no_update"),
+        ]
         if sql.dialect.name == "postgresql" {
             try await sql.raw("""
-                CREATE OR REPLACE FUNCTION viadere_audit_append_only() RETURNS trigger AS $$
+                CREATE OR REPLACE FUNCTION viadere_append_only() RETURNS trigger AS $$
                 BEGIN
-                    RAISE EXCEPTION 'audit_events is append-only';
+                    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
                 END;
                 $$ LANGUAGE plpgsql
                 """).run()
-            try await sql.raw("""
-                CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
-                FOR EACH ROW EXECUTE FUNCTION viadere_audit_append_only()
-                """).run()
+            for (table, name) in tables {
+                // Names are compile-time constants.
+                try await sql.raw(SQLQueryString("""
+                    CREATE TRIGGER \(unsafeRaw: name) BEFORE UPDATE OR DELETE ON \(unsafeRaw: table)
+                    FOR EACH ROW EXECUTE FUNCTION viadere_append_only()
+                    """)).run()
+            }
         } else {
-            try await sql.raw("""
-                CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events
-                BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END
-                """).run()
-            try await sql.raw("""
-                CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events
-                BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END
-                """).run()
+            for (table, name) in tables {
+                try await sql.raw(SQLQueryString("""
+                    CREATE TRIGGER \(unsafeRaw: name) BEFORE UPDATE ON \(unsafeRaw: table)
+                    BEGIN SELECT RAISE(ABORT, 'append-only table'); END
+                    """)).run()
+                try await sql.raw(SQLQueryString("""
+                    CREATE TRIGGER \(unsafeRaw: table + "_no_delete") BEFORE DELETE ON \(unsafeRaw: table)
+                    BEGIN SELECT RAISE(ABORT, 'append-only table'); END
+                    """)).run()
+            }
         }
     }
 }

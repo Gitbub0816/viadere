@@ -12,7 +12,9 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     let clock = overrides.clock ?? SystemClock()
     let apns: any APNsSender
     if let override = overrides.apns { apns = override } else if let apnsConfig = config.apns {
-        apns = try APNSwiftSender(config: apnsConfig, logger: app.logger)
+        let sender = try APNSwiftSender(config: apnsConfig, logger: app.logger)
+        app.lifecycle.use(APNsShutdown(sender: sender))
+        apns = sender
     } else {
         apns = DisabledAPNsSender()
     }
@@ -40,13 +42,12 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         app.databases.use(.sqlite(.memory), as: .sqlite)
     }
     app.migrations.add(Migrations.all)
-    if config.databaseURL == nil || overrides.autoMigrate { try await app.autoMigrate() }
+    if config.databaseURL == nil || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
 
     // MARK: HTTP
     app.routes.defaultMaxBodySize = ByteCount(value: config.maxBodyBytes)
     app.http.server.configuration.hostname = config.bindHost
     app.http.server.configuration.port = config.port
-    app.http.server.configuration.serverName = ""
     app.http.server.configuration.supportPipelining = false
     app.middleware = Middlewares()
     app.middleware.use(SecurityHeadersMiddleware())
@@ -57,7 +58,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     app.middleware.use(RequestGuardMiddleware())
     try Routes.register(app)
 
-    if config.runBackgroundJobs { app.lifecycle.use(BackgroundJobRunner()) }
+    if config.runBackgroundJobs { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
 }
 
 /// Test/dev seams. Production code never sets these.
@@ -93,4 +94,11 @@ public func makeApplication(environment: Environment, config: ServerConfig, over
         throw error
     }
     return app
+}
+
+/// Closes the APNs HTTP/2 client when the application shuts down.
+struct APNsShutdown: LifecycleHandler {
+    let sender: APNSwiftSender
+    func shutdown(_ application: Application) {}
+    func shutdownAsync(_ application: Application) async { await sender.shutdown() }
 }

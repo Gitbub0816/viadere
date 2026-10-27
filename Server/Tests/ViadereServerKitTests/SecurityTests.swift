@@ -197,9 +197,9 @@ final class SecurityTests: XCTestCase {
 
     func testAuditLogIsHashChainedAppendOnlyAndTamperEvident() async throws {
         try await withHarness { h in
-            _ = try await h.readyConsumer()
+            let consumer = try await h.readyConsumer()
             let b = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
-            _ = b
+            _ = try await h.connect(consumer, to: b)
             let verification = try await AuditService.verifyChain(on: h.db)
             XCTAssertTrue(verification.valid)
             XCTAssertGreaterThanOrEqual(verification.checked, 3)
@@ -219,7 +219,7 @@ final class SecurityTests: XCTestCase {
                 XCTFail("DELETE must be rejected")
             } catch {}
             // Even if an attacker with schema privileges removes the triggers, the chain exposes the edit.
-            try await sql.raw("DROP TRIGGER audit_events_no_update").run()
+            try await dropAuditTriggers(sql)
             try await sql.raw("UPDATE audit_events SET outcome = 'denied' WHERE seq = 2").run()
             let broken = try await AuditService.verifyChain(on: h.db)
             XCTAssertFalse(broken.valid)
@@ -227,11 +227,23 @@ final class SecurityTests: XCTestCase {
         }
     }
 
+    /// Simulates an attacker with schema privileges removing the append-only triggers (dialect-aware).
+    func dropAuditTriggers(_ sql: any SQLDatabase) async throws {
+        if sql.dialect.name == "postgresql" {
+            try await sql.raw("DROP TRIGGER audit_events_no_update ON audit_events").run()
+        } else {
+            try await sql.raw("DROP TRIGGER audit_events_no_update").run()
+            try await sql.raw("DROP TRIGGER audit_events_no_delete").run()
+        }
+    }
+
     func testAuditChainDetectsDeletedEvents() async throws {
         try await withHarness { h in
-            _ = try await h.readyConsumer()
+            let consumer = try await h.readyConsumer()
+            let b = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
+            _ = try await h.connect(consumer, to: b)
             let sql = h.db as! any SQLDatabase
-            try await sql.raw("DROP TRIGGER audit_events_no_delete").run()
+            try await dropAuditTriggers(sql)
             try await sql.raw("DELETE FROM audit_events WHERE seq = 2").run()
             let result = try await AuditService.verifyChain(on: h.db)
             XCTAssertFalse(result.valid)
@@ -444,7 +456,7 @@ final class SecurityTests: XCTestCase {
         let harness = try await TestHarness.make()
         // Simulate a production-configured context for the command's guard.
         let console = Terminal()
-        let input = CommandInput(arguments: [])
+        let input = CommandInput(arguments: ["viadere"])
         var context = CommandContext(console: console, input: input)
         context.userInfo["application"] = harness.app
         harness.app.ctx = ServerContext(config: production, clock: harness.clock, apns: harness.push, sms: harness.texts, passkeys: FakePasskeyVerifier(), webhookTransport: harness.webhooks)

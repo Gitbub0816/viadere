@@ -198,7 +198,7 @@ final class SMSGatewayTests: XCTestCase {
             let airlineSession = airlineMessages[0]
             let before = h.texts.sent.count
             let late = try await h.businessPost(airline, "/v1/business/messages", BusinessSendMessageRequest(relationshipId: airlineSession.relationshipId, sessionId: airlineSession.sessionId, body: "Gate changed to B12", idempotencyKey: "late1"))
-            XCTAssertTrue([200, 201, 409].contains(late.status.code), late.text)
+            XCTAssertEqual(late.status, .created, late.text)
             try await h.runJobs()
             XCTAssertEqual(h.texts.sent.count, before, "airline text must not reach the hotel thread")
             XCTAssertFalse(h.texts.sent.contains { $0.body.contains("Gate changed") })

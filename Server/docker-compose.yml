@@ -1,0 +1,57 @@
+# Local / staging stack: PostgreSQL + the Viadere server.
+#
+#   cp .env.example .env     # then fill in the secrets (see comments in .env.example)
+#   docker compose up --build
+#
+# TLS is terminated at the edge (load balancer / reverse proxy); the server sets HSTS and expects HTTPS in front of it.
+# When behind a proxy, set TRUSTED_PROXY_COUNT so rate limits key on the real client address.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: viadere
+      POSTGRES_DB: viadere
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - viadere-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U viadere -d viadere"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # The database is only reachable from the server container; nothing is published to the host.
+    networks: [backend]
+
+  server:
+    build:
+      context: ..
+      dockerfile: Server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Compose builds the URL; the password is URL-safe if generated with `openssl rand -hex 24`.
+      DATABASE_URL: postgres://viadere:${POSTGRES_PASSWORD}@db:5432/viadere
+      AUTO_MIGRATE: "true"
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /healthz HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q ok <&3'"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    networks: [backend, default]
+
+networks:
+  backend:
+    internal: true
+
+volumes:
+  viadere-db:

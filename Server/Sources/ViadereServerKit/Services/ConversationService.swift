@@ -168,7 +168,7 @@ struct ConversationService {
             // The session must belong to this business *and* this relationship.
             guard let found = try await ConversationSessionRecord.query(on: db).filter(\.$id == sessionId.uuid)
                 .filter(\.$businessId == principal.businessId.uuid).filter(\.$relationshipId == relationship.id!).first() else { throw APIError.notFound }
-            guard found.state != "closed" else { throw APIError.conflict("This conversation is closed.") }
+            // A closed session still accepts history-only messages (they are never rendered in another thread).
             session = found
         } else if let open = try await ConversationSessionRecord.query(on: db).filter(\.$relationshipId == relationship.id!)
             .filter(\.$businessId == principal.businessId.uuid).filter(\.$state == "open").sort(\.$createdAt, .descending).first() {
@@ -220,7 +220,15 @@ struct ConversationService {
         // Delivery: SMS thread if this session is the active SMS session, otherwise a generic push.
         let viaSMS = try await GatewayService(db: db, ctx: ctx).deliverBusinessMessage(
             businessId: principal.businessId, sessionId: SessionID(session.id!), text: body, messageId: record.id)
-        if !viaSMS, principal.livemode { await pushMessageNotice(consumerId: relationship.consumerId, businessId: principal.businessId) }
+        if !viaSMS {
+            // In-app / history-only messages are "delivered" once stored; SMS ones follow provider receipts.
+            record.deliveryStatus = DeliveryStatus.delivered.rawValue
+            record.deliveredAt = ctx.now
+            try await record.update(on: db)
+            if principal.livemode, session.state != "closed" {
+                await pushMessageNotice(consumerId: relationship.consumerId, businessId: principal.businessId)
+            }
+        }
         return (try dto(record), true)
     }
 

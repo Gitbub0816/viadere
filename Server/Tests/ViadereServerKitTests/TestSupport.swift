@@ -147,12 +147,15 @@ final class TestHarness: @unchecked Sendable {
     static func make(_ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
         var config = ServerConfig.testing()
         adjust(&config)
+        // Set TEST_DATABASE_URL to run the whole suite against a real PostgreSQL instance.
+        let postgres = ProcessInfo.processInfo.environment["TEST_DATABASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
+        if let postgres { config.databaseURL = postgres }
         let clock = ManualClock(Date(timeIntervalSince1970: 1_800_000_000))
         let apns = RecordingAPNsSender()
         let sms = RecordingSMSProvider()
         let transport = ScriptedWebhookTransport()
         let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
-            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport))
+            clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, autoMigrate: postgres != nil))
         let harness = TestHarness(app: app, clock: clock, config: config)
         harness.bind(apns: apns, sms: sms, transport: transport)
         return harness
@@ -172,7 +175,10 @@ final class TestHarness: @unchecked Sendable {
     var ctx: ServerContext { app.ctx }
     var db: any Database { app.db }
 
-    func shutdown() async throws { try await app.asyncShutdown() }
+    func shutdown() async throws {
+        if config.databaseURL != nil { try? await app.autoRevert() }
+        try await app.asyncShutdown()
+    }
 
     // MARK: Requests
 

@@ -66,6 +66,10 @@ public struct ServerConfig: Sendable {
     /// Exact origins allowed by CORS. Empty (the default) means no cross-origin access.
     public var corsAllowedOrigins: [String]
     public var runBackgroundJobs: Bool
+    /// Seconds between background job runs (webhook/SMS delivery, expiry sweeps).
+    public var jobIntervalSeconds: Double
+    /// Run pending database migrations at startup (`AUTO_MIGRATE=true`). In-memory SQLite always migrates.
+    public var autoMigrate: Bool
     public var maxBodyBytes: Int
     public var rateLimits: RateLimitSettings
     public var accessTokenTTL: TimeInterval
@@ -85,7 +89,7 @@ public struct ServerConfig: Sendable {
             appBundleID: "com.viadere.app", appClipBundleID: "com.viadere.app.Clip",
             connectLinkKey: SymmetricKey(data: Data(repeating: 0x11, count: 32)),
             pepper: Data(repeating: 0x22, count: 32), dataEncryptionKey: SymmetricKey(data: Data(repeating: 0x33, count: 32)),
-            apns: nil, twilio: nil, trustedProxyCount: 0, corsAllowedOrigins: [], runBackgroundJobs: false,
+            apns: nil, twilio: nil, trustedProxyCount: 0, corsAllowedOrigins: [], runBackgroundJobs: false, jobIntervalSeconds: 5, autoMigrate: false,
             maxBodyBytes: 64 * 1024, rateLimits: .standard, accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true)
     }
@@ -154,6 +158,8 @@ public struct ServerConfig: Sendable {
             apns: apns, twilio: twilio, trustedProxyCount: Int(env["TRUSTED_PROXY_COUNT"] ?? "") ?? 0,
             corsAllowedOrigins: (env["CORS_ALLOWED_ORIGINS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
             runBackgroundJobs: (env["RUN_BACKGROUND_JOBS"] ?? "true") != "false",
+            jobIntervalSeconds: min(max(Double(env["JOB_INTERVAL_SECONDS"] ?? "") ?? 5, 0.05), 300),
+            autoMigrate: env["AUTO_MIGRATE"] == "true",
             maxBodyBytes: Int(env["MAX_BODY_BYTES"] ?? "") ?? 64 * 1024, rateLimits: .standard,
             accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,

@@ -36,18 +36,32 @@ final class BackgroundJobRunner: LifecycleHandler, @unchecked Sendable {
 
     init(interval: Duration = .seconds(5)) { self.interval = interval }
 
-    func didBootAsync(_ application: Application) async throws {
+    func didBoot(_ application: Application) throws { start(application) }
+
+    func didBootAsync(_ application: Application) async throws { start(application) }
+
+    /// Starts the loop once (Vapor may call either boot hook depending on how the app is driven).
+    private func start(_ application: Application) {
         let interval = self.interval
         let logger = application.logger
-        let runner = Task { [application] in
-            while !Task.isCancelled {
-                do { try await BackgroundJobs(app: application).runOnce() } catch {
-                    logger.warning("background job failed", metadata: ["error": "\(type(of: error))"])
+        lock.withLock {
+            guard task == nil else { return }
+            task = Task { [application] in
+                while !Task.isCancelled {
+                    do { try await BackgroundJobs(app: application).runOnce() } catch {
+                        logger.warning("background job failed", metadata: ["error": "\(type(of: error))"])
+                    }
+                    try? await Task.sleep(for: interval)
                 }
-                try? await Task.sleep(for: interval)
             }
         }
-        lock.withLock { task = runner }
+    }
+
+    func shutdown(_ application: Application) {
+        lock.withLock {
+            task?.cancel()
+            task = nil
+        }
     }
 
     func shutdownAsync(_ application: Application) async {
