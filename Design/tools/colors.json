@@ -1,0 +1,18 @@
+{
+  "Charcoal":      {"light": "#1F1E1C", "dark": "#1F1E1C"},
+  "Graphite":      {"light": "#4A4844", "dark": "#5A5752"},
+  "Silver":        {"light": "#C9C4BB", "dark": "#C9C4BB"},
+  "Ivory":         {"light": "#F5F2EC", "dark": "#F5F2EC"},
+  "Champagne":     {"light": "#C2AE8E", "dark": "#CDB993"},
+  "Background":    {"light": "#F5F2EC", "dark": "#121211"},
+  "Surface":       {"light": "#FCFBF8", "dark": "#1C1B1A"},
+  "SurfaceRaised": {"light": "#FFFFFF", "dark": "#262523"},
+  "TextPrimary":   {"light": "#1F1E1C", "dark": "#F3F0EA"},
+  "TextSecondary": {"light": "#6B675F", "dark": "#A29D94"},
+  "TextTertiary":  {"light": "#9A958C", "dark": "#6F6B64"},
+  "Accent":        {"light": "#8C7550", "dark": "#CDB993"},
+  "OnAccent":      {"light": "#FFFFFF", "dark": "#1F1E1C"},
+  "Danger":        {"light": "#A3412E", "dark": "#E08068"},
+  "Success":       {"light": "#4C7458", "dark": "#8DBB98"},
+  "Hairline":      {"light": ["#1F1E1C", 0.10], "dark": ["#F3F0EA", 0.12]}
+}

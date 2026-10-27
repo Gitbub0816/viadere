@@ -356,9 +356,10 @@ public struct ViadereWordmark: View {
 
 // MARK: - Lockups
 
-/// Mark + wordmark with the brand-guide proportions.
-/// Horizontal: wordmark x-height = 0.73 × ribbon height, gap = 0.26 × ribbon height, baseline 0.1 × ribbon height above the ribbon bottom.
-/// Stacked: wordmark ≈ 1.36 × ribbon width, centred under the mark.
+/// Mark + wordmark with the brand-guide proportions. Clear space (one dot diameter) is NOT
+/// included in the view; add `.padding(ViadereLockup.clearSpace(ribbonHeight:))` around it.
+/// Horizontal: wordmark x-height = 0.66 × ribbon height, gap = 0.26 × ribbon height, baseline 0.1 × ribbon height above the ribbon bottom.
+/// Stacked: wordmark ≈ 1.24 × ribbon width, centred under the mark.
 public struct ViadereLockup: View {
     public enum Layout { case horizontal, stacked }
 
@@ -375,12 +376,15 @@ public struct ViadereLockup: View {
         self.typeface = typeface
     }
 
+    /// Minimum clear space around a lockup or mark: one dot diameter.
+    public static func clearSpace(ribbonHeight: CGFloat) -> CGFloat { ribbonHeight * 0.41 }
+
     private var markHeight: CGFloat { ribbonHeight * ViadereMarkGeometry.height / 100 }
 
     public var body: some View {
         switch layout {
         case .horizontal:
-            let fontSize = 0.73 * ribbonHeight / ViadereWordmark.xHeight
+            let fontSize = 0.66 * ribbonHeight / ViadereWordmark.xHeight
             HStack(alignment: .bottom, spacing: ribbonHeight * 0.26) {
                 ViadereMark(style: markStyle).frame(height: markHeight)
                 ViadereWordmark(size: fontSize, typeface: typeface)
@@ -390,7 +394,7 @@ public struct ViadereLockup: View {
             .accessibilityLabel(Text("Viadere"))
         case .stacked:
             let ribbonWidth = ribbonHeight * ViadereBrand.ribbonAspectRatio
-            let fontSize = 1.36 * ribbonWidth / ViadereWordmark.emWidth
+            let fontSize = 1.24 * ribbonWidth / ViadereWordmark.emWidth
             VStack(spacing: ribbonHeight * 0.36) {
                 ViadereMark(style: markStyle).frame(height: markHeight)
                 ViadereWordmark(size: fontSize, typeface: typeface)
