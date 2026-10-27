@@ -102,8 +102,10 @@ struct PasskeyEnrollmentTests {
             #expect(log.count == 2 && log[1].hadAssertion, "the re-enrollment carried an assertion")
             #expect(record.deviceId != old.deviceId)
             let devices = try await api.devices()
-            // The old device is replaced by the enrollment itself (`replacesDeviceId`), never revoked before it.
-            #expect(devices.first { $0.id == old.deviceId }?.revokedAt != nil)
+            // The old device is replaced by the enrollment itself (`replacesDeviceId`), never revoked before it. It was live, so it is
+            // only marked as pending replacement.
+            #expect(devices.first { $0.id == old.deviceId }?.revokedAt == nil)
+            #expect(devices.first { $0.id == old.deviceId }?.pendingReplacementBy == record.deviceId)
             #expect(await api.enrollmentLog.count == 2)
             #expect(devices.first { $0.id == record.deviceId }?.revokedAt == nil)
         }

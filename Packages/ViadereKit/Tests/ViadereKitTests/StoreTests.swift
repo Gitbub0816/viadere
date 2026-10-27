@@ -171,7 +171,15 @@ struct OnboardingTests {
         #expect(model.step == .account)
         model.displayName = "Ana"
         await model.createAccount()
+        // The recovery codes come first, once; "I saved these" is required.
+        #expect(model.step == .recoveryCodes)
+        #expect(model.recoveryCodes?.codes?.codes.count == RecoveryPolicy.codeCount)
+        model.recoveryCodesSaved()
+        #expect(model.step == .recoveryCodes, "not without the confirmation")
+        model.recoveryCodes?.confirmedSaved = true
+        model.recoveryCodesSaved()
         #expect(model.step == .device)
+        #expect(model.recoveryCodes == nil)
         #expect(await services.sessions.isSignedIn)
 
         await model.enrollDevice()

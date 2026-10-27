@@ -93,6 +93,9 @@ targets:
       path: Viadere/Viadere.entitlements
       properties:
         aps-environment: $(APS_ENVIRONMENT)
+        # App Attest: vouches for the keys enrolled at device enrollment. `development` in Debug, `production` in Release
+        # (Configs/*.xcconfig); the server's APP_ATTEST_ENVIRONMENT must match.
+        com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
         com.apple.developer.associated-domains:
           - applinks:viadere.com
           - webcredentials:viadere.com
@@ -213,6 +216,9 @@ targets:
       - path: Shared/DesignSystem
       - path: Shared/Runtime
       - path: Shared/UI
+      # Copy / screenshot awareness for the recovery codes shown after the Clip creates an account.
+      - path: Viadere/Security/SecurePasteboard.swift
+      - path: Viadere/Security/ScreenCaptureObserver.swift
       - path: Shared/Privacy/PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: Resources
@@ -231,6 +237,8 @@ targets:
         com.apple.developer.parent-application-identifiers:
           - $(AppIdentifierPrefix)com.viadere.app
         com.apple.developer.on-demand-install-capable: true
+        # The Clip attests with its own App Attest key (its own app id).
+        com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
         com.apple.developer.associated-domains:
           - appclips:viadere.com
           - applinks:viadere.com

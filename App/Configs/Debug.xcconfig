@@ -5,6 +5,8 @@
 VIADERE_API_BASE_URL = http:/$()/localhost:8080
 VIADERE_PLIST_DEFS = VIADERE_LOCAL_DEV=1
 APS_ENVIRONMENT = development
+// App Attest environment (the entitlement; the server's APP_ATTEST_ENVIRONMENT must match the AAGUID these builds attest with).
+APP_ATTEST_ENVIRONMENT = development
 
 // Let Local.xcconfig override the above.
 #include? "Local.xcconfig"

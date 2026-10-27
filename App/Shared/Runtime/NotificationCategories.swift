@@ -31,11 +31,12 @@ enum NotificationCategories {
             options: [])
     }
 
-    /// Registers the static categories, keeping any per-interaction `choose` categories the service extension added.
+    /// Registers the static categories (and `viadere.security.cancel`, the security-notice push whose "Review" action opens the app),
+    /// keeping any per-interaction `choose` categories the service extension added.
     static func registerStatic() async {
         let center = UNUserNotificationCenter.current()
         let existing = await center.notificationCategories()
-        let statics = NotificationEnricher.staticCategorySpecs().map(category)
+        let statics = NotificationEnricher.registeredCategorySpecs().map(category)
         let staticIds = Set(statics.map(\.identifier))
         let dynamic = existing.filter { !staticIds.contains($0.identifier) }
         center.setNotificationCategories(Set(statics).union(dynamic))
@@ -44,7 +45,7 @@ enum NotificationCategories {
     /// Removes the per-interaction `viadere.choose.<id>` categories, keeping only the static ones (sign-out).
     static func removeDynamic() async {
         let center = UNUserNotificationCenter.current()
-        center.setNotificationCategories(Set(NotificationEnricher.staticCategorySpecs().map(category)))
+        center.setNotificationCategories(Set(NotificationEnricher.registeredCategorySpecs().map(category)))
     }
 
     /// Adds one category (the service extension registers `viadere.choose.<id>` before delivery).

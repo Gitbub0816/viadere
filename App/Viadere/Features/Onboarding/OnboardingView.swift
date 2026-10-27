@@ -27,7 +27,20 @@ struct OnboardingView: View {
         Group {
             switch vm.step {
             case .welcome: WelcomeStep(vm: vm)
+            case .recovery:
+                if let recovery = vm.recovery {
+                    AccountRecoveryView(vm: recovery) { vm.leaveRecovery() }
+                } else {
+                    WelcomeStep(vm: vm)
+                }
             case .account: AccountStep(vm: vm)
+            case .recoveryCodes:
+                if let codes = vm.recoveryCodes {
+                    RecoveryCodesView(model: codes) { vm.recoveryCodesSaved() }
+                } else {
+                    // The codes were released (the app locked while they were showing): they can't come back.
+                    DeviceStep(vm: vm)
+                }
             case .device: DeviceStep(vm: vm)
             case .notifications: NotificationsStep(vm: vm)
             case .phone, .done: PhoneStep(vm: vm)
@@ -37,6 +50,7 @@ struct OnboardingView: View {
         .transition(.opacity)
         .viadereScreenBackground()
         .passkeyExplanation(vm.passkeyGate)
+        .task { if vm.step == .recovery { await vm.resumeRecoveryIfPending() } }
     }
 }
 
@@ -127,6 +141,9 @@ private struct WelcomeStep: View {
                 Button("I already have an account") { Task { await vm.signIn() } }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
+                Button("Lost your devices?") { vm.beginRecovery() }
+                    .buttonStyle(.viadere(.quiet))
+                    .disabled(vm.isWorking)
             }
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.m)
@@ -154,6 +171,9 @@ private struct AccountStep: View {
                 .buttonStyle(.viadere(.primary))
                 .disabled(!vm.canCreateAccount)
             Button("Sign in instead") { Task { await vm.signIn() } }
+                .buttonStyle(.viadere(.quiet))
+                .disabled(vm.isWorking)
+            Button("Lost your devices?") { vm.beginRecovery() }
                 .buttonStyle(.viadere(.quiet))
                 .disabled(vm.isWorking)
         }

@@ -44,6 +44,8 @@ public actor MockViadereAPI: ViadereAPI {
     private var recoverySet: RecoveryCodeSet?
     private var recoveryRecord: MockRecoveryRecord?
     private var recoveryCodesChallenges: [CeremonyID: String] = [:]
+    /// Sessions the server minted for replacement devices (`Device.replacementSession`).
+    public private(set) var replacementSessions: [AuthSession] = []
     public private(set) var cancelledReplacementIds: [DeviceID] = []
     public private(set) var cancelledRecoveryIds: [RecoveryID] = []
     public private(set) var recoveryCompleteCalls = 0
@@ -254,7 +256,9 @@ public actor MockViadereAPI: ViadereAPI {
             } else {
                 deviceList[index].pendingReplacementBy = deviceId
                 deviceList[index].pendingReplacementAt = now.addingTimeInterval(Self.newDeviceCoolDown)
-                device.replacementSession = grant()
+                let session = grant()
+                replacementSessions.append(session)
+                device.replacementSession = session
                 addNotice(rawKind: "devicePendingReplacement", message: "A new iPhone is replacing one of your devices.",
                           subjectId: deviceId.description, action: .cancelDeviceReplacement)
             }
@@ -428,6 +432,7 @@ public actor MockViadereAPI: ViadereAPI {
     }
     /// Test hook: puts notices on the account.
     public func setDismissNeedsTrustedDevice(_ value: Bool) { dismissNeedsTrustedDevice = value }
+    public func setRequiresAttestation(_ value: Bool) { requiresAttestation = value }
     public func setSignOutCallsFail(_ failure: APIError?) { signOutCallsFail = failure }
     public func setSecurityNotices(_ notices: [SecurityNotice]) { noticeList = notices }
 

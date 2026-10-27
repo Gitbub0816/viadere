@@ -50,7 +50,7 @@ struct KeyTests {
         #expect(await blank.account.health() == .notEnrolled)
     }
 
-    @Test func reenrollmentReplacesDeviceAndRevokesOld() async throws {
+    @Test func reenrollmentOfALiveDeviceIsPendingNotImmediate() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)
         let oldId = try #require(try await services.records.load()?.deviceId)
@@ -58,7 +58,9 @@ struct KeyTests {
         let record = try await services.account.reenrollThisDevice(name: "New phone")
         #expect(record.deviceId != oldId)
         let devices = try await api.devices()
-        #expect(devices.first { $0.id == oldId }?.isRevoked == true)
+        // The old device is still live on the server: it is marked as pending replacement and revoked later (confirmation, cool-down
+        // or the owner cancelling), and this installation's session is the one bound to the new device.
+        #expect(devices.first { $0.id == oldId }?.pendingReplacementBy == record.deviceId)
         #expect(devices.first { $0.id == record.deviceId }?.isRevoked == false)
         #expect(await services.account.health() == .healthy)
     }

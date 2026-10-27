@@ -45,6 +45,8 @@ public final class InMemoryPreferences: PreferencesStore, @unchecked Sendable {
 
     public init() {}
 
+    var allValues: [String] { lock.lock(); defer { lock.unlock() }; return Array(values.values) }
+
     public func bool(_ key: PreferenceKey) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return values[key] == "1"

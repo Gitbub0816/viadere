@@ -19,8 +19,12 @@ public enum SecretStoreError: Error, Equatable, Sendable {
 public final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [String: Data] = [:]
+    private var history: [Data] = []
 
     public init() {}
+
+    /// Every value ever written, including ones since deleted (tests check that secrets that must never be stored never appear).
+    var everWritten: [Data] { lock.lock(); defer { lock.unlock() }; return history }
 
     public func read(_ account: String) throws -> Data? {
         lock.lock(); defer { lock.unlock() }
@@ -30,6 +34,7 @@ public final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     public func write(_ data: Data, account: String) throws {
         lock.lock(); defer { lock.unlock() }
         items[account] = data
+        history.append(data)
     }
 
     public func delete(_ account: String) throws {

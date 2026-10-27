@@ -17,6 +17,9 @@ struct HomeView: View {
                     if let notice = model.securityNotices.current {
                         SecurityNoticeBanner(vm: model.securityNotices, notice: notice) { model.reviewDevices() }
                             .padding(.bottom, ViadereSpace.s)
+                    } else if let message = model.securityNotices.message {
+                        // The outcome of "Cancel recovery" / "Cancel" stays visible after its notice is gone.
+                        ViadereNotice(message, kind: .info).padding(.bottom, ViadereSpace.s)
                     }
                     if let notice = home.coolDownNotice {
                         ViadereNotice("\(notice) \(CoolDownPolicy.stillAvailable)", kind: .info).padding(.bottom, ViadereSpace.s)
@@ -159,7 +162,7 @@ struct SecurityNoticeBanner: View {
                         .font(ViadereType.body)
                         .foregroundStyle(ViadereColor.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(SecurityNoticesViewModel.prompt)
+                    Text(vm.prompt(for: notice))
                         .font(ViadereType.subhead)
                         .foregroundStyle(ViadereColor.textSecondary)
                     if vm.additionalCount > 0 {
@@ -173,12 +176,19 @@ struct SecurityNoticeBanner: View {
             if let message = vm.message {
                 ViadereNotice(message, kind: .info)
             }
+            // "Not you? Cancel": recovery started, or a new iPhone replacing this one. Needs a device the account already trusts.
+            if let title = vm.actionTitle(for: notice) {
+                Button(vm.isActing ? "Working…" : title) { Task { await vm.perform(notice) } }
+                    .buttonStyle(.viadere(.primary))
+                    .disabled(vm.isActing)
+                    .accessibilityHint(Text(vm.actionHint(for: notice) ?? ""))
+            }
             HStack(spacing: ViadereSpace.s) {
                 Button("This was me") { Task { await vm.dismiss(notice) } }
                     .buttonStyle(.viadere(.secondary))
-                    .disabled(vm.isDismissing)
+                    .disabled(vm.isDismissing || vm.isActing)
                 Button("Review", action: review)
-                    .buttonStyle(.viadere(.primary))
+                    .buttonStyle(ViadereButtonStyle(vm.actionTitle(for: notice) == nil ? .primary : .secondary))
             }
         }
         .padding(ViadereSpace.m)

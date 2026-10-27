@@ -135,6 +135,7 @@ struct ReenrollmentView: View {
                     errorMessage = nil
                     do { try await model.reenroll(deviceName: "iPhone") } catch {
                         if let passkey = error as? PasskeyError { if passkey != .cancelled { errorMessage = passkey.userMessage } }
+                        else if let attest = error as? AppAttestError { errorMessage = attest.userMessage }
                         else { errorMessage = (error as? APIError)?.userMessage ?? "We couldn't set this iPhone up. Please try again." }
                     }
                     isWorking = false
