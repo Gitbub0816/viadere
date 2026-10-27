@@ -11,7 +11,7 @@ final class AppEnvironment {
     /// Keychain-backed, Secure Enclave-keyed, certificate-pinned. See `ViadereServices.live`.
     nonisolated static let services: ViadereServices = ViadereServices.live(
         configuration: ViadereRuntime.configuration,
-        passkeys: ApplePasskeyService(),
+        passkeys: ApplePasskeyService(anchorProvider: { KeyWindow.current }),
         notificationPermission: UserNotificationPermissionService(),
         appLock: LocalAuthenticationAppLock())
 

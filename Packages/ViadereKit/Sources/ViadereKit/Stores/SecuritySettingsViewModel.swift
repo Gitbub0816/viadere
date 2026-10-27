@@ -80,6 +80,49 @@ public final class SecuritySettingsViewModel {
         }
     }
 
+    // MARK: Linking another phone
+
+    public enum AddPhoneStage: Equatable, Sendable { case idle, awaitingCode, failed(String) }
+    public private(set) var addPhoneStage: AddPhoneStage = .idle
+    private var pendingPhoneLinkId: PhoneLinkID?
+
+    /// Starts linking a number (`PhoneInput` accepts "(480) 555-0123"); an SMS code follows.
+    public func startAddPhone(_ raw: String) async {
+        guard let phone = PhoneInput.normalize(raw) else { addPhoneStage = .failed("Enter a full mobile number."); return }
+        do {
+            pendingPhoneLinkId = try await services.api.startPhoneLink(phone: phone).phoneLinkId
+            addPhoneStage = .awaitingCode
+        } catch {
+            addPhoneStage = .failed((error as? APIError)?.userMessage ?? "Couldn't send a code.")
+        }
+    }
+
+    public func verifyAddPhone(code: String) async {
+        guard let id = pendingPhoneLinkId, OTPInput.isComplete(code) else { return }
+        do {
+            let link = try await services.api.verifyPhoneLink(id: id, code: OTPInput.normalize(code))
+            phones.append(link)
+            pendingPhoneLinkId = nil
+            addPhoneStage = .idle
+        } catch {
+            addPhoneStage = .failed((error as? APIError)?.userMessage ?? "That code isn't right.")
+        }
+    }
+
+    public func cancelAddPhone() { pendingPhoneLinkId = nil; addPhoneStage = .idle }
+
+    /// Redeems an SMS account-link token (`https://viadere.com/l/{token}`) after the person confirms the last 4 digits.
+    public func redeemAccountLink(token: String, last4: String) async -> Bool {
+        guard last4.count == 4, last4.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+        do {
+            phones.append(try await services.api.redeemSMSLink(token: token, confirmPhoneLast4: last4))
+            return true
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? "That didn't match. Check the last 4 digits of your number."
+            return false
+        }
+    }
+
     public func removePhone(_ phone: PhoneLink) async {
         do { try await services.api.removePhoneLink(phone.id); phones.removeAll { $0.id == phone.id } } catch {
             errorMessage = (error as? APIError)?.userMessage ?? "Couldn't unlink that number."

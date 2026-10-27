@@ -47,7 +47,7 @@ public struct ViadereServices: Sendable {
 
     // MARK: Live
 
-    #if canImport(Security)
+    #if canImport(Security) && canImport(LocalAuthentication)
     /// The production graph: Keychain-backed storage, Secure Enclave keys (software fallback only in DEBUG on the
     /// simulator), pinned URLSession transport, device-signed API client with single-flight refresh.
     /// - Parameters:
@@ -63,13 +63,13 @@ public struct ViadereServices: Sendable {
         let signer = DeviceRequestSigner(records: records, keys: keys)
         let executor = RequestExecutor(baseURL: configuration.apiBaseURL, transport: transport, signer: signer)
         // The app and its extensions rotate the same session; serialize that across processes (single-use refresh tokens).
-        let lock: any CrossProcessLock = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: configuration.appGroupID)
+        let groupID = configuration.appGroupID
+        let lock: any CrossProcessLock = (groupID.isEmpty ? nil : FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID))
             .map { FileCrossProcessLock(url: $0.appendingPathComponent("session-refresh.lock")) } ?? NoCrossProcessLock()
         let sessions = SessionManager(store: tokens, refresher: APITokenRefresher(executor: executor), lock: lock)
         let client = APIClient(executor: executor, sessions: sessions)
         return ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
-                               records: records, preferences: UserDefaultsPreferences(suiteName: configuration.appGroupID),
+                               records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
                                secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock)
     }
 

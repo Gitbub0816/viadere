@@ -74,6 +74,8 @@ public struct ViadereConfiguration: Sendable {
                 }
             }
         }
+        // An explicit empty value opts out of app-group sharing (the App Clip has no shared container).
+        if let appGroup = info["ViadereAppGroupID"] as? String { config.appGroupID = appGroup }
         if let group = info["ViadereKeychainAccessGroup"] as? String, !group.isEmpty, !group.contains("$(") {
             config.keychainAccessGroup = group
         }

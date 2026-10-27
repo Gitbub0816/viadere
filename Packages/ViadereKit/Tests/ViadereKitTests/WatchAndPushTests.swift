@@ -39,6 +39,16 @@ struct WatchAndPushTests {
         #expect(roundTrip == pick)
     }
 
+    @Test func watchResultsRoundTrip() {
+        #expect(WatchActionResult(.submitted(InteractionID(), .denied)) == .done)
+        #expect(WatchActionResult(.requiresApp(InteractionID())) == .needsPhone)
+        #expect(WatchActionResult(.expired(InteractionID())) == .expired)
+        for result in [WatchActionResult.done, .needsPhone, .stale, .expired, .failed] {
+            #expect(WatchSync.decodeResult(WatchSync.encode(result)) == result)
+        }
+        #expect(WatchSync.decodeResult(Data("garbage".utf8)) == .failed)
+    }
+
     @Test func pushTokensAreHexAndRegistered() async throws {
         #expect(PushRegistrar.hex(Data([0xAB, 0x01, 0xFF])) == "ab01ff")
         let api = MockViadereAPI(seed: false)
@@ -70,5 +80,40 @@ struct WatchAndPushTests {
             createdAt: Date(), expiresAt: Date().addingTimeInterval(60), idempotencyKey: "d")
         #expect(LiveActivityDecision.decide(for: done, isRunning: true) == .end(landed))
         #expect(LiveActivityDecision.decide(for: done, isRunning: false) == .ignore)
+    }
+}
+
+@Suite("Live Activity presentation")
+struct LiveActivityPresentationTests {
+    @Test func flight() {
+        let when = Date(timeIntervalSince1970: 1_800_000_000)
+        let p = LiveActivityPresentation(status: .flight(FlightActivityState(
+            flightNumber: "JA 482", departureAirport: "PHX", arrivalAirport: "SEA", stage: .delayed, scheduledDeparture: when,
+            estimatedDeparture: when.addingTimeInterval(1_500), gate: "B12")), businessName: "Juniper Air")
+        #expect(p.headline == "JA 482 · PHX to SEA")
+        #expect(p.detail == "Delayed · Gate B12")
+        #expect(p.isAlert)
+        #expect(p.target == when.addingTimeInterval(1_500))
+        #expect(p.symbol == "airplane")
+    }
+
+    @Test func deliveryStops() {
+        let p = LiveActivityPresentation(status: .delivery(DeliveryActivityState(
+            trackingReference: "T1", stage: .outForDelivery, carrierName: "Parcelwise", stopsAway: 3)), businessName: "x")
+        #expect(p.detail == "Out for delivery · 3 stops away")
+        #expect(p.compact == "3 stops")
+        #expect(p.headline == "Parcelwise delivery")
+        #expect(p.progress == 0.8)
+    }
+
+    @Test func orderAndAppointment() {
+        let order = LiveActivityPresentation(status: .order(OrderActivityState(orderReference: "1042", stage: .ready)), businessName: "Copperline Coffee")
+        #expect(order.detail == "Ready for pickup")
+        #expect(order.headline == "Order 1042")
+        let appointment = LiveActivityPresentation(status: .appointment(AppointmentActivityState(
+            title: "Dental cleaning", startsAt: Date(), providerName: "Linden Dental", stage: .checkInOpen)), businessName: "Linden Dental")
+        #expect(appointment.detail == "Check-in is open · Linden Dental")
+        #expect(!appointment.isAlert)
+        #expect(LiveActivityPresentation(status: .order(OrderActivityState(orderReference: "1", stage: .cancelled)), businessName: "x").progress == nil)
     }
 }

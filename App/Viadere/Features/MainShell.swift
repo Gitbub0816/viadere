@@ -42,6 +42,12 @@ struct MainShell: View {
         }
         .viadereScreenBackground()
         .task { await model.messages.load() }
+        .onChange(of: model.home.content, initial: true) { _, content in
+            // Keep the watch's pending list and any running Live Activities in step with Home.
+            let environment = AppEnvironment.shared
+            environment.watchBridge.push(content)
+            Task { await environment.liveActivities.sync(content.statuses) }
+        }
     }
 
     private func badge(for tab: AppTab) -> Int {

@@ -19,7 +19,7 @@ public struct PendingConnect: Equatable, Sendable {
 @Observable
 #endif
 public final class AppModel {
-    public enum Phase: Equatable { case launching, onboarding(OnboardingStep), needsReenrollment, ready }
+    public enum Phase: Equatable, Sendable { case launching, onboarding(OnboardingStep), needsReenrollment, ready }
 
     public private(set) var phase: Phase = .launching
     public var selectedTab: AppTab = .home

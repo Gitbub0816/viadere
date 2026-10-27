@@ -4,6 +4,6 @@
 /// deep-link routing, code entry, view models) compiles and is unit-tested on Linux. Apple-only code
 /// (Secure Enclave, Keychain, passkeys, pinning, LocalAuthentication) is guarded by `#if canImport(...)`
 /// and lives under `Platform/` and `Keys/`.
-public enum ViadereKit {
+public enum ViadereKitInfo {
     public static let version = "1.0.0"
 }

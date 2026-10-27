@@ -1,0 +1,14 @@
+// Shared build settings. Per-developer overrides go in Configs/Local.xcconfig (git-ignored).
+// `$()` after the colon stops xcconfig from treating `//` as a comment.
+
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+// Production API. Pins for this host live in ViadereConfiguration.productionPinning (TODO before release).
+VIADERE_API_BASE_URL = https:/$()/api.viadere.com
+
+// Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
+DEVELOPMENT_TEAM =
+
+// Optional per-developer overrides (team id, a staging server).
+#include? "Local.xcconfig"

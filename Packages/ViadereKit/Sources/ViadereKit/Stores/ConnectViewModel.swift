@@ -9,7 +9,7 @@ import Observation
 @Observable
 #endif
 public final class ConnectViewModel {
-    public enum Phase: Equatable {
+    public enum Phase: Equatable, Sendable {
         case entry
         case resolving
         /// Several verified matches for a name.

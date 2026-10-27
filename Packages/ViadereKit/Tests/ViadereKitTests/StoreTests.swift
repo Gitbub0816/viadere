@@ -393,6 +393,24 @@ struct DetailStoreTests {
         #expect(!model2.appLockEnabled)
     }
 
+    @Test func addingAndRedeemingPhones() async throws {
+        let services = await ViadereServices.mock()
+        let model = SecuritySettingsViewModel(services: services)
+        await model.startAddPhone("123")
+        if case .failed = model.addPhoneStage {} else { Issue.record("expected failure for a short number") }
+        await model.startAddPhone("(480) 555-0123")
+        #expect(model.addPhoneStage == .awaitingCode)
+        await model.verifyAddPhone(code: "000000")
+        if case .failed = model.addPhoneStage {} else { Issue.record("expected failure for a wrong code") }
+        await model.startAddPhone("(480) 555-0123")
+        await model.verifyAddPhone(code: "123456")
+        #expect(model.addPhoneStage == .idle)
+        #expect(model.phones.count == 1)
+        #expect(await model.redeemAccountLink(token: String(repeating: "A", count: 43), last4: "0123"))
+        #expect(!(await model.redeemAccountLink(token: "x", last4: "12")))
+        #expect(model.phones.count == 2)
+    }
+
     @Test func settingsListsDevicesAndConsentHistory() async throws {
         let services = await ViadereServices.mock()
         let model = SecuritySettingsViewModel(services: services)

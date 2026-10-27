@@ -1,0 +1,7 @@
+#include "Shared.xcconfig"
+
+// Release: HTTPS only, strict ATS (no exceptions), certificate pinning fail-closed, production APNs.
+VIADERE_PLIST_DEFS =
+APS_ENVIRONMENT = production
+
+#include? "Local.xcconfig"

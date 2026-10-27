@@ -9,7 +9,7 @@ import Observation
 @Observable
 #endif
 public final class HomeViewModel {
-    public enum Phase: Equatable { case idle, loading, loaded, failed(String) }
+    public enum Phase: Equatable, Sendable { case idle, loading, loaded, failed(String) }
 
     public private(set) var content: HomeContent = .empty
     public private(set) var phase: Phase = .idle

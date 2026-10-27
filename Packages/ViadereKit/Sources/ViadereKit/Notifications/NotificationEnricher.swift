@@ -80,6 +80,11 @@ public struct NotificationEnricher: Sendable {
     /// Returns `nil` if the push carries no interaction id (leave the notification untouched).
     public func enrich(userInfo: [AnyHashable: Any]) async -> EnrichedNotification? {
         guard let id = PushPayload.interactionId(from: userInfo) else { return nil }
+        return await enrich(interactionId: id)
+    }
+
+    /// Fetches and renders one interaction (the service extension calls this with the id extracted from the push).
+    public func enrich(interactionId id: InteractionID) async -> EnrichedNotification {
         guard let envelope = try? await api.interaction(id) else { return Self.fallback(interactionId: id) }
         let now = clock()
 

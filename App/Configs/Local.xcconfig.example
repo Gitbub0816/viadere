@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig (git-ignored) and edit.
+DEVELOPMENT_TEAM = ABCDE12345
+// VIADERE_API_BASE_URL = https:/$()/staging-api.viadere.com

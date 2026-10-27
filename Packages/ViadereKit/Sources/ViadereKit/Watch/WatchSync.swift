@@ -35,6 +35,31 @@ public struct WatchActionRequest: Codable, Sendable, Equatable {
     }
 }
 
+/// What the phone tells the watch after a watch-originated action.
+public enum WatchActionResult: String, Codable, Sendable, Equatable {
+    case done, needsPhone, stale, expired, failed
+
+    public init(_ outcome: NotificationOutcome) {
+        switch outcome {
+        case .submitted: self = .done
+        case .requiresApp, .open: self = .needsPhone
+        case .stale: self = .stale
+        case .expired: self = .expired
+        case .failed, .ignored: self = .failed
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .done: "Sent"
+        case .needsPhone: "Finish on your iPhone"
+        case .stale: "Already handled"
+        case .expired: "Expired"
+        case .failed: "Couldn't send"
+        }
+    }
+}
+
 public enum WatchSync {
     public static let contextKey = "pending.v1"
     public static let messageKey = "action.v1"
@@ -59,6 +84,11 @@ public enum WatchSync {
 
     public static func encode(_ request: WatchActionRequest) -> Data? { try? ViadereJSON.encode(request) }
     public static func decodeRequest(_ data: Data) -> WatchActionRequest? { try? ViadereJSON.decode(WatchActionRequest.self, from: data) }
+
+    public static func encode(_ result: WatchActionResult) -> Data { Data(result.rawValue.utf8) }
+    public static func decodeResult(_ data: Data) -> WatchActionResult {
+        WatchActionResult(rawValue: String(decoding: data, as: UTF8.self)) ?? .failed
+    }
 
     /// Phone side: runs a watch-originated request through the notification-action safety policy.
     public static func handle(_ request: WatchActionRequest, using handler: NotificationActionHandler) async -> NotificationOutcome {

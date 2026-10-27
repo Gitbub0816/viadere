@@ -7,8 +7,16 @@ import UIKit
 
 /// Platform passkeys via `ASAuthorizationPlatformPublicKeyCredentialProvider` (relying party `viadere.com`;
 /// requires the `webcredentials:viadere.com` associated domain and the server's apple-app-site-association file).
+///
+/// The Kit never touches `UIApplication` (so it stays safe to link into app extensions); the app passes the window
+/// that should host the system passkey sheet.
 public final class ApplePasskeyService: PasskeyService, @unchecked Sendable {
-    public init() {}
+    private let anchorProvider: @MainActor @Sendable () -> UIWindow?
+
+    /// - Parameter anchorProvider: returns the key window of the foreground scene.
+    public init(anchorProvider: @escaping @MainActor @Sendable () -> UIWindow?) {
+        self.anchorProvider = anchorProvider
+    }
 
     public func register(options: PasskeyRegistrationOptions) async throws -> PasskeyRegistrationCredential {
         guard let challenge = Base64URL.decode(options.challenge), let userID = Base64URL.decode(options.userId) else {
@@ -16,9 +24,9 @@ public final class ApplePasskeyService: PasskeyService, @unchecked Sendable {
         }
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: options.relyingPartyId)
         let request = provider.createCredentialRegistrationRequest(challenge: challenge, name: options.userName, userID: userID)
-        request.displayName = options.userDisplayName
+        if #available(iOS 17.4, *) { request.displayName = options.userDisplayName }
         request.userVerificationPreference = .required
-        let authorization = try await PasskeyCoordinator.perform([request])
+        let authorization = try await PasskeyCoordinator.perform([request], anchorProvider: anchorProvider)
         guard let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialRegistration,
               let attestation = credential.rawAttestationObject else { throw PasskeyError.failed("credential") }
         return PasskeyRegistrationCredential(
@@ -34,7 +42,7 @@ public final class ApplePasskeyService: PasskeyService, @unchecked Sendable {
         request.userVerificationPreference = .required
         let allowed = options.allowCredentialIds.compactMap(Base64URL.decode).map { ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0) }
         if !allowed.isEmpty { request.allowedCredentials = allowed }
-        let authorization = try await PasskeyCoordinator.perform([request])
+        let authorization = try await PasskeyCoordinator.perform([request], anchorProvider: anchorProvider)
         guard let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion else {
             throw PasskeyError.failed("credential")
         }
@@ -52,11 +60,18 @@ private final class PasskeyCoordinator: NSObject, @preconcurrency ASAuthorizatio
                                         @preconcurrency ASAuthorizationControllerPresentationContextProviding {
     private var continuation: CheckedContinuation<ASAuthorization, any Error>?
     private var controller: ASAuthorizationController?
+    private let anchorProvider: @MainActor @Sendable () -> UIWindow?
     /// Keeps the coordinator alive while the system sheet is up.
     private static var active: PasskeyCoordinator?
 
-    static func perform(_ requests: [ASAuthorizationRequest]) async throws -> ASAuthorization {
-        let coordinator = PasskeyCoordinator()
+    private init(anchorProvider: @escaping @MainActor @Sendable () -> UIWindow?) {
+        self.anchorProvider = anchorProvider
+        super.init()
+    }
+
+    static func perform(_ requests: [ASAuthorizationRequest],
+                        anchorProvider: @escaping @MainActor @Sendable () -> UIWindow?) async throws -> ASAuthorization {
+        let coordinator = PasskeyCoordinator(anchorProvider: anchorProvider)
         active = coordinator
         defer { active = nil }
         return try await coordinator.run(requests)
@@ -86,9 +101,7 @@ private final class PasskeyCoordinator: NSObject, @preconcurrency ASAuthorizatio
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first
-        return window ?? ASPresentationAnchor()
+        anchorProvider() ?? ASPresentationAnchor()
     }
 }
 #endif

@@ -1,0 +1,263 @@
+# Viadere Xcode project (XcodeGen).
+#
+#   brew install xcodegen
+#   cd App && xcodegen
+#   open Viadere.xcodeproj
+#
+# Settings that vary per developer or per environment live in Configs/*.xcconfig (team id, API URL, APNs
+# environment). See App/README.md.
+
+name: Viadere
+
+options:
+  bundleIdPrefix: com.viadere
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+  minimumXcodeGenVersion: "2.40.0"
+
+configs:
+  Debug: debug
+  Release: release
+
+configFiles:
+  Debug: Configs/Debug.xcconfig
+  Release: Configs/Release.xcconfig
+
+settings:
+  base:
+    # Swift 6 language mode. If the first Xcode build reports concurrency diagnostics you want to defer,
+    # set SWIFT_VERSION to "5" for the UI targets (the packages stay on Swift 6).
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ENABLE_MODULE_VERIFIER: NO
+    # Strict ATS everywhere. The only exception (http://localhost for the dev server) is added by the
+    # preprocessed Info.plists when the Debug xcconfig defines VIADERE_LOCAL_DEV. Release never gains one.
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      ONLY_ACTIVE_ARCH: YES
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+      STRIP_INSTALLED_PRODUCT: YES
+      ENABLE_TESTABILITY: NO
+
+packages:
+  ViadereCore:
+    path: ../Packages/ViadereCore
+  ViadereKit:
+    path: ../Packages/ViadereKit
+
+# Reusable pieces ----------------------------------------------------------------------------------------------
+# Networking targets use a hand-written, *preprocessed* Info.plist: the DEBUG-only ATS exception for
+# http://localhost:8080 sits inside `#ifdef VIADERE_LOCAL_DEV`, which only the Debug xcconfig defines.
+targetTemplates:
+  PreprocessedInfoPlist:
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_PREPROCESS: YES
+        INFOPLIST_OTHER_PREPROCESSOR_FLAGS: -traditional
+        INFOPLIST_PREPROCESSOR_DEFINITIONS: $(VIADERE_PLIST_DEFS)
+
+targets:
+  # ------------------------------------------------------------------------------------------------ iOS app
+  Viadere:
+    type: application
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: Viadere
+        excludes: ["Info.plist"]
+      - path: Shared
+        excludes: ["Privacy/**"]
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app
+        INFOPLIST_FILE: Viadere/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Viadere/Viadere.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Accent
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+    entitlements:
+      path: Viadere/Viadere.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        com.apple.developer.associated-domains:
+          - applinks:viadere.com
+          - webcredentials:viadere.com
+          - appclips:viadere.com
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.shared
+        com.apple.developer.usernotifications.time-sensitive: true
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+      - target: ViadereNotificationService
+      - target: ViadereNotificationContent
+      - target: ViadereWidgets
+      - target: ViadereClip
+      - target: ViadereWatch
+
+  # ------------------------------------------------------------------------- notification service extension
+  ViadereNotificationService:
+    type: app-extension
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: ViadereNotificationService
+        excludes: ["Info.plist"]
+      - path: Shared/Runtime
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationService
+        INFOPLIST_FILE: ViadereNotificationService/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereNotificationService/ViadereNotificationService.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereNotificationService/ViadereNotificationService.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.shared
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------------- notification content extension
+  ViadereNotificationContent:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereNotificationContent
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationContent
+        INFOPLIST_FILE: ViadereNotificationContent/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------- Live Activities / Dynamic Island
+  ViadereWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereWidgets
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/LiveActivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.Widgets
+        INFOPLIST_FILE: ViadereWidgets/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------------------------------- App Clip
+  ViadereClip:
+    type: application.on-demand-install-capable
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: ViadereClip
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/Runtime
+      - path: Shared/UI
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.Clip
+        INFOPLIST_FILE: ViadereClip/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereClip/ViadereClip.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Accent
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+    entitlements:
+      path: ViadereClip/ViadereClip.entitlements
+      properties:
+        com.apple.developer.parent-application-identifiers:
+          - $(AppIdentifierPrefix)com.viadere.app
+        com.apple.developer.on-demand-install-capable: true
+        com.apple.developer.associated-domains:
+          - appclips:viadere.com
+          - applinks:viadere.com
+          - webcredentials:viadere.com
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # --------------------------------------------------------------------------------- watchOS companion
+  ViadereWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: ViadereWatch
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.watchkitapp
+        INFOPLIST_FILE: ViadereWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+schemes:
+  Viadere:
+    build:
+      targets:
+        Viadere: all
+    run:
+      config: Debug
+    archive:
+      config: Release

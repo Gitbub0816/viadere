@@ -25,7 +25,7 @@ public enum OnboardingFlow {
 @Observable
 #endif
 public final class OnboardingViewModel {
-    public enum PhoneStage: Equatable { case entry, verify, linked(String) }
+    public enum PhoneStage: Equatable, Sendable { case entry, verify, linked(String) }
 
     public private(set) var step: OnboardingStep
     public private(set) var isWorking = false

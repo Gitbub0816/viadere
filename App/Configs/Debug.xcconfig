@@ -1,0 +1,10 @@
+#include "Shared.xcconfig"
+
+// Debug talks to the local development server (Server/). Plain HTTP to localhost is allowed ONLY here:
+// the Info.plist of every networking target adds an ATS exception when VIADERE_LOCAL_DEV is defined.
+VIADERE_API_BASE_URL = http:/$()/localhost:8080
+VIADERE_PLIST_DEFS = VIADERE_LOCAL_DEV=1
+APS_ENVIRONMENT = development
+
+// Let Local.xcconfig override the above.
+#include? "Local.xcconfig"

@@ -148,7 +148,10 @@ public actor SessionManager {
                 // Another process (the app or an extension) may have rotated the session while we waited.
                 let stored = try await store.load()
                 if let stored, let rejected, stored.accessToken != rejected, !stored.needsRefresh(now: now(), leeway: 0) { return stored }
-                return try await refresher.refresh(current: stored)
+                let fresh = try await refresher.refresh(current: stored)
+                // Persist before releasing the lock: the next process must see the rotated pair, never the spent one.
+                try await store.save(fresh)
+                return fresh
             }
         }
         inflight = task
@@ -158,7 +161,6 @@ public actor SessionManager {
             // Publish in memory first (no suspension point), so requests that retry immediately see the new token.
             cache = fresh
             inflight = nil
-            try await store.save(fresh)
             return fresh
         } catch {
             inflight = nil

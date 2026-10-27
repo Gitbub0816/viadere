@@ -11,7 +11,7 @@ import Observation
 @Observable
 #endif
 public final class ApprovalViewModel: Identifiable {
-    public enum Phase: Equatable {
+    public enum Phase: Equatable, Sendable {
         case ready
         case signing(Decision)
         case done(Decision, InteractionStatus)
