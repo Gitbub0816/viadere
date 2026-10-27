@@ -12,8 +12,14 @@ info:
     `ViadereCore`; wire formats are normative in `docs/SECURITY.md`. See `docs/BUSINESS-INTEGRATION.md` for a quickstart.
 
     ## Authentication
-    `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (no real delivery, no quota). Keys are created in the
+    `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (sandbox only). Keys are created in the
     business dashboard, are scoped, revocable, and shown once. Suspended or unverified businesses receive `403`.
+
+    ## Test mode
+    A `vdk_test_…` key can **only address sandbox relationships**, never a real customer: create one with
+    `POST /v1/business/sandbox/relationships`. Sandbox consumers have no device and no phone, so test traffic is never pushed,
+    texted, decided by a real device, counted against your quota, or billed. A live key cannot address a sandbox relationship
+    (`404`), and a test key used with a real relationship is `403`.
 
     ## Idempotency
     Every `POST` that creates something takes an `Idempotency-Key` header which **must equal** the body's `idempotencyKey`.
@@ -32,7 +38,13 @@ info:
     * Security-sensitive kinds (`authenticate`, `authorize`, unknown kinds, or any `high`/`critical` sensitivity) can only be
       approved by a device-signed decision in the Viadere app. They are never approvable by SMS or RCS reply; text channels
       receive a secure handoff link instead.
-    * You see a per-business pseudonym for each customer, never their Viadere identity or phone number.
+    * You see a per-business pseudonym for each customer, never their Viadere identity or phone number. A decision names the
+      deciding **device** by a per-business pseudonym (`deviceRef`) and carries the server's attestation that the device
+      signature, the shown context and the assurance were verified (`verification`). You never receive the raw device-signed
+      decision (it contains the global device id); Viadere keeps it for disputes.
+    * Business text shown on approval screens may not contain bidirectional, zero-width, control or line-separator
+      characters, may not start with (or, for names, mention) "Viadere", and is capped in graphemes, unicode scalars and UTF-8
+      bytes; violations are `422 validation_failed`.
   license:
     name: Proprietary
     identifier: LicenseRef-Viadere
@@ -198,6 +210,24 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/sandbox/relationships:
+    post:
+      tags: [Interactions]
+      operationId: createSandboxRelationship
+      summary: Create a sandbox relationship (test keys only)
+      description: |
+        Creates a sandbox consumer connected to your business and returns the relationship id to use with a `vdk_test_…` key.
+        Requires scope `interactions:write` and a **test** key (`403` with a live key). At most 50 per business.
+      responses:
+        "201":
+          description: The sandbox relationship.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SandboxRelationship" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/business/webhooks:
     get:
@@ -465,9 +495,10 @@ webhooks:
     post:
       summary: A customer decided an interaction
       description: |
-        Sent once when the decision is recorded. `data.assurance` and `data.signedDecision` are present for device-signed
-        decisions; a decision made over a text channel (RCS suggested reply to a low-sensitivity `confirm`/`choose`) carries
-        `channel: rcs` and **no** assurance or signature, and you must treat it accordingly.
+        Sent once when the decision is recorded. `data.assurance`, `data.deviceRef` and `data.verification` are present for
+        device-signed decisions (there is no `signedDecision`: see the security model); a decision made over a text channel
+        (RCS suggested reply to a low-sensitivity `confirm`/`choose`) carries `channel: rcs` and **no** assurance or
+        verification, and you must treat it accordingly.
       requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
       responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
   interaction.expired:
@@ -658,7 +689,8 @@ components:
       type: string
       description: Stable machine codes. Unknown future codes should be treated as `unknown`.
       enum: [bad_request, validation_failed, unauthorized, signature_invalid, replay_detected, clock_skew, forbidden, not_found, conflict,
-             gone, expired, insufficient_assurance, consent_required, rate_limited, idempotency_conflict, internal_error, unavailable, unknown]
+             gone, expired, insufficient_assurance, consent_required, rate_limited, idempotency_conflict, internal_error, unavailable,
+             passkey_assertion_required, device_cool_down, context_digest_required, context_mismatch, unknown]
 
     InteractionKind:
       type: string
@@ -964,9 +996,27 @@ components:
         channel: { $ref: "#/components/schemas/Channel" }
         decidedAt: { $ref: "#/components/schemas/Timestamp" }
         correlationId: { type: string }
-        signedDecision:
-          description: The device-signed decision, for your own audit trail. Absent for text-channel decisions.
-          $ref: "#/components/schemas/SignedDecision"
+        deviceRef:
+          type: string
+          description: Per-business pseudonym of the deciding device (stable for you, unlinkable across businesses). Device-signed decisions only.
+        verification:
+          description: The server's attestation that the decision was verified. Absent for text-channel decisions.
+          $ref: "#/components/schemas/DecisionVerification"
+    DecisionVerification:
+      type: object
+      required: [verified, keyPurpose, contextBound, verifiedAt, evidenceRef]
+      properties:
+        verified: { type: boolean, description: Always true when present. }
+        keyPurpose: { type: string, enum: [request, approvalUserPresence, approvalBiometric], description: The device key that signed (`approvalBiometric` = device-bound biometric). }
+        contextBound: { type: boolean, description: The decision was signed over the digest of what was shown (v2 payload) and it matched. }
+        verifiedAt: { $ref: "#/components/schemas/Timestamp" }
+        evidenceRef: { type: string, description: Opaque reference to the stored signed decision; quote it in a dispute. }
+    SandboxRelationship:
+      type: object
+      required: [relationshipId, createdAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
 
     MessageAttribution:
       type: object

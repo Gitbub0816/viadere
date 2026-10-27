@@ -238,9 +238,13 @@ final class HardeningTests: XCTestCase {
             let real = try await h.consumerInteraction(second, id: early.id)
             try await eq(try await h.decide(second, id: early.id, signed: try await h.decision(second, interaction: real)).errorCode, .deviceCoolDown)
             h.clock.advance(by: 24 * 3600 + 1)
+            // The access token is long expired by now: refresh the session like the app does.
+            var renewed = second
+            let refreshed = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: try XCTUnwrap(second.session.refreshToken)))
+            renewed.session = try refreshed.json(AuthSession.self)
             let late = try await highAuthorize(h, b, rel)
-            let real2 = try await h.consumerInteraction(second, id: late.id)
-            try await eq(try await h.decide(second, id: late.id, signed: try await h.decision(second, interaction: real2)).status, .ok)
+            let real2 = try await h.consumerInteraction(renewed, id: late.id)
+            try await eq(try await h.decide(renewed, id: late.id, signed: try await h.decision(renewed, interaction: real2)).status, .ok)
         }
     }
 
@@ -250,9 +254,9 @@ final class HardeningTests: XCTestCase {
             let consumer = try await h.registerConsumer()
             // Approval keys are refused for a clip, whichever spelling of the flag is used.
             let withApproval = try await rawEnroll(h, consumer, purposes: [.request, .approvalBiometric], clientKind: .appClip)
-            XCTAssertEqual(withApproval.0.status, .badRequest, withApproval.0.text)
+            XCTAssertEqual(withApproval.0.status, .unprocessableEntity, withApproval.0.text)
             let wire = try await rawEnroll(h, consumer, purposes: [.request, .approvalUserPresence], clipDevice: true)
-            XCTAssertEqual(wire.0.status, .badRequest, wire.0.text)
+            XCTAssertEqual(wire.0.status, .unprocessableEntity, wire.0.text)
             // Request-key only, via the `clipDevice` wire flag the app sends.
             let ok = try await rawEnroll(h, consumer, purposes: [.request], clipDevice: true)
             XCTAssertEqual(ok.0.status, .created, ok.0.text)
@@ -282,6 +286,7 @@ final class HardeningTests: XCTestCase {
             XCTAssertLessThanOrEqual(clip.session.refreshExpiresAt ?? .distantFuture, .distantFuture)
             h.clock.advance(by: 7 * 24 * 3600 + 1)
             try await eq(try await h.signed(clip, .GET, "/v1/devices").status, .unauthorized)
+            try await h.runJobs()   // the retention sweep revokes devices past their lifetime
             try await notNil(try await DeviceRecord.find(device.id.uuid, on: h.db)?.revokedAt)
         }
     }
@@ -799,7 +804,7 @@ final class HardeningTests: XCTestCase {
                 try await sql.raw("UPDATE audit_events SET outcome = \(bind: event.outcome), prev_hash = \(bind: event.prevHash), hash = \(bind: event.hash), chain_version = 1 WHERE seq = \(bind: event.seq)").run()
             }
             let forged = try await AuditService.verifyChain(on: h.db, key: key)
-            XCTAssertFalse(forged.valid, "an unkeyed rewrite is detected")
+            XCTAssertFalse(forged.valid, "a chain rewritten as unkeyed SHA-256 (downgraded) is detected")
         }
     }
 
@@ -830,7 +835,7 @@ final class HardeningTests: XCTestCase {
     }
 
     func testLegacyUnkeyedEventsMayOnlyPrecedeKeyedOnesAndAKeyedEventCannotBeDowngraded() async throws {
-        try await withHarness { h in
+        try await withHarness({ $0.auditLegacyThroughSeq = 2 }) { h in
             let sql = h.db as! any SQLDatabase
             try await HardeningTests.dropTriggers(sql)
             // A pre-upgrade deployment: legacy rows first.
@@ -845,13 +850,14 @@ final class HardeningTests: XCTestCase {
                 try await e.create(on: h.db)
             }
             _ = try await AuditService(db: h.db, ctx: h.ctx).record("after.upgrade", actor: AuditActor(kind: .system))
-            try await isTrue(try await AuditService.verifyChain(on: h.db, key: key).valid, "legacy rows followed by keyed rows verify")
+            try await isTrue(try await AuditService.verifyChain(on: h.db, key: key, legacyThroughSeq: 2).valid, "legacy rows followed by keyed rows verify")
+            try await isFalse(try await AuditService.verifyChain(on: h.db, key: key, legacyThroughSeq: 0).valid, "...but only when the operator declared the legacy prefix")
             // Downgrading the keyed row to "legacy" is a break.
             let last = try await AuditEventRecord.query(on: h.db).sort(\.$seq, .descending).first()!
             last.chainVersion = 1
             last.hash = try AuditService.hash(of: last, key: key)
             try await sql.raw("UPDATE audit_events SET chain_version = 1, hash = \(bind: last.hash) WHERE seq = \(bind: last.seq)").run()
-            try await isTrue(try await AuditService.verifyChain(on: h.db, key: key).valid == false || true)
+            try await isFalse(try await AuditService.verifyChain(on: h.db, key: key, legacyThroughSeq: 2).valid, "a keyed event cannot be downgraded to legacy")
         }
     }
 

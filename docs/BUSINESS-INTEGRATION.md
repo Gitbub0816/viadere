@@ -13,7 +13,7 @@ get the customer's decision back, exchange messages, and let customers connect w
    The organization starts `pending`. A Viadere reviewer verifies it; **your handle and permanent code are issued only on
    approval**, and until then you cannot create API keys or webhooks and cannot issue interactions.
 2. **Create an API key** in the dashboard (*API keys*). Creating one asks you to confirm with your passkey. Give each key only the
-   scopes it needs; the secret is shown once. Use `vdk_test_…` keys while building (no real delivery, no quota) and `vdk_live_…` in production.
+   scopes it needs; the secret is shown once. Use `vdk_test_…` keys while building and `vdk_live_…` in production. A test key can only address a **sandbox** relationship (create one with `POST /v1/business/sandbox/relationships`, or `client.createSandboxRelationship()` in the Swift SDK): it never reaches a real customer, is not pushed, texted, counted or billed, and a live key cannot address a sandbox relationship.
 3. **Add a webhook endpoint** (*Webhooks*). The signing secret (`whsec_…`) is shown once.
 
 | Scope | Allows |
@@ -79,8 +79,11 @@ default: break
 }
 ```
 
-Treat `expired` and `cancelled` as "no". For `authenticate` and `authorize`, only a decision with `assurance` and a `signedDecision`
-(device-signed) is an approval; they are never approvable by text message.
+Treat `expired` and `cancelled` as "no". For `authenticate` and `authorize`, only a decision with `assurance` and a `verification`
+(the server's attestation that the device signature, the context that was shown and the assurance were verified) is an approval; they
+are never approvable by text message. `deviceRef` is a pseudonym of the deciding device, stable for your business and unlinkable across
+businesses. You do **not** receive the raw device-signed decision (it contains the customer's global device id); Viadere keeps it and
+can export it for a dispute: quote `verification.evidenceRef`.
 
 ## 3. Verify webhooks
 
@@ -172,8 +175,11 @@ Every `POST` that creates something takes an `Idempotency-Key` header **equal to
 
 * List `rcs` and/or `sms` in `allowedChannels` to permit them; `rcs` implies SMS fallback. The default is `[nativePush, inApp]`.
 * Viadere checks RCS capability per phone and falls back to SMS for the *same* interaction. A sensitive interaction is **never** downgraded to a yes/no text.
+* Text you send by SMS or RCS is rendered as a single line after your `[Name]:` attribution (line breaks become spaces, and a leading `Viadere` or `[` is neutralised), so it cannot forge a second speaker or a menu.
+* The customer's text thread is shared by every business. While it is connected to *another* business, an interaction you send by SMS is replaced by a content-free notice ("new message from you in the Viadere app"); the content is in the app.
+* A phone the customer linked in the last 24 hours from a text link is not used for delivery until a trusted device confirms it.
 * Text channels need the customer's verified phone, no STOP, and (for anything but security, account-service and transactional purposes) a consent grant that covers text channels.
-* A decision made over RCS arrives with `channel: "rcs"` and **no** `assurance` or `signedDecision`.
+* A decision made over RCS arrives with `channel: "rcs"` and **no** `assurance`, `deviceRef` or `verification`.
 * RCS postbacks are opaque, signed, single-use tokens bound to the customer's phone and the active menu; a newer message to the same phone supersedes older menus, exactly like SMS numbers.
 * Apple Messages for Business is a disabled placeholder and cannot be used until Apple approves multi-merchant brokerage in writing.
 

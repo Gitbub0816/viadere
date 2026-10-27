@@ -73,7 +73,7 @@ docker compose run --rm server seed --env development
 ```
 
 `seed` creates **Northwind Air** (`@northwindair`) and **Juniper Coffee** (`@junipercoffee`) — clearly fictional, verified,
-with `vdk_test_…` keys printed once. It refuses to run when `ENVIRONMENT=production`.
+with `vdk_test_…` keys printed once. It refuses to run when `ENVIRONMENT` is `production` or `staging`.
 
 ### Tests
 
@@ -84,19 +84,27 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/viaderetest swift test   # 
 
 ## Configuration (environment)
 
-All secrets come from the environment only. With `ENVIRONMENT=production` every secret and `DATABASE_URL` is mandatory and
-the process refuses to start without them; in development missing secrets get random ephemeral values.
+All secrets come from the environment only. **`ENVIRONMENT` is required** (`development`, `test`, `staging`, `production`): a missing
+or misspelled value is a startup error, never a silent `development`. With `staging` or `production` every secret and `DATABASE_URL`
+is mandatory, secrets must be distinct values, `PUBLIC_BASE_URL` and `RP_ORIGIN` must be https, and `seed` is refused. In
+`development`/`test` missing secrets get random ephemeral values **only without `DATABASE_URL`** (in-memory SQLite): with a database
+an unset secret is an error, because an ephemeral secret would make stored data unreadable after a restart.
 
 | Variable | Purpose |
 |---|---|
-| `ENVIRONMENT` | `development` (default), `testing`, `production` |
+| `ENVIRONMENT` | **required**: `development`, `test`, `staging`, `production` (`staging` uses production rules) |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db`. Unset → in-memory SQLite (never allowed in production) |
 | `AUTO_MIGRATE` | `true` runs pending migrations at startup |
 | `CONNECT_LINK_SIGNING_KEY` | base64url ≥ 32 B; HMAC key for signed `/c/{CODE}?ctx=&sig=` links |
 | `SERVER_PEPPER` | base64url ≥ 32 B; keys OTP hashes, phone lookup hashes, per-business consumer pseudonyms |
-| `DATA_ENCRYPTION_KEY` | base64url ≥ 32 B; AES-256-GCM key for phones, message bodies, webhook secrets, SMS context |
+| `DATA_ENCRYPTION_KEY` | base64url ≥ 32 B; AES-256-GCM key for phones, message bodies, webhook secrets and bodies, SMS context (row-bound additional data) |
+| `AUDIT_CHAIN_KEY` | base64url ≥ 32 B; HMAC key of the audit hash chain (required in staging/production; keep it out of the database) |
+| `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` | set once when upgrading an existing deployment to the last pre-upgrade audit `seq` (default 0 = every event must be keyed) |
 | `PUBLIC_BASE_URL` | public origin (https in production). Used for links and for Twilio signature URLs — never the Host header |
-| `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`) |
+| `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
+| `OTP_ALLOWED_COUNTRIES` | ISO regions that may receive verification codes (default `US,CA`; Caribbean +1 regions such as `JM`, `DO` are separate) |
+| `SMS_MENU_RACE_SECONDS` | a menu digit this soon after a menu change re-shows the menu (default 3; 0 disables) |
+| `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS`, `LINK_TOKEN_RETENTION_DAYS` | retention for finished webhook deliveries (30), finished SMS/RCS outbound rows (30) and used/expired link tokens (7) |
 | `APPLE_TEAM_ID`, `APP_STORE_ID` | AASA file; Smart App Banner |
 | `APNS_KEY_P8` or `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_ENVIRONMENT` | APNs token auth |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID` | SMS provider |
@@ -125,11 +133,14 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.com`, UV required); returns session + refresh token |
 | `POST /v1/auth/login/begin` · `/finish` | none | passkey login (discoverable credentials) |
 | `POST /v1/auth/refresh` | none | refresh-token rotation; reuse revokes the whole family |
-| `POST /v1/auth/logout` | bearer | revokes the token family |
-| `POST /v1/devices/enroll/begin` · `POST /v1/devices` | bearer | proof of possession per key (`VIADERE-ENROLL-V1`), single-use challenge |
+| `POST /v1/auth/logout` | bearer | revokes the token family (and the devices enrolled through it) |
+| `POST /v1/devices/enroll/begin` · `POST /v1/devices` | bearer | proof of possession per key (`VIADERE-ENROLL-V1`), single-use challenge, **plus a fresh user-verified passkey assertion over that challenge** (begin returns the assertion options; a session minted by a passkey ceremony < 5 min ago may enroll once without it). `clientKind: appClip` / `clipDevice: true` = request key only, 7 days, never decides. Keys are stored `attested = false` (App Attest hook is a stub) |
+| `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, user-verified key) |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | device+bearer | list / revoke |
 | `POST /v1/phone-links/start` · `/verify` | device+bearer | SMS OTP (HMAC-hashed, 5 attempts, rate-limited) |
-| `POST /v1/sms/link-tokens/redeem` | bearer | link token + explicit last-4 confirmation |
+| `GET /v1/sms/link-tokens/{token}/preview` | device+bearer | masked phone + expiry, rate-limited, does not consume |
+| `POST /v1/sms/link-tokens/redeem` | device+bearer | link token + confirmation of the previewed number; the new link is not a delivery target or reply decider for 24 h unless confirmed |
+| `POST /v1/phone-links/{id}/confirm` | device+bearer | a trusted device makes a new link usable now (`ConfirmationProof`) |
 | `GET /v1/phone-links` · `DELETE /v1/phone-links/{id}` | device+bearer | list / unlink verified phones |
 | `GET /v1/sessions` · `DELETE /v1/sessions/{id}` | device+bearer | signed-in sessions (token families) |
 | `DELETE /v1/account` | device+bearer | revokes all devices/tokens, erases personal data, keeps pseudonymous audit |
@@ -287,3 +298,19 @@ DNS-pinned webhook connections (the destination is re-resolved and checked immed
 Dashboard: no outbound email (invitations and operator enrollments are shown once as links), no payment processor (metering and an invoice preview
 only), no email verification of business users (an operator reviews every application; invitations are single-use links), no business-profile editing after verification, no recovery path for a user who loses every passkey (an operator-assisted flow is needed),
 and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale).
+
+## Security operations
+
+| Command | Purpose |
+|---|---|
+| `ViadereServer audit-head` | prints the signed head of the audit chain (JSON). Run it on a schedule and store the output in write-once storage |
+| `ViadereServer audit-verify [--head file.json]` | recomputes the keyed chain (honouring `AUDIT_CHAIN_LEGACY_THROUGH_SEQ`) and optionally checks an exported head |
+| `ViadereServer reencrypt-fields` | rewrites legacy column-bound ciphertexts (and plaintext webhook bodies) as row-bound ones; idempotent |
+| `ViadereServer export-dispute --interaction <id>` | prints the signed decision, global device id and device public keys for a dispute (businesses only get a pseudonym and an attestation); audited |
+
+Notes for operators:
+* **Upgrading.** Set `ENVIRONMENT` and `AUDIT_CHAIN_KEY`; set `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` to the highest existing `audit_events.seq`; run `reencrypt-fields` once. Existing sessions keep working (they bind to their device the first time it signs).
+* **Rate limiting is per instance.** With more than one instance, supply a shared `RateLimitStore` (`Overrides.rateLimitStore`).
+* **Webhook SSRF.** Deliveries resolve the host once, vet every address and connect to the vetted address (DNS pinning); redirects are never followed.
+* **Test keys** only address sandbox relationships (`POST /v1/business/sandbox/relationships`).
+* **App Attest** is a hook (`DeviceIntegrityVerifier`) with a stub; configure Apple credentials and implement `AppleAppAttestVerifier` to start storing `attested = true`.

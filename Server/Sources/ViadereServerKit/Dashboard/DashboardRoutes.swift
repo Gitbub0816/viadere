@@ -456,7 +456,7 @@ enum DashboardRoutes {
         let body = """
         <div class="card"><h2>\(DashboardUI.esc(d.eventType)) \(DashboardFormat.badge(d.status, d.status == "succeeded" ? "ok" : (d.status == "dead" ? "dg" : "mu")))</h2>\
         <p class="mu sm">Created \(DashboardFormat.date(d.createdAt)) · \(d.attempts) attempt(s)</p>\
-        <h3>Payload (redacted)</h3><pre>\(DashboardUI.esc(PayloadRedactor.display(body: d.body)))</pre>\(replay)</div>\
+        <h3>Payload (redacted)</h3><pre>\(DashboardUI.esc(PayloadRedactor.display(body: WebhookService(db: req.db, ctx: req.ctx).deliveryBody(d).map { String(decoding: $0, as: UTF8.self) } ?? "")))</pre>\(replay)</div>\
         <div class="card"><h2>Attempts</h2>\(DashboardFormat.table(["#", "When", "HTTP", "Duration", "Error"], attemptRows, empty: "No attempts yet."))</div>
         """
         return DashboardUI.businessPage(p, title: "Delivery", active: "/dashboard/webhooks", actions: "<a class=\"btn s sm\" href=\"/dashboard/webhooks/deliveries\">Back</a>", body: body)
