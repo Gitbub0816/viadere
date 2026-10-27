@@ -7,13 +7,14 @@ Viadere is a verified business-to-consumer connection layer ("A trusted way to c
 ```
 Packages/ViadereCore   Shared contract: platform-neutral Swift 6 package (iOS 17, macOS 14, watchOS 10, Linux)
 Packages/ViadereKit    iOS-only client SDK: Secure Enclave keys, API client, notification handling
-Server/                Vapor 4 backend (Postgres in production, SQLite in tests)
+Packages/ViadereBusinessSDK  Server-side Swift SDK for businesses: typed business-API client, webhook verification, idempotency helpers
+Server/                Vapor 4 backend (Postgres in production, SQLite in tests); also serves the business dashboard, operator console and connect button
 App/                   iOS 17 SwiftUI app plus extensions (XcodeGen project, bundle prefix com.viadere)
 Design/                Brand assets and design tokens (charcoal, ivory, champagne)
 docs/                  Specs, architecture and security
 ```
 
-Dependency direction: `Server` → `ViadereCore`, and `App` → `ViadereKit` → `ViadereCore`. ViadereCore depends only on Foundation and `apple/swift-crypto` (`import Crypto`).
+Dependency direction: `Server` → `ViadereCore`, `ViadereBusinessSDK` → `ViadereCore`, and `App` → `ViadereKit` → `ViadereCore`. ViadereCore depends only on Foundation and `apple/swift-crypto` (`import Crypto`).
 
 ## ViadereCore modules
 
@@ -50,6 +51,8 @@ Dependency direction: `Server` → `ViadereCore`, and `App` → `ViadereKit` →
 - Persists `ConversationContext` per phone number using compare-and-swap on `revision`.
 - Executes `GatewayEffect`s in order.
 - Delivers webhooks signed with `WebhookSignature` and writes audit events.
+- **Channels (P4).** `ChannelAdapter` unifies SMS, RCS and the Apple Messages for Business placeholder. `ChannelRouter` owns a durable outbox: capability check per phone, RCS send, SMS fallback, receipts. RCS postbacks are opaque signed single-use tokens validated against the active menu version and TTL.
+- **Platform (P5).** Server-rendered business dashboard and operator console (passkey sign-in, `__Host-` sessions, CSRF, re-authentication, roles), business onboarding (`pending → verified`, handle and code only on verification), suspension, abuse thresholds with automatic throttling, downward-only operator overrides, usage metering with an invoice preview, a server-side QR encoder, and the embeddable connect button.
 
 **App (SwiftUI)**
 - Onboarding (passkey), connected businesses, inbox and history, approvals that need a secure step-up, permissions, devices.
@@ -102,9 +105,44 @@ Key rules:
 - Sessions idle for 24 h become `EXPIRED`. The next message is held and routed only after the user explicitly resumes.
 - Each business has its own `SessionID` and its own history. Attribution always uses the verified name captured at connect time.
 
+## Data flow: rich channels (RCS with SMS fallback)
+
+```
+Business ──POST /v1/business/interactions (allowedChannels ∋ rcs|sms)──▶ Server
+Server (one transaction): store interaction + challenge, meter usage, write a channel_outbound row
+        (needs: verified phone link, not opted out, text-channel consent for non-essential purposes)
+Worker (ChannelRouter.deliverDue):
+   rcs preferred? → capability(phone) cached 24 h ─┬─ capable → ChannelRenderer.rcs
+                                                   │     sensitive / not inline → secure handoff link (/h/{token}), no chips
+                                                   │     else → suggested replies, one opaque signed single-use token each,
+                                                   │            endpoint.active_menu_version += 1 (CAS), older menus revoked
+                                                   │     → RCSProvider.send; transient errors retry, then fall back
+                                                   └─ not capable / provider error → SMS (same interaction):
+                                                         needs an answer or sensitive → handoff link; informational → plain text
+Provider ──POST /v1/providers/rcs/inbound (X-RCS-Signature)──▶ Server
+   postback: token well-formed (MAC) → row found → same phone → open → menu version current and unexpired
+             → interaction pending, business verified, phone belongs to the interaction's consumer
+             → AssurancePolicy.canSatisfy(channel: .rcs, .unauthenticatedReply) → CAS token + decision in one transaction
+             → webhook interaction.decided (channel "rcs", no assurance/signature)
+   text: joins the SMS gateway thread (STOP/HELP work); receipts: delivered / failed → SMS fallback for a pending interaction
+```
+
+## Data flow: business onboarding and operations
+
+```
+Organization ──/dashboard/signup (passkey)──▶ user + organization(pending) + application   (no handle, no code, no API access)
+Operator ──/operator (passkey, re-auth)──▶ approve → status verified + handle + permanent code   |   decline → note, may resubmit
+Business user ──/dashboard (passkey, role-gated)──▶ API keys · webhooks · templates · campaign links/QR · consent counts · audit · team · billing preview
+Operator ──suspend──▶ status flips atomically → next API call 403, pending interactions cancelled, consumer decisions refused
+Background ──abuse sweep──▶ complaint / opt-out rates over the window → auto-throttle (quota and API rate × factor) → auto-lift on recovery
+```
+
 ## Open decisions (tracked from the spec)
 
 - Messaging provider and number type.
 - Retention windows.
 - Simultaneous sessions. The engine allows one active session per thread.
-- RCS and Apple Messages for Business (AMB) enablement.
+- RCS provider selection and carrier launch approval (a generic RBM-style adapter ships; vendor adapters implement `RCSProvider`).
+- Apple Messages for Business: blocked on Apple's written approval of multi-merchant brokerage (placeholder only).
+- Business pricing and billing (metering and an invoice preview exist; no payment processor).
+- Operator staffing and the account-recovery policy for business users who lose every passkey.

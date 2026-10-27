@@ -114,6 +114,8 @@ public struct RequestLoggingMiddleware: AsyncMiddleware {
         var out = parts
         for i in parts.indices where i > 0 {
             if ["l", "h"].contains(parts[i - 1]) && i == 2 { out[i] = ":token" }
+            // Single-use dashboard invitation and operator enrollment links.
+            if ["invite", "enroll"].contains(parts[i - 1]) && (parts.first == "" && parts.count > 2 && ["dashboard", "operator"].contains(parts[1])) { out[i] = ":token" }
             if parts[i - 1] == "handles" || parts[i - 1] == "codes" { out[i] = ":id" }
         }
         return out.joined(separator: "/")

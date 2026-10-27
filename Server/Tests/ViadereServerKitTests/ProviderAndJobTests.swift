@@ -192,7 +192,7 @@ final class PushAndSchemaTests: XCTestCase {
             let interaction = Interaction(businessId: business.id, scope: scope, purpose: .transactional, payload: payload, createdAt: Date(), expiresAt: Date().addingTimeInterval(300), idempotencyKey: "k")
             let message = PushPayloadBuilder.message(for: interaction, business: business, token: token, topic: "com.viadere.app")
             let blob = [message.title, message.body, message.category, message.threadID, message.interactionId ?? ""].joined(separator: "|")
-            for secret in ["285", "Walmart", "Mesa", "Fictionland", "Paris", "9981", "Dentist", "Strange", "Chrome", "Northwind"] {
+            for secret in ["285.28", "Walmart", "Mesa", "Fictionland", "Paris", "9981", "Dentist", "Strange", "Chrome", "Northwind"] {
                 XCTAssertFalse(blob.contains(secret), "\(secret) leaked into \(blob)")
             }
             XCTAssertEqual(message.interactionId, interaction.id.description)

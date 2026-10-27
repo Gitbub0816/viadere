@@ -15,6 +15,9 @@ public enum LogRedactor {
             (#"(?i)viadere-signature[^\n]*"#, "Viadere-Signature: [redacted]"),
             (#"\+\d{7,15}"#, "[phone]"),
             (#"/(l|h)/[A-Za-z0-9_-]{20,}"#, "/$1/[token]"),
+            (#"/(invite|enroll)/[A-Za-z0-9_-]{20,}"#, "/$1/[token]"),
+            (#"vds_[A-Za-z0-9_-]{16,}"#, "[redacted-session]"),
+            (#"vrp1\.[A-Za-z0-9_.-]{20,}"#, "[redacted-postback]"),
         ]
         return specs.compactMap { spec in (try? NSRegularExpression(pattern: spec.0)).map { ($0, spec.1) } }
     }()

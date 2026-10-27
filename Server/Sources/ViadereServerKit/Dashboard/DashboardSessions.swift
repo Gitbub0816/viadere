@@ -95,9 +95,18 @@ struct DashboardSessionStore {
     }
 
     static func purge(on db: any Database, now: Date) async throws {
+        // Abuse signal buckets older than 90 days carry no value.
+        let oldBucket = Int(now.timeIntervalSince1970 / 60) - 90 * 24 * 60
+        if try await AbuseSignalRecord.query(on: db).filter(\.$bucket < oldBucket).count() > 0 {
+            try await AbuseSignalRecord.query(on: db).filter(\.$bucket < oldBucket).delete()
+        }
         let cutoff = now.addingTimeInterval(-24 * 3600)
-        try await DashboardSessionRecord.query(on: db).filter(\.$expiresAt < cutoff).delete()
-        try await DashboardCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
+        if try await DashboardSessionRecord.query(on: db).filter(\.$expiresAt < cutoff).count() > 0 {
+            try await DashboardSessionRecord.query(on: db).filter(\.$expiresAt < cutoff).delete()
+        }
+        if try await DashboardCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).count() > 0 {
+            try await DashboardCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
+        }
     }
 
     // MARK: Cookie

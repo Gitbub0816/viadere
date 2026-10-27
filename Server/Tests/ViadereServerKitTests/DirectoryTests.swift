@@ -186,4 +186,13 @@ final class DirectoryTests: XCTestCase {
         XCTAssertNotEqual(hasher.consumerReference(businessId: a, consumerId: consumer), hasher.consumerReference(businessId: b, consumerId: consumer))
         XCTAssertNotEqual(hasher.consumerReference(businessId: a, consumerId: consumer).uuid, consumer.uuid)
     }
+
+    func testIssuedCodesAlwaysContainADigitSoTypedCodesAreNeverMistakenForNames() {
+        for _ in 0..<2000 {
+            let code = BusinessRegistry.generateDiscoverableCode()
+            XCTAssertTrue(code.canonical.contains(where: \.isNumber), code.canonical)
+            guard case .code(let parsed) = DirectoryInput(parsing: code.display) else { return XCTFail("\(code.display) was not classified as a code") }
+            XCTAssertEqual(parsed, code)
+        }
+    }
 }

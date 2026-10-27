@@ -38,6 +38,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=build --chown=viadere:viadere /staging/ViadereServer /app/ViadereServer
+# Static, immutable, SRI-pinned assets served under /connect-button/v1/ (the "Connect with Viadere" button).
+COPY --chown=viadere:viadere Server/Public /app/Public
 
 ENV ENVIRONMENT=production \
     BIND_HOST=0.0.0.0 \

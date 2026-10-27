@@ -112,16 +112,18 @@ enum OperatorRoutes {
         pages.get("operator", "applications", ":id") { req in try await application(req) }
         pages.post("operator", "applications", ":id", "approve") { req -> Response in
             let p = try operatorPrincipal(req)
-            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: "/operator/applications/\(req.parameters.get("id") ?? "")") }
+            let id = try req.uuid("id")
+            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: "/operator/applications/\(id.uuidString.lowercased())") }
             let form = try req.content.decode(DecisionForm.self)
-            try await BusinessOnboarding(db: req.db, ctx: req.ctx).approve(businessId: try req.uuid("id"), operatorId: p.user.id!, handleOverride: form.handle, note: form.note)
+            try await BusinessOnboarding(db: req.db, ctx: req.ctx).approve(businessId: id, operatorId: p.user.id!, handleOverride: form.handle, note: form.note)
             return DashboardResponses.redirect("/operator?m=approved")
         }
         pages.post("operator", "applications", ":id", "reject") { req -> Response in
             let p = try operatorPrincipal(req)
-            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: "/operator/applications/\(req.parameters.get("id") ?? "")") }
+            let id = try req.uuid("id")
+            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: "/operator/applications/\(id.uuidString.lowercased())") }
             let form = try req.content.decode(DecisionForm.self)
-            try await BusinessOnboarding(db: req.db, ctx: req.ctx).reject(businessId: try req.uuid("id"), operatorId: p.user.id!, note: form.note)
+            try await BusinessOnboarding(db: req.db, ctx: req.ctx).reject(businessId: id, operatorId: p.user.id!, note: form.note)
             return DashboardResponses.redirect("/operator?m=rejected")
         }
         pages.get("operator", "businesses") { req in try await businesses(req) }

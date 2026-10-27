@@ -231,7 +231,7 @@ enum DashboardRoutes {
             return DashboardResponses.redirect("/dashboard/webhooks/deliveries?m=replayed")
         }
         pages.get("dashboard", "templates") { req in try await templatesPage(req) }
-        pages.get("dashboard", "campaigns") { req in try await campaignsPage(req, result: nil) }
+        pages.get("dashboard", "campaigns") { req in try await campaignsPage(req) }
         pages.post("dashboard", "campaigns") { req in try await createCampaign(req) }
         pages.post("dashboard", "campaigns", "download") { req in try await downloadCampaign(req) }
         pages.get("dashboard", "consent") { req in try await consentPage(req) }
@@ -491,7 +491,7 @@ enum DashboardRoutes {
         """
     }
 
-    private static func campaignsPage(_ req: Request, result: DashboardActions.Campaign?) async throws -> Response {
+    private static func campaignsPage(_ req: Request) async throws -> Response {
         let (p, _) = try req.businessDashboard
         try p.require(.manageCampaigns)
         return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: "Links and QR codes that open Viadere to your business.",

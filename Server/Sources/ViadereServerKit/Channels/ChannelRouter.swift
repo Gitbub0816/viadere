@@ -105,8 +105,12 @@ struct ChannelRouter {
     func deliverDue(limit: Int = 50) async throws -> Int {
         let now = ctx.now
         // A worker that died mid-send leaves a "sending" row behind; put it back after a 5 minute lease.
-        try await ChannelOutboundRecord.query(on: db).filter(\.$status == "sending")
-            .filter(\.$nextAttemptAt < now.addingTimeInterval(-300)).set(\.$status, to: "queued").update()
+        // (Read first: an idle worker must not take a write lock on every tick.)
+        let stuck = ChannelOutboundRecord.query(on: db).filter(\.$status == "sending").filter(\.$nextAttemptAt < now.addingTimeInterval(-300))
+        if try await stuck.count() > 0 {
+            try await ChannelOutboundRecord.query(on: db).filter(\.$status == "sending")
+                .filter(\.$nextAttemptAt < now.addingTimeInterval(-300)).set(\.$status, to: "queued").update()
+        }
         let due = try await ChannelOutboundRecord.query(on: db).filter(\.$status == "queued").filter(\.$nextAttemptAt <= now)
             .sort(\.$createdAt, .ascending).limit(limit).all()
         var handled = 0

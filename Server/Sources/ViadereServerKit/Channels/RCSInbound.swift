@@ -86,13 +86,25 @@ struct RCSInbound {
     }
 
     func handlePostback(from phone: PhoneNumber, data: String, messageId: String) async throws -> PostbackResult {
+        do {
+            return try await process(postback: data, from: phone, messageId: messageId)
+        } catch {
+            // An unexpected failure (database error) must not swallow the user's tap: forget the dedup marker so the
+            // provider's retry is processed.
+            try? await ProcessedProviderMessageRecord.query(on: db).filter(\.$provider == "rcs").filter(\.$providerMessageId == messageId).delete()
+            throw error
+        }
+    }
+
+    private func process(postback data: String, from phone: PhoneNumber, messageId: String) async throws -> PostbackResult {
         let audit = AuditService(db: db, ctx: ctx)
         let actor = AuditActor(kind: .gateway, id: phone.masked)
         func reject(_ reason: Rejection, interaction: UUID? = nil, business: UUID? = nil, notify: Bool = false) async throws -> PostbackResult {
             _ = try await audit.record("rcs.postback_rejected", outcome: .denied, actor: actor, businessId: business.map(BusinessID.init),
                 subjectType: interaction == nil ? nil : "interaction", subjectId: interaction?.uuidString.lowercased(),
                 metadata: ["reason": reason.rawValue, "phone": phone.masked])
-            if notify {
+            // One notice per phone per minute: a stale-tap storm must not become an SMS storm.
+            if notify, await ctx.limiter.allow("rcs-stale-notice", key: ctx.hasher.phoneHash(phone), rule: .perMinute(1, burst: 1)) {
                 try await OutboundSMS(db: db, ctx: ctx).enqueue(
                     to: phone, body: "Viadere: That option is no longer available. Use your most recent Viadere message.")
             }

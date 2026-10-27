@@ -22,6 +22,8 @@ struct DatabaseReplayGuard: ReplayGuard {
 
     /// Deletes expired entries (called by the maintenance job).
     static func purge(on db: any Database, now: Date) async throws {
+        // Read first: an idle maintenance tick must not take a write lock (SQLite in tests, row locks elsewhere).
+        guard try await ReplayNonceRecord.query(on: db).filter(\.$expiresAt <= now).count() > 0 else { return }
         try await ReplayNonceRecord.query(on: db).filter(\.$expiresAt <= now).delete()
     }
 }

@@ -127,10 +127,19 @@ struct BusinessRegistry {
         }
     }
 
+    /// A random code that contains at least one digit. Typed input is classified as a *code* only when it has a digit
+    /// (an all-letter string is more likely a business name), so an all-letter code could not be found by typing it.
+    static func generateDiscoverableCode() -> BusinessCode {
+        while true {
+            let code = BusinessCode.generate()
+            if code.canonical.contains(where: \.isNumber) { return code }
+        }
+    }
+
     /// Issues a code that has never been used by any business, active or retired (codes are never reassigned).
     static func issueCode(for businessId: UUID, explicit: BusinessCode?, now: Date, on db: any Database) async throws -> BusinessCode {
         for attempt in 0..<20 {
-            let candidate = (attempt == 0 ? explicit : nil) ?? BusinessCode.generate()
+            let candidate = (attempt == 0 ? explicit : nil) ?? generateDiscoverableCode()
             let active = try await BusinessCodeRecord.query(on: db).filter(\.$canonical == candidate.canonical).count()
             let retired = try await RetiredBusinessCodeRecord.query(on: db).filter(\.$canonical == candidate.canonical).count()
             if active + retired == 0 {

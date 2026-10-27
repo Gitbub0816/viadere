@@ -27,10 +27,15 @@ struct BackgroundJobs {
         if await ctx.limiter.allow("abuse-sweep", key: "all", rule: .perMinute(1, burst: 1)) {
             try await AbuseService(db: db, ctx: ctx).sweep()
         }
-        try await DashboardSessionStore.purge(on: db, now: ctx.now)
+        if await ctx.limiter.allow("dashboard-purge", key: "all", rule: .perMinute(1, burst: 1)) {
+            try await DashboardSessionStore.purge(on: db, now: ctx.now)
+        }
         try await DatabaseReplayGuard.purge(on: db, now: ctx.now)
         let now = ctx.now
-        try await PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
+        let staleCeremonies = PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600))
+        if try await staleCeremonies.count() > 0 {
+            try await PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
+        }
         return report
     }
 }

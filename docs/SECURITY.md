@@ -26,6 +26,20 @@ Security is the top priority. This document has two parts:
 | **Account-link and handoff tokens** | Replay, guessing, open redirect | 256-bit tokens. Only `SHA-256` is stored. Tokens are single-use, have a short TTL (15 min link, 10 min handoff), and are bound to phone + conversation. Fixed paths `/l/{token}` and `/h/{token}`, with no redirect parameters. |
 | **Business API** | S/E: tenant crossover | API key → businessId. Every query is tenant-scoped. Idempotency keys are required on POSTs. |
 | **Webhooks** | S/T: forged or modified events | `Viadere-Signature: t=…,v1=HMAC`, 300 s tolerance, constant-time compare, multi-secret rotation. |
+| **RCS channel** | S/T: forged or replayed provider events | `X-RCS-Signature: t=…,v1=HMAC-SHA256("{t}." + body)`, 300 s window, constant-time compare; one `403` for every failure; provider event ids de-duplicated (§2.11). |
+| | E: approving a sensitive request by tapping a suggestion | Suggestion taps are *unauthenticated replies*: `AssurancePolicy` never lets them satisfy `authenticate`, `authorize`, unknown kinds or `high`/`critical`, and deny/report are refused on a channel. Sensitive interactions are rendered as a secure handoff link, never as chips. |
+| | S/R: forged, replayed, forwarded or stale postbacks | Postback data is an opaque, MAC-signed, single-use token (never an id); bound to the phone it was sent to; valid only while its menu version is the phone's active one and within the menu TTL (the SMS rules); consumed by compare-and-swap together with the decision. |
+| | Silent downgrade | The same interaction falls back to SMS when the phone is not RCS-capable or the provider fails; a sensitive one becomes a handoff link on both channels. |
+| **Apple Messages for Business** | Unapproved multi-merchant brokerage | The adapter is an inert placeholder behind a flag that defaults off: it never sends, never reports capability and rejects every inbound webhook. |
+| **Business dashboard** | S: credential phishing, password reuse | Passkeys only (user verification required); separate credential store and RP-scoped origin; no passwords to steal. |
+| | S/E: cookie theft or fixation, cross-site requests | `__Host-` cookie (Secure, HttpOnly, SameSite=Strict, no Domain), only the SHA-256 stored, a new session on every sign-in, idle + absolute timeouts, per-session CSRF token and Origin check on every state change (§2.12). |
+| | E: a stolen session minting credentials | Passkey re-authentication (≤ 5 min old) for creating API keys or webhooks, rotating secrets, adding an owner and every operator mutation. |
+| | E: role abuse and tenant crossover | Least-privilege roles checked server-side on every request against the *current* membership; every query scoped to the session's organization; admins cannot touch owners; the last owner cannot leave. |
+| | I: leaking customer data to the business | Analytics and consent views are aggregates; webhook payloads are redacted in the delivery log; business views carry per-business pseudonyms. |
+| | Script injection, exfiltration | CSP `default-src 'none'` with hash-pinned stylesheet (and one hash-pinned script on sign-in pages only), no inline event handlers or styles, no third-party assets, `frame-ancestors 'none'`; all output HTML-escaped. |
+| **Operator console** | E: insider abuse | Separate realm and passkeys, shorter timeouts, re-authentication for every mutation, every action audited with actor kind `operator`; overrides can only restrict (throttle, suspend, downward priority ceiling) and never read the billing tier. |
+| **Abuse by a business** | Spam, “I don't recognize this”, pestering | Per-business complaint and opt-out rates with automatic throttling; suspension takes effect on the next request and cancels pending interactions; operators review before any handle or code is issued. |
+| **Embeddable button** | Third-party script risk | Immutable versioned files with SRI, no network access, cookies, storage or iframes; it can only link to `https://viadere.com/c/{CODE}`; the label is set as text, never markup. |
 | **Server data** | I: database leak | Tokens and API keys are stored hashed. Phones are masked in logs. Audit `metadata` must be redacted. No message bodies in telemetry. |
 | | D: unbounded input | Max lengths on every field (`InteractionValidation.Limits`). Payloads are capped (decision ≤ 8 KiB). |
 
@@ -156,3 +170,31 @@ Matching is on the whole message after trimming, removing trailing `.`/`!`, and 
 | `HELP INFO` | Help text in every state, including OPTED_OUT (no re-subscribe). Cannot be escaped. |
 | `START UNSTOP YES` | Opt back in, only from `OPTED_OUT`. Otherwise ordinary content. |
 | `MENU`, `BACK` | Gateway controls. Send `\MENU` or `\BACK` to pass the word to the connected business. |
+
+### 2.11 RCS provider webhooks and postback tokens
+
+Inbound (provider → Viadere), `POST /v1/providers/rcs/inbound`:
+```
+X-RCS-Signature: t={unix seconds},v1={hex HMAC-SHA256(key = UTF-8(secret), message = "{t}." + raw body)}
+```
+The secret is `RCS_WEBHOOK_SECRET` (base64url, ≥ 32 bytes; the HMAC key is the UTF-8 of its base64url text). Verification, tolerance (300 s) and constant-time
+comparison are exactly §2.6. Unconfigured, unsigned, badly signed and stale deliveries are the same `403`. Events: free text, `suggestionResponse.postbackData`,
+and `DELIVERED` / `READ` / `FAILED` receipts. Provider message ids are de-duplicated.
+
+Postback token (Viadere → provider → Viadere), carried as `postbackData`:
+```
+vrp1.{base64url(32 CSPRNG bytes)}.{first 32 hex of HMAC-SHA256(serverPepper, "rcs-postback\n" + random part)}
+```
+* Opaque: it contains no interaction id, option id or decision; the server keeps `(interaction, target, phone, menu version, expiry)` keyed by the SHA-256 of the whole token.
+* Structure and MAC are checked before any lookup; comparison is constant time.
+* Single use: consuming it is a compare-and-swap in the same transaction that records the decision.
+* Bound to the phone it was sent to, to the phone's **active menu version** (a newer menu supersedes older ones) and to the menu TTL.
+* Authenticates nothing about the person: a reply on RCS is `ProvidedAssurance.unauthenticatedReply`.
+
+### 2.12 Dashboard sessions and CSRF
+
+* Session cookie: `__Host-vd_session` (operators `__Host-vd_operator`) = `vds_` + base64url(32 CSPRNG bytes); `Secure; HttpOnly; SameSite=Strict; Path=/`, no `Domain`. Stored: SHA-256 only.
+* Created on every successful passkey assertion (a presented old session is revoked). Idle timeout 30 min / absolute 12 h (operators 15 min / 8 h). `reauthAt` is set at sign-in and by a re-authentication ceremony.
+* CSRF token: first 43 hex characters of `HMAC-SHA256(serverPepper, "dashboard-csrf\n" + cookie value)`, sent as hidden field `_csrf` or header `X-CSRF-Token` on every non-`GET`; constant-time compare. A request with an `Origin` header must carry one of the configured origins.
+* Passkey ceremonies use the dashboard's own credential table and a single-use ceremony row (5 min); registration and assertion require user verification.
+

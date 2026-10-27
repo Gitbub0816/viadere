@@ -1,0 +1,885 @@
+openapi: 3.1.0
+info:
+  title: Viadere Business API
+  version: "2026-10-27"
+  summary: Issue structured interactions to verified customers, receive their decisions, and exchange messages.
+  description: |
+    The business API lets a **verified** business ask a connected customer to confirm, choose, acknowledge, reply,
+    authenticate or authorize something, route support messages, publish ongoing-event statuses, and receive signed
+    webhooks when anything changes.
+
+    Hand-written from the route catalog (`Packages/ViadereCore/Sources/ViadereCore/API/APIRoutes.swift`) and the DTOs in
+    `ViadereCore`; wire formats are normative in `docs/SECURITY.md`. See `docs/BUSINESS-INTEGRATION.md` for a quickstart.
+
+    ## Authentication
+    `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (no real delivery, no quota). Keys are created in the
+    business dashboard, are scoped, revocable, and shown once. Suspended or unverified businesses receive `403`.
+
+    ## Idempotency
+    Every `POST` that creates something takes an `Idempotency-Key` header which **must equal** the body's `idempotencyKey`.
+    Repeating a request with the same key and body returns the original result (`200` instead of `201`); the same key with a
+    different body is `409 idempotency_conflict`.
+
+    ## Errors
+    Every error body is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.
+
+    ## Rate limits
+    Per business (default burst 120, sustained 600 requests/minute) plus a daily live-interaction quota. Exceeding either
+    returns `429` with `Retry-After` (seconds). Complaint and opt-out rates above Viadere's thresholds automatically reduce
+    both limits; paying never changes the priority of your messages or bypasses a customer's consent.
+
+    ## Security model
+    * Security-sensitive kinds (`authenticate`, `authorize`, unknown kinds, or any `high`/`critical` sensitivity) can only be
+      approved by a device-signed decision in the Viadere app. They are never approvable by SMS or RCS reply; text channels
+      receive a secure handoff link instead.
+    * You see a per-business pseudonym for each customer, never their Viadere identity or phone number.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Viadere
+servers:
+  - url: https://viadere.com
+    description: Production
+security:
+  - apiKey: []
+tags:
+  - name: Interactions
+  - name: Messages
+  - name: Statuses
+  - name: Webhooks
+  - name: Rewards
+
+paths:
+  /v1/business/interactions:
+    post:
+      tags: [Interactions]
+      operationId: issueInteraction
+      summary: Issue an interaction
+      description: |
+        Requires scope `interactions:write`. The relationship must belong to your business and be active, the customer must have
+        consented to the `purpose`, and your daily quota must not be exhausted. Priority is clamped by the Trust Engine
+        (marketing and rewards never exceed `normal`; `urgent` is reserved for security authenticate/authorize).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueInteractionRequest" }
+            examples:
+              confirmPickup:
+                summary: Ask a customer to confirm a pickup
+                value:
+                  relationshipId: 11111111-2222-4333-8444-555555555555
+                  kind: confirm
+                  purpose: transactional
+                  payload:
+                    title: Confirm pickup
+                    details: Thursday 10:30 at Main Street
+                    reference: BK-20418
+                  priority: normal
+                  sensitivity: standard
+                  allowedChannels: [nativePush, inApp, rcs, sms]
+                  ttlSeconds: 3600
+                  idempotencyKey: order-1042-confirm
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "200":
+          description: The idempotency key was already used with an identical request; the original interaction is returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/interactions/{interactionId}:
+    get:
+      tags: [Interactions]
+      operationId: getInteractionOutcome
+      summary: Get an interaction's outcome
+      description: Requires scope `interactions:read`. Pending interactions past their expiry are reported as `expired`.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+      responses:
+        "200":
+          description: The current outcome.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InteractionOutcome" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/interactions/{interactionId}/cancel:
+    post:
+      tags: [Interactions]
+      operationId: cancelInteraction
+      summary: Cancel a pending interaction
+      description: Requires scope `interactions:write`. Cancelling an interaction that is already final returns its outcome unchanged.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+      responses:
+        "200":
+          description: The outcome after cancellation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InteractionOutcome" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/messages:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Send a message to a customer
+      description: |
+        Requires scope `messages:write`. Delivered into the customer's active SMS session with you, or held in the
+        conversation history. Always attributed to your verified business name.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessSendMessageRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationMessage" }
+        "200":
+          description: Idempotent replay of an earlier identical request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationMessage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/statuses:
+    post:
+      tags: [Statuses]
+      operationId: updateStatus
+      summary: Publish an ongoing-event status
+      description: |
+        Requires scope `statuses:write`. A newer status with the same `activityKey` replaces the earlier one. Eligible
+        purposes (`transactional`, `accountService`, `support`) may drive a Live Activity on the customer's device.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessStatusUpdateRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      summary: List webhook endpoints
+      description: Requires scope `webhooks:manage`.
+      responses:
+        "200":
+          description: Active subscriptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WebhookSubscription" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      summary: Create a webhook endpoint
+      description: |
+        Requires scope `webhooks:manage`. The URL must be a public `https` URL (private, loopback, link-local and cloud
+        metadata addresses are refused, and redirects are never followed). The signing `secret` in the response is shown
+        **once**. At most 10 active endpoints per business.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWebhookRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}:
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook endpoint
+      description: Requires scope `webhooks:manage`. Pending deliveries to the endpoint are dropped.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200":
+          description: Deleted (an empty object).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: false }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/rotate-secret:
+    post:
+      tags: [Webhooks]
+      operationId: rotateWebhookSecret
+      summary: Rotate a webhook signing secret
+      description: |
+        Requires scope `webhooks:manage`. The previous secret keeps signing for 24 hours (the `Viadere-Signature` header then
+        carries two `v1=` values) so you can switch over without dropping events.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200":
+          description: The new secret (shown once).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/rewards:
+    post:
+      tags: [Rewards]
+      operationId: issueReward
+      summary: Issue a reward (not yet available)
+      description: Reserved. Authenticated and scope-checked (`rewards:write`), but currently always answers `501 unavailable`.
+      responses:
+        "501":
+          description: Not available yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+webhooks:
+  interaction.decided:
+    post:
+      summary: A customer decided an interaction
+      description: |
+        Sent once when the decision is recorded. `data.assurance` and `data.signedDecision` are present for device-signed
+        decisions; a decision made over a text channel (RCS suggested reply to a low-sensitivity `confirm`/`choose`) carries
+        `channel: rcs` and **no** assurance or signature, and you must treat it accordingly.
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  interaction.expired:
+    post:
+      summary: An interaction expired undecided
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  interaction.cancelled:
+    post:
+      summary: An interaction was cancelled (by you, or because the customer disconnected)
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  message.received:
+    post:
+      summary: A customer's message was forwarded to you
+      description: The only event whose payload contains customer-authored text. The dashboard delivery log redacts it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: message.received }
+                    data: { $ref: "#/components/schemas/MessageReceivedData" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  relationship.connected:
+    post:
+      summary: A customer connected to your business
+      requestBody: { $ref: "#/components/requestBodies/RelationshipEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  relationship.disconnected:
+    post:
+      summary: A customer disconnected; pending interactions were cancelled
+      requestBody: { $ref: "#/components/requestBodies/RelationshipEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  consent.updated:
+    post:
+      summary: A customer changed a consent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: consent.updated }
+                    data: { $ref: "#/components/schemas/ConsentUpdatedData" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "vdk_live_… | vdk_test_…"
+      description: A business API key. Keys are scoped; the required scope is listed on each operation.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Must equal the request body's `idempotencyKey`. Up to 128 characters of `A-Z a-z 0-9 _ . - :`.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    InteractionId:
+      name: interactionId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+
+  headers:
+    WebhookSignature:
+      description: "`t={unix seconds},v1={hex HMAC-SHA256(secret, \"{t}.\" + raw body)}`; several `v1=` values during secret rotation."
+      schema: { type: string }
+    WebhookEventId:
+      description: "The delivery id (`WebhookEvent.id`). Deliveries are at-least-once: deduplicate on it."
+      schema: { type: string, format: uuid }
+    WebhookEventType:
+      description: The event type (`WebhookEvent.type`).
+      schema: { type: string }
+
+  requestBodies:
+    InteractionEvent:
+      required: true
+      description: |
+        Headers sent with every delivery: `Viadere-Signature`, `Viadere-Event-Id`, `Viadere-Event-Type`, `Content-Type: application/json`.
+        Reject (4xx) when `|now - t| > 300 s` or no `v1` matches (constant-time compare). Respond `2xx` within 10 seconds;
+        failures retry at 30 s, 2 min, 10 min, 1 h, 6 h, 12 h, 24 h, then dead-letter.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/InteractionOutcome" }
+    RelationshipEvent:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/RelationshipEventData" }
+
+  responses:
+    WebhookAck:
+      description: Acknowledge with any 2xx. Anything else (or a timeout) is retried.
+    BadRequest:
+      description: Malformed request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Unauthorized:
+      description: Missing, malformed, unknown, revoked or expired API key.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Forbidden:
+      description: The key lacks the required scope, the business is not active (unverified or suspended), or consent is required (`consent_required`).
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    NotFound:
+      description: Not found. Other businesses' resources are indistinguishable from missing ones.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Conflict:
+      description: State conflict, or `idempotency_conflict` when the key was used with a different body.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    ValidationFailed:
+      description: The request failed validation; `error.details` maps field paths to issue codes.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    RateLimited:
+      description: Rate limit or daily quota exceeded.
+      headers:
+        Retry-After:
+          description: Seconds to wait.
+          schema: { type: integer, minimum: 1 }
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      description: Lowercase UUID.
+    Timestamp:
+      type: string
+      format: date-time
+      description: "ISO 8601 UTC with milliseconds, e.g. `2026-10-27T08:00:00.000Z`."
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: object
+              additionalProperties: { type: string }
+    ErrorCode:
+      type: string
+      description: Stable machine codes. Unknown future codes should be treated as `unknown`.
+      enum: [bad_request, validation_failed, unauthorized, signature_invalid, replay_detected, clock_skew, forbidden, not_found, conflict,
+             gone, expired, insufficient_assurance, consent_required, rate_limited, idempotency_conflict, internal_error, unavailable, unknown]
+
+    InteractionKind:
+      type: string
+      description: Extensible. Unknown kinds are treated as maximally sensitive and never rendered as actionable.
+      enum: [authenticate, authorize, confirm, choose, acknowledge, reply, status, reward, ticket, message]
+    InteractionPurpose:
+      type: string
+      description: Consent is granted per purpose. `security` and `accountService` cannot be turned off by the customer; `marketing` and `rewards` are opt-in.
+      enum: [security, accountService, transactional, support, marketing, rewards]
+    InteractionPriority:
+      type: string
+      description: A request. Viadere clamps it; it can never be bought.
+      enum: [low, normal, high, urgent]
+    Sensitivity:
+      type: string
+      description: Drives the required assurance. `authenticate`/`authorize` are never below `standard`.
+      enum: [low, standard, high, critical]
+    Channel:
+      type: string
+      description: |
+        Where Viadere may deliver. Text channels (`sms`, `rcs`, `appleMessagesForBusiness`) can only carry unauthenticated replies, so
+        security-sensitive interactions sent there become a secure handoff link. `rcs` implies SMS fallback.
+      enum: [nativePush, inApp, web, sms, rcs, appleMessagesForBusiness]
+    ActionRole:
+      type: string
+      enum: [approve, deny, confirm, decline, select, reply, acknowledge, open, report, redeem]
+    Decision:
+      type: string
+      enum: [approve, deny, confirm, decline, select, reply, acknowledge, report]
+    DecisionAssurance:
+      type: string
+      enum: [none, devicePasscode, biometric]
+    InteractionStatus:
+      type: string
+      enum: [pending, approved, denied, confirmed, declined, selected, replied, acknowledged, reported, expired, cancelled, delivered]
+
+    MoneyAmount:
+      type: object
+      required: [value, currency]
+      properties:
+        value: { type: string, pattern: "^[0-9]{1,15}(\\.[0-9]+)?$", description: Plain decimal string with the currency's minor-unit digits, e.g. "285.28". }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    RiskIndicator:
+      type: object
+      required: [code, label, severity]
+      properties:
+        code: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 80 }
+        severity: { type: string, enum: [info, warning, high] }
+    RequestedAction:
+      type: object
+      required: [id, label, role]
+      properties:
+        id: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 32 }
+        role: { $ref: "#/components/schemas/ActionRole" }
+
+    AuthenticatePayload:
+      type: object
+      required: [service, device, attemptedAt]
+      properties:
+        service: { type: string, maxLength: 80 }
+        device: { type: string, maxLength: 80 }
+        approximateLocation: { type: string, maxLength: 80 }
+        ipRegion: { type: string, maxLength: 80 }
+        attemptedAt: { $ref: "#/components/schemas/Timestamp" }
+        riskIndicators: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/RiskIndicator" } }
+    AuthorizePayload:
+      type: object
+      required: [actionDescription]
+      properties:
+        actionDescription: { type: string, maxLength: 120 }
+        amount: { $ref: "#/components/schemas/MoneyAmount" }
+        merchant: { type: string, maxLength: 80 }
+        location: { type: string, maxLength: 80 }
+        effectOfApproval: { type: string, maxLength: 160 }
+        riskIndicators: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/RiskIndicator" } }
+    ConfirmPayload:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 80 }
+        details: { type: string, maxLength: 160 }
+        reference: { type: string, maxLength: 64 }
+        scheduledAt: { $ref: "#/components/schemas/Timestamp" }
+    ChoiceOption:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 80 }
+    ChoosePayload:
+      type: object
+      required: [prompt, options]
+      properties:
+        prompt: { type: string, maxLength: 160 }
+        options: { type: array, minItems: 2, maxItems: 10, items: { $ref: "#/components/schemas/ChoiceOption" } }
+        allowsMultiple: { type: boolean, default: false }
+    AcknowledgePayload:
+      type: object
+      required: [title, body]
+      properties:
+        title: { type: string, maxLength: 80 }
+        body: { type: string, maxLength: 1000 }
+        documentURL: { type: string, format: uri }
+        documentVersion: { type: string }
+    ReplyPayload:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, maxLength: 160 }
+        maxLength: { type: integer, default: 280 }
+        suggestedReplies: { type: array, maxItems: 4, items: { type: string } }
+    StatusPayload:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 80 }
+        body: { type: string, maxLength: 240 }
+        liveActivity: { $ref: "#/components/schemas/LiveActivityStatus" }
+    LiveActivityStatus:
+      type: object
+      description: "`{\"type\":\"delivery\",\"delivery\":{…}}` — exactly one state object matching `type`."
+      required: [type]
+      properties:
+        type: { type: string, enum: [order, delivery, flight, appointment] }
+        order:
+          type: object
+          required: [orderReference, stage]
+          properties:
+            orderReference: { type: string }
+            stage: { type: string, enum: [placed, preparing, ready, completed, cancelled] }
+            estimatedReadyAt: { $ref: "#/components/schemas/Timestamp" }
+            note: { type: string }
+        delivery:
+          type: object
+          required: [trackingReference, stage]
+          properties:
+            trackingReference: { type: string }
+            stage: { type: string, enum: [labelCreated, inTransit, outForDelivery, delivered, exception] }
+            carrierName: { type: string }
+            estimatedDeliveryAt: { $ref: "#/components/schemas/Timestamp" }
+            stopsAway: { type: integer }
+        flight:
+          type: object
+          required: [flightNumber, departureAirport, arrivalAirport, stage, scheduledDeparture]
+          properties:
+            flightNumber: { type: string }
+            departureAirport: { type: string }
+            arrivalAirport: { type: string }
+            stage: { type: string, enum: [scheduled, delayed, boarding, departed, landed, cancelled, diverted] }
+            scheduledDeparture: { $ref: "#/components/schemas/Timestamp" }
+            estimatedDeparture: { $ref: "#/components/schemas/Timestamp" }
+            estimatedArrival: { $ref: "#/components/schemas/Timestamp" }
+            gate: { type: string }
+            seat: { type: string }
+        appointment:
+          type: object
+          required: [title, startsAt, stage]
+          properties:
+            title: { type: string }
+            startsAt: { $ref: "#/components/schemas/Timestamp" }
+            location: { type: string }
+            providerName: { type: string }
+            stage: { type: string, enum: [upcoming, checkInOpen, checkedIn, inProgress, completed, cancelled] }
+    MessagePayload:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+    RewardPayload:
+      type: object
+      description: Reserved (rewards are not available yet).
+      required: [rewardId, title]
+      properties:
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        title: { type: string }
+        details: { type: string }
+        redeemBy: { $ref: "#/components/schemas/Timestamp" }
+        walletPassId: { $ref: "#/components/schemas/Uuid" }
+    TicketPayload:
+      type: object
+      description: Reserved.
+      required: [title, ticketType]
+      properties:
+        title: { type: string }
+        ticketType: { type: string }
+        holderName: { type: string }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        walletPassId: { $ref: "#/components/schemas/Uuid" }
+    InteractionPayload:
+      description: The payload object for the declared `kind` (payload shapes overlap, so the sibling `kind` is the discriminator).
+      anyOf:
+        - { $ref: "#/components/schemas/AuthenticatePayload" }
+        - { $ref: "#/components/schemas/AuthorizePayload" }
+        - { $ref: "#/components/schemas/ConfirmPayload" }
+        - { $ref: "#/components/schemas/ChoosePayload" }
+        - { $ref: "#/components/schemas/AcknowledgePayload" }
+        - { $ref: "#/components/schemas/ReplyPayload" }
+        - { $ref: "#/components/schemas/StatusPayload" }
+        - { $ref: "#/components/schemas/RewardPayload" }
+        - { $ref: "#/components/schemas/TicketPayload" }
+        - { $ref: "#/components/schemas/MessagePayload" }
+
+    IssueInteractionRequest:
+      type: object
+      required: [relationshipId, kind, purpose, payload, ttlSeconds, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/InteractionKind" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        payload: { $ref: "#/components/schemas/InteractionPayload" }
+        requestedActions: { type: array, maxItems: 4, default: [], items: { $ref: "#/components/schemas/RequestedAction" } }
+        priority: { $ref: "#/components/schemas/InteractionPriority" }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        allowedChannels:
+          type: array
+          default: [nativePush, inApp]
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Channel" }
+        ttlSeconds:
+          type: integer
+          minimum: 1
+          maximum: 2592000
+          description: Lifetime. At most 15 minutes (900) for `authenticate` and `authorize`, 30 days otherwise.
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        correlationId: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        accountReference: { type: string, maxLength: 64, description: 'Shown to the customer, e.g. "Checking ••1234".' }
+      allOf:
+        - if: { properties: { kind: { const: authenticate } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AuthenticatePayload" } } }
+        - if: { properties: { kind: { const: authorize } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AuthorizePayload" } } }
+        - if: { properties: { kind: { const: confirm } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ConfirmPayload" } } }
+        - if: { properties: { kind: { const: choose } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ChoosePayload" } } }
+        - if: { properties: { kind: { const: acknowledge } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AcknowledgePayload" } } }
+        - if: { properties: { kind: { const: reply } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ReplyPayload" } } }
+        - if: { properties: { kind: { const: status } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/StatusPayload" } } }
+        - if: { properties: { kind: { const: message } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/MessagePayload" } } }
+    Interaction:
+      type: object
+      description: |
+        As seen by the business. `scope.consumerId` is a **per-business pseudonym** (stable for your business, different for every
+        other), and `challenge` is a one-way reference, not the device challenge.
+      required: [schemaVersion, id, businessId, scope, kind, purpose, payload, priority, sensitivity, allowedChannels, createdAt, expiresAt, idempotencyKey, challenge]
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        id: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        scope:
+          type: object
+          required: [consumerId, relationshipId]
+          properties:
+            consumerId: { $ref: "#/components/schemas/Uuid" }
+            relationshipId: { $ref: "#/components/schemas/Uuid" }
+            accountReference: { type: string }
+        kind: { $ref: "#/components/schemas/InteractionKind" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        payload: { $ref: "#/components/schemas/InteractionPayload" }
+        requestedActions: { type: array, items: { $ref: "#/components/schemas/RequestedAction" } }
+        priority: { $ref: "#/components/schemas/InteractionPriority" }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        allowedChannels: { type: array, items: { $ref: "#/components/schemas/Channel" } }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        idempotencyKey: { type: string }
+        correlationId: { type: string }
+        challenge: { type: string, description: One-way reference. }
+    SignedDecision:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload: { type: string, description: Canonical JSON of the decision (docs/SECURITY.md §2.4), as signed by the device. }
+        signature: { type: string, description: ECDSA P-256 / SHA-256, raw r‖s, base64url. }
+    InteractionOutcome:
+      type: object
+      required: [interactionId, businessId, status]
+      properties:
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        status: { $ref: "#/components/schemas/InteractionStatus" }
+        decision: { $ref: "#/components/schemas/Decision" }
+        selectedOptionIds: { type: array, items: { type: string } }
+        reply: { type: string }
+        assurance:
+          description: Present for device-signed decisions. **Absent for decisions made on a text channel.**
+          $ref: "#/components/schemas/DecisionAssurance"
+        channel: { $ref: "#/components/schemas/Channel" }
+        decidedAt: { $ref: "#/components/schemas/Timestamp" }
+        correlationId: { type: string }
+        signedDecision:
+          description: The device-signed decision, for your own audit trail. Absent for text-channel decisions.
+          $ref: "#/components/schemas/SignedDecision"
+
+    MessageAttribution:
+      type: object
+      required: [senderType, displayName]
+      properties:
+        senderType: { type: string, enum: [consumer, business, agent, automated, viadere] }
+        displayName: { type: string }
+        agentName: { type: string }
+    ConversationMessage:
+      type: object
+      required: [id, sessionId, businessId, direction, attribution, body, channel, createdAt, deliveryStatus]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        direction: { type: string, enum: [consumerToBusiness, businessToConsumer] }
+        attribution: { $ref: "#/components/schemas/MessageAttribution" }
+        body: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        deliveredAt: { $ref: "#/components/schemas/Timestamp" }
+        readAt: { $ref: "#/components/schemas/Timestamp" }
+        deliveryStatus: { type: string, enum: [queued, sent, delivered, read, failed] }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+    BusinessSendMessageRequest:
+      type: object
+      required: [relationshipId, body, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        body: { type: string, minLength: 1, maxLength: 1600 }
+        agentName: { type: string, maxLength: 40 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    BusinessStatusUpdateRequest:
+      type: object
+      required: [relationshipId, purpose, status, activityKey, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        status: { $ref: "#/components/schemas/StatusPayload" }
+        activityKey: { type: string, minLength: 1, maxLength: 64, description: Stable key for the ongoing event (an order id) so updates replace earlier ones. }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+
+    WebhookEventType:
+      type: string
+      description: Open set; ignore (and acknowledge) types you do not recognize.
+      examples: [interaction.decided]
+      enum: [interaction.decided, interaction.expired, interaction.cancelled, message.received, relationship.connected, relationship.disconnected, consent.updated, reward.redeemed]
+    WebhookSubscription:
+      type: object
+      required: [id, url, events, active, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        active: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+    CreateWebhookRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/WebhookEventType" } }
+    WebhookSecretResponse:
+      type: object
+      required: [subscription, secret]
+      properties:
+        subscription: { $ref: "#/components/schemas/WebhookSubscription" }
+        secret: { type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: Shown once. HMAC key is the UTF-8 bytes of the whole string, prefix included. }
+
+    WebhookEventEnvelope:
+      type: object
+      required: [id, type, createdAt, businessId, apiVersion, data]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        type: { $ref: "#/components/schemas/WebhookEventType" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        apiVersion: { type: string, examples: ["2026-10-27"] }
+        data: { description: Event-specific payload. }
+    MessageReceivedData:
+      type: object
+      required: [sessionId, relationshipId, messageId, text, channel, receivedAt]
+      properties:
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        messageId: { $ref: "#/components/schemas/Uuid" }
+        text: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        receivedAt: { $ref: "#/components/schemas/Timestamp" }
+    RelationshipEventData:
+      type: object
+      required: [relationshipId, occurredAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        source: { type: string, enum: [handle, code, qr, button, link, search, sms, appClip] }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }
+    ConsentUpdatedData:
+      type: object
+      required: [relationshipId, purpose, granted, occurredAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        granted: { type: boolean }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }

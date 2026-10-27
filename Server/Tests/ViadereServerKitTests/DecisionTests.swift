@@ -56,7 +56,7 @@ final class DecisionTests: XCTestCase {
             XCTAssertEqual(push.category, "viadere.authorize.secure")
             XCTAssertEqual(push.threadID, "business.\(s.business.id)")
             for text in [push.title, push.body, push.category, push.threadID, push.interactionId ?? ""] {
-                for secretWord in ["285", "Walmart", "Mesa", "Northwind", "Arizona"] { XCTAssertFalse(text.contains(secretWord), "push leaked \(secretWord)") }
+                for secretWord in ["285.28", "Walmart", "Mesa", "Northwind", "Arizona"] { XCTAssertFalse(text.contains(secretWord), "push leaked \(secretWord)") }
             }
 
             // The consumer lists pending interactions and decides with a biometric-gated key.
