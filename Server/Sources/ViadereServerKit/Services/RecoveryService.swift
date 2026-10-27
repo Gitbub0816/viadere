@@ -70,40 +70,76 @@ struct RecoveryService {
 
     // MARK: Begin
 
+    static let globalRule = RateRule.perHour(300, burst: 60)
+    static let perIdRule = RateRule.perHour(20, burst: 10)
+
     func begin(_ request: RecoveryBeginRequest) async throws -> PasskeyRegistrationOptions {
         let failure = APIError(.unauthorized, .unauthorized, "Recovery could not be started. Check the recovery ID and the code.")
-        try await ctx.limiter.enforce("recovery-begin-global", key: "all", rule: .perHour(300, burst: 60))
         // Both values are hashed whatever they are, so the work does not depend on whether the account exists.
         let normalizedId = RecoveryCodeFormat.normalizeRecoveryID(request.recoveryId)
         let normalizedCode = RecoveryCodeFormat.normalizeCode(request.code)
         let idHash = recoveryIdHash(normalized: normalizedId ?? "invalid")
-        guard normalizedId != nil, normalizedCode != nil,
-              let profile = try await RecoveryProfileRecord.query(on: db).filter(\.$recoveryIdHash == idHash).first(), let profileId = profile.id,
-              let consumer = try await ConsumerRecord.find(profile.consumerId, on: db), consumer.status == "active" else { throw failure }
+        // Malformed input is rejected before any shared budget is touched (the per-IP middleware still counts it), so a flood of garbage
+        // cannot use up what a real recovery needs.
+        guard normalizedId != nil, let normalizedCode else { throw failure }
+        // Per recovery ID: guessing codes for one account is bounded here, whatever the number of source addresses. Refunded on success.
+        try await ctx.limiter.enforce("recovery-begin-id", key: idHash, rule: Self.perIdRule)
+        guard let profile = try await RecoveryProfileRecord.query(on: db).filter(\.$recoveryIdHash == idHash).first(), let profileId = profile.id,
+              let consumer = try await ConsumerRecord.find(profile.consumerId, on: db), consumer.status == "active" else {
+            // An ID that names no account: this is what guessing the ID space looks like, so it is what the global budget bounds. The
+            // known-ID path below never waits on it, so a flood of made-up IDs from many addresses cannot lock a real recovery out.
+            try await ctx.limiter.enforce("recovery-begin-global", key: "all", rule: Self.globalRule)
+            throw failure
+        }
         let now = ctx.now
         let consumerId = profile.consumerId
-        if let locked = profile.lockedUntil, locked > now {
-            await audit("recovery.begin_denied", outcome: .denied, consumer: consumerId, metadata: ["reason": "locked"])
-            throw failure
+        // From here every failure is charged to the global budget too (a success is not).
+        func fail(_ reason: String? = nil) async -> APIError {
+            _ = await ctx.limiter.allow("recovery-begin-global", key: "all", rule: Self.globalRule)
+            if let reason { await audit("recovery.begin_denied", outcome: .denied, consumer: consumerId, metadata: ["reason": reason]) }
+            return failure
         }
-        // One recovery at a time: a competing begin does not burn a code.
+        if let locked = profile.lockedUntil, locked > now { throw await fail("locked") }
+        // One recovery at a time: a competing begin does not burn a code. (The unique index on open recoveries is what makes this
+        // hold under concurrency; this check only saves the code in the common case.)
         try await expireStale(consumerId: consumerId)
         if try await AccountRecoveryRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state ~~ ["awaiting_passkey", "holding"]).count() > 0 {
-            await audit("recovery.begin_denied", outcome: .denied, consumer: consumerId, metadata: ["reason": "in_progress"])
-            throw failure
+            throw await fail("in_progress")
         }
-        let hash = codeHash(consumerId: consumerId, normalized: normalizedCode ?? "")
+        let hash = codeHash(consumerId: consumerId, normalized: normalizedCode)
         guard let code = try await RecoveryCodeRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$codeHash == hash)
-            .filter(\.$state == "active").first(), let codeId = code.id,
-              try await DB.swap(db, table: RecoveryCodeRecord.schema, id: codeId, column: "state", expected: "active", newValue: "used",
-                                extra: [("used_at", now)]) else {
+            .filter(\.$state == "active").first(), let codeId = code.id else {
             try await recordFailure(profileId: profileId, consumerId: consumerId)
-            throw failure
+            throw await fail()
         }
-        try await RecoveryProfileRecord.query(on: db).filter(\.$id == profileId).set(\.$failedAttempts, to: 0).update()
         let challenge = Base64URL.encode(ctx.passkeys.makeChallenge())
         let recovery = AccountRecoveryRecord(consumerId: consumerId, challenge: challenge, userHandle: consumer.userHandle, now: now)
-        try await recovery.create(on: db)
+        // Spending the code and opening the recovery are one transaction: losing the race for the single open-recovery slot (unique
+        // index violation) rolls the code back, so a competing begin burns nothing.
+        enum Outcome { case started, wrongCode, inProgress }
+        let outcome: Outcome
+        do {
+            outcome = try await db.transaction { tx in
+                guard try await DB.swap(tx, table: RecoveryCodeRecord.schema, id: codeId, column: "state", expected: "active", newValue: "used",
+                                        extra: [("used_at", now)]) else { return .wrongCode }
+                try await recovery.create(on: tx)
+                return .started
+            }
+        } catch {
+            guard error.isConstraintViolation else { throw error }
+            outcome = .inProgress
+        }
+        switch outcome {
+        case .wrongCode:
+            try await recordFailure(profileId: profileId, consumerId: consumerId)
+            throw await fail()
+        case .inProgress:
+            throw await fail("in_progress")
+        case .started:
+            break
+        }
+        try await RecoveryProfileRecord.query(on: db).filter(\.$id == profileId).set(\.$failedAttempts, to: 0).update()
+        await ctx.limiter.refund("recovery-begin-id", key: idHash, rule: Self.perIdRule)
         await audit("recovery.code_accepted", consumer: consumerId, subject: recovery.id)
         return PasskeyRegistrationOptions(ceremonyId: CeremonyID(recovery.id!), challenge: challenge, relyingPartyId: ctx.config.relyingPartyID,
                                           relyingPartyName: ctx.config.relyingPartyName, userId: consumer.userHandle, userName: consumer.displayName,
@@ -151,15 +187,22 @@ struct RecoveryService {
         }
         let token = SecureToken.generate()
         let holdUntil = now.addingTimeInterval(RecoveryPolicy.holdSeconds)
-        let started = try await DB.swap(db, table: AccountRecoveryRecord.schema, id: recoveryId, column: "state", expected: "awaiting_passkey",
-                                        newValue: "holding", extra: [("new_credential_id", verified.credentialId),
-                                                                     ("new_public_key", Base64URL.encode(verified.publicKey)),
-                                                                     ("new_sign_count", Int(verified.signCount)),
-                                                                     ("new_backup_eligible", verified.backupEligible),
-                                                                     ("status_token_hash", SecureToken.hash(token)), ("hold_until", holdUntil)])
+        // The "Recovery started" notice is stored in the same transaction as the hold: if it cannot be stored the recovery does not start
+        // (an owner who is never told is exactly what the hold exists to prevent). The push afterwards is best effort.
+        let consumerId = recovery.consumerId
+        let started: Bool = try await db.transaction { tx in
+            guard try await DB.swap(tx, table: AccountRecoveryRecord.schema, id: recoveryId, column: "state", expected: "awaiting_passkey",
+                                    newValue: "holding", extra: [("new_credential_id", verified.credentialId),
+                                                                 ("new_public_key", Base64URL.encode(verified.publicKey)),
+                                                                 ("new_sign_count", Int(verified.signCount)),
+                                                                 ("new_backup_eligible", verified.backupEligible),
+                                                                 ("status_token_hash", SecureToken.hash(token)), ("hold_until", holdUntil)]) else { return false }
+            try await SecurityNotices(db: tx, ctx: ctx).store(of: consumerId, except: nil, notice: .recoveryStarted, subjectId: RecoveryID(recoveryId).description)
+            return true
+        }
         guard started else { throw failure }
-        await audit("recovery.started", consumer: recovery.consumerId, subject: recoveryId, metadata: ["activates_at": ViadereDate.format(holdUntil)])
-        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: recovery.consumerId, except: nil, notice: .recoveryStarted, subjectId: RecoveryID(recoveryId).description)
+        await audit("recovery.started", consumer: consumerId, subject: recoveryId, metadata: ["activates_at": ViadereDate.format(holdUntil)])
+        await SecurityNotices(db: db, ctx: ctx).push(to: consumerId, except: nil, notice: .recoveryStarted)
         return RecoveryStatus(id: RecoveryID(recoveryId), state: .holding, startedAt: recovery.createdAt, activatesAt: holdUntil, statusToken: token)
     }
 
@@ -180,6 +223,9 @@ struct RecoveryService {
         let cancelled: Bool = try await db.transaction { tx in
             guard try await DB.swap(tx, table: AccountRecoveryRecord.schema, id: id.uuid, column: "state", expected: recovery.state, newValue: "cancelled",
                                     extra: [("cancelled_at", now)]) else { return false }
+            // Every other open recovery of the account closes with it: cancelling one must never leave another able to activate.
+            try await AccountRecoveryRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$state ~~ ["awaiting_passkey", "holding"])
+                .set(\.$state, to: "cancelled").set(\.$cancelledAt, to: now).update()
             try await RecoveryCodeRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$state == "active")
                 .set(\.$state, to: "invalidated").update()
             _ = try await AuditService(db: tx, ctx: ctx).record("recovery.cancelled", principal: principal, subjectType: "recovery", subjectId: id.description)
@@ -240,8 +286,9 @@ struct RecoveryService {
         guard recovery.state == "holding", let hold = recovery.holdUntil, hold <= now, let id = recovery.id,
               let credentialId = recovery.newCredentialId, let publicKey = recovery.newPublicKey else { return }
         let consumerId = recovery.consumerId
+        var counterparts: [UUID] = []
         do {
-            try await db.transaction { tx in
+            counterparts = try await db.transaction { tx -> [UUID] in
                 guard try await DB.swap(tx, table: AccountRecoveryRecord.schema, id: id, column: "state", expected: "holding", newValue: "activated",
                                         extra: [("activated_at", now)]) else { throw ConcurrencyConflict() }
                 let deviceIds = try await DeviceRecord.query(on: tx).filter(\.$consumerId == consumerId).filter(\.$revokedAt == nil).all().compactMap(\.id)
@@ -251,12 +298,23 @@ struct RecoveryService {
                 try await PasskeyCredentialRecord(consumerId: consumerId, credentialId: credentialId, publicKey: publicKey,
                                                   signCount: recovery.newSignCount ?? 0, backupEligible: recovery.newBackupEligible ?? false, now: now).create(on: tx)
                 try await RecoveryCodeRecord.query(on: tx).filter(\.$consumerId == consumerId).filter(\.$state == "active").set(\.$state, to: "invalidated").update()
+                // Recovery proves possession of a code, not that this is the person the household and the phone numbers were trusted
+                // for: third-party trust does not carry over. Delegation grants (both directions) end and open invitations are cancelled;
+                // every phone link goes back into cool-down (confirmable from a trusted device with Face ID).
+                let ended = try await HouseholdService(db: tx, ctx: ctx).endAll(for: ConsumerID(consumerId), reason: "account_recovered")
+                let phonesCooling = try await PhoneLinkService.coolDownAll(consumerId: consumerId, until: now.addingTimeInterval(RecoveryPolicy.holdSeconds), on: tx)
+                let notices = SecurityNotices(db: tx, ctx: ctx)
+                try await notices.store(of: consumerId, except: nil, notice: .recoveryCompleted, subjectId: id.uuidString.lowercased())
+                for other in ended { try await notices.store(of: other, except: nil, notice: .delegationEnded, subjectId: id.uuidString.lowercased()) }
                 _ = try await AuditService(db: tx, ctx: ctx).record("recovery.activated", actor: AuditActor(kind: .system), consumerId: ConsumerID(consumerId),
-                    subjectType: "recovery", subjectId: id.uuidString.lowercased(), metadata: ["devices_revoked": String(deviceIds.count)])
+                    subjectType: "recovery", subjectId: id.uuidString.lowercased(),
+                    metadata: ["devices_revoked": String(deviceIds.count), "delegations_ended": String(ended.count), "phones_cooling": String(phonesCooling)])
+                return ended
             }
         } catch is ConcurrencyConflict {
             return
         }
+        for other in counterparts { await SecurityNotices(db: db, ctx: ctx).push(to: other, except: nil, notice: .delegationEnded) }
     }
 
     // MARK: Maintenance
@@ -279,12 +337,13 @@ struct RecoveryService {
         let consumerId = principal.consumerId.uuid
         let remaining = try await RecoveryCodeRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state == "active").count()
         let profile = try await RecoveryProfileRecord.query(on: db).filter(\.$consumerId == consumerId).first()
-        let holding = try await AccountRecoveryRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state == "holding").first()
-        let pending = holding.flatMap { row -> PendingRecovery? in
+        let holding = try await AccountRecoveryRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state == "holding")
+            .sort(\.$createdAt, .ascending).all()
+        let pending = holding.compactMap { row -> PendingRecovery? in
             guard let id = row.id, let until = row.holdUntil else { return nil }
             return PendingRecovery(id: RecoveryID(id), startedAt: row.createdAt, activatesAt: until)
         }
-        return RecoveryInfo(remainingCodes: remaining, issuedAt: profile?.issuedAt, pending: pending)
+        return RecoveryInfo(remainingCodes: remaining, issuedAt: profile?.issuedAt, pending: pending.first, pendingRecoveries: pending)
     }
 
     /// Step 1 of regeneration: assertion options over a fresh single-use challenge. Needs a trusted device.
@@ -324,10 +383,27 @@ struct RecoveryService {
             _ = try? await AuditService(db: db, ctx: ctx).record("recovery.codes_failed", outcome: .failure, principal: principal, subjectType: "recovery")
             throw required
         }
-        return try await db.transaction { tx in
+        // Whoever started a recovery held a code of the old set. A trusted device that makes a new set closes every recovery still waiting
+        // (the old codes die, and so must what they started).
+        let (set, cancelled): (RecoveryCodeSet, [UUID]) = try await db.transaction { tx in
+            let open = try await AccountRecoveryRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid)
+                .filter(\.$state ~~ ["awaiting_passkey", "holding"]).all()
+            if !open.isEmpty {
+                try await AccountRecoveryRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$state ~~ ["awaiting_passkey", "holding"])
+                    .set(\.$state, to: "cancelled").set(\.$cancelledAt, to: now).update()
+                for row in open {
+                    _ = try await AuditService(db: tx, ctx: ctx).record("recovery.cancelled", principal: principal, subjectType: "recovery",
+                                                                       subjectId: row.id?.uuidString.lowercased(), metadata: ["reason": "codes_regenerated"])
+                }
+            }
             let set = try await RecoveryService(db: tx, ctx: ctx).issueCodes(consumerId: principal.consumerId.uuid)
             _ = try await AuditService(db: tx, ctx: ctx).record("recovery.codes_regenerated", principal: principal, subjectType: "recovery")
-            return set
+            return (set, open.compactMap(\.id))
         }
+        for id in cancelled {
+            await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .recoveryCancelled,
+                                                                       subjectId: RecoveryID(id).description)
+        }
+        return set
     }
 }

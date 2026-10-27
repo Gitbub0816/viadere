@@ -78,4 +78,17 @@ struct IdentityRound4Tests {
         #expect(APIRoutes.all.contains { $0.name == "devices.replacement.cancel" && $0.auth == .deviceSignedBearer })
         #expect(RecoveryPolicy.holdSeconds == 72 * 3600 && RecoveryPolicy.codeCount == 10)
     }
+
+    @Test func recoveryInfoListsEveryPendingRecoveryAndStaysCompatible() throws {
+        let one = PendingRecovery(id: RecoveryID(), startedAt: Fixtures.now, activatesAt: Fixtures.now.addingTimeInterval(RecoveryPolicy.holdSeconds))
+        let two = PendingRecovery(id: RecoveryID(), startedAt: Fixtures.now, activatesAt: Fixtures.now.addingTimeInterval(RecoveryPolicy.holdSeconds))
+        let info = RecoveryInfo(remainingCodes: 4, issuedAt: Fixtures.now, pendingRecoveries: [one, two])
+        #expect(info.pending == one && info.pendingRecoveries == [one, two])
+        #expect(try ViadereJSON.decode(RecoveryInfo.self, from: try ViadereJSON.encode(info)) == info)
+        // A server from before the list: only `pending`. A client from before the list ignores the new field.
+        let legacy = try ViadereJSON.decode(RecoveryInfo.self, from: Data(#"{"remainingCodes":1,"pending":\#(String(decoding: try ViadereJSON.encode(one), as: UTF8.self))}"#.utf8))
+        #expect(legacy.pendingRecoveries == [one] && legacy.pending == one)
+        #expect(try ViadereJSON.decode(RecoveryInfo.self, from: Data(#"{"remainingCodes":0}"#.utf8)).pendingRecoveries.isEmpty)
+        #expect(SecurityNoticeTopic(rawValue: "delegationEnded") == .delegationEnded && SecurityNoticeTopic(rawValue: "recoveryCompleted") == .recoveryCompleted)
+    }
 }

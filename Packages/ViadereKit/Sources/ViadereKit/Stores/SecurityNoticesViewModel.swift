@@ -137,6 +137,8 @@ public final class SecurityNoticesViewModel {
         case .recoveryStarted: return "Account recovery was started \(when)."
         case .recoveryCancelled: return "An account recovery was cancelled \(when)."
         case .recoveryAttemptsLocked: return "Several wrong recovery codes were entered, so recovery is paused for a day."
+        case .recoveryCompleted: return "Your account was recovered \(when). Household access ended and your phone numbers are cooling down."
+        case .delegationEnded: return "Household access with another account ended \(when) because that account was recovered."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
@@ -152,6 +154,8 @@ public final class SecurityNoticesViewModel {
         }
         switch notice.topic {
         case .recoveryCancelled, .recoveryAttemptsLocked: return "Your devices were told. You can generate new recovery codes in Settings."
+        case .recoveryCompleted: return "Confirm your phone numbers from a device you trust, and share access again if you want to."
+        case .delegationEnded: return "Ask them to invite you again if you still want to share."
         default: return Self.prompt
         }
     }

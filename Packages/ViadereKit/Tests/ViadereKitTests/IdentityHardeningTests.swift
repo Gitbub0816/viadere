@@ -285,6 +285,68 @@ struct RecoveryCodesTests {
         #expect(vm.newRecoveryCodes == nil)
     }
 
+    @Test func settingsShowsEveryPendingRecoveryAndCancelsAllOfThemWithoutAHomeNotice() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api)
+        await api.setRecoveryCodes(RecoveryCodeSet(recoveryId: "AAAA-BBBB-CCCC", codes: ["AAAAA-AAAAA"], issuedAt: Date()))
+        let first = await api.addHoldingRecovery()
+        let second = await api.addHoldingRecovery()
+        let vm = SecuritySettingsViewModel(services: services)
+        await vm.load()
+        // No notice was ever loaded: the control is driven by RecoveryInfo alone.
+        #expect(vm.pendingRecoveries.map(\.id) == [first, second])
+        #expect(vm.recoveryStatusLine == "Recovery in progress. You can cancel it here.")
+        await vm.cancelPendingRecoveries()
+        #expect(Set(await api.cancelledRecoveryIds) == [first, second], "one cancel request per pending recovery")
+        #expect(vm.pendingRecoveries.isEmpty)
+        #expect(vm.recoveryMessage == SecurityNoticesViewModel.recoveryCancelledMessage)
+    }
+
+    @Test func cancellingARecoveryFromSettingsNeedsATrustedDevice() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api)
+        let id = await api.addHoldingRecovery()
+        let vm = SecuritySettingsViewModel(services: services)
+        await vm.load()
+        await api.setDismissNeedsTrustedDevice(true)
+        await vm.cancelPendingRecoveries()
+        #expect(vm.recoveryMessage == SecurityNoticesViewModel.coolDownActionMessage)
+        #expect(vm.pendingRecoveries.map(\.id) == [id], "still pending: nothing was cancelled")
+    }
+
+    @Test func regeneratingCodesClosesPendingRecoveries() async throws {
+        let api = MockViadereAPI(seed: false)
+        let passkeys = RecordingPasskeys()
+        var services = await ViadereServices.mock(api: api)
+        services.passkeys = passkeys
+        await api.setRecoveryCodes(RecoveryCodeSet(recoveryId: "AAAA-BBBB-CCCC", codes: ["AAAAA-AAAAA"], issuedAt: Date()))
+        await api.addHoldingRecovery()
+        let vm = SecuritySettingsViewModel(services: services)
+        await vm.load()
+        #expect(vm.pendingRecoveries.count == 1)
+        await vm.regenerateRecoveryCodes()
+        #expect(vm.pendingRecoveries.isEmpty)
+    }
+
+    @Test func recoveryInfoDecodesOldAndNewServers() throws {
+        let id = RecoveryID()
+        let old = Data(#"{"remainingCodes":3,"pending":{"id":"\#(id)","startedAt":"2026-01-01T00:00:00Z","activatesAt":"2026-01-04T00:00:00Z"}}"#.utf8)
+        let decoded = try ViadereJSON.decode(RecoveryInfo.self, from: old)
+        #expect(decoded.pendingRecoveries.map(\.id) == [id] && decoded.pending?.id == id)
+        let none = try ViadereJSON.decode(RecoveryInfo.self, from: Data(#"{"remainingCodes":0}"#.utf8))
+        #expect(none.pendingRecoveries.isEmpty && none.pending == nil)
+        let round = try ViadereJSON.decode(RecoveryInfo.self, from: try ViadereJSON.encode(decoded))
+        #expect(round == decoded)
+    }
+
+    @Test func recoveryCompletedAndDelegationEndedNoticesHaveTheirOwnCopy() async {
+        let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: MockViadereAPI(seed: false)))
+        func make(_ kind: String) -> SecurityNotice { SecurityNotice(id: UUID(), rawKind: kind, message: "", createdAt: Date()) }
+        #expect(model.headline(for: make("recoveryCompleted")).contains("recovered"))
+        #expect(model.headline(for: make("delegationEnded")).contains("Household access"))
+        #expect(model.prompt(for: make("recoveryCompleted")).contains("Confirm your phone numbers"))
+    }
+
     @Test func aDeviceThatIsNotTrustedYetCannotRegenerate() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)

@@ -353,9 +353,12 @@ struct HouseholdService {
         throw APIError.notFound
     }
 
-    /// Account deletion: every grant given or received ends and open invitations are cancelled.
-    func endAll(for consumer: ConsumerID) async throws {
+    /// Account deletion or recovery: every grant given or received ends and open invitations are cancelled. Returns the counterpart
+    /// accounts (the other side of each grant that was ended) so the caller can tell them.
+    @discardableResult
+    func endAll(for consumer: ConsumerID, reason: String = "account_deleted") async throws -> [UUID] {
         let now = ctx.now
+        var counterparts: [UUID] = []
         for grant in try await DelegationGrantRecord.query(on: db).filter(\.$revokedAt == nil).group(.or, { or in
             or.filter(\.$grantorId == consumer.uuid)
             or.filter(\.$delegateId == consumer.uuid)
@@ -363,10 +366,13 @@ struct HouseholdService {
             if try await DB.swapFromNull(db, table: DelegationGrantRecord.schema, id: grant.id!, column: "revoked_at", newValue: now) {
                 _ = try await AuditService(db: db, ctx: ctx).record("delegation.revoked", actor: AuditActor(kind: .consumer, id: consumer.description),
                     consumerId: ConsumerID(grant.grantorId), subjectType: "delegation", subjectId: grant.id!.uuidString.lowercased(),
-                    metadata: ["grantorId": ConsumerID(grant.grantorId).description, "reason": "account_deleted"])
+                    metadata: ["grantorId": ConsumerID(grant.grantorId).description, "reason": reason])
+                let other = grant.grantorId == consumer.uuid ? grant.delegateId : grant.grantorId
+                if !counterparts.contains(other) { counterparts.append(other) }
             }
         }
         try await DelegationInvitationRecord.query(on: db).filter(\.$grantorId == consumer.uuid).filter(\.$state == "open").set(\.$state, to: "revoked").update()
+        return counterparts
     }
 
     // MARK: Access checks used by interactions

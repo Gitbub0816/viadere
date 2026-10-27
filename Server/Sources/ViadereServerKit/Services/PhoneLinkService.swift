@@ -16,6 +16,19 @@ struct PhoneLinkService {
     /// The same, when the account has no *other* trusted device that could confirm it (nobody to ask, so the delay is the defence).
     static let soleDeviceLinkCoolDown: TimeInterval = 72 * 3600
 
+    /// Recovery took effect: every verified number goes back into cool-down (usable from `until`, or sooner when a trusted device
+    /// confirms it with Face ID), because whoever recovered the account is not yet known to be its owner. Returns how many links changed.
+    @discardableResult
+    static func coolDownAll(consumerId: UUID, until: Date, on db: any Database) async throws -> Int {
+        let links = try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state == "verified").all()
+        for link in links {
+            link.usableFrom = max(link.usableFrom ?? until, until)
+            link.confirmedAt = nil
+            try await link.update(on: db)
+        }
+        return links.count
+    }
+
     private func otpHash(linkId: UUID, code: String) -> String { ctx.hasher.hmacHex("otp", "\(linkId.uuidString.lowercased())|\(code)") }
 
     private func randomOTP() -> String {

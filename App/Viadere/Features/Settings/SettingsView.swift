@@ -367,8 +367,13 @@ struct RecoveryCodesSettingsView: View {
             if vm.recoveryInfo?.remainingCodes == 0 {
                 ViadereNotice("You have no unused codes. Generate a set so you can recover your account if you lose your devices.", kind: .warning)
             }
-            if let pending = vm.recoveryInfo?.pending {
-                ViadereNotice("A recovery was started and finishes \(CoolDownPolicy.timeText(pending.activatesAt, now: Date())). If it wasn't you, cancel it from the notice on Home.", kind: .warning)
+            if let pending = vm.pendingRecoveries.first {
+                // Driven by `RecoveryInfo`, not by the Home notice: the way to stop a recovery you did not start is always here.
+                ViadereNotice("Recovery in progress. It finishes \(CoolDownPolicy.timeText(pending.activatesAt, now: Date())) and would replace your passkey and sign out every device. If it wasn't you, cancel it now.", kind: .warning)
+                Button(vm.isCancellingRecovery ? "Cancelling…" : "Recovery in progress — Cancel") { Task { await vm.cancelPendingRecoveries() } }
+                    .buttonStyle(.viadere(.primary))
+                    .disabled(vm.isCancellingRecovery || !vm.isTrustedDevice)
+                    .accessibilityHint("Stops the account recovery that was started and makes its recovery codes stop working")
             }
             Text("Each code works once, together with your recovery ID. Generating new codes makes the old ones stop working. You'll confirm with your passkey, and the new codes are shown only once.")
                 .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)

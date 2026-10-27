@@ -39,6 +39,8 @@ struct EmailVerificationService {
     static let codeTTL: TimeInterval = 15 * 60
     static let maxAttempts = 5
     static let unverifiedTTL: TimeInterval = 24 * 3600
+    /// Wrong or unanswered verification attempts per address per day, whatever the number of codes issued: 10, refilled over 24 hours.
+    static let dailyFailureRule = RateRule(capacity: 10, perMinute: 10.0 / (24 * 60))
     static let payloadContext = "dashboard_email_codes.payload"
 
     /// Six digits, uniform (rejection sampling over a 32-bit value).
@@ -114,20 +116,55 @@ struct EmailVerificationService {
 
     // MARK: Unverified accounts
 
+    /// How long a pending sign-up is protected from being replaced by someone else's sign-up for the same address.
+    static let freshSignupWindow: TimeInterval = 15 * 60
+
     /// Deletes unverified business accounts (and everything hanging off them) so the address is free again.
+    ///
+    /// The accounts are **claimed first**, atomically (`unverified → purging … RETURNING id`), and only the claimed ones lose their
+    /// children. An account whose owner entered the code in the meantime is no longer `unverified`, so the claim skips it and its passkey
+    /// and sessions are never touched (the old order deleted the children of a snapshot and only then checked the status). The foreign
+    /// keys require the children to go before the user row, so the claim is a status flip inside the transaction, not a delete.
     static func removeUnverified(_ users: [DashboardUserRecord], on db: any Database) async throws {
         let ids = users.compactMap(\.id)
         guard !ids.isEmpty else { return }
-        try await DashboardEmailCodeRecord.query(on: db).filter(\.$subjectId ~~ ids).delete()
-        try await DashboardPasskeyRecord.query(on: db).filter(\.$userId ~~ ids).delete()
-        try await DashboardSessionRecord.query(on: db).filter(\.$userId ~~ ids).delete()
-        try await DashboardUserRecord.query(on: db).filter(\.$id ~~ ids).filter(\.$status == "unverified").delete()
+        try await db.transaction { tx in
+            guard let sql = tx as? any SQLDatabase else { throw APIError.internalError }
+            let claimed = try await sql.raw("UPDATE dashboard_users SET status = 'purging' WHERE id IN (\(binds: ids)) AND status = 'unverified' RETURNING id").all()
+                .map { try $0.decode(column: "id", as: UUID.self) }
+            try await purgeClaimed(claimed, on: tx)
+        }
     }
 
     /// Removes an unverified account holding `emailHash`, if any (before a verified sign-up or an invitation takes the address).
     static func removeUnverified(emailHash: String, on db: any Database) async throws {
+        try await db.transaction { tx in
+            guard let sql = tx as? any SQLDatabase else { throw APIError.internalError }
+            let claimed = try await sql.raw("UPDATE dashboard_users SET status = 'purging' WHERE email_hash = \(bind: emailHash) AND status = 'unverified' RETURNING id").all()
+                .map { try $0.decode(column: "id", as: UUID.self) }
+            try await purgeClaimed(claimed, on: tx)
+        }
+    }
+
+    private static func purgeClaimed(_ ids: [UUID], on db: any Database) async throws {
+        guard !ids.isEmpty else { return }
+        try await DashboardEmailCodeRecord.query(on: db).filter(\.$subjectId ~~ ids).delete()
+        try await DashboardPasskeyRecord.query(on: db).filter(\.$userId ~~ ids).delete()
+        try await DashboardSessionRecord.query(on: db).filter(\.$userId ~~ ids).delete()
+        try await DashboardUserRecord.query(on: db).filter(\.$id ~~ ids).filter(\.$status == "purging").delete()
+    }
+
+    /// Whether `emailHash` has an unverified sign-up that is younger than `freshSignupWindow` (its newest code counts: a resend renews it).
+    /// Such a sign-up is left alone by a competing sign-up for the same address, so nobody can keep wiping a victim's in-progress sign-up.
+    static func hasFreshPendingSignup(emailHash: String, on db: any Database, now: Date) async throws -> Bool {
+        let cutoff = now.addingTimeInterval(-freshSignupWindow)
         let users = try await DashboardUserRecord.query(on: db).filter(\.$emailHash == emailHash).filter(\.$status == "unverified").all()
-        try await removeUnverified(users, on: db)
+        for user in users {
+            if user.createdAt > cutoff { return true }
+            guard let id = user.id else { continue }
+            if try await DashboardEmailCodeRecord.query(on: db).filter(\.$kind == "signup").filter(\.$subjectId == id).filter(\.$createdAt > cutoff).count() > 0 { return true }
+        }
+        return false
     }
 
     /// Maintenance: sign-ups that sat unverified for 24 hours, and long-dead codes.

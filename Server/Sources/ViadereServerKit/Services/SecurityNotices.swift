@@ -11,7 +11,7 @@ struct SecurityNotices {
 
     enum Notice {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
-        case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked
+        case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -23,6 +23,8 @@ struct SecurityNotices {
             case .recoveryStarted: .recoveryStarted
             case .recoveryCancelled: .recoveryCancelled
             case .recoveryAttemptsLocked: .recoveryAttemptsLocked
+            case .recoveryCompleted: .recoveryCompleted
+            case .delegationEnded: .delegationEnded
             }
         }
 
@@ -50,19 +52,33 @@ struct SecurityNotices {
                 "An account recovery was cancelled. Its recovery codes no longer work: create new ones in Viadere settings."
             case .recoveryAttemptsLocked:
                 "Someone entered wrong recovery codes for your Viadere account, so recovery is locked for a while. If this wasn't you, make new recovery codes in settings."
+            case .recoveryCompleted:
+                "Your Viadere account was recovered. Household access was ended and your linked phone numbers need to be confirmed again from a trusted device."
+            case .delegationEnded:
+                "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }
         }
     }
 
+    /// Stores the in-app notice (throws when it cannot be stored: callers that must not lose the notice run this inside their transaction).
+    func store(of consumer: UUID, except: UUID?, notice: Notice, subjectId: String? = nil) async throws {
+        try await SecurityNoticeRecord(consumerId: consumer, kind: notice.kind.rawValue, message: notice.body, subjectId: subjectId,
+                                       originDeviceId: except, now: ctx.now, action: notice.action?.rawValue).create(on: db)
+    }
+
     /// Stores the in-app notice and pushes to every active app device of `consumer` except `except` (the device that just did it).
     func notifyOtherDevices(of consumer: UUID, except: UUID?, notice: Notice, subjectId: String? = nil) async {
-        let now = ctx.now
         do {
-            try await SecurityNoticeRecord(consumerId: consumer, kind: notice.kind.rawValue, message: notice.body, subjectId: subjectId,
-                                           originDeviceId: except, now: now, action: notice.action?.rawValue).create(on: db)
+            try await store(of: consumer, except: except, notice: notice, subjectId: subjectId)
         } catch {
             ctx.logger.warning("security notice could not be stored", metadata: ["kind": "\(notice.kind.rawValue)"])
         }
+        await push(to: consumer, except: except, notice: notice)
+    }
+
+    /// The push half (best effort): the stored notice, the audit log and the device list remain the source of truth.
+    func push(to consumer: UUID, except: UUID?, notice: Notice) async {
+        let now = ctx.now
         do {
             let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$revokedAt == nil).all()
                 .filter { $0.id != except && $0.kind == .app && !$0.isExpired(at: now) }
@@ -76,7 +92,7 @@ struct SecurityNotices {
                 }
             }
         } catch {
-            // Best effort: the stored notice, the audit log and the device list remain the source of truth.
+            // Best effort.
         }
     }
 

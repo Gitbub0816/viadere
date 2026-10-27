@@ -163,11 +163,27 @@ public struct RecoveryInfo: Codable, Sendable, Hashable {
     /// Unused codes left (0 = none issued yet or all used: regenerate).
     public var remainingCodes: Int
     public var issuedAt: Date?
+    /// The earliest pending recovery (kept for older clients; `pendingRecoveries` is the complete list).
     public var pending: PendingRecovery?
-    public init(remainingCodes: Int, issuedAt: Date? = nil, pending: PendingRecovery? = nil) {
+    /// Every recovery waiting out its 72 h hold, oldest first. The source of truth for "Recovery in progress - Cancel": cancel each one.
+    public var pendingRecoveries: [PendingRecovery]
+    public init(remainingCodes: Int, issuedAt: Date? = nil, pending: PendingRecovery? = nil, pendingRecoveries: [PendingRecovery]? = nil) {
         self.remainingCodes = remainingCodes
         self.issuedAt = issuedAt
-        self.pending = pending
+        self.pending = pending ?? pendingRecoveries?.first
+        self.pendingRecoveries = pendingRecoveries ?? pending.map { [$0] } ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey { case remainingCodes, issuedAt, pending, pendingRecoveries }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        remainingCodes = try container.decode(Int.self, forKey: .remainingCodes)
+        issuedAt = try container.decodeIfPresent(Date.self, forKey: .issuedAt)
+        let single = try container.decodeIfPresent(PendingRecovery.self, forKey: .pending)
+        let all = try container.decodeIfPresent([PendingRecovery].self, forKey: .pendingRecoveries)
+        pending = single ?? all?.first
+        pendingRecoveries = all ?? single.map { [$0] } ?? []
     }
 }
 

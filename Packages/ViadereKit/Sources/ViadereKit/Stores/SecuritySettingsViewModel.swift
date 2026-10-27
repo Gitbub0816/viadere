@@ -36,6 +36,7 @@ public final class SecuritySettingsViewModel {
     public private(set) var recoveryInfo: RecoveryInfo?
     public private(set) var recoveryAvailable = true
     public private(set) var isRegeneratingCodes = false
+    public private(set) var isCancellingRecovery = false
     public private(set) var recoveryMessage: String?
     /// New codes from "Generate new codes", on screen once.
     public private(set) var newRecoveryCodes: RecoveryCodesViewModel?
@@ -88,10 +89,42 @@ public final class SecuritySettingsViewModel {
     /// This iPhone is not cooling down and not revoked (`DeviceTrust`, §2.5): it may act on the account's security.
     public var isTrustedDevice: Bool { thisDeviceLockedUntil == nil && thisDevice?.isRevoked != true }
 
+    /// Every recovery of this account that is waiting out its 72 h hold, from `RecoveryInfo` (the server's own list, not the Home notice).
+    public var pendingRecoveries: [PendingRecovery] {
+        guard let info = recoveryInfo else { return [] }
+        return info.pendingRecoveries.isEmpty ? (info.pending.map { [$0] } ?? []) : info.pendingRecoveries
+    }
+
+    /// "Recovery in progress - Cancel": cancels **every** pending recovery (a trusted device; one request each). Needs no Home notice.
+    public func cancelPendingRecoveries() async {
+        guard !isCancellingRecovery, !pendingRecoveries.isEmpty else { return }
+        guard isTrustedDevice else { recoveryMessage = SecurityNoticesViewModel.coolDownActionMessage; return }
+        isCancellingRecovery = true
+        recoveryMessage = nil
+        defer { isCancellingRecovery = false }
+        for pending in pendingRecoveries {
+            do { _ = try await services.api.cancelRecovery(pending.id) } catch let error as APIError {
+                switch error.code {
+                case .notFound?, .gone?, .conflict?: continue            // already cancelled, finished or handled elsewhere
+                case .deviceCoolDown?: recoveryMessage = SecurityNoticesViewModel.coolDownActionMessage
+                default: recoveryMessage = error.userMessage
+                }
+                await loadRecovery()
+                return
+            } catch {
+                recoveryMessage = "Couldn't cancel the recovery. Try again in a moment."
+                await loadRecovery()
+                return
+            }
+        }
+        recoveryMessage = SecurityNoticesViewModel.recoveryCancelledMessage
+        await loadRecovery()
+    }
+
     /// One calm line about the codes.
     public var recoveryStatusLine: String {
         guard let info = recoveryInfo else { return "Checking…" }
-        if info.pending != nil { return "A recovery is waiting. Review it on Home." }
+        if !pendingRecoveries.isEmpty { return "Recovery in progress. You can cancel it here." }
         if info.remainingCodes == 0 { return "No codes yet. Generate a set to be able to recover your account." }
         return info.remainingCodes == 1 ? "1 unused code" : "\(info.remainingCodes) unused codes"
     }

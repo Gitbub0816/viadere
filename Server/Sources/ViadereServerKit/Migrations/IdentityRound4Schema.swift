@@ -1,6 +1,7 @@
 import Fluent
 import FluentSQL
 import Foundation
+import SQLKit
 
 /// Identity round 4: App Attest keys, account recovery (codes, profiles, recoveries), pending device replacement, notice actions and
 /// business idempotency keys.
@@ -102,5 +103,30 @@ struct CreateIdentityRound4Schema: AsyncMigration {
         try await db.schema("recovery_codes").delete()
         try await db.schema("recovery_profiles").delete()
         try await db.schema("app_attest_keys").delete()
+    }
+}
+
+/// Round-4 re-review: at most one open recovery per account, enforced by the database. `begin` used to count open recoveries and then
+/// insert, so concurrent begins with different codes created several holding recoveries and one cancel closed only one of them.
+struct CreateRecoveryRound5Schema: AsyncMigration {
+    var name: String { "CreateRecoveryRound5Schema.v1" }
+
+    func prepare(on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase else { return }
+        // Existing duplicates (if any) would make the index fail: keep the oldest open recovery of each account, cancel the rest.
+        try await sql.raw("""
+            UPDATE account_recoveries SET state = 'cancelled' WHERE state IN ('awaiting_passkey', 'holding') AND EXISTS (
+                SELECT 1 FROM account_recoveries older WHERE older.consumer_id = account_recoveries.consumer_id
+                AND older.state IN ('awaiting_passkey', 'holding')
+                AND (older.created_at < account_recoveries.created_at
+                     OR (older.created_at = account_recoveries.created_at AND older.id < account_recoveries.id)))
+            """).run()
+        // A partial unique index: Postgres and SQLite both support it, Fluent cannot express it.
+        try await sql.raw("CREATE UNIQUE INDEX IF NOT EXISTS uq_account_recoveries_open ON account_recoveries (consumer_id) WHERE state IN ('awaiting_passkey', 'holding')").run()
+    }
+
+    func revert(on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase else { return }
+        try await sql.raw("DROP INDEX IF EXISTS uq_account_recoveries_open").run()
     }
 }

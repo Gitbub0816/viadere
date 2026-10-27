@@ -445,6 +445,8 @@ final class PlatformRound4Tests: XCTestCase {
     func testALaterSignupReplacesAnUnverifiedOneForTheSameAddress() async throws {
         try await withHarness { h in
             let (first, _) = try await h.dashSignupUnverified(email: "owner@acme.test", org: "Squatter Org", handle: nil)
+            // A sign-up under 15 minutes old is protected from being wiped (DashboardRound5Tests); an older one never holds the address.
+            h.clock.advance(by: 16 * 60)
             let (second, _) = try await h.dashSignupUnverified(email: "owner@acme.test", org: "Real Org", handle: nil)
             try await isNil(try await DashboardUserRecord.find(first.userId, on: h.db))
             try await notNil(try await DashboardUserRecord.find(second.userId, on: h.db))

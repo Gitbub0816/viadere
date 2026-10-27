@@ -43,6 +43,8 @@ public actor MockViadereAPI: ViadereAPI {
     /// Recovery state (§2.26).
     private var recoverySet: RecoveryCodeSet?
     private var recoveryRecord: MockRecoveryRecord?
+    /// Further holding recoveries of the account (the real server allows one; this models an older server or a racing client).
+    private var extraRecoveries: [MockRecoveryRecord] = []
     private var recoveryCodesChallenges: [CeremonyID: String] = [:]
     /// Sessions the server minted for replacement devices (`Device.replacementSession`).
     public private(set) var replacementSessions: [AuthSession] = []
@@ -698,6 +700,11 @@ extension MockViadereAPI {
 
     public func cancelRecovery(_ id: RecoveryID) async throws -> RecoveryStatus {
         if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        if let index = extraRecoveries.firstIndex(where: { $0.id == id }) {
+            extraRecoveries[index].state = .cancelled
+            cancelledRecoveryIds.append(id)
+            return RecoveryStatus(id: id, state: .cancelled, startedAt: extraRecoveries[index].startedAt, activatesAt: extraRecoveries[index].activatesAt)
+        }
         guard var record = recoveryRecord, record.id == id else { throw APIError.server(status: 404, code: .notFound, message: "") }
         if record.state == .holding || record.state == .awaitingPasskey { record.state = .cancelled }
         recoveryRecord = record
@@ -709,11 +716,11 @@ extension MockViadereAPI {
     }
 
     public func recoveryInfo() async throws -> RecoveryInfo {
-        let pending = recoveryRecord.flatMap { record -> PendingRecovery? in
+        let pending = ([recoveryRecord].compactMap { $0 } + extraRecoveries).compactMap { record -> PendingRecovery? in
             guard record.state == .holding, let at = record.activatesAt else { return nil }
             return PendingRecovery(id: record.id, startedAt: record.startedAt, activatesAt: at)
         }
-        return RecoveryInfo(remainingCodes: recoverySet?.codes.count ?? 0, issuedAt: recoverySet?.issuedAt, pending: pending)
+        return RecoveryInfo(remainingCodes: recoverySet?.codes.count ?? 0, issuedAt: recoverySet?.issuedAt, pending: pending.first, pendingRecoveries: pending)
     }
 
     public func beginRecoveryCodes() async throws -> PasskeyAssertionOptions {
@@ -728,7 +735,20 @@ extension MockViadereAPI {
         guard let challenge = recoveryCodesChallenges.removeValue(forKey: request.ceremonyId), Self.assertionIsUserVerified(request.assertion, challenge: challenge) else {
             throw APIError.server(status: 401, code: .passkeyAssertionRequired, message: "")
         }
+        // New codes close every recovery still waiting (the old codes started them).
+        if var record = recoveryRecord, record.state == .holding || record.state == .awaitingPasskey { record.state = .cancelled; recoveryRecord = record }
+        for index in extraRecoveries.indices where extraRecoveries[index].state == .holding { extraRecoveries[index].state = .cancelled }
+        noticeList.removeAll { $0.action == .cancelRecovery }
         return issueRecoveryCodes()
+    }
+
+    /// Test hook: another recovery is holding for this account; returns its id.
+    @discardableResult
+    public func addHoldingRecovery() -> RecoveryID {
+        let record = MockRecoveryRecord(id: RecoveryID(), state: .holding, startedAt: clock(), activatesAt: clock().addingTimeInterval(RecoveryPolicy.holdSeconds),
+                                        statusToken: SecureToken.generate(), ceremonyId: CeremonyID())
+        extraRecoveries.append(record)
+        return record.id
     }
 
     /// Test hook: the 72 h hold passes (the next `complete` activates the recovery).

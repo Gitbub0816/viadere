@@ -588,6 +588,10 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case recoveryCancelled
     /// Repeated wrong recovery codes locked recovery for a while.
     case recoveryAttemptsLocked
+    /// A recovery took effect on this account: household access ended and linked phone numbers are cooling down again.
+    case recoveryCompleted
+    /// A household grant with another account ended because that account was recovered.
+    case delegationEnded
     case unknown
 
     public init(from decoder: any Decoder) throws {

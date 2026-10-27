@@ -187,8 +187,13 @@ struct DashboardAuthService {
         let detail = body.description.flatMap { cleanName($0, max: 500) }
         // Three independent budgets, so one source cannot mail-bomb an address from many IPs, one IP cannot spray many addresses, and a single
         // (IP, address) pair is limited on its own. The keys are the input, never the account's existence, so the answers reveal nothing.
-        try await ctx.limiter.enforce("dashboard-signup-email", key: "\(ip)|\(emailHash(email))", rule: .perHour(5, burst: 5))
-        try await ctx.limiter.enforce("dashboard-signup-address", key: emailHash(email), rule: .perHour(5, burst: 5))
+        // An address with a fresh pending sign-up is not touched by this one (see `signupFinish`), so it does not spend that address's budget:
+        // somebody hammering a victim's address cannot use up what the victim's own sign-up needs. The per-IP budgets always apply.
+        let protected = try await EmailVerificationService.hasFreshPendingSignup(emailHash: emailHash(email), on: db, now: ctx.now)
+        if !protected {
+            try await ctx.limiter.enforce("dashboard-signup-email", key: "\(ip)|\(emailHash(email))", rule: .perHour(5, burst: 5))
+            try await ctx.limiter.enforce("dashboard-signup-address", key: emailHash(email), rule: .perHour(5, burst: 5))
+        }
         try await ctx.limiter.enforce("dashboard-signup-ip", key: ip, rule: .perHour(30, burst: 15))
         // Deliberately no "this email is taken" answer here: it would let anyone enumerate addresses, and the ceremony proves nothing
         // about the address. A taken address fails at the end with the same generic error as any other failed registration.
@@ -223,9 +228,12 @@ struct DashboardAuthService {
         let userId = UUID()
         let hash = emailHash(payload.email)
         let verification = EmailVerificationService(db: db, ctx: ctx)
-        let code: String
+        let code: String?
         do {
-            code = try await db.transaction { tx in
+            code = try await db.transaction { tx -> String? in
+                // A pending sign-up younger than 15 minutes is not wiped by a competing one: this answers exactly as a success does and
+                // sends nothing, so repeating it cannot keep resetting a victim's in-progress sign-up (the owner uses "resend").
+                if try await EmailVerificationService.hasFreshPendingSignup(emailHash: hash, on: tx, now: ctx.now) { return nil }
                 try await EmailVerificationService.removeUnverified(emailHash: hash, on: tx)
                 try await makeUser(kind: "business", email: payload.email, displayName: payload.displayName, handle: payload.userHandle,
                                    status: "unverified", id: userId).create(on: tx)
@@ -241,7 +249,7 @@ struct DashboardAuthService {
             }
             throw error
         }
-        await verification.deliver(EmailVerificationService.codeMessage(to: payload.email, code: code, kind: "signup-code"))
+        if let code { await verification.deliver(EmailVerificationService.codeMessage(to: payload.email, code: code, kind: "signup-code")) }
         if let previousCookie { try await store.revoke(token: previousCookie) }
     }
 
@@ -254,6 +262,10 @@ struct DashboardAuthService {
         guard let email = Self.normalizeEmail(body.email) else { throw failure }
         let hash = emailHash(email)
         try await ctx.limiter.enforce("dashboard-verify-email", key: hash, rule: .perHour(30, burst: 10))
+        // A per-address cap on wrong guesses per day that a new code does not reset (the five attempts per code do): ten tries, refilled over
+        // 24 hours. Charged before the comparison (so concurrent guesses cannot exceed it) and given back on success. The key is the input,
+        // never the account, so exhausting it reveals nothing.
+        try await ctx.limiter.enforce("dashboard-verify-failures", key: hash, rule: EmailVerificationService.dailyFailureRule)
         let verification = EmailVerificationService(db: db, ctx: ctx)
         guard let record = try await verification.latest(kind: "signup", emailHash: hash), try await verification.check(record, code: body.code),
               let sealed = record.payload, let data = try? ctx.cipher.open(sealed, context: EmailVerificationService.payloadContext, rowId: record.id!),
@@ -275,6 +287,7 @@ struct DashboardAuthService {
         } catch is ConcurrencyConflict {
             throw failure
         }
+        await ctx.limiter.refund("dashboard-verify-failures", key: hash, rule: EmailVerificationService.dailyFailureRule)
     }
 
     /// Sends a fresh sign-up code to an address that has a pending sign-up. Always returns normally for a well-formed request, whether or
@@ -282,7 +295,8 @@ struct DashboardAuthService {
     func resendSignupCode(email rawEmail: String, ip: String) async throws {
         guard let email = Self.normalizeEmail(rawEmail) else { return }
         let hash = emailHash(email)
-        try await ctx.limiter.enforce("dashboard-signup-address", key: hash, rule: .perHour(5, burst: 5))
+        // Its own budget: a stranger's sign-up attempts for this address (`dashboard-signup-address`) must not use up the owner's resends.
+        try await ctx.limiter.enforce("dashboard-resend-address", key: hash, rule: .perHour(5, burst: 5))
         try await ctx.limiter.enforce("dashboard-signup-ip", key: ip, rule: .perHour(30, burst: 15))
         let verification = EmailVerificationService(db: db, ctx: ctx)
         guard let old = try await verification.latest(kind: "signup", emailHash: hash), let sealed = old.payload,
