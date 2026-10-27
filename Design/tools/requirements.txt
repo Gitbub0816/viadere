@@ -1,0 +1,4 @@
+# Tooling dependencies for Design/tools/build.py (Python only; no Node.js).
+fonttools
+pillow
+playwright

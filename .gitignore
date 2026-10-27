@@ -3,3 +3,5 @@
 DerivedData/
 *.xcodeproj/
 .DS_Store
+Design/tools/.venv/
+__pycache__/

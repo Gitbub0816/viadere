@@ -2,7 +2,7 @@
 
 The identity in one place is `brand-guide.html`, a self-contained page you open in a browser. It covers the mark, its meaning, lockups, app icons, palette, clear space, minimum sizes, do's and don'ts, typography and component principles.
 
-Every vector here comes from **one Bézier source** (`tools/geom.js` + `tools/final.json`). The SVGs, PDFs, PNGs, the asset catalog and the Swift path data are all generated from it, so they cannot drift apart.
+Every vector here comes from **one Bézier source** (`tools/geom.py` + `tools/final.json`). The SVGs, PDFs, PNGs, the asset catalog and the Swift path data are all generated from it, so they cannot drift apart.
 
 ## Files
 
@@ -19,7 +19,7 @@ Every vector here comes from **one Bézier source** (`tools/geom.js` + `tools/fi
 | `pdf/*` | Vector PDFs (the asset catalog uses these) |
 | `../App/Shared/DesignSystem/ViadereMark.swift` | SwiftUI mark, wordmark, lockup and `ViadereBrand` palette (SwiftUI only, generated). **Moved:** `App/Shared/DesignSystem` is now the source of truth |
 | `../App/Shared/DesignSystem/ViadereDesignSystem.swift` | Custom components and tokens (buttons, field, card, row, toggle, segmented, badge, section header, slide-to-approve / approve–deny, empty state). **Moved** with the mark; `ViadereComponents.swift` beside it adds the app-level components (tab bar, chips, code and OTP fields, countdown ring, notices) |
-| `tools/` | Generators (Node + Playwright/Chromium, Python + fontTools/Pillow). Paths inside assume the original scratch layout, so adjust them before re-running |
+| `tools/` | Generators, Python only (`python3 Design/tools/build.py`; see [Regenerating](#regenerating)). All paths are repo-relative |
 | `../App/Resources/Assets.xcassets` | `AppIcon` (light, dark and tinted appearances), `BrandMark` (light/dark), `BrandMarkMonoDark`, `BrandMarkMonoLight`, `BrandMarkTemplate` (template rendering), `Wordmark`, `LockupHorizontal`, and `Colors/*` colour sets |
 | `../App/Resources/Fonts` | Outfit Light / Regular / SemiBold TTF + `OFL.txt` |
 
@@ -58,7 +58,7 @@ Semantic colour sets (light / dark):
 
 ## Typography
 
-- **Wordmark:** [Outfit](https://github.com/Outfitio/Outfit-Fonts) by The Outfit Project Authors, **SIL Open Font License 1.1**. Sourced from the `@fontsource/outfit@5.3.0` npm package (latin subset) and outlined with fontTools: "via" is SemiBold (600), "dere" is Light (300), with tracking of −0.008 em. The OFL allows bundling, so the TTFs and `OFL.txt` are in `App/Resources/Fonts`. To use them in SwiftUI, list them under `UIAppFonts` in Info.plist (`Outfit-Light.ttf`, `Outfit-Regular.ttf`, `Outfit-SemiBold.ttf`).
+- **Wordmark:** [Outfit](https://github.com/Outfitio/Outfit-Fonts) by The Outfit Project Authors, **SIL Open Font License 1.1**. Sourced from Fontsource's Outfit 5.3.0 release (latin subset; the TTFs in `App/Resources/Fonts` and the woff2 files in `tools/fonts/` are the inputs) and outlined with fontTools: "via" is SemiBold (600), "dere" is Light (300), with tracking of −0.008 em. The OFL allows bundling, so the TTFs and `OFL.txt` are in `App/Resources/Fonts`. To use them in SwiftUI, list them under `UIAppFonts` in Info.plist (`Outfit-Light.ttf`, `Outfit-Regular.ttf`, `Outfit-SemiBold.ttf`).
 - **Interface:** SF Pro (system) with Dynamic Type. See `ViadereType`.
 
 ## Using it in the app
@@ -84,4 +84,28 @@ ViadereSlideToConfirm { approve() }
 - The AppIcon set uses the single-size 1024 format (Xcode 15+). The `dark` and `tinted` appearances are honoured on iOS 18 / Xcode 16; older toolchains use the light icon.
 - This is a high-fidelity vector interpretation of the reference images, not the original designer's source files. If a designer delivers final masters, replace `tools/final.json` (or the SVG/PDF files directly) and regenerate.
 
-> **Source of truth moved.** The SwiftUI files that used to live in `Design/swift/` are now part of the app target at `App/Shared/DesignSystem/` and are compiled into every UI target (app, App Clip, notification content, widgets, watch). Edit them there. The generators under `tools/` still emit the geometry; copy regenerated `ViadereMark.swift` output into `App/Shared/DesignSystem/`.
+## Regenerating
+
+One command rebuilds everything, from any working directory:
+
+```sh
+python3 -m venv Design/tools/.venv                       # once; the venv is gitignored
+Design/tools/.venv/bin/pip install -r Design/tools/requirements.txt
+python3 Design/tools/build.py                            # re-runs itself inside the venv if it exists
+```
+
+Requirements: Python 3 (current stable), `fonttools`, `pillow` and `playwright` (see `tools/requirements.txt`). No Node.js. PNG and PDF rendering uses headless Chromium through Python Playwright. `build.py` uses a Chromium at `$VIADERE_CHROMIUM` or `/opt/pw-browsers/chromium*` if present; otherwise run `Design/tools/.venv/bin/playwright install chromium` once.
+
+What it writes:
+
+| Step | Module | Output |
+|---|---|---|
+| geometry + SVG | `geom.py`, `mark.py`, `brand.py` (+ `glyphs.py` for the outlined wordmark) | `svg/*.svg` |
+| raster / PDF | `render.py` | `png/*.png`, `pdf/*.pdf` |
+| Swift path data | `swift.py` | `../App/Shared/DesignSystem/ViadereMark.swift` |
+| asset catalog | `assets.py` + `colors.json` | `../App/Resources/Assets.xcassets` |
+| brand guide | `guide.py` | `brand-guide.html` |
+
+The SVG, Swift, JSON and PNG output is deterministic and byte-identical between runs. Chromium stamps a creation date into every PDF, so `build.py` keeps the existing PDF when its drawing (content streams and page size) is unchanged, which keeps the diff clean. The Outfit TTFs in `App/Resources/Fonts` are inputs, not outputs.
+
+> **Source of truth moved.** The SwiftUI files that used to live in `Design/swift/` are now part of the app target at `App/Shared/DesignSystem/` and are compiled into every UI target (app, App Clip, notification content, widgets, watch). `tools/build.py` regenerates `ViadereMark.swift` there directly; the other files in that folder are edited by hand.
