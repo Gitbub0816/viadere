@@ -24,13 +24,22 @@ public enum Decision: String, Sendable, Codable, CaseIterable {
 /// The signed statement a device produces when the consumer decides on an interaction.
 ///
 /// Canonical JSON (see `CanonicalJSON`) with these members (absent optionals omitted):
-/// `assurance`, `businessId`, `challenge`, `decision`, `deviceId`, `interactionId`,
-/// `reply`, `selectedOptionIds`, `signedAt`, `v` (= 1).
+/// `assurance`, `businessId`, `challenge`, `contextDigest`, `decision`, `deviceId`, `interactionId`,
+/// `reply`, `selectedOptionIds`, `signedAt`, `v`.
+///
+/// **Versions.** `v` = 1 has no `contextDigest`. `v` = 2 adds `contextDigest` = `Interaction.displayContextDigest()` of
+/// the interaction exactly as the person saw it, so the signature covers the amount, merchant, service, options and
+/// expiry that were displayed. The server *requires* v2 for `approve`, `confirm`, `select` and `reply` on
+/// `authenticate`, `authorize`, `confirm` and `choose` (`requiresContextDigest`); v1 is still accepted for everything
+/// else (deny, report, decline, acknowledge, ...). The version is implied by the presence of the digest.
 ///
 /// Signature input: UTF-8 `"VIADERE-DECISION-V1\n"` followed by the canonical JSON bytes.
 /// Algorithm: ECDSA P-256 / SHA-256, raw r||s, base64url.
 public struct DecisionPayload: Sendable, Hashable, Codable {
+    /// Version without a context digest (still valid for deny/report/decline/acknowledge).
     public static let version: Int64 = 1
+    /// Version that carries `contextDigest`.
+    public static let versionWithContext: Int64 = 2
     public static let domain = "VIADERE-DECISION-V1\n"
     /// Max reply length inside a decision.
     public static let maxReplyLength = 1000
@@ -45,9 +54,25 @@ public struct DecisionPayload: Sendable, Hashable, Codable {
     public var signedAt: Date
     public var deviceId: DeviceID
     public var assurance: DecisionAssurance
+    /// `Interaction.displayContextDigest()` of what was displayed; present makes this a v2 payload.
+    public var contextDigest: String?
+
+    /// 1 without a context digest, 2 with one.
+    public var payloadVersion: Int64 { contextDigest == nil ? Self.version : Self.versionWithContext }
+
+    /// Whether `decision` on a `kind` must carry a context digest (v2).
+    public static func requiresContextDigest(kind: InteractionKind, decision: Decision) -> Bool {
+        switch kind {
+        case .authenticate, .authorize, .confirm, .choose:
+            return [.approve, .confirm, .select, .reply].contains(decision)
+        default:
+            return false
+        }
+    }
 
     public init(interactionId: InteractionID, businessId: BusinessID, decision: Decision, selectedOptionIds: [String]? = nil,
-                reply: String? = nil, challenge: ChallengeNonce, signedAt: Date, deviceId: DeviceID, assurance: DecisionAssurance) {
+                reply: String? = nil, challenge: ChallengeNonce, signedAt: Date, deviceId: DeviceID, assurance: DecisionAssurance,
+                contextDigest: String? = nil) {
         self.interactionId = interactionId
         self.businessId = businessId
         self.decision = decision
@@ -57,12 +82,13 @@ public struct DecisionPayload: Sendable, Hashable, Codable {
         self.signedAt = ViadereDate.truncatedToMilliseconds(signedAt)
         self.deviceId = deviceId
         self.assurance = assurance
+        self.contextDigest = contextDigest
     }
 
     /// Canonical JSON bytes.
     public func canonicalJSON() throws -> Data {
         var object: [String: JSONValue] = [
-            "v": .integer(Self.version),
+            "v": .integer(payloadVersion),
             "interactionId": .string(interactionId.description),
             "businessId": .string(businessId.description),
             "decision": .string(decision.rawValue),
@@ -73,6 +99,7 @@ public struct DecisionPayload: Sendable, Hashable, Codable {
         ]
         if let selectedOptionIds { object["selectedOptionIds"] = .array(selectedOptionIds.map(JSONValue.string)) }
         if let reply { object["reply"] = .string(reply) }
+        if let contextDigest { object["contextDigest"] = .string(contextDigest) }
         return try CanonicalJSON.serialize(.object(object))
     }
 
@@ -87,8 +114,12 @@ public struct DecisionPayload: Sendable, Hashable, Codable {
             throw DecisionVerificationError.malformedPayload
         }
         let allowed: Set<String> = ["v", "interactionId", "businessId", "decision", "challenge", "signedAt", "deviceId",
-                                    "assurance", "selectedOptionIds", "reply"]
-        guard Set(o.keys).isSubset(of: allowed), o["v"] == .integer(version),
+                                    "assurance", "selectedOptionIds", "reply", "contextDigest"]
+        // v1 has no digest; v2 must have a well-formed one.
+        let contextDigest = o["contextDigest"]?.stringValue
+        guard Set(o.keys).isSubset(of: allowed),
+              (o["v"] == .integer(version) && o["contextDigest"] == nil)
+                || (o["v"] == .integer(versionWithContext) && contextDigest.map(Interaction.isValidContextDigest) == true),
               let interactionId = o["interactionId"]?.stringValue.flatMap(InteractionID.init),
               let businessId = o["businessId"]?.stringValue.flatMap(BusinessID.init),
               let decision = o["decision"]?.stringValue.flatMap(Decision.init(rawValue:)),
@@ -111,7 +142,7 @@ public struct DecisionPayload: Sendable, Hashable, Codable {
         }
         let payload = DecisionPayload(interactionId: interactionId, businessId: businessId, decision: decision,
                                       selectedOptionIds: selected, reply: reply, challenge: challenge, signedAt: signedAt,
-                                      deviceId: deviceId, assurance: assurance)
+                                      deviceId: deviceId, assurance: assurance, contextDigest: contextDigest)
         guard try payload.canonicalJSON() == data else { throw DecisionVerificationError.nonCanonicalPayload }
         return payload
     }
@@ -145,6 +176,10 @@ public enum DecisionVerificationError: Error, Sendable, Equatable {
     case invalidSelection
     case invalidDecision
     case replayed
+    /// The decision needs a v2 payload with a context digest and has none.
+    case contextDigestRequired
+    /// The signed context digest is not the digest of the interaction the server holds.
+    case contextMismatch
 }
 
 /// Produces `SignedDecision`s on the device.
@@ -217,6 +252,13 @@ public struct DecisionVerifier: Sendable {
         guard AssurancePolicy.canSatisfy(interaction, channel: channel, provided: .deviceSignature(payload.assurance),
                                         decision: payload.decision) else {
             throw DecisionVerificationError.insufficientAssurance
+        }
+        // What was shown is what was signed: recomputed from the interaction the server holds, never taken from the client.
+        if DecisionPayload.requiresContextDigest(kind: interaction.kind, decision: payload.decision), payload.contextDigest == nil {
+            throw DecisionVerificationError.contextDigestRequired
+        }
+        if let digest = payload.contextDigest {
+            guard ConstantTime.equals(digest, interaction.displayContextDigest()) else { throw DecisionVerificationError.contextMismatch }
         }
         if case .choose(let choose) = interaction.payload {
             let valid = Set(choose.options.map(\.id))

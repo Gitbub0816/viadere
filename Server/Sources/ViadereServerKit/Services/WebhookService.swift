@@ -48,7 +48,7 @@ struct WebhookService {
         record.businessId = businessId.uuid
         record.url = request.url.absoluteString
         record.events = events.sorted().joined(separator: ",")
-        record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret")
+        record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret", rowId: record.id!)
         record.active = true
         record.createdAt = ctx.now
         try await record.create(on: db)
@@ -77,7 +77,7 @@ struct WebhookService {
         // Keep the old secret signing for a while so receivers can switch over without dropping events.
         record.previousSecretCiphertext = record.secretCiphertext
         record.previousSecretExpiresAt = ctx.now.addingTimeInterval(Self.rotationOverlap)
-        record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret")
+        record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret", rowId: record.id!)
         try await record.update(on: db)
         guard let subscription = dto(record) else { throw APIError.internalError }
         _ = try await AuditService(db: db, ctx: ctx).record("webhook.rotated", actor: AuditActor(kind: .business, id: businessId.description),
@@ -153,11 +153,11 @@ struct WebhookService {
         }
         let body = Data(delivery.body.utf8)
         var secrets: [String] = []
-        if let current = try? ctx.cipher.openString(subscription.secretCiphertext, context: "webhook_subscriptions.secret") {
+        if let current = try? ctx.cipher.openString(subscription.secretCiphertext, context: "webhook_subscriptions.secret", rowId: subscription.id!) {
             secrets.append(current)
         }
         if let previous = subscription.previousSecretCiphertext, let expires = subscription.previousSecretExpiresAt, expires > now,
-           let value = try? ctx.cipher.openString(previous, context: "webhook_subscriptions.secret") {
+           let value = try? ctx.cipher.openString(previous, context: "webhook_subscriptions.secret", rowId: subscription.id!) {
             secrets.append(value)
         }
         let started = Date()

@@ -21,10 +21,15 @@ public enum APIRoutes {
         "auth.logout", .POST, "/v1/auth/logout", auth: .bearer)
 
     // MARK: Devices
+    /// Returns the enrollment challenge **and** WebAuthn assertion options over that same challenge (`DeviceEnrollmentChallenge`).
     public static let deviceEnrollBegin = Endpoint<EmptyBody, DeviceEnrollmentChallenge>(
         "devices.enroll.begin", .POST, "/v1/devices/enroll/begin", auth: .bearer)
+    /// Bearer plus a fresh, user-verified passkey assertion over the enrollment challenge (or a fresh unused passkey sign-in).
     public static let deviceEnroll = Endpoint<DeviceEnrollRequest, Device>(
         "devices.enroll", .POST, "/v1/devices", auth: .bearer)
+    /// Lifts the new-device cool-down of `{deviceId}`; signed by a different, trusted device (`ConfirmationProof`).
+    public static let deviceConfirm = Endpoint<ConfirmationRequest, Device>(
+        "devices.confirm", .POST, "/v1/devices/{deviceId}/confirm", auth: .deviceSignedBearer)
     public static let devicesList = Endpoint<EmptyBody, [Device]>(
         "devices.list", .GET, "/v1/devices", auth: .deviceSignedBearer)
     public static let deviceRevoke = Endpoint<EmptyBody, EmptyBody>(
@@ -39,6 +44,9 @@ public enum APIRoutes {
         "phoneLinks.list", .GET, "/v1/phone-links", auth: .deviceSignedBearer)
     public static let phoneLinkDelete = Endpoint<EmptyBody, EmptyBody>(
         "phoneLinks.delete", .DELETE, "/v1/phone-links/{phoneLinkId}", auth: .deviceSignedBearer)
+    /// Makes a newly linked phone usable for delivery and RCS/SMS replies now (`ConfirmationProof`, subject `phoneLink`).
+    public static let phoneLinkConfirm = Endpoint<ConfirmationRequest, PhoneLink>(
+        "phoneLinks.confirm", .POST, "/v1/phone-links/{phoneLinkId}/confirm", auth: .deviceSignedBearer)
 
     // MARK: Sessions & account
     public static let sessionsList = Endpoint<EmptyBody, [SessionInfo]>(
@@ -49,9 +57,12 @@ public enum APIRoutes {
     public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
         "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
 
-    /// Web flow: the one-time SMS link token is redeemed after passkey sign-in.
+    /// Read-only: what the one-time SMS link token would link (`{maskedPhone, expiresAt}`). Does not consume the token.
+    public static let smsLinkPreview = Endpoint<EmptyBody, SMSLinkPreview>(
+        "sms.linkTokens.preview", .GET, "/v1/sms/link-tokens/{token}/preview", auth: .deviceSignedBearer)
+    /// The one-time SMS link token is redeemed **inside the app** after the person confirmed the masked phone (device-signed).
     public static let smsLinkRedeem = Endpoint<SMSLinkRedeemRequest, PhoneLink>(
-        "sms.linkTokens.redeem", .POST, "/v1/sms/link-tokens/redeem", auth: .bearer)
+        "sms.linkTokens.redeem", .POST, "/v1/sms/link-tokens/redeem", auth: .deviceSignedBearer)
 
     /// App-side redemption of an SMS secure-handoff token; the token must have been minted for this consumer.
     public static let handoffRedeem = Endpoint<HandoffRedeemRequest, HandoffRedeemResponse>(
@@ -183,6 +194,9 @@ public enum APIRoutes {
     /// Validates and consumes a redemption code atomically: exactly one caller can ever succeed per code.
     public static let businessConsumeRedemption = Endpoint<ConsumeRedemptionRequest, RedemptionReceipt>(
         "business.redemptions.consume", .POST, "/v1/business/redemptions/consume", auth: .businessAPIKey)
+    /// Test-mode keys only: creates a sandbox consumer connected to the business. Test keys can target nothing else.
+    public static let businessSandboxRelationship = Endpoint<EmptyBody, SandboxRelationship>(
+        "business.sandbox.relationships.create", .POST, "/v1/business/sandbox/relationships", auth: .businessAPIKey)
     public static let businessWebhooksList = Endpoint<EmptyBody, [WebhookSubscription]>(
         "business.webhooks.list", .GET, "/v1/business/webhooks", auth: .businessAPIKey)
     public static let businessWebhookCreate = Endpoint<CreateWebhookRequest, WebhookSecretResponse>(
@@ -208,8 +222,9 @@ public enum APIRoutes {
     public static let all: [AnyEndpoint] = [
         registerBegin.descriptor, registerFinish.descriptor, loginBegin.descriptor, loginFinish.descriptor,
         authRefresh.descriptor, logout.descriptor,
-        deviceEnrollBegin.descriptor, deviceEnroll.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
-        phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
+        deviceEnrollBegin.descriptor, deviceEnroll.descriptor, deviceConfirm.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
+        phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkPreview.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
+        phoneLinkConfirm.descriptor,
         phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
         relationshipConnect.descriptor, relationshipsList.descriptor, relationshipDisconnect.descriptor,
@@ -227,7 +242,7 @@ public enum APIRoutes {
         businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
         businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
-        businessWebhookRotate.descriptor,
+        businessWebhookRotate.descriptor, businessSandboxRelationship.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
     ]
 

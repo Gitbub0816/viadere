@@ -89,6 +89,15 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         try decode(InteractionOutcome.self, try await perform(APIRoutes.businessCancelInteraction.descriptor, parameters: ["interactionId": id.description], naturallyIdempotent: true))
     }
 
+    // MARK: Sandbox (test keys only)
+
+    /// Creates a sandbox consumer connected to your business (`POST /v1/business/sandbox/relationships`). **Test keys can
+    /// only issue interactions and messages to sandbox relationships**; a live key can never target one, and a test key can
+    /// never reach a real person. Requires a `vdk_test_…` key.
+    public func createSandboxRelationship() async throws -> SandboxRelationship {
+        try decode(SandboxRelationship.self, try await perform(APIRoutes.businessSandboxRelationship.descriptor))
+    }
+
     // MARK: Messages and statuses
 
     /// Sends a message into the customer's conversation with you (scope `messages:write`).

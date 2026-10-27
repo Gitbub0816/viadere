@@ -16,7 +16,7 @@ struct ConversationService {
     // MARK: Mapping
 
     func dto(_ record: ConversationMessageRecord) throws -> ConversationMessage {
-        let body = (try? ctx.cipher.openString(record.bodyCiphertext, context: "conversation_messages.body")) ?? ""
+        let body = (try? ctx.cipher.openString(record.bodyCiphertext, context: "conversation_messages.body", rowId: record.id!)) ?? ""
         return ConversationMessage(
             id: MessageID(record.id!), sessionId: SessionID(record.sessionId), businessId: BusinessID(record.businessId),
             direction: MessageDirection(rawValue: record.direction) ?? .system,
@@ -50,7 +50,7 @@ struct ConversationService {
             let last = try await ConversationMessageRecord.query(on: db).filter(\.$sessionId == id).sort(\.$createdAt, .descending).first()
             let unread = try await ConversationMessageRecord.query(on: db).filter(\.$sessionId == id)
                 .filter(\.$direction == MessageDirection.businessToConsumer.rawValue).filter(\.$readAt == nil).count()
-            let preview = last.flatMap { try? ctx.cipher.openString($0.bodyCiphertext, context: "conversation_messages.body") }
+            let preview = last.flatMap { try? ctx.cipher.openString($0.bodyCiphertext, context: "conversation_messages.body", rowId: $0.id!) }
                 .map { SMSEncoding.field($0, maxLength: 80) }
             out.append(ConversationSummary(id: SessionID(id), business: business, state: ConversationSummary.State(rawValue: session.state) ?? .closed,
                                            lastMessagePreview: preview, lastMessageAt: session.lastMessageAt, unreadCount: unread))
@@ -117,7 +117,7 @@ struct ConversationService {
         record.direction = MessageDirection.consumerToBusiness.rawValue
         record.senderType = MessageAttribution.SenderType.consumer.rawValue
         record.displayName = "You"
-        record.bodyCiphertext = try ctx.cipher.seal(body, context: "conversation_messages.body")
+        record.bodyCiphertext = try ctx.cipher.seal(body, context: "conversation_messages.body", rowId: record.id!)
         record.channel = Channel.inApp.rawValue
         record.deliveryStatus = DeliveryStatus.delivered.rawValue
         record.createdAt = now
@@ -190,7 +190,7 @@ struct ConversationService {
         // Attribution always uses the verified business name, never business-supplied text.
         record.displayName = principal.businessName
         record.agentName = agent
-        record.bodyCiphertext = try ctx.cipher.seal(body, context: "conversation_messages.body")
+        record.bodyCiphertext = try ctx.cipher.seal(body, context: "conversation_messages.body", rowId: record.id!)
         record.channel = session.channel
         record.deliveryStatus = DeliveryStatus.queued.rawValue
         record.createdAt = now

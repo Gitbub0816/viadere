@@ -84,7 +84,7 @@ public struct SMSGatewayEngine: Sendable {
         ctx.session = session
         ctx.revision += 1
         let body = GatewayCopy.attribution(session.business)
-            + SMSEncoding.stripSpoofingCharacters(SMSEncoding.gsmFriendly(text), allowNewlines: true)
+            + SMSEncoding.businessLine(text)
         return GatewayTransition(context: ctx, effects: [.sendSMS(body)])
     }
 

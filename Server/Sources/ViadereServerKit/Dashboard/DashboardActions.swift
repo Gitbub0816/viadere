@@ -207,7 +207,7 @@ struct DashboardActions {
             invite.id = UUID()
             invite.businessId = businessId
             invite.emailHash = emailHash
-            invite.emailCiphertext = try ctx.cipher.seal(email, context: "org_invites.email")
+            invite.emailCiphertext = try ctx.cipher.seal(email, context: "org_invites.email", rowId: invite.id!)
             invite.role = role.rawValue
             invite.tokenHash = SecureToken.hash(token)
             invite.invitedBy = principal.user.id!

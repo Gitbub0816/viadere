@@ -38,6 +38,8 @@ final class AuditEventRecord: Model, @unchecked Sendable {
     @Field(key: "metadata_json") var metadataJSON: String
     @Field(key: "prev_hash") var prevHash: String
     @Field(key: "hash") var hash: String
+    /// 1 = legacy unkeyed SHA-256; 2 = HMAC-SHA256 under `AUDIT_CHAIN_KEY` with the row id in the hashed content.
+    @Field(key: "chain_version") var chainVersion: Int
 
     init() {}
 }

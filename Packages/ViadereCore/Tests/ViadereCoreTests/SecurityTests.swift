@@ -118,11 +118,12 @@ struct DecisionSigningTests {
     let deviceId = DeviceID()
     let now = Fixtures.now
 
+    /// A v2 payload (with the context digest of `i`) unless `context` is false.
     func payload(for i: Interaction, decision: Decision = .approve, assurance: DecisionAssurance = .biometric,
-                 selected: [String]? = nil, challenge: ChallengeNonce? = nil, at: Date? = nil) -> DecisionPayload {
+                 selected: [String]? = nil, challenge: ChallengeNonce? = nil, at: Date? = nil, context: Bool = true) -> DecisionPayload {
         DecisionPayload(interactionId: i.id, businessId: i.businessId, decision: decision, selectedOptionIds: selected,
                         challenge: challenge ?? i.challenge, signedAt: at ?? now.addingTimeInterval(5), deviceId: deviceId,
-                        assurance: assurance)
+                        assurance: assurance, contextDigest: context ? i.displayContextDigest() : nil)
     }
 
     @Test func canonicalEncoding() throws {

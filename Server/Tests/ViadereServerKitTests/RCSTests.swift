@@ -421,18 +421,24 @@ final class RCSTests: XCTestCase {
                         let interaction = try r.json(Interaction.self)
                         let record = try await InteractionRecord.find(interaction.id.uuid, on: h.db)!
                         let stored = try record.interaction()
-                        let policy = AssurancePolicy.canSatisfy(stored, channel: .rcs, provided: .unauthenticatedReply, decision: Decision.allowed(for: stored.kind).first)
-                        for decision in Decision.allowed(for: stored.kind) {
+                        // `Decision.allowed(for:)` is a Set, and Swift gives every Set instance its own iteration order, so the
+                        // decisions are sorted: the loop below must be deterministic (an earlier version compared `.first` of
+                        // three differently ordered sets and failed intermittently, on any database).
+                        for decision in Decision.allowed(for: stored.kind).sorted(by: { $0.rawValue < $1.rawValue }) {
+                            let policy = AssurancePolicy.canSatisfy(stored, channel: .rcs, provided: .unauthenticatedReply, decision: decision)
                             do {
                                 _ = try await service.decideViaChannel(record: record, decision: decision, selected: decision == .select ? ["a"] : nil,
                                                                        reply: decision == .reply ? "ok" : nil, channel: .rcs, actor: AuditActor(kind: .gateway))
-                                // Allowed only when the policy says a channel reply suffices.
+                                // Allowed only when the policy says a channel reply suffices, and the server agrees with the policy.
+                                XCTAssertTrue(policy, "\(stored.kind) \(sensitivity) \(purpose) \(decision): the server allowed what the policy forbids")
                                 XCTAssertTrue(stored.requiredAssurance == .channelReply && !stored.kind.isSecuritySensitive && ![Decision.deny, .report].contains(decision),
                                               "\(stored.kind) \(sensitivity) \(purpose) \(decision) must not be satisfiable")
-                                XCTAssertTrue(policy || decision != Decision.allowed(for: stored.kind).first)
                                 break // one decision per interaction
                             } catch let error as APIError {
                                 XCTAssertTrue([.insufficientAssurance, .validationFailed].contains(error.code), "\(error.code)")
+                                if error.code == .insufficientAssurance {
+                                    XCTAssertFalse(policy, "\(stored.kind) \(sensitivity) \(purpose) \(decision): the server refused what the policy allows")
+                                }
                             }
                         }
                     }

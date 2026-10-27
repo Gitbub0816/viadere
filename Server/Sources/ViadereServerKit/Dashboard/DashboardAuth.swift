@@ -75,14 +75,15 @@ struct DashboardAuthService {
         return value
     }
 
-    private func newCeremony(kind: String, userId: UUID?, payload: String?) async throws -> (DashboardCeremonyRecord, Data) {
+    /// `sealedPayload` (personal data such as an email address) is encrypted bound to this ceremony row.
+    private func newCeremony(kind: String, userId: UUID?, payload: String? = nil, sealedPayload: String? = nil) async throws -> (DashboardCeremonyRecord, Data) {
         let challenge = verifier.makeChallenge()
         let record = DashboardCeremonyRecord()
         record.id = UUID()
         record.kind = kind
         record.challenge = Base64URL.encode(challenge)
         record.userId = userId
-        record.payloadJSON = payload
+        record.payloadJSON = try sealedPayload.map { try ctx.cipher.seal($0, context: "dashboard_ceremonies.payload", rowId: record.id!) } ?? payload
         record.state = "open"
         record.createdAt = ctx.now
         record.expiresAt = ctx.now.addingTimeInterval(Self.ceremonyTTL)
@@ -136,7 +137,7 @@ struct DashboardAuthService {
         user.id = id
         user.kind = kind
         user.emailHash = emailHash(email)
-        user.emailCiphertext = try ctx.cipher.seal(email, context: "dashboard_users.email")
+        user.emailCiphertext = try ctx.cipher.seal(email, context: "dashboard_users.email", rowId: id)
         user.displayName = displayName
         user.userHandle = handle
         user.status = status
@@ -177,7 +178,7 @@ struct DashboardAuthService {
         let payload = SignupPayload(email: email, displayName: name, organizationName: org, category: category, legalName: legal,
                                     website: website, requestedHandle: handle, description: detail, userHandle: userHandle)
         let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
-        let (ceremony, challenge) = try await newCeremony(kind: "signup", userId: nil, payload: try ctx.cipher.seal(json, context: "dashboard_ceremonies.payload"))
+        let (ceremony, challenge) = try await newCeremony(kind: "signup", userId: nil, sealedPayload: json)
         return registrationOptions(ceremony, challenge: challenge, handle: userHandle, email: email, displayName: name)
     }
 
@@ -195,7 +196,7 @@ struct DashboardAuthService {
 
     func signupFinish(_ finish: PasskeyRegistrationFinishRequest, previousCookie: String?) async throws -> DashboardSessionStore.Created {
         let ceremony = try await consume(finish.ceremonyId, kind: "signup")
-        guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload"),
+        guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload", rowId: ceremony.id!),
               let payload = try? JSONDecoder().decode(SignupPayload.self, from: data) else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
         let userId = UUID()
@@ -312,13 +313,13 @@ struct DashboardAuthService {
         guard let name = cleanName(body.displayName, max: 64), let invite = try await openInvite(token: body.token) else {
             throw APIError.validation("This invitation is not valid.", details: ["token": "invalid"])
         }
-        let email = try ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email")
+        let email = try ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!)
         guard try await DashboardUserRecord.query(on: db).filter(\.$emailHash == invite.emailHash).count() == 0 else {
             throw APIError.conflict("An account with this email already exists. Sign in, then accept the invitation.")
         }
         let handle = SecureToken.generate(byteCount: 32)
         let payload = String(decoding: try JSONEncoder().encode(["inviteId": invite.id!.uuidString, "displayName": name, "userHandle": handle]), as: UTF8.self)
-        let (ceremony, challenge) = try await newCeremony(kind: "invite", userId: nil, payload: try ctx.cipher.seal(payload, context: "dashboard_ceremonies.payload"))
+        let (ceremony, challenge) = try await newCeremony(kind: "invite", userId: nil, sealedPayload: payload)
         return registrationOptions(ceremony, challenge: challenge, handle: handle, email: email, displayName: name)
     }
 
@@ -332,11 +333,11 @@ struct DashboardAuthService {
 
     func inviteFinish(_ finish: PasskeyRegistrationFinishRequest, previousCookie: String?) async throws -> DashboardSessionStore.Created {
         let ceremony = try await consume(finish.ceremonyId, kind: "invite")
-        guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload"),
+        guard let sealed = ceremony.payloadJSON, let data = try? ctx.cipher.open(sealed, context: "dashboard_ceremonies.payload", rowId: ceremony.id!),
               let payload = try? JSONDecoder().decode([String: String].self, from: data), let inviteIdText = payload["inviteId"],
               let inviteId = UUID(uuidString: inviteIdText), let name = payload["displayName"], let handle = payload["userHandle"],
               let invite = try await OrgInviteRecord.find(inviteId, on: db), invite.state == "open", invite.expiresAt > ctx.now,
-              let email = try? ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email") else { throw APIError.unauthorized }
+              let email = try? ctx.cipher.openString(invite.emailCiphertext, context: "org_invites.email", rowId: invite.id!) else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
         let userId = UUID()
         try await db.transaction { tx in
@@ -364,7 +365,7 @@ struct DashboardAuthService {
         guard let enrollment = try await openEnrollment(token: body.token), let user = try await DashboardUserRecord.find(enrollment.userId, on: db) else {
             throw APIError.validation("This enrollment link is not valid.", details: ["token": "invalid"])
         }
-        let email = try ctx.cipher.openString(user.emailCiphertext, context: "dashboard_users.email")
+        let email = try ctx.cipher.openString(user.emailCiphertext, context: "dashboard_users.email", rowId: user.id!)
         let payload = String(decoding: try JSONEncoder().encode(["enrollmentId": enrollment.id!.uuidString]), as: UTF8.self)
         let (ceremony, challenge) = try await newCeremony(kind: "enroll", userId: user.id, payload: payload)
         return registrationOptions(ceremony, challenge: challenge, handle: user.userHandle, email: email, displayName: user.displayName)

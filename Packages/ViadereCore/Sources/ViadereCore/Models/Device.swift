@@ -10,16 +10,33 @@ public struct DeviceKey: Codable, Sendable, Hashable, Identifiable {
     public var id: DeviceKeyID
     public var purpose: DeviceKeyPurpose
     public var publicKey: DevicePublicKey
-    /// True if the private key is hardware-backed (Secure Enclave), as reported at enrollment.
+    /// True if the private key is hardware-backed (Secure Enclave), **as claimed by the client at enrollment**.
     public var hardwareBacked: Bool
+    /// True only when the server verified Apple App Attest evidence for this key. Until a verifier is configured this is
+    /// always `false`, and policy or telemetry must not rely on `hardwareBacked` alone.
+    public var attested: Bool
     public var createdAt: Date
 
-    public init(id: DeviceKeyID, purpose: DeviceKeyPurpose, publicKey: DevicePublicKey, hardwareBacked: Bool, createdAt: Date) {
+    public init(id: DeviceKeyID, purpose: DeviceKeyPurpose, publicKey: DevicePublicKey, hardwareBacked: Bool, createdAt: Date,
+                attested: Bool = false) {
         self.id = id
         self.purpose = purpose
         self.publicKey = publicKey
         self.hardwareBacked = hardwareBacked
+        self.attested = attested
         self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey { case id, purpose, publicKey, hardwareBacked, attested, createdAt }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(DeviceKeyID.self, forKey: .id)
+        purpose = try c.decode(DeviceKeyPurpose.self, forKey: .purpose)
+        publicKey = try c.decode(DevicePublicKey.self, forKey: .publicKey)
+        hardwareBacked = try c.decode(Bool.self, forKey: .hardwareBacked)
+        attested = try c.decodeIfPresent(Bool.self, forKey: .attested) ?? false
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
 }
 
@@ -36,9 +53,17 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
     public var createdAt: Date
     public var lastSeenAt: Date?
     public var revokedAt: Date?
+    /// `app` or `appClip` (App Clip devices hold a request key only and never decide interactions).
+    public var clientKind: DeviceClientKind
+    /// New-device cool-down: until this instant, `deny`/`report` work but the device may not approve **high or critical**
+    /// requests, unless another trusted device confirms it (`POST /v1/devices/{id}/confirm`). `nil` = trusted.
+    public var approvalsLockedUntil: Date?
+    /// When the device stops working on its own (App Clips: 7 days after enrollment). `nil` = never.
+    public var expiresAt: Date?
 
     public init(id: DeviceID, consumerId: ConsumerID, name: String, platform: DevicePlatform, keys: [DeviceKey],
-                createdAt: Date, lastSeenAt: Date? = nil, revokedAt: Date? = nil) {
+                createdAt: Date, lastSeenAt: Date? = nil, revokedAt: Date? = nil, clientKind: DeviceClientKind = .app,
+                approvalsLockedUntil: Date? = nil, expiresAt: Date? = nil) {
         self.id = id
         self.consumerId = consumerId
         self.name = name
@@ -48,9 +73,59 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.lastSeenAt = lastSeenAt
         self.revokedAt = revokedAt
+        self.clientKind = clientKind
+        self.approvalsLockedUntil = approvalsLockedUntil
+        self.expiresAt = expiresAt
     }
 
+    enum CodingKeys: String, CodingKey {
+        case id, consumerId, name, platform, keys, maxAssurance, createdAt, lastSeenAt, revokedAt, clientKind, clipDevice, approvalsLockedUntil, expiresAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(DeviceID.self, forKey: .id)
+        consumerId = try c.decode(ConsumerID.self, forKey: .consumerId)
+        name = try c.decode(String.self, forKey: .name)
+        platform = try c.decode(DevicePlatform.self, forKey: .platform)
+        keys = try c.decode([DeviceKey].self, forKey: .keys)
+        maxAssurance = try c.decode(DecisionAssurance.self, forKey: .maxAssurance)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        lastSeenAt = try c.decodeIfPresent(Date.self, forKey: .lastSeenAt)
+        revokedAt = try c.decodeIfPresent(Date.self, forKey: .revokedAt)
+        let clip = try c.decodeIfPresent(Bool.self, forKey: .clipDevice) ?? false
+        clientKind = clip ? .appClip : (try c.decodeIfPresent(DeviceClientKind.self, forKey: .clientKind) ?? .app)
+        approvalsLockedUntil = try c.decodeIfPresent(Date.self, forKey: .approvalsLockedUntil)
+        expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(consumerId, forKey: .consumerId)
+        try c.encode(name, forKey: .name)
+        try c.encode(platform, forKey: .platform)
+        try c.encode(keys, forKey: .keys)
+        try c.encode(maxAssurance, forKey: .maxAssurance)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
+        try c.encodeIfPresent(revokedAt, forKey: .revokedAt)
+        try c.encode(clientKind, forKey: .clientKind)
+        try c.encode(clientKind == .appClip, forKey: .clipDevice)
+        try c.encodeIfPresent(approvalsLockedUntil, forKey: .approvalsLockedUntil)
+        try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+    }
+
+    /// Whether the device is inside its new-device cool-down at `now`.
+    public func isCoolingDown(at now: Date) -> Bool { approvalsLockedUntil.map { now < $0 } ?? false }
+
+    /// Whether the device has passed its own lifetime.
+    public func isExpired(at now: Date) -> Bool { expiresAt.map { now >= $0 } ?? false }
+
     public var isRevoked: Bool { revokedAt != nil }
+
+    /// Wire convenience for the app: true for App Clip devices.
+    public var clipDevice: Bool { clientKind == .appClip }
 
     /// The key that must verify a request or decision with the given assurance.
     public func key(for purpose: DeviceKeyPurpose) -> DeviceKey? { keys.first { $0.purpose == purpose } }

@@ -15,7 +15,7 @@ struct HandoffTokens {
         record.kind = "handoff"
         record.tokenHash = SecureToken.hash(token)
         record.phoneHash = ctx.hasher.phoneHash(phone)
-        record.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "link_tokens.phone")
+        record.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "link_tokens.phone", rowId: record.id!)
         record.phoneLast4 = String(phone.e164.suffix(4))
         record.contextRevision = 0
         record.consumerId = consumerId
@@ -80,8 +80,8 @@ struct ChannelRouter {
         row.channel = rcsUsable ? "rcs" : "sms"
         row.preferredChannel = rcsWanted ? "rcs" : "sms"
         row.phoneHash = phoneHash
-        guard let phone = PhoneNumber((try? ctx.cipher.openString(link.phoneCiphertext, context: "phone_links.phone")) ?? "") else { return }
-        row.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "channel_outbound.phone")
+        guard let phone = PhoneNumber((try? ctx.cipher.openString(link.phoneCiphertext, context: "phone_links.phone", rowId: link.id!)) ?? "") else { return }
+        row.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "channel_outbound.phone", rowId: row.id!)
         row.status = "queued"
         row.attempts = 0
         row.nextAttemptAt = ctx.now
@@ -139,7 +139,7 @@ struct ChannelRouter {
               let business = try await DirectoryService(db: db).verified(id: row.businessId),
               let summary = try await DirectoryService(db: db).summary(for: business),
               let interaction = try? interactionRecord.interaction(),
-              let phone = PhoneNumber((try? ctx.cipher.openString(row.phoneCiphertext, context: "channel_outbound.phone")) ?? "") else {
+              let phone = PhoneNumber((try? ctx.cipher.openString(row.phoneCiphertext, context: "channel_outbound.phone", rowId: row.id!)) ?? "") else {
             try await finish(row, status: "cancelled", error: "not_deliverable")
             return
         }

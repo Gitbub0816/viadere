@@ -67,6 +67,27 @@ public enum SMSEncoding {
         return String(scalars)
     }
 
+    /// Text a **business** wrote, made safe to place after a `[Business]: ` attribution in a text message:
+    /// every line break (LF, CR, NEL, U+2028/2029, vertical tab, form feed) and tab becomes one space, spoofing and
+    /// control characters are removed, whitespace is collapsed, and a leading `Viadere` (the platform's own voice) or
+    /// `[` (a forged second attribution) is neutralised. One business message is therefore always exactly one line, so
+    /// it cannot forge a `Viadere:` line, a numbered menu or a `[OtherBank]:` attribution.
+    public static func businessLine(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in gsmFriendly(text).unicodeScalars {
+            switch scalar.value {
+            case 0x0A, 0x0D, 0x09, 0x0B, 0x0C, 0x85, 0x2028, 0x2029: scalars.append(" ")
+            default: scalars.append(scalar)
+            }
+        }
+        let cleaned = stripSpoofingCharacters(String(scalars), allowNewlines: false)
+        var line = cleaned.split(whereSeparator: { $0 == " " || $0.isWhitespace }).joined(separator: " ")
+        // After the attribution, a second `[Name]:` or a `Viadere:` prefix would read as a different speaker.
+        if line.hasPrefix("[") { line = "(" + line.dropFirst() }
+        if DisplayTextSanitizer.impersonatesViadere(line) { line = "- " + line }
+        return line
+    }
+
     /// Single-line, spoof-stripped, whitespace-collapsed, length-capped field text.
     public static func field(_ text: String, maxLength: Int) -> String {
         let cleaned = stripSpoofingCharacters(gsmFriendly(text), allowNewlines: false)

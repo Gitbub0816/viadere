@@ -26,6 +26,25 @@ struct ClientTests {
         #expect(decoded == request)
     }
 
+    @Test func sandboxRelationshipsUseTheCatalogPathAndDecodeTheResult() async throws {
+        let transport = MockTransport()
+        let sandbox = SandboxRelationship(relationshipId: RelationshipID(), createdAt: Fixtures.now)
+        try transport.enqueue(status: 201, json: sandbox)
+        let created = try await Fixtures.client(transport).createSandboxRelationship()
+        #expect(created == sandbox)
+        let sent = try #require(transport.requests.first)
+        #expect(sent.method == "POST" && sent.url.path == "/v1/business/sandbox/relationships")
+    }
+
+    @Test func aBusinessOutcomeNeverCarriesTheRawSignedDecision() throws {
+        let outcome = InteractionOutcome(interactionId: InteractionID(), businessId: BusinessID(), status: .approved, decision: .approve,
+                                         assurance: .biometric, decidedAt: Fixtures.now, deviceRef: "pseudonym",
+                                         verification: DecisionVerification(keyPurpose: .approvalBiometric, contextBound: true,
+                                                                            verifiedAt: Fixtures.now, evidenceRef: "ref"))
+        let decoded = try ViadereJSON.decode(InteractionOutcome.self, from: ViadereJSON.encode(outcome))
+        #expect(decoded.signedDecision == nil && decoded.deviceRef == "pseudonym" && decoded.verification?.contextBound == true)
+    }
+
     @Test func aRecognizedIdempotencyKeyIsReportedAsNotCreated() async throws {
         let transport = MockTransport()
         let request = Fixtures.confirm()
@@ -90,7 +109,8 @@ struct ClientTests {
         let covered: Set<String> = ["business.interactions.issue", "business.interactions.outcome", "business.interactions.cancel", "business.messages.send",
                                     "business.statuses.update", "business.webhooks.list", "business.webhooks.create", "business.webhooks.delete", "business.webhooks.rotate",
                                     "business.rewards.issue", "business.rewards.list", "business.rewards.revoke", "business.loyalty.program.get",
-                                    "business.loyalty.program.put", "business.loyalty.points", "business.redemptions.consume"]
+                                    "business.loyalty.program.put", "business.loyalty.points", "business.redemptions.consume",
+                                    "business.sandbox.relationships.create"]
         #expect(Set(business).subtracting(covered).isEmpty)
     }
 

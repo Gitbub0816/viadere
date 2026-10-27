@@ -117,16 +117,67 @@ public struct SoftwareP256SigningKey: DeviceSigningKey {
 
 /// ECDSA signature encoding used everywhere in Viadere: **raw** `r || s` (64 bytes),
 /// base64url without padding (86 characters).
+///
+/// **Low-S canonical form.** For every valid ECDSA signature `(r, s)`, `(r, n - s)` is also valid (malleability).
+/// Secure Enclave signatures may come out with either `s`, so Viadere neither rejects high-S nor trusts the
+/// signature bytes for identity: `encode` and `decode` both normalise to `s <= n/2`, so every Viadere signature
+/// has exactly one canonical encoding, and replay guards are keyed on signed *content* (challenge, nonce,
+/// `deviceId|signedAt|scopeDigest`), never on the signature string.
 public enum ViadereSignatureEncoding {
-    /// Encodes a signature as base64url(raw r||s).
-    public static func encode(_ signature: P256.Signing.ECDSASignature) -> String {
-        Base64URL.encode(signature.rawRepresentation)
+    /// Order `n` of the P-256 group, big endian.
+    private static let order: [UInt8] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51,
+    ]
+    /// `n / 2` (floor), big endian.
+    private static let halfOrder: [UInt8] = [
+        0x7F, 0xFF, 0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xDE, 0x73, 0x7D, 0x56, 0xD3, 0x8B, 0xCF, 0x42, 0x79, 0xDC, 0xE5, 0x61, 0x7E, 0x31, 0x92, 0xA8,
+    ]
+
+    /// Whether the 32-byte big-endian value `a` is strictly greater than `b`.
+    private static func greater(_ a: [UInt8], than b: [UInt8]) -> Bool {
+        for (x, y) in zip(a, b) where x != y { return x > y }
+        return false
     }
 
-    /// Decodes base64url(raw r||s). Rejects DER and any length other than 64 bytes.
+    /// Returns the 64-byte raw signature with `s` folded into the lower half of the group (`s <= n/2`).
+    /// Values that are not valid scalars (`s >= n`) are returned unchanged and simply fail verification.
+    public static func normalizedRaw(_ raw: Data) -> Data {
+        guard raw.count == 64 else { return raw }
+        let bytes = [UInt8](raw)
+        let s = Array(bytes[32..<64])
+        guard greater(s, than: halfOrder), greater(order, than: s) else { return raw }
+        // n - s, big-endian subtraction.
+        var result = [UInt8](repeating: 0, count: 32)
+        var borrow = 0
+        for i in stride(from: 31, through: 0, by: -1) {
+            var difference = Int(order[i]) - Int(s[i]) - borrow
+            if difference < 0 { difference += 256; borrow = 1 } else { borrow = 0 }
+            result[i] = UInt8(difference)
+        }
+        return Data(bytes[0..<32] + result)
+    }
+
+    /// Whether `signature` is already in the canonical low-S form.
+    public static func isCanonical(_ signature: P256.Signing.ECDSASignature) -> Bool {
+        normalizedRaw(signature.rawRepresentation) == signature.rawRepresentation
+    }
+
+    /// Encodes a signature as base64url(raw r||s), normalised to low-S.
+    public static func encode(_ signature: P256.Signing.ECDSASignature) -> String {
+        Base64URL.encode(normalizedRaw(signature.rawRepresentation))
+    }
+
+    /// Decodes base64url(raw r||s) and normalises it to low-S. Rejects DER and any length other than 64 bytes.
     public static func decode(_ string: String) -> P256.Signing.ECDSASignature? {
         guard Base64URL.isValid(string, minLength: 86, maxLength: 86), let bytes = Base64URL.decode(string),
               bytes.count == 64 else { return nil }
-        return try? P256.Signing.ECDSASignature(rawRepresentation: bytes)
+        return try? P256.Signing.ECDSASignature(rawRepresentation: normalizedRaw(bytes))
+    }
+
+    /// The canonical (low-S) base64url form of a wire signature string; `nil` when it is malformed.
+    public static func canonicalString(_ string: String) -> String? {
+        decode(string).map { Base64URL.encode($0.rawRepresentation) }
     }
 }

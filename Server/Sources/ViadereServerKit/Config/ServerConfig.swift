@@ -2,9 +2,24 @@
 import Foundation
 import ViadereCore
 
-/// Deployment environment.
-public enum DeploymentEnvironment: String, Sendable {
-    case development, testing, production
+/// Deployment environment. `ENVIRONMENT` is **required** and must be one of `development`, `test`, `staging`, `production`:
+/// a missing or misspelled value never silently becomes `development` (which would allow ephemeral secrets and skipped checks).
+public enum DeploymentEnvironment: String, Sendable, CaseIterable {
+    case development, testing, staging, production
+
+    /// Parses the `ENVIRONMENT` value (`test` is the documented spelling; `testing` is accepted too).
+    public static func parse(_ raw: String) -> DeploymentEnvironment? {
+        switch raw.lowercased() {
+        case "development": .development
+        case "test", "testing": .testing
+        case "staging": .staging
+        case "production": .production
+        default: nil
+        }
+    }
+
+    /// Staging uses the production rules: every secret mandatory, https only, no seed data.
+    public var isStrict: Bool { self == .production || self == .staging }
 }
 
 /// APNs token-auth configuration (`.p8` key).
@@ -88,8 +103,22 @@ public struct ServerConfig: Sendable {
     public var dashboardOrigin: String?
     /// Wallet pass signing material. `nil` disables pass issuance (the pass endpoints answer `501`).
     public var passes: PassConfig?
+    /// HMAC key of the audit hash chain (`AUDIT_CHAIN_KEY`). Keeping it out of the database means an attacker who can
+    /// write the database cannot recompute a forged chain.
+    public var auditChainKey: SymmetricKey = SymmetricKey(data: Data(repeating: 0x44, count: 32))
+    /// Destination countries (ISO 3166 regions) for verification codes. Default US and CA.
+    public var otpAllowedCountries: [String] = ["US", "CA"]
+    /// Digits of the E.164 number (after `+`) that identify a destination prefix for the per-prefix OTP budget.
+    public var otpPrefixDigits = 5
+    /// A digit reply this soon after a menu was issued is treated as a race with the menu change (SMS carries no
+    /// timestamp): the menu is shown again instead of acting on the digit. `0` disables the guard.
+    public var smsMenuRaceWindow: TimeInterval = 3
+    public var retention = RetentionSettings()
 
+    /// True only for `production`.
     public var isProduction: Bool { environment == .production }
+    /// True for `production` and `staging`.
+    public var isStrict: Bool { environment.isStrict }
 
     /// Deterministic configuration for tests: no network, no background jobs, fixed secrets.
     public static func testing() -> ServerConfig {
@@ -102,13 +131,19 @@ public struct ServerConfig: Sendable {
             pepper: Data(repeating: 0x22, count: 32), dataEncryptionKey: SymmetricKey(data: Data(repeating: 0x33, count: 32)),
             apns: nil, twilio: nil, trustedProxyCount: 0, corsAllowedOrigins: [], runBackgroundJobs: false, jobIntervalSeconds: 5, autoMigrate: false,
             maxBodyBytes: 64 * 1024, rateLimits: .standard, accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
-            freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true)
+            freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true, smsMenuRaceWindow: 0)
     }
 
     /// Loads configuration from the process environment and validates it. Production requires every secret.
     public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) throws -> ServerConfig {
-        let environment = DeploymentEnvironment(rawValue: (env["ENVIRONMENT"] ?? "development").lowercased()) ?? .development
-        let production = environment == .production
+        guard let rawEnvironment = env["ENVIRONMENT"], !rawEnvironment.isEmpty else {
+            throw ServerConfigError.missing("ENVIRONMENT (development, test, staging or production)")
+        }
+        guard let environment = DeploymentEnvironment.parse(rawEnvironment) else {
+            throw ServerConfigError.invalid("ENVIRONMENT (development, test, staging or production)")
+        }
+        let production = environment.isStrict
+        let databaseURL = env["DATABASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
 
         func secretBytes(_ name: String, minimum: Int) throws -> Data {
             if let raw = env[name], !raw.isEmpty {
@@ -118,11 +153,12 @@ public struct ServerConfig: Sendable {
                 return data
             }
             if production { throw ServerConfigError.missing(name) }
-            // Development only: an ephemeral random secret (data encrypted with it will not survive a restart).
+            // An ephemeral secret would make everything already stored under it unreadable after a restart, so it is
+            // only allowed with the throwaway in-memory database.
+            if databaseURL != nil { throw ServerConfigError.missing("\(name) (required whenever DATABASE_URL is set)") }
             return SecureToken.randomBytes(max(minimum, 32))
         }
 
-        let databaseURL = env["DATABASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
         if production && databaseURL == nil { throw ServerConfigError.missing("DATABASE_URL") }
 
         let publicBase = (env["PUBLIC_BASE_URL"] ?? "https://viadere.com").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -130,6 +166,15 @@ public struct ServerConfig: Sendable {
             throw ServerConfigError.invalid("PUBLIC_BASE_URL")
         }
         if production && scheme != "https" { throw ServerConfigError.invalid("PUBLIC_BASE_URL (must be https in production)") }
+        // Passkeys are scoped to the origin: outside local development it must be an https origin of the relying party.
+        let relyingPartyID = env["RP_ID"] ?? ViadereCore.domain
+        let relyingPartyOrigin = env["RP_ORIGIN"] ?? "https://\(ViadereCore.domain)"
+        if environment != .development {
+            guard let origin = URL(string: relyingPartyOrigin), origin.scheme == "https", let host = origin.host,
+                  host == relyingPartyID || host.hasSuffix("." + relyingPartyID), origin.user == nil, origin.path.isEmpty || origin.path == "/" else {
+                throw ServerConfigError.invalid("RP_ORIGIN (must be an https origin of RP_ID outside development)")
+            }
+        }
 
         var apns: APNsConfig?
         if let key = env["APNS_KEY_P8"].flatMap({ $0.isEmpty ? nil : $0 }) ?? Self.readFile(env["APNS_KEY_PATH"]) {
@@ -159,8 +204,8 @@ public struct ServerConfig: Sendable {
         var config = ServerConfig(
             environment: environment, databaseURL: databaseURL,
             bindHost: env["BIND_HOST"] ?? "0.0.0.0", port: Int(env["PORT"] ?? "") ?? 8080,
-            publicBaseURL: publicBase, relyingPartyID: env["RP_ID"] ?? ViadereCore.domain,
-            relyingPartyName: env["RP_NAME"] ?? "Viadere", relyingPartyOrigin: env["RP_ORIGIN"] ?? "https://\(ViadereCore.domain)",
+            publicBaseURL: publicBase, relyingPartyID: relyingPartyID,
+            relyingPartyName: env["RP_NAME"] ?? "Viadere", relyingPartyOrigin: relyingPartyOrigin,
             appleTeamID: teamID.isEmpty ? "TEAMIDDEV0" : teamID, appStoreID: env["APP_STORE_ID"].flatMap { $0.isEmpty ? nil : $0 },
             appBundleID: "\(ViadereCore.bundlePrefix).app", appClipBundleID: "\(ViadereCore.bundlePrefix).app.Clip",
             connectLinkKey: SymmetricKey(data: try secretBytes("CONNECT_LINK_SIGNING_KEY", minimum: 32)),
@@ -175,6 +220,27 @@ public struct ServerConfig: Sendable {
             accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
+        config.auditChainKey = SymmetricKey(data: try secretBytes("AUDIT_CHAIN_KEY", minimum: 32))
+        if production {
+            // Independent secrets: one leaked value must not unlock the others.
+            let keys: [(String, Data)] = [("CONNECT_LINK_SIGNING_KEY", config.connectLinkKey.withUnsafeBytes { Data($0) }), ("SERVER_PEPPER", config.pepper),
+                                          ("DATA_ENCRYPTION_KEY", config.dataEncryptionKey.withUnsafeBytes { Data($0) }),
+                                          ("AUDIT_CHAIN_KEY", config.auditChainKey.withUnsafeBytes { Data($0) })]
+            for (index, first) in keys.enumerated() {
+                for second in keys[(index + 1)...] where first.1.prefix(32) == second.1.prefix(32) {
+                    throw ServerConfigError.invalid("\(first.0) and \(second.0) must be different values")
+                }
+            }
+        }
+        if let raw = env["OTP_ALLOWED_COUNTRIES"], !raw.isEmpty {
+            let countries = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).uppercased() }.filter { !$0.isEmpty }
+            guard !countries.isEmpty, countries.allSatisfy({ PhoneRegions.callingCodes[$0] != nil }) else {
+                throw ServerConfigError.invalid("OTP_ALLOWED_COUNTRIES (comma-separated ISO regions Viadere knows: \(PhoneRegions.callingCodes.keys.sorted().joined(separator: ", ")))")
+            }
+            config.otpAllowedCountries = countries
+        }
+        if let seconds = env["SMS_MENU_RACE_SECONDS"].flatMap(Double.init), seconds >= 0, seconds <= 30 { config.smsMenuRaceWindow = seconds }
+        try config.retention.apply(env)
         try config.applyPlatformEnvironment(env, production: production)
         try config.applyPassEnvironment(env)
         return config
@@ -212,6 +278,10 @@ public struct RateLimitSettings: Sendable {
     public var smsInboundPerPhone: RateRule
     public var smsInboundGlobal: RateRule
     public var providerIP: RateRule
+    /// Verification-code SMS across the whole platform (toll-fraud ceiling). Exceeding it is logged as an alert.
+    public var otpGlobal: RateRule = .perHour(600, burst: 100)
+    /// Verification-code SMS per destination prefix (country code plus the next digits), against pumping a premium range.
+    public var otpPerPrefix: RateRule = .perHour(60, burst: 20)
     /// Dashboard / operator state-changing actions per signed-in user.
     public var dashboardAction: RateRule = .perMinute(60, burst: 30)
     /// Dashboard sign-in and sign-up ceremonies per IP.

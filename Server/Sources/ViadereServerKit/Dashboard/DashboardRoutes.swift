@@ -583,7 +583,7 @@ enum DashboardRoutes {
         let assignable = OrgRole.allCases.sorted(by: >).filter { p.role == .owner || $0 != .owner }
         let memberRows = members.map { m -> [String] in
             let user = byId[m.userId]
-            let email = user.flatMap { try? ctx.cipher.openString($0.emailCiphertext, context: "dashboard_users.email") } ?? ""
+            let email = user.flatMap { try? ctx.cipher.openString($0.emailCiphertext, context: "dashboard_users.email", rowId: $0.id!) } ?? ""
             let isSelf = m.userId == p.user.id
             var role = DashboardFormat.badge(OrgRole(rawValue: m.role)?.title ?? m.role)
             var actions = ""
@@ -598,7 +598,7 @@ enum DashboardRoutes {
         let invites = try await OrgInviteRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$state == "open")
             .filter(\.$expiresAt > ctx.now).sort(\.$createdAt, .descending).all()
         let inviteRows = invites.map { i -> [String] in
-            let email = (try? ctx.cipher.openString(i.emailCiphertext, context: "org_invites.email")) ?? ""
+            let email = (try? ctx.cipher.openString(i.emailCiphertext, context: "org_invites.email", rowId: i.id!)) ?? ""
             var action = ""
             if canManage, let id = i.id?.uuidString.lowercased() {
                 action = "<form method=\"post\" action=\"/dashboard/team/invites/\(id)/revoke\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Revoke</button></form>"

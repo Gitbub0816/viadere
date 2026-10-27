@@ -127,6 +127,14 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case idempotencyConflict = "idempotency_conflict"
     case internalError = "internal_error"
     case unavailable
+    /// `POST /v1/devices` without the required passkey assertion (or with one that does not verify).
+    case passkeyAssertionRequired = "passkey_assertion_required"
+    /// The device is in its new-device cool-down and may not approve high or critical requests yet.
+    case deviceCoolDown = "device_cool_down"
+    /// A decision that needs a v2 payload (`contextDigest`) was signed without one.
+    case contextDigestRequired = "context_digest_required"
+    /// The signed `contextDigest` is not the digest of the interaction the server holds.
+    case contextMismatch = "context_mismatch"
     case unknown
 
     public init(from decoder: any Decoder) throws {

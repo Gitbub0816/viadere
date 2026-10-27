@@ -195,7 +195,7 @@ enum OperatorRoutes {
         let owners = try await OrgMembershipRecord.query(on: req.db).filter(\.$businessId == id).filter(\.$role == OrgRole.owner.rawValue).all()
         let users = try await DashboardUserRecord.query(on: req.db).filter(\.$id ~~ owners.map(\.userId)).all()
         let ownerLines = users.map { u in
-            "\(DashboardUI.esc(u.displayName)) · \(DashboardUI.esc((try? req.ctx.cipher.openString(u.emailCiphertext, context: "dashboard_users.email")) ?? ""))"
+            "\(DashboardUI.esc(u.displayName)) · \(DashboardUI.esc((try? req.ctx.cipher.openString(u.emailCiphertext, context: "dashboard_users.email", rowId: u.id!)) ?? ""))"
         }.joined(separator: "<br>")
         var decide = ""
         if app.state == "pending" {

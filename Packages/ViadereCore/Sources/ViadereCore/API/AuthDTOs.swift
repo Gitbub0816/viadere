@@ -170,12 +170,60 @@ public struct HandoffRedeemResponse: Codable, Sendable, Hashable {
 // MARK: - Devices
 
 /// Server challenge for device enrollment.
+///
+/// **Passkey-bound enrollment.** A bearer token alone never creates a device: the new device's keys are the strongest
+/// credential the account has (the biometric key approves payments and sign-ins). `assertion` carries WebAuthn
+/// assertion options whose `challenge` equals `challenge`: the app performs a user-verified passkey assertion over it and
+/// sends the result in `DeviceEnrollRequest.assertion`. The one exception is `assertionOptional == true`: the token
+/// family was minted by a passkey sign-in or registration less than five minutes ago and has not enrolled yet
+/// (single use), so the ceremony the user just completed already proves the same thing.
 public struct DeviceEnrollmentChallenge: Codable, Sendable, Hashable {
     public var challenge: String
     public var expiresAt: Date
-    public init(challenge: String, expiresAt: Date) {
+    /// Assertion options (`challenge` identical to `challenge`, `userVerification` = required). `nil` only from servers
+    /// that predate passkey-bound enrollment.
+    public var assertion: PasskeyAssertionOptions?
+    /// True when this session may enroll without `DeviceEnrollRequest.assertion` (fresh, unused passkey sign-in).
+    public var assertionOptional: Bool
+
+    public init(challenge: String, expiresAt: Date, assertion: PasskeyAssertionOptions? = nil, assertionOptional: Bool = false) {
         self.challenge = challenge
         self.expiresAt = expiresAt
+        self.assertion = assertion
+        self.assertionOptional = assertionOptional
+    }
+
+    enum CodingKeys: String, CodingKey { case challenge, expiresAt, assertion, assertionOptional }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        challenge = try c.decode(String.self, forKey: .challenge)
+        expiresAt = try c.decode(Date.self, forKey: .expiresAt)
+        assertion = try c.decodeIfPresent(PasskeyAssertionOptions.self, forKey: .assertion)
+        assertionOptional = try c.decodeIfPresent(Bool.self, forKey: .assertionOptional) ?? false
+    }
+}
+
+/// What kind of Viadere client is enrolling.
+public enum DeviceClientKind: String, Codable, Sendable, CaseIterable {
+    /// The full app: may enroll approval keys.
+    case app
+    /// The App Clip: request key only, a 7-day device lifetime, and it can never decide interactions.
+    case appClip
+}
+
+/// Apple App Attest evidence for the keys being enrolled (`DCAppAttestService.attestKey`). The server verifier is a stub
+/// until Apple credentials are configured: today the evidence is recorded and every key is stored as `attested = false`,
+/// so `hardwareBacked` remains a client claim that policy and telemetry must not trust.
+public struct AppAttestEvidence: Codable, Sendable, Hashable {
+    /// App Attest key identifier (base64).
+    public var keyId: String
+    /// base64url CBOR attestation object, over `SHA-256(enroll challenge)` as the client data hash.
+    public var attestation: String
+
+    public init(keyId: String, attestation: String) {
+        self.keyId = keyId
+        self.attestation = attestation
     }
 }
 
@@ -199,15 +247,145 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
     public var name: String
     public var platform: DevicePlatform
     public var challenge: String
-    /// Must include a `.request` key; approval keys optional.
+    /// Must include a `.request` key; approval keys optional (and not allowed for `appClip`).
     public var keys: [DeviceKeyRegistration]
+    /// A user-verified passkey assertion whose challenge is `challenge` (see `DeviceEnrollmentChallenge`). Required unless the
+    /// challenge response said `assertionOptional`.
+    public var assertion: PasskeyAssertionCredential?
+    /// `app` (default) or `appClip`.
+    public var clientKind: DeviceClientKind
+    /// Wire alias used by the app: `true` for an App Clip enrollment (omitted otherwise). `true` means `clientKind == .appClip`.
+    public var clipDevice: Bool?
+    /// App Attest evidence (recorded; not yet trusted).
+    public var appAttest: AppAttestEvidence?
 
-    public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration]) {
+    public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration],
+                assertion: PasskeyAssertionCredential? = nil, clientKind: DeviceClientKind = .app, appAttest: AppAttestEvidence? = nil,
+                clipDevice: Bool? = nil) {
+        self.clipDevice = clipDevice
         self.name = name
         self.platform = platform
         self.challenge = challenge
         self.keys = keys
+        self.assertion = assertion
+        self.clientKind = clientKind
+        self.appAttest = appAttest
     }
+
+    enum CodingKeys: String, CodingKey { case name, platform, challenge, keys, assertion, clientKind, appAttest, clipDevice }
+
+    /// The effective client kind: `clipDevice == true` or `clientKind == .appClip` both mean App Clip.
+    public var effectiveClientKind: DeviceClientKind { clipDevice == true || clientKind == .appClip ? .appClip : .app }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        platform = try c.decode(DevicePlatform.self, forKey: .platform)
+        challenge = try c.decode(String.self, forKey: .challenge)
+        keys = try c.decode([DeviceKeyRegistration].self, forKey: .keys)
+        assertion = try c.decodeIfPresent(PasskeyAssertionCredential.self, forKey: .assertion)
+        clientKind = try c.decodeIfPresent(DeviceClientKind.self, forKey: .clientKind) ?? .app
+        appAttest = try c.decodeIfPresent(AppAttestEvidence.self, forKey: .appAttest)
+        clipDevice = try c.decodeIfPresent(Bool.self, forKey: .clipDevice)
+    }
+}
+
+/// Confirms a security-relevant addition from a device that is already trusted.
+///
+/// Used for (a) a **new device** that is in its cool-down (`POST /v1/devices/{deviceId}/confirm`, signed by *another*
+/// device of the same account that is not itself cooling down) and (b) a **newly linked phone**
+/// (`POST /v1/phone-links/{phoneLinkId}/confirm`). `signature` is the confirming device's ECDSA P-256 / SHA-256 signature
+/// (raw r‖s, base64url) over `signingInput()`, made with its `approvalBiometric` key (`assurance` = biometric) or its
+/// `approvalUserPresence` key (`assurance` = devicePasscode); a request key cannot confirm.
+public struct ConfirmationProof: Codable, Sendable, Hashable {
+    public enum Subject: String, Codable, Sendable { case device, phoneLink }
+
+    public static let domain = "VIADERE-CONFIRM-V1\n"
+    /// A proof older than this (or more than `allowedFutureSkew` in the future) is rejected.
+    public static let maxAge: TimeInterval = 300
+    public static let allowedFutureSkew: TimeInterval = 60
+
+    public var subject: Subject
+    /// Lowercase UUID of the device or phone link being confirmed.
+    public var subjectId: String
+    /// The confirming device.
+    public var deviceId: DeviceID
+    public var signedAt: Date
+    public var assurance: DecisionAssurance
+    public var signature: String
+
+    public init(subject: Subject, subjectId: String, deviceId: DeviceID, signedAt: Date, assurance: DecisionAssurance, signature: String) {
+        self.subject = subject
+        self.subjectId = subjectId
+        self.deviceId = deviceId
+        self.signedAt = ViadereDate.truncatedToMilliseconds(signedAt)
+        self.assurance = assurance
+        self.signature = signature
+    }
+
+    /// `"VIADERE-CONFIRM-V1\n{subject}\n{subjectId}\n{deviceId}\n{signedAt ISO-8601 ms}\n{assurance}"`.
+    public static func signingInput(subject: Subject, subjectId: String, deviceId: DeviceID, signedAt: Date,
+                                    assurance: DecisionAssurance) -> Data {
+        Data((domain + [subject.rawValue, subjectId, deviceId.description, ViadereDate.format(signedAt), assurance.rawValue]
+            .joined(separator: "\n")).utf8)
+    }
+
+    public func signingInput() -> Data {
+        Self.signingInput(subject: subject, subjectId: subjectId, deviceId: deviceId, signedAt: signedAt, assurance: assurance)
+    }
+
+    /// Signs a confirmation (device side).
+    public static func sign(subject: Subject, subjectId: String, deviceId: DeviceID, assurance: DecisionAssurance,
+                            key: any DeviceSigningKey, now: Date = Date()) async throws -> ConfirmationProof {
+        let signedAt = ViadereDate.truncatedToMilliseconds(now)
+        let signature = try await key.signature(for: signingInput(subject: subject, subjectId: subjectId, deviceId: deviceId,
+                                                                   signedAt: signedAt, assurance: assurance))
+        return ConfirmationProof(subject: subject, subjectId: subjectId, deviceId: deviceId, signedAt: signedAt, assurance: assurance,
+                                 signature: ViadereSignatureEncoding.encode(signature))
+    }
+
+    public enum Failure: Error, Equatable, Sendable {
+        case wrongSubject, assuranceTooLow, malformedSignature, signedInFuture, tooOld, badSignature, replayed
+    }
+
+    /// The key purpose that must have signed this proof.
+    public var requiredKeyPurpose: DeviceKeyPurpose? {
+        switch assurance {
+        case .none: nil
+        case .devicePasscode: .approvalUserPresence
+        case .biometric: .approvalBiometric
+        }
+    }
+
+    /// Content-based replay key (never the signature string: `(r, n - s)` is a second encoding of the same proof).
+    public var replayKey: String {
+        SecureToken.sha256Hex(signingInput())
+    }
+
+    /// Checks subject binding, freshness and the signature. `publicKey` must be the confirming device's key for `requiredKeyPurpose`.
+    public func verify(subject expected: Subject, subjectId expectedId: String, publicKey: DevicePublicKey, now: Date) throws {
+        guard subject == expected, ConstantTime.equals(subjectId.lowercased(), expectedId.lowercased()) else { throw Failure.wrongSubject }
+        guard requiredKeyPurpose != nil else { throw Failure.assuranceTooLow }
+        guard let decoded = ViadereSignatureEncoding.decode(signature) else { throw Failure.malformedSignature }
+        guard signedAt <= now.addingTimeInterval(Self.allowedFutureSkew) else { throw Failure.signedInFuture }
+        guard now.timeIntervalSince(signedAt) <= Self.maxAge else { throw Failure.tooOld }
+        guard let key = try? publicKey.signingKey(), key.isValidSignature(decoded, for: signingInput()) else { throw Failure.badSignature }
+    }
+
+    /// `verify` plus single-use consumption through `replayGuard` (scope `confirm:{deviceId}`).
+    public func verify(subject expected: Subject, subjectId expectedId: String, publicKey: DevicePublicKey, now: Date,
+                       replayGuard: any ReplayGuard) async throws {
+        try verify(subject: expected, subjectId: expectedId, publicKey: publicKey, now: now)
+        let fresh = try await replayGuard.registerIfFresh(nonce: replayKey, scope: "confirm:\(deviceId)",
+                                                          expiresAt: signedAt.addingTimeInterval(Self.maxAge + Self.allowedFutureSkew), now: now)
+        guard fresh else { throw Failure.replayed }
+    }
+}
+
+/// Body of `POST /v1/devices/{deviceId}/confirm` and `POST /v1/phone-links/{phoneLinkId}/confirm`.
+public struct ConfirmationRequest: Codable, Sendable, Hashable {
+    public var proof: ConfirmationProof
+    public init(proof: ConfirmationProof) { self.proof = proof }
 }
 
 /// Proof-of-possession format for device enrollment.
@@ -264,26 +442,59 @@ public struct PhoneLinkVerifyRequest: Codable, Sendable, Hashable {
 }
 
 /// A verified phone link (phone shown masked).
+///
+/// A link created from an SMS link token (or from a device that is itself cooling down) is **not used** as an interaction
+/// delivery target or as an RCS/SMS decider until `usableFrom` (24 hours after verification) unless it is confirmed
+/// from a trusted device (`POST /v1/phone-links/{id}/confirm`). `usableFrom == nil` means usable now.
 public struct PhoneLink: Codable, Sendable, Hashable, Identifiable {
     public var id: PhoneLinkID
     public var maskedPhone: String
     public var verifiedAt: Date
-    public init(id: PhoneLinkID, maskedPhone: String, verifiedAt: Date) {
+    public var usableFrom: Date?
+    public init(id: PhoneLinkID, maskedPhone: String, verifiedAt: Date, usableFrom: Date? = nil) {
         self.id = id
         self.maskedPhone = maskedPhone
         self.verifiedAt = verifiedAt
+        self.usableFrom = usableFrom
+    }
+
+    enum CodingKeys: String, CodingKey { case id, maskedPhone, verifiedAt, usableFrom }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(PhoneLinkID.self, forKey: .id)
+        maskedPhone = try c.decode(String.self, forKey: .maskedPhone)
+        verifiedAt = try c.decode(Date.self, forKey: .verifiedAt)
+        usableFrom = try c.decodeIfPresent(Date.self, forKey: .usableFrom)
     }
 }
 
-/// Redeem an SMS account-link token after passkey sign-in on the web.
+/// What an SMS account-link token would link, shown **before** redeeming it
+/// (`GET /v1/sms/link-tokens/{token}/preview`; device-signed, rate-limited, does not consume the token).
+/// The app must show `maskedPhone` in full with "This is my phone" and a warning that anyone who can read this number's
+/// texts will see this account's messages.
+public struct SMSLinkPreview: Codable, Sendable, Hashable {
+    public var maskedPhone: String
+    public var expiresAt: Date
+    public init(maskedPhone: String, expiresAt: Date) {
+        self.maskedPhone = maskedPhone
+        self.expiresAt = expiresAt
+    }
+}
+
+/// Redeem an SMS account-link token from the app (device-signed) after previewing it.
 public struct SMSLinkRedeemRequest: Codable, Sendable, Hashable {
     /// Token from the `https://viadere.com/l/{token}` link.
     public var token: String
     /// Explicit confirmation of the last 4 digits of the phone being linked.
     public var confirmPhoneLast4: String
-    public init(token: String, confirmPhoneLast4: String) {
+    /// The `maskedPhone` from `SMSLinkPreview`, echoed back after the person confirmed it is their phone. Optional on the wire
+    /// (the app confirms from the preview and sends `confirmPhoneLast4`); when present it must match exactly.
+    public var confirmMaskedPhone: String?
+    public init(token: String, confirmPhoneLast4: String, confirmMaskedPhone: String? = nil) {
         self.token = token
         self.confirmPhoneLast4 = confirmPhoneLast4
+        self.confirmMaskedPhone = confirmMaskedPhone
     }
 }
 

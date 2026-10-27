@@ -246,7 +246,7 @@ struct RewardsService {
         record.pointsBalance = 0
         record.acceptedTermsVersion = program.termsVersion
         if let reference {
-            record.memberReferenceCiphertext = try ctx.cipher.seal(reference, context: "loyalty_accounts.member_reference")
+            record.memberReferenceCiphertext = try ctx.cipher.seal(reference, context: "loyalty_accounts.member_reference", rowId: record.id!)
             record.memberReferenceMasked = "••" + String(reference.suffix(4))
         }
         record.memberSince = now

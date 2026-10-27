@@ -134,7 +134,34 @@ public struct DecideInteractionRequest: Codable, Sendable, Hashable {
     }
 }
 
+/// The server's statement that a device-signed decision was verified. Businesses receive this instead of the raw signed
+/// decision (which names the consumer's device): see `InteractionOutcome.verification`.
+public struct DecisionVerification: Codable, Sendable, Hashable {
+    /// Always `true` when present: signature, binding, freshness and assurance policy were checked.
+    public var verified: Bool
+    /// The key that signed (`approvalBiometric` = device-bound biometric).
+    public var keyPurpose: DeviceKeyPurpose
+    /// True when the decision carried a v2 `contextDigest` that matched the interaction.
+    public var contextBound: Bool
+    public var verifiedAt: Date
+    /// Opaque reference to the stored signed decision, for disputes with Viadere (`HMAC(server secret, decision id)`).
+    public var evidenceRef: String
+
+    public init(verified: Bool = true, keyPurpose: DeviceKeyPurpose, contextBound: Bool, verifiedAt: Date, evidenceRef: String) {
+        self.verified = verified
+        self.keyPurpose = keyPurpose
+        self.contextBound = contextBound
+        self.verifiedAt = verifiedAt
+        self.evidenceRef = evidenceRef
+    }
+}
+
 /// The recorded outcome (returned to the app, the business API and webhooks).
+///
+/// **What a business receives.** A business never gets the device-signed decision: it names the consumer's global device id.
+/// The business API and webhooks carry `deviceRef` (a per-business pseudonym of the device, stable for one business and
+/// unlinkable across businesses) and `verification` (the server's attestation). The original signed decision stays on the
+/// server for disputes (`ViadereServer export-dispute`). The consumer's own `POST .../decision` response still carries `signedDecision`.
 public struct InteractionOutcome: Codable, Sendable, Hashable {
     public var interactionId: InteractionID
     public var businessId: BusinessID
@@ -146,12 +173,17 @@ public struct InteractionOutcome: Codable, Sendable, Hashable {
     public var channel: Channel?
     public var decidedAt: Date?
     public var correlationId: String?
-    /// The device-signed decision, for the business's own audit trail.
+    /// The device-signed decision. Present only in the consumer's own decision response; never sent to businesses.
     public var signedDecision: SignedDecision?
+    /// Per-business pseudonym of the deciding device.
+    public var deviceRef: String?
+    /// The server's attestation that the decision was verified (device-signed decisions only).
+    public var verification: DecisionVerification?
 
     public init(interactionId: InteractionID, businessId: BusinessID, status: InteractionStatus, decision: Decision? = nil,
                 selectedOptionIds: [String]? = nil, reply: String? = nil, assurance: DecisionAssurance? = nil,
-                channel: Channel? = nil, decidedAt: Date? = nil, correlationId: String? = nil, signedDecision: SignedDecision? = nil) {
+                channel: Channel? = nil, decidedAt: Date? = nil, correlationId: String? = nil, signedDecision: SignedDecision? = nil,
+                deviceRef: String? = nil, verification: DecisionVerification? = nil) {
         self.interactionId = interactionId
         self.businessId = businessId
         self.status = status
@@ -163,6 +195,8 @@ public struct InteractionOutcome: Codable, Sendable, Hashable {
         self.decidedAt = decidedAt
         self.correlationId = correlationId
         self.signedDecision = signedDecision
+        self.deviceRef = deviceRef
+        self.verification = verification
     }
 }
 

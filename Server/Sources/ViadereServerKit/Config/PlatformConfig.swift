@@ -115,3 +115,26 @@ extension ServerConfig {
         if let v = env["BILLING_TRANSPORT_MICROS_PER_RCS_MESSAGE"].flatMap(Int.init), v >= 0 { billingRates.transportMicrosPerRCSMessage = v }
     }
 }
+
+/// How long operational records are kept. Everything here holds personal data or message text for delivery only.
+public struct RetentionSettings: Sendable, Equatable {
+    /// Delivered or dead-lettered webhook deliveries (their bodies hold consumer message text).
+    public var webhookDeliveryDays = 30
+    /// Finished `sms_outbound` and `channel_outbound` rows (they hold an encrypted phone number).
+    public var outboundDays = 30
+    /// Used or expired link tokens (they hold an encrypted phone number).
+    public var linkTokenDays = 7
+
+    public init() {}
+
+    mutating func apply(_ env: [String: String]) throws {
+        func days(_ name: String) throws -> Int? {
+            guard let raw = env[name], !raw.isEmpty else { return nil }
+            guard let value = Int(raw), (1...3650).contains(value) else { throw ServerConfigError.invalid("\(name) (1-3650 days)") }
+            return value
+        }
+        if let v = try days("WEBHOOK_RETENTION_DAYS") { webhookDeliveryDays = v }
+        if let v = try days("OUTBOUND_RETENTION_DAYS") { outboundDays = v }
+        if let v = try days("LINK_TOKEN_RETENTION_DAYS") { linkTokenDays = v }
+    }
+}

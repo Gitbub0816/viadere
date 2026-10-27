@@ -18,8 +18,8 @@ struct OutboundSMS {
         row.id = UUID()
         row.seq = Int(ctx.sequence.next(now: now))
         row.phoneHash = ctx.hasher.phoneHash(phone)
-        row.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "sms_outbound.phone")
-        row.bodyCiphertext = try ctx.cipher.seal(body, context: "sms_outbound.body")
+        row.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "sms_outbound.phone", rowId: row.id!)
+        row.bodyCiphertext = try ctx.cipher.seal(body, context: "sms_outbound.body", rowId: row.id!)
         row.sensitive = sensitive
         row.allowWhenOptedOut = allowWhenOptedOut
         row.status = "queued"
@@ -64,12 +64,12 @@ struct OutboundSMS {
         let phone: PhoneNumber
         let body: String
         do {
-            guard let parsed = PhoneNumber(try ctx.cipher.openString(row.phoneCiphertext, context: "sms_outbound.phone")) else {
+            guard let parsed = PhoneNumber(try ctx.cipher.openString(row.phoneCiphertext, context: "sms_outbound.phone", rowId: row.id!)) else {
                 try await finish(row, status: "failed", error: "bad_phone", wipe: true)
                 return true
             }
             phone = parsed
-            body = try ctx.cipher.openString(row.bodyCiphertext, context: "sms_outbound.body")
+            body = try ctx.cipher.openString(row.bodyCiphertext, context: "sms_outbound.body", rowId: row.id!)
         } catch {
             try await finish(row, status: "failed", error: "decrypt", wipe: true)
             return true
@@ -115,7 +115,7 @@ struct OutboundSMS {
     private func finish(_ row: SMSOutboundRecord, status: String, error: String?, wipe: Bool) async throws {
         row.status = status
         row.errorCode = error
-        if wipe { row.bodyCiphertext = (try? ctx.cipher.seal("[removed]", context: "sms_outbound.body")) ?? "" }
+        if wipe { row.bodyCiphertext = (try? ctx.cipher.seal("[removed]", context: "sms_outbound.body", rowId: row.id!)) ?? "" }
         try await row.update(on: db)
     }
 

@@ -53,8 +53,9 @@ struct HouseholdService {
         return record.displayName
     }
 
-    private func label(_ ciphertext: String?) -> String {
-        guard let ciphertext, let text = try? ctx.cipher.openString(ciphertext, context: "delegation.label") else { return "Someone" }
+    /// A grant has the id of the invitation it came from, so the label's ciphertext (bound to that id) is valid on both rows.
+    private func label(_ ciphertext: String?, rowId: UUID?) -> String {
+        guard let ciphertext, let rowId, let text = try? ctx.cipher.openString(ciphertext, context: "delegation.label", rowId: rowId) else { return "Someone" }
         return text
     }
 
@@ -86,7 +87,7 @@ struct HouseholdService {
         var givenOut: [HouseholdGrant] = []
         for grant in given {
             guard let dto = grant.dto else { continue }
-            givenOut.append(HouseholdGrant(grant: dto, counterpartName: label(grant.labelCiphertext), businessNames: businessLabels(grant.businessIdSet),
+            givenOut.append(HouseholdGrant(grant: dto, counterpartName: label(grant.labelCiphertext, rowId: grant.id), businessNames: businessLabels(grant.businessIdSet),
                                            status: status(grant: grant, now: now)))
         }
         for invite in invitations {
@@ -101,7 +102,7 @@ struct HouseholdService {
             case "revoked": state = .revoked
             default: state = .expired   // locked after too many attempts
             }
-            givenOut.append(HouseholdGrant(grant: dto, counterpartName: label(invite.labelCiphertext), businessNames: businessLabels(businessIds), status: state))
+            givenOut.append(HouseholdGrant(grant: dto, counterpartName: label(invite.labelCiphertext, rowId: invite.id), businessNames: businessLabels(businessIds), status: state))
         }
         givenOut.sort { $0.grant.createdAt > $1.grant.createdAt }
 
@@ -162,7 +163,7 @@ struct HouseholdService {
             let record = DelegationInvitationRecord()
             record.id = UUID()
             record.grantorId = consumer.uuid
-            record.labelCiphertext = try ctx.cipher.seal(label, context: "delegation.label")
+            record.labelCiphertext = try ctx.cipher.seal(label, context: "delegation.label", rowId: record.id!)
             record.role = request.role.rawValue
             record.purposes = request.purposes.map(\.rawValue).sorted().joined(separator: ",")
             record.businessIds = request.businessIds.map { $0.uuid.uuidString.lowercased() }.sorted().joined(separator: ",")
@@ -381,7 +382,7 @@ struct HouseholdService {
                 if id == me { return "You" }
                 // The grantor sees the delegate by the label they chose.
                 if grantor == me, let grant {
-                    if let record = grantById[grant], record.delegateId == id { return label(record.labelCiphertext) }
+                    if let record = grantById[grant], record.delegateId == id { return label(record.labelCiphertext, rowId: record.id) }
                 }
                 return consumerNames[id] ?? "Someone"
             }

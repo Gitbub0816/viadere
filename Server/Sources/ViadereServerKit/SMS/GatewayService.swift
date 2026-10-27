@@ -121,7 +121,7 @@ struct GatewayService {
     // MARK: Context persistence
 
     private func decode(_ record: SMSContextRecord) throws -> ConversationContext {
-        let data = try ctx.cipher.open(record.contextCiphertext, context: "sms_contexts.context")
+        let data = try ctx.cipher.open(record.contextCiphertext, context: "sms_contexts.context", rowId: record.id!)
         return try ViadereJSON.decode(ConversationContext.self, from: data)
     }
 
@@ -138,7 +138,8 @@ struct GatewayService {
 
     /// Compare-and-swap persist: succeeds only if nobody changed the row since `previous` was read.
     func persist(_ context: ConversationContext, previous: SMSContextRecord?, on db: any Database) async throws {
-        let sealed = try ctx.cipher.seal(try ViadereJSON.encode(context), context: "sms_contexts.context")
+        let rowId = previous?.id ?? UUID()
+        let sealed = try ctx.cipher.seal(try ViadereJSON.encode(context), context: "sms_contexts.context", rowId: rowId)
         let now = ctx.now
         if let previous, let id = previous.id {
             let swapped = try await DB.swap(db, table: SMSContextRecord.schema, id: id, column: "revision", expected: previous.revision,
@@ -148,7 +149,7 @@ struct GatewayService {
                 .set(\.$activeSessionId, to: context.session?.sessionId.uuid).set(\.$updatedAt, to: now).update()
         } else {
             let record = SMSContextRecord()
-            record.id = UUID()
+            record.id = rowId
             record.phoneHash = ctx.hasher.phoneHash(context.phone)
             record.contextCiphertext = sealed
             record.revision = context.revision
@@ -261,7 +262,7 @@ struct GatewayService {
         message.direction = MessageDirection.consumerToBusiness.rawValue
         message.senderType = MessageAttribution.SenderType.consumer.rawValue
         message.displayName = "You"
-        message.bodyCiphertext = try ctx.cipher.seal(text, context: "conversation_messages.body")
+        message.bodyCiphertext = try ctx.cipher.seal(text, context: "conversation_messages.body", rowId: message.id!)
         message.channel = Channel.sms.rawValue
         message.deliveryStatus = DeliveryStatus.delivered.rawValue
         message.createdAt = now
@@ -294,7 +295,7 @@ struct GatewayService {
         record.kind = kind
         record.tokenHash = SecureToken.hash(token)
         record.phoneHash = hash
-        record.phoneCiphertext = try ctx.cipher.seal(context.phone.e164, context: "link_tokens.phone")
+        record.phoneCiphertext = try ctx.cipher.seal(context.phone.e164, context: "link_tokens.phone", rowId: record.id!)
         record.phoneLast4 = String(context.phone.e164.suffix(4))
         record.contextRevision = context.revision
         record.consumerId = consumerId?.uuid

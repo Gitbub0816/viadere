@@ -166,8 +166,7 @@ public enum ChannelRenderer {
                 + (handoffURL.map { ". View your ticket: \($0.absoluteString)" } ?? ". View your ticket in the Viadere app.")
             return finish(text, choices: [], handoff: false)
         case .message(let p):
-            return finish(prefix + SMSEncoding.stripSpoofingCharacters(SMSEncoding.gsmFriendly(p.text), allowNewlines: true),
-                          choices: [], handoff: false)
+            return finish(prefix + SMSEncoding.businessLine(p.text), choices: [], handoff: false)
         case .authenticate, .authorize, .unknown:
             return finish(prefix + secureHandoffText(interaction, url: handoffURL), choices: [], handoff: true)
         }

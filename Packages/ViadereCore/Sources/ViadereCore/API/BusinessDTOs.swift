@@ -349,3 +349,15 @@ public struct WebhookEvent: Codable, Sendable, Hashable {
         try ViadereJSON.decode(type, from: ViadereJSON.encode(data))
     }
 }
+
+/// A sandbox relationship: a test consumer connected to the calling business. **Test-mode keys can only target
+/// sandbox relationships** (never real people) and live keys can never target one; sandbox consumers have no devices and
+/// no phone, so test traffic cannot reach, be decided by, or be billed as a real consumer.
+public struct SandboxRelationship: Codable, Sendable, Hashable {
+    public var relationshipId: RelationshipID
+    public var createdAt: Date
+    public init(relationshipId: RelationshipID, createdAt: Date) {
+        self.relationshipId = relationshipId
+        self.createdAt = createdAt
+    }
+}

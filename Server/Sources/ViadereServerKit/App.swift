@@ -60,7 +60,8 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     }
     app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms, passkeys: passkeys, webhookTransport: transport,
                             rateLimitStore: overrides.rateLimitStore ?? InMemoryRateLimitStore(), rcs: rcs,
-                            dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush)
+                            dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
+                            integrity: overrides.integrity ?? UnconfiguredDeviceIntegrityVerifier())
 
     // MARK: Database
     if let url = config.databaseURL {
@@ -101,11 +102,13 @@ public struct Overrides: Sendable {
     public var autoMigrate: Bool = false
     public var passSigner: (any PassSigner)?
     public var passPush: (any PassPushSender)?
+    public var integrity: (any DeviceIntegrityVerifier)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,
                 rateLimitStore: (any RateLimitStore)? = nil, rcs: (any RCSProvider)? = nil, autoMigrate: Bool = false,
-                passSigner: (any PassSigner)? = nil, passPush: (any PassPushSender)? = nil) {
+                passSigner: (any PassSigner)? = nil, passPush: (any PassPushSender)? = nil,
+                integrity: (any DeviceIntegrityVerifier)? = nil) {
         self.clock = clock
         self.apns = apns
         self.sms = sms
@@ -116,6 +119,7 @@ public struct Overrides: Sendable {
         self.autoMigrate = autoMigrate
         self.passSigner = passSigner
         self.passPush = passPush
+        self.integrity = integrity
     }
 }
 

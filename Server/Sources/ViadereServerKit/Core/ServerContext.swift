@@ -25,12 +25,15 @@ public final class ServerContext: Sendable {
     public let passSigner: (any PassSigner)?
     /// Pushes "pass changed" notifications to registered Wallet devices.
     public let passPush: any PassPushSender
+    /// App Attest / DeviceCheck hook (a stub until Apple credentials are configured).
+    public let integrity: any DeviceIntegrityVerifier
 
     public init(config: ServerConfig, clock: any ServerClock = SystemClock(), apns: any APNsSender, sms: any SMSProvider,
                 passkeys: any PasskeyVerifier, webhookTransport: any WebhookTransport,
                 rateLimitStore: any RateLimitStore = InMemoryRateLimitStore(), rcs: (any RCSProvider)? = nil,
                 dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
-                passPush: any PassPushSender = DisabledPassPushSender()) {
+                passPush: any PassPushSender = DisabledPassPushSender(),
+                integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier()) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey)
@@ -46,6 +49,7 @@ public final class ServerContext: Sendable {
         self.dashboardPasskeys = dashboardPasskeys ?? passkeys
         self.passSigner = passSigner
         self.passPush = passPush
+        self.integrity = integrity
     }
 
     public var now: Date { clock.now() }

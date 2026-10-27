@@ -96,13 +96,19 @@ public enum DelegationStepUpVerifier {
         }
     }
 
+    /// Content-based replay key: `sha256(deviceId | signedAt | scopeDigest)`.
+    public static func replayKey(for proof: DelegationStepUpProof) -> String {
+        SecureToken.sha256Hex(Data("\(proof.deviceId)|\(ViadereDate.format(proof.signedAt))|\(proof.scopeDigest)".utf8))
+    }
+
     /// `verify` plus single-use consumption of the proof through `replayGuard`.
     public static func verify(_ proof: DelegationStepUpProof?, for request: DelegationInvitationRequest, deviceId: DeviceID,
                               publicKey: DevicePublicKey, now: Date, replayGuard: any ReplayGuard) async throws {
         try verify(proof, for: request, deviceId: deviceId, publicKey: publicKey, now: now)
         guard let proof else { throw Failure.missing }
+        // Keyed on the signed content, not the signature string: `(r, n - s)` is a second valid encoding of the same proof.
         let fresh = try await replayGuard.registerIfFresh(
-            nonce: SecureToken.sha256Hex(Data(proof.signature.utf8)), scope: "delegation-stepup:\(deviceId)",
+            nonce: replayKey(for: proof), scope: "delegation-stepup:\(deviceId)",
             expiresAt: proof.signedAt.addingTimeInterval(maxAge + allowedFutureSkew), now: now)
         guard fresh else { throw Failure.replayed }
     }

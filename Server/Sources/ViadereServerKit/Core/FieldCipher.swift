@@ -2,43 +2,77 @@
 import Foundation
 import ViadereCore
 
-/// AES-256-GCM field encryption for data at rest (phone numbers, message bodies, webhook secrets,
-/// SMS conversation contexts). Wire form: `v1.` + base64url(nonce ‖ ciphertext ‖ tag).
-/// The `context` string is bound as additional authenticated data so a ciphertext cannot be
-/// moved to a different column or table.
+/// AES-256-GCM field encryption for data at rest (phone numbers, message bodies, webhook secrets and bodies,
+/// SMS conversation contexts).
+///
+/// Wire forms: `v2.` + base64url(nonce ‖ ciphertext ‖ tag), authenticated with the additional data
+/// `"{column}#{rowId}"` (for example `sms_outbound.body#9c1f…`); and the legacy `v1.` form whose additional data is
+/// only the column (`sms_outbound.body`). New writes are always `v2`, so a ciphertext cannot be moved to a different
+/// column **or a different row** (an attacker with database write access cannot swap two people's phone numbers).
+/// `open` still reads `v1` so existing rows keep working until `ViadereServer reencrypt-fields` rewrites them.
 public struct FieldCipher: Sendable {
     public enum Failure: Error, Sendable { case malformed, authenticationFailed }
 
     private let key: SymmetricKey
-    private static let prefix = "v1."
+    private static let legacyPrefix = "v1."
+    private static let rowBoundPrefix = "v2."
 
     public init(key: SymmetricKey) { self.key = key }
 
-    public func seal(_ plaintext: String, context: String) throws -> String {
-        try seal(Data(plaintext.utf8), context: context)
+    private static func aad(_ context: String, rowId: UUID) -> Data {
+        Data("\(context)#\(rowId.uuidString.lowercased())".utf8)
     }
 
-    public func seal(_ plaintext: Data, context: String) throws -> String {
-        let box = try AES.GCM.seal(plaintext, using: key, authenticating: Data(context.utf8))
+    // MARK: Row-bound (v2)
+
+    public func seal(_ plaintext: String, context: String, rowId: UUID) throws -> String {
+        try seal(Data(plaintext.utf8), context: context, rowId: rowId)
+    }
+
+    public func seal(_ plaintext: Data, context: String, rowId: UUID) throws -> String {
+        let box = try AES.GCM.seal(plaintext, using: key, authenticating: Self.aad(context, rowId: rowId))
         guard let combined = box.combined else { throw Failure.malformed }
-        return Self.prefix + Base64URL.encode(combined)
+        return Self.rowBoundPrefix + Base64URL.encode(combined)
     }
 
-    public func open(_ sealed: String, context: String) throws -> Data {
-        guard sealed.hasPrefix(Self.prefix), let combined = Base64URL.decode(String(sealed.dropFirst(Self.prefix.count))) else {
-            throw Failure.malformed
+    /// Opens a `v2` value (bound to `context` and `rowId`) or, for rows written before row binding, a `v1` value (bound to `context` only).
+    public func open(_ sealed: String, context: String, rowId: UUID) throws -> Data {
+        if sealed.hasPrefix(Self.rowBoundPrefix) {
+            return try open(String(sealed.dropFirst(Self.rowBoundPrefix.count)), aad: Self.aad(context, rowId: rowId))
         }
+        return try openLegacy(sealed, context: context)
+    }
+
+    public func openString(_ sealed: String, context: String, rowId: UUID) throws -> String {
+        guard let string = String(data: try open(sealed, context: context, rowId: rowId), encoding: .utf8) else { throw Failure.malformed }
+        return string
+    }
+
+    /// Whether `sealed` is in the legacy column-bound form (and should be rewritten).
+    public static func isLegacy(_ sealed: String) -> Bool { sealed.hasPrefix(legacyPrefix) }
+
+    // MARK: Legacy (v1)
+
+    /// Column-bound only. Kept to read (and, in tests, to produce) rows written before row binding.
+    public func sealLegacy(_ plaintext: String, context: String) throws -> String {
+        let box = try AES.GCM.seal(Data(plaintext.utf8), using: key, authenticating: Data(context.utf8))
+        guard let combined = box.combined else { throw Failure.malformed }
+        return Self.legacyPrefix + Base64URL.encode(combined)
+    }
+
+    public func openLegacy(_ sealed: String, context: String) throws -> Data {
+        guard sealed.hasPrefix(Self.legacyPrefix) else { throw Failure.malformed }
+        return try open(String(sealed.dropFirst(Self.legacyPrefix.count)), aad: Data(context.utf8))
+    }
+
+    private func open(_ body: String, aad: Data) throws -> Data {
+        guard let combined = Base64URL.decode(body) else { throw Failure.malformed }
         do {
             let box = try AES.GCM.SealedBox(combined: combined)
-            return try AES.GCM.open(box, using: key, authenticating: Data(context.utf8))
+            return try AES.GCM.open(box, using: key, authenticating: aad)
         } catch {
             throw Failure.authenticationFailed
         }
-    }
-
-    public func openString(_ sealed: String, context: String) throws -> String {
-        guard let string = String(data: try open(sealed, context: context), encoding: .utf8) else { throw Failure.malformed }
-        return string
     }
 }
 
