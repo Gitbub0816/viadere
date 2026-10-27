@@ -21,3 +21,18 @@ public enum ConstantTime {
         equals(Array(a.utf8), Array(b.utf8))
     }
 }
+
+extension String {
+    /// Trims only ASCII whitespace (space, tab, CR, LF). Unicode "whitespace" such as zero-width
+    /// or non-breaking spaces is deliberately preserved so validators can reject it.
+    var asciiTrimmed: String {
+        let isSpace: (Unicode.Scalar) -> Bool = { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" }
+        let scalars = Array(unicodeScalars)
+        guard let start = scalars.firstIndex(where: { !isSpace($0) }), let end = scalars.lastIndex(where: { !isSpace($0) }) else {
+            return ""
+        }
+        var view = String.UnicodeScalarView()
+        view.append(contentsOf: scalars[start...end])
+        return String(view)
+    }
+}
