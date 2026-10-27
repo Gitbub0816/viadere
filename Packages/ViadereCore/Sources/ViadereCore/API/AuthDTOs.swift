@@ -594,6 +594,9 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case delegationEnded
     /// A device was added to (or removed from) the account's synced credential vault, or the synced vault was deleted.
     case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
+    /// Approve v2: a pairwise approval key was enrolled for a business, revoked, approvals were frozen or unfrozen, or repeated requests
+    /// from a business were paused (`subjectId` = the key id or relationship id).
+    case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
     case unknown
 
     public init(from decoder: any Decoder) throws {

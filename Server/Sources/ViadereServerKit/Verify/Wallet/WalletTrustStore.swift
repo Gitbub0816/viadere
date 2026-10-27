@@ -99,7 +99,7 @@ struct IACATrustStore: Sendable {
             do {
                 let der: Data
                 if let text = String(data: data, encoding: .utf8), text.contains("-----BEGIN CERTIFICATE-----") {
-                    guard let pem = try? PEMDocument(pemString: text.trimmingCharacters(in: .whitespacesAndNewlines)), pem.type == "CERTIFICATE" else {
+                    guard let pem = try? PEMDocument(pemString: text.trimmingCharacters(in: .whitespacesAndNewlines)), pem.discriminator == "CERTIFICATE" else {
                         throw IACARejection.unparseable
                     }
                     der = Data(pem.derBytes)

@@ -426,21 +426,32 @@ public struct WebhookSubscription: Codable, Sendable, Hashable, Identifiable {
     public var events: [WebhookEventType]
     public var active: Bool
     public var createdAt: Date
-    public init(id: WebhookSubscriptionID, url: URL, events: [WebhookEventType], active: Bool, createdAt: Date) {
+    /// `"2026-10-27"` for an opaque v2 subscription; absent for v1.
+    public var envelopeVersion: String?
+    /// The version of the signing secret (starts at 1, increases at every rotation); also in the `Viadere-Key-Id` header of each delivery.
+    public var secretVersion: Int?
+    public init(id: WebhookSubscriptionID, url: URL, events: [WebhookEventType], active: Bool, createdAt: Date, envelopeVersion: String? = nil,
+                secretVersion: Int? = nil) {
         self.id = id
         self.url = url
         self.events = events
         self.active = active
         self.createdAt = createdAt
+        self.envelopeVersion = envelopeVersion
+        self.secretVersion = secretVersion
     }
 }
 
 public struct CreateWebhookRequest: Codable, Sendable, Hashable {
     public var url: URL
     public var events: [WebhookEventType]
-    public init(url: URL, events: [WebhookEventType]) {
+    /// `nil` (default) keeps the v1 event body (`WebhookEvent`). `"2026-10-27"` opts this subscription into the opaque v2 envelope
+    /// (`WebhookEnvelopeV2`: ids and a `result_ref` only), which is limited to `WebhookEventType.opaqueEvents`.
+    public var envelopeVersion: String?
+    public init(url: URL, events: [WebhookEventType], envelopeVersion: String? = nil) {
         self.url = url
         self.events = events
+        self.envelopeVersion = envelopeVersion
     }
 }
 

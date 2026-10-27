@@ -15,6 +15,8 @@ public final class ServerContext: Sendable {
     public let subjects: SubjectRefDeriver
     /// Short-lived cache of the operator-controlled policy state (kill switches and law/policy rules).
     let policyCache = PolicyStateCache()
+    /// In-memory copy of the key-directory Merkle tree's leaf hashes (the database is the source; the cache only avoids re-reading it).
+    let keyLogCache = KeyLogTreeCache()
     public let limiter: RateLimiter
     public let apns: any APNsSender
     public let sms: any SMSProvider

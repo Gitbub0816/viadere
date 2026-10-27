@@ -1,4 +1,5 @@
 import SwiftUI
+import ViadereCore
 import ViadereKit
 
 extension AppTab {
@@ -44,6 +45,13 @@ struct MainShell: View {
             })
         }
         .viadereScreenBackground()
+        .viadereDocumentVerification()
+        .sheet(item: Binding(get: { AppEnvironment.shared.verification.presented.map(PresentedVerification.init) },
+                             set: { AppEnvironment.shared.verification.presented = $0?.id })) { presented in
+            VerificationSheetHost(id: presented.id)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
         .task { await model.messages.load() }
         .onChange(of: model.home.content, initial: true) { _, content in
             // Keep the watch's pending list and any running Live Activities in step with Home.
@@ -65,4 +73,23 @@ struct MainShell: View {
         default: 0
         }
     }
+}
+
+/// `Identifiable` wrapper so a request id can drive `.sheet(item:)`.
+struct PresentedVerification: Identifiable {
+    let id: VerificationRequestID
+}
+
+/// Builds the verification view model once per presentation.
+struct VerificationSheetHost: View {
+    @State private var model: VerificationViewModel
+
+    init(id: VerificationRequestID) {
+        let environment = AppEnvironment.shared
+        _model = State(initialValue: VerificationViewModel(
+            id: id, api: environment.verifyAPI, wallet: PassKitWalletIdentity(), document: DocumentVerificationLauncher.shared,
+            lock: AppEnvironment.services.appLock))
+    }
+
+    var body: some View { VerificationRequestSheet(model: model) }
 }

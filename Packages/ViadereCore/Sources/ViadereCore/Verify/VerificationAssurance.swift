@@ -17,6 +17,8 @@ public enum VerificationMethod: String, Sendable, Codable, CaseIterable, Hashabl
     case deviceAuthenticator = "device_authenticator"
     /// A one-time code delivered to a phone or address the person controls (a reachable contact).
     case contactCode = "contact_code"
+    /// Test-mode only: a simulated result for a sandbox customer. Never produced for a live key, never evidence of anything real.
+    case sandbox
 
     /// The labels this method may ever establish: the ceiling, not a promise (the result must still carry the facts, see
     /// `VerificationAssuranceMapper`). Everything not listed is **not** established by the method.
@@ -26,6 +28,7 @@ public enum VerificationMethod: String, Sendable, Codable, CaseIterable, Hashabl
         case .diditAgeEstimation: [.estimatedAge]
         case .deviceAuthenticator: [.registeredAuthenticator]
         case .contactCode: [.reachableContact]
+        case .sandbox: [.verifiedAgeThreshold, .verifiedIdentity]
         }
     }
 
@@ -35,6 +38,7 @@ public enum VerificationMethod: String, Sendable, Codable, CaseIterable, Hashabl
         case .walletMdoc: "viadere"
         case .diditDocumentLiveness, .diditAgeEstimation: "didit"
         case .deviceAuthenticator, .contactCode: "viadere"
+        case .sandbox: "viadere-sandbox"
         }
     }
 }
@@ -92,6 +96,8 @@ extension RequiredEvidence {
 /// Strength of the identity evidence behind a result (the "identity proofing" dimension).
 public enum EvidenceStrength: String, Sendable, Codable, Hashable, Comparable, CaseIterable {
     case none
+    /// A test-mode simulation: no evidence at all.
+    case simulated
     /// Declared by the person, unchecked. Never labeled verified.
     case selfAsserted = "self_asserted"
     /// A facial estimate: a probabilistic signal about a face, no document.
@@ -164,6 +170,7 @@ public struct AssuranceDimensions: Sendable, Codable, Hashable {
     /// IAL/AAL equivalence.
     public var level: String {
         switch (evidence, presentationBinding) {
+        case (.simulated, _): "sandbox_simulated"
         case (.issuerSignedCredential, .deviceSignatureOverTranscript): "issuer_signed_credential_device_bound"
         case (.documentWithBiometricMatch, _): "document_and_biometric_match"
         case (.biometricEstimate, _): "biometric_estimate"
@@ -284,6 +291,12 @@ public enum VerificationAssuranceMapper {
     public static func walletDimensions(verifiedAt: Date, validUntil: Date, risk: TransactionRisk) -> AssuranceDimensions {
         AssuranceDimensions(evidence: .issuerSignedCredential, authenticator: .deviceBoundUserVerified, issuerTrust: .configuredTrustAnchor,
                             verifiedAt: verifiedAt, validUntil: validUntil, presentationBinding: .deviceSignatureOverTranscript, transactionRisk: risk)
+    }
+
+    /// The dimensions of a test-mode simulation: no evidence, no issuer, no binding.
+    public static func sandboxDimensions(verifiedAt: Date, validUntil: Date, risk: TransactionRisk) -> AssuranceDimensions {
+        AssuranceDimensions(evidence: .simulated, authenticator: .none, issuerTrust: .none, verifiedAt: verifiedAt, validUntil: validUntil,
+                            presentationBinding: .none, transactionRisk: risk)
     }
 
     /// The dimensions for a result from a provider document, liveness and face-match session.

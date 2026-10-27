@@ -54,6 +54,11 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let content = response.notification.request.content
+        // A verification request opens its own sheet: the push carries only the opaque request id (`iid`), and consent happens in the app.
+        if content.categoryIdentifier == "viadere.verification.request", let id = VerificationCenter.requestId(fromPushUserInfo: content.userInfo) {
+            AppEnvironment.shared.verification.present(id)
+            return
+        }
         let info = NotificationResponseInfo(
             actionIdentifier: response.actionIdentifier,
             categoryIdentifier: content.categoryIdentifier,

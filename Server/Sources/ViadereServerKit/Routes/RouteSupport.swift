@@ -61,5 +61,8 @@ enum Routes {
         VaultRoutes.register(api)
         PolicyRoutes.register(api)
         PolicyOperatorRoutes.register(app)
+        VerifyHTTPRoutes.register(api)
+        ApproveRoutes.register(api)
+        KeyDirectoryRoutes.register(api)
     }
 }

@@ -14,7 +14,12 @@ enum BusinessAPIKeys {
         static let statusesWrite = "statuses:write"
         static let webhooksManage = "webhooks:manage"
         static let rewardsWrite = "rewards:write"
-        static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite]
+        /// Approve v2 enrollments, requests, results and freezes (the approval capabilities are required as well).
+        static let approvalsManage = "approvals:manage"
+        /// Registers and rotates the business root key and publishes operational keys in the key directory. Issue it to a dedicated,
+        /// tightly held key: whoever holds it before the business registered its root could register their own.
+        static let keyDirectoryManage = "keydirectory:manage"
+        static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage]
     }
 
     struct Issued {

@@ -278,6 +278,74 @@ public enum APIRoutes {
     public static let vaultJoinCancel = Endpoint<EmptyBody, EmptyBody>(
         "vault.joins.cancel", .DELETE, "/v1/vault/joins/{joinId}", auth: .deviceSignedBearer)
 
+
+    // MARK: Approve v2: pairwise keys, signed audience-bound results, key directory (WP1; behind `APPROVE_V2_ENABLED`)
+    /// Business: starts a business-authorized enrollment for an existing relationship (`subject_ref`, never a phone number). Capability
+    /// `auth.challenge` or `transaction.approve`, policy-checked.
+    public static let businessApproveEnrollmentCreate = Endpoint<CreateApprovalEnrollmentRequest, ApprovalEnrollmentTicket>(
+        "business.approve.enrollments.create", .POST, "/v1/business/approve/enrollments", auth: .businessAPIKey)
+    public static let businessApproveEnrollmentGet = Endpoint<EmptyBody, ApprovalEnrollmentView>(
+        "business.approve.enrollments.get", .GET, "/v1/business/approve/enrollments/{enrollmentId}", auth: .businessAPIKey)
+    /// The business's signed confirmation of the key it received; activates the key.
+    public static let businessApproveEnrollmentConfirm = Endpoint<ConfirmApprovalEnrollmentRequest, ApprovalKeyView>(
+        "business.approve.enrollments.confirm", .POST, "/v1/business/approve/enrollments/{enrollmentId}/confirm", auth: .businessAPIKey)
+    public static let businessApproveEnrollmentCancel = Endpoint<EmptyBody, ApprovalEnrollmentView>(
+        "business.approve.enrollments.cancel", .POST, "/v1/business/approve/enrollments/{enrollmentId}/cancel", auth: .businessAPIKey)
+    /// Query: `subject_ref`.
+    public static let businessApproveKeys = Endpoint<EmptyBody, [ApprovalKeyView]>(
+        "business.approve.keys.list", .GET, "/v1/business/approve/keys", auth: .businessAPIKey)
+    public static let businessApproveKeyRevoke = Endpoint<RevokeApprovalKeyRequest, ApprovalKeyView>(
+        "business.approve.keys.revoke", .POST, "/v1/business/approve/keys/{kid}/revoke", auth: .businessAPIKey)
+    public static let businessApproveRequestCreate = Endpoint<CreateApprovalRequest, ApprovalRequestView>(
+        "business.approve.requests.create", .POST, "/v1/business/approve/requests", auth: .businessAPIKey)
+    public static let businessApproveRequestGet = Endpoint<EmptyBody, ApprovalRequestView>(
+        "business.approve.requests.get", .GET, "/v1/business/approve/requests/{requestId}", auth: .businessAPIKey)
+    public static let businessApproveRequestCancel = Endpoint<EmptyBody, ApprovalRequestView>(
+        "business.approve.requests.cancel", .POST, "/v1/business/approve/requests/{requestId}/cancel", auth: .businessAPIKey)
+    /// The signed result. Recipient-bound: only the business the result is addressed to can read it.
+    public static let businessApproveResult = Endpoint<EmptyBody, ApprovalResultResponse>(
+        "business.approve.results.get", .GET, "/v1/business/approve/results/{resultRef}", auth: .businessAPIKey)
+    public static let businessApproveFreeze = Endpoint<BusinessFreezeRequest, FreezeStatus>(
+        "business.approve.freeze", .POST, "/v1/business/approve/freeze", auth: .businessAPIKey)
+    /// Publishes one signed key-directory entry (root registration, succession, operational key, revocation).
+    public static let businessKeyDirectoryPublish = Endpoint<PublishKeyEntryRequest, PublishKeyEntryResponse>(
+        "business.keyDirectory.publish", .POST, "/v1/business/key-directory/entries", auth: .businessAPIKey)
+    /// The calling business's own log entries with proofs, for monitoring. Query: `since` (tree size last seen).
+    public static let businessKeyDirectoryEntries = Endpoint<EmptyBody, KeyDirectoryResponse>(
+        "business.keyDirectory.entries", .GET, "/v1/business/key-directory/entries", auth: .businessAPIKey)
+
+    /// Device: looks up an enrollment by the code the business displayed (rate-limited; wrong codes burn attempts).
+    public static let approveEnrollmentLookup = Endpoint<ApproveEnrollmentLookupRequest, ApproveEnrollmentPreview>(
+        "approve.enrollments.lookup", .POST, "/v1/approve/enrollments/lookup", auth: .deviceSignedBearer)
+    /// Device: submits the signed enrollment statement of the new pairwise key (trusted device only).
+    public static let approveEnrollmentComplete = Endpoint<CompleteApproveEnrollmentRequest, ApproveKey>(
+        "approve.enrollments.complete", .POST, "/v1/approve/enrollments/{enrollmentId}/complete", auth: .deviceSignedBearer)
+    public static let approveKeys = Endpoint<EmptyBody, [ApproveKey]>(
+        "approve.keys.list", .GET, "/v1/approve/keys", auth: .deviceSignedBearer)
+    public static let approveKeyRevoke = Endpoint<EmptyBody, ApproveKey>(
+        "approve.keys.revoke", .POST, "/v1/approve/keys/{kid}/revoke", auth: .deviceSignedBearer)
+    /// Device: pending approval requests addressed to this device's keys.
+    public static let approveRequests = Endpoint<EmptyBody, [ApproveDeviceRequest]>(
+        "approve.requests.list", .GET, "/v1/approve/requests", auth: .deviceSignedBearer)
+    public static let approveRequestGet = Endpoint<EmptyBody, ApproveDeviceRequest>(
+        "approve.requests.get", .GET, "/v1/approve/requests/{approvalId}", auth: .deviceSignedBearer)
+    public static let approveRequestResult = Endpoint<SubmitApprovalResultRequest, SubmitApprovalResultResponse>(
+        "approve.requests.result", .POST, "/v1/approve/requests/{approvalId}/result", auth: .deviceSignedBearer)
+    public static let approveFreezeGet = Endpoint<EmptyBody, ApproveFreezeState>(
+        "approve.freeze.get", .GET, "/v1/approve/freeze", auth: .deviceSignedBearer)
+    public static let approveFreezeSet = Endpoint<ApproveFreezeRequest, ApproveFreezeState>(
+        "approve.freeze.set", .POST, "/v1/approve/freeze", auth: .deviceSignedBearer)
+
+    /// Public key directory (rate-limited, no authentication: it publishes public keys and signatures only).
+    public static let keyDirectorySTH = Endpoint<EmptyBody, SignedTreeHead>(
+        "keyDirectory.sth", .GET, "/v1/key-directory/sth", auth: .none)
+    /// Query: `first`, `second` (tree sizes).
+    public static let keyDirectoryConsistency = Endpoint<EmptyBody, ConsistencyProofResponse>(
+        "keyDirectory.consistency", .GET, "/v1/key-directory/consistency", auth: .none)
+    /// Every entry of one business with inclusion proofs against the current head. Query: `since` (tree size last seen, for the consistency proof).
+    public static let keyDirectoryBusiness = Endpoint<EmptyBody, KeyDirectoryResponse>(
+        "keyDirectory.business", .GET, "/v1/key-directory/businesses/{businessId}", auth: .none)
+
     // MARK: Messaging provider
     /// Raw provider payload (e.g. form-encoded); verified with the provider's signature scheme.
     public static let providerSMSInbound = Endpoint<Data, EmptyBody>(
@@ -322,6 +390,13 @@ public enum APIRoutes {
         vaultStatus.descriptor, vaultPut.descriptor, vaultDelete.descriptor, vaultManifests.descriptor, vaultBlobs.descriptor, vaultEnvelope.descriptor,
         vaultRecoveryEnvelope.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,
         vaultJoinRequest.descriptor, vaultJoinCancel.descriptor,
+        businessApproveEnrollmentCreate.descriptor, businessApproveEnrollmentGet.descriptor, businessApproveEnrollmentConfirm.descriptor,
+        businessApproveEnrollmentCancel.descriptor, businessApproveKeys.descriptor, businessApproveKeyRevoke.descriptor, businessApproveRequestCreate.descriptor,
+        businessApproveRequestGet.descriptor, businessApproveRequestCancel.descriptor, businessApproveResult.descriptor, businessApproveFreeze.descriptor,
+        businessKeyDirectoryPublish.descriptor, businessKeyDirectoryEntries.descriptor,
+        approveEnrollmentLookup.descriptor, approveEnrollmentComplete.descriptor, approveKeys.descriptor, approveKeyRevoke.descriptor, approveRequests.descriptor,
+        approveRequestGet.descriptor, approveRequestResult.descriptor, approveFreezeGet.descriptor, approveFreezeSet.descriptor,
+        keyDirectorySTH.descriptor, keyDirectoryConsistency.descriptor, keyDirectoryBusiness.descriptor,
     ] + verifyEndpoints
 
     /// Web (non-API) paths served on `viadere.com`.

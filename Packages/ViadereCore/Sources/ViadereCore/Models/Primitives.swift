@@ -145,6 +145,10 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case contextMismatch = "context_mismatch"
     /// The server requires App Attest (`APP_ATTEST_MODE=require`) and the enrollment carried no valid attestation (`403`).
     case attestationRequired = "attestation_required"
+    /// Approvals are frozen for this relationship or account (by the customer or by the business).
+    case approvalsFrozen = "approvals_frozen"
+    /// The customer's protection against repeated prompts paused requests from this business for a while.
+    case approvalsPaused = "approvals_paused"
     case unknown
 
     public init(from decoder: any Decoder) throws {

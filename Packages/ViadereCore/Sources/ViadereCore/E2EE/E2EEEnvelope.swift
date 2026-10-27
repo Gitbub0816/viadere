@@ -55,11 +55,13 @@ public struct E2EEContext: Sendable, Hashable {
         !value.isEmpty && value.utf8.count <= max && value.utf8.allSatisfy(allowed)
     }
 
-    static func validPurpose(_ value: String) -> Bool {
+    /// `[a-z0-9._-]{1,64}`.
+    public static func validPurpose(_ value: String) -> Bool {
         isToken(value, allowed: { ($0 >= 0x61 && $0 <= 0x7A) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2E || $0 == 0x5F || $0 == 0x2D }, max: 64)
     }
 
-    static func validIdentifier(_ value: String) -> Bool {
+    /// `[A-Za-z0-9._:-]{1,128}`.
+    public static func validIdentifier(_ value: String) -> Bool {
         isToken(value, allowed: {
             ($0 >= 0x61 && $0 <= 0x7A) || ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2E || $0 == 0x5F || $0 == 0x2D || $0 == 0x3A
         })

@@ -52,7 +52,13 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Viadere uses Face ID to confirm it is you when you approve sign-ins and purchases, and to unlock the app if you turn on app lock.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Viadere uses the camera to scan QR codes that connect you to a business. Nothing is recorded or stored.</string>
+	<string>Viadere uses the camera to scan QR codes that connect you to a business. If you choose to scan an ID document, the camera also takes a photo of it and a selfie for that check. They go to our verification provider, not to Viadere.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>If you choose to scan an ID document, the verification provider records a short liveness video with sound to confirm you are present. It is deleted after the check.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>If you choose to scan an ID document, you can pick a photo of it from your library instead of using the camera. Viadere does not read your other photos.</string>
+	<key>NSIdentityUsageDescription</key>
+	<string>Apple Wallet asks you to confirm before sharing from your ID. Viadere asks only for what a business needs for the request you approve, such as whether you meet an age threshold.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

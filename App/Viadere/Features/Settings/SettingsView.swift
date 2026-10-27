@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -54,6 +54,7 @@ struct SettingsView: View {
                 case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
                 case .recovery: RecoveryCodesSettingsView(vm: vm)
                 case .authenticator: AuthenticatorView(backTitle: "Settings")
+                case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
                 }
             }
             .task {
@@ -148,6 +149,8 @@ struct SettingsView: View {
                     ViadereHairline(inset: 50)
                 }
                 navRow("Consent history", subtitle: "What you've allowed, and when", symbol: "checklist", route: .consents)
+                ViadereHairline(inset: 50)
+                navRow("Verification history", subtitle: "Age and ID checks, and what was shared", symbol: "person.badge.shield.checkmark", route: .verifications)
                 if vm.sessionsAvailable {
                     ViadereHairline(inset: 50)
                     navRow("Signed-in sessions", subtitle: "\(vm.sessions.count) active", symbol: "person.crop.circle", route: .sessions)

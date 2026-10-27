@@ -29,7 +29,11 @@ struct BackgroundJobs {
         report.redemptionsReleased = try await RewardsService(db: db, ctx: ctx).releaseExpired()
         report.passPushes = try await WalletService(db: db, ctx: ctx).deliverDue()
         try await HouseholdService(db: db, ctx: ctx).recordExpired()
+        // Approve v2: overdue requests end with one opaque event each; stale enrollments expire.
+        if ctx.config.approve.enabled { try await ApproveRequestService(db: db, ctx: ctx).expireDue() }
         try await IdentityMaintenance(db: db, ctx: ctx).run()
+        // Verify: finish expired requests, purge provider sessions, erase spent results (runs even while Verify is switched off).
+        try await VerifyService(db: db, ctx: ctx, runtime: app.verify).runMaintenance()
         // Relationships created before `subject_ref` existed get theirs (a read first; nothing to do once all have one).
         try await SubjectResolver.backfill(db: db, ctx: ctx)
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.

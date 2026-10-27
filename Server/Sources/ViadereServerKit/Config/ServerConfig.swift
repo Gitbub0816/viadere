@@ -134,6 +134,10 @@ public struct ServerConfig: Sendable {
     public var email: EmailConfig?
     /// Credential-vault sync gate and limits (`VAULT_SYNC_ENABLED`, default off).
     public var vaultSync = VaultSyncSettings()
+    /// Approve v2, the business key directory and its transparency log (WP1; `APPROVE_V2_ENABLED`, default off in staging and production).
+    public var approve = ApproveSettings()
+    /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).
+    public var verify = VerifySettings()
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -272,6 +276,8 @@ public struct ServerConfig: Sendable {
         try config.applyPassEnvironment(env)
         try config.applyInfrastructureEnvironment(env, production: production)
         config.applyVaultEnvironment(env)
+        try config.applyApproveEnvironment(env, production: production)
+        try config.applyVerifyEnvironment(env, production: production)
         return config
     }
 

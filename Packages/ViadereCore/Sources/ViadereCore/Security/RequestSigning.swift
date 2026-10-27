@@ -15,6 +15,12 @@ public enum ViadereHeader {
     public static let eventId = "Viadere-Event-Id"
     /// Webhook event type.
     public static let eventType = "Viadere-Event-Type"
+    /// Webhook delivery id (stable across retries of one delivery).
+    public static let deliveryId = "Viadere-Delivery-Id"
+    /// Versioned id of the key that signed a webhook delivery: `whk_{subscription prefix}_v{secret version}` (SEC-API-006).
+    public static let keyId = "Viadere-Key-Id"
+    /// Webhook body format: absent or `v1` for `WebhookEvent`, `2026-10-27` for the opaque `WebhookEnvelopeV2`.
+    public static let webhookVersion = "Viadere-Webhook-Version"
     /// Idempotency key for business API POSTs (1–128 chars). Business API keys travel in
     /// `Authorization: Bearer vk_…`.
     public static let idempotencyKey = "Idempotency-Key"

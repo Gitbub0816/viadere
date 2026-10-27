@@ -13,6 +13,7 @@ struct SecurityNotices {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
         case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
         case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
+        case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -29,6 +30,11 @@ struct SecurityNotices {
             case .vaultDeviceAdded: .vaultDeviceAdded
             case .vaultDeviceRemoved: .vaultDeviceRemoved
             case .vaultDeleted: .vaultDeleted
+            case .approvalKeyEnrolled: .approvalKeyEnrolled
+            case .approvalKeyRevoked: .approvalKeyRevoked
+            case .approvalsFrozen: .approvalsFrozen
+            case .approvalsUnfrozen: .approvalsUnfrozen
+            case .approvalRequestsPaused: .approvalRequestsPaused
             }
         }
 
@@ -62,6 +68,13 @@ struct SecurityNotices {
                 "A device was added to your synced Viadere credential vault. If this wasn't you, open Viadere, remove it and change the passwords and passkeys you keep there."
             case .vaultDeviceRemoved: "A device was removed from your synced Viadere credential vault."
             case .vaultDeleted: "Your synced Viadere credential vault was deleted from Viadere's servers. Your devices keep their own copies."
+            case .approvalKeyEnrolled:
+                "A business can now ask you to approve requests with a new approval key. If you didn't set this up, open Viadere, remove the key and freeze approvals."
+            case .approvalKeyRevoked: "An approval key was removed, so that business can no longer ask you to approve requests with it."
+            case .approvalsFrozen: "Approvals were frozen. No business can ask you to approve anything until you unfreeze them in Viadere."
+            case .approvalsUnfrozen: "Approvals were unfrozen. If this wasn't you, open Viadere and freeze them again."
+            case .approvalRequestsPaused:
+                "A business sent you several approval requests, so Viadere paused further requests from it for a while. If you don't recognize it, report it in Viadere."
             case .delegationEnded:
                 "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }

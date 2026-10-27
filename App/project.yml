@@ -55,6 +55,11 @@ packages:
     path: ../Packages/ViadereCore
   ViadereKit:
     path: ../Packages/ViadereKit
+  # Verify (WP3): Didit's native flow for people without a Wallet ID. Core variant (manual capture, no NFC, no OpenSSL, iOS 13+); the NFC
+  # variant (iOS 15+) is only needed if passport chip reading is added. Latest stable tag checked 2026-10-27: 4.9.1.
+  DiditSDK:
+    url: https://github.com/didit-protocol/sdk-ios.git
+    from: "4.9.1"
 
 # Reusable pieces ----------------------------------------------------------------------------------------------
 # Networking targets use a hand-written, *preprocessed* Info.plist: the DEBUG-only ATS exception for
@@ -116,6 +121,10 @@ targets:
         # Third-party passkey / one-time-code provider (Authenticator). The extension carries the same entitlement.
         com.apple.developer.authentication-services.autofill-credential-provider: true
         com.apple.developer.usernotifications.time-sensitive: true
+        # Verify with Wallet (WP3): Apple grants `com.apple.developer.in-app-identity-presentment` per bundle ID after a request (see App/README.md).
+        # It is NOT listed here on purpose: until Apple approves the request the provisioning profile does not carry it and signing would fail.
+        # After approval add it from Xcode (Signing & Capabilities → Verify with Wallet) and commit the value Apple issued; Wallet is
+        # simply unavailable in the app until then (`checkCanRequestDocument` answers false) and the document method still works.
         # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement. The pass-type-identifiers
         # entitlement is only needed to read passes this app did not add, so it is deliberately not requested:
         #   com.apple.developer.pass-type-identifiers: [$(TeamIdentifierPrefix)pass.com.viadere.*]
@@ -132,6 +141,8 @@ targets:
         product: ViadereKit
       - package: ViadereCore
         product: ViadereCore
+      - package: DiditSDK
+        product: DiditSDKCore
       - target: ViadereNotificationService
       - target: ViadereNotificationContent
       - target: ViadereCredentialProvider

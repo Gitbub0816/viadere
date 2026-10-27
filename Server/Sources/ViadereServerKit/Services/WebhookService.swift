@@ -13,7 +13,8 @@ struct WebhookService {
     static let backoff: [TimeInterval] = [30, 120, 600, 3600, 6 * 3600, 12 * 3600, 24 * 3600]
     static let knownEvents: [WebhookEventType] = [
         .interactionDecided, .interactionExpired, .interactionCancelled, .messageReceived, .relationshipConnected,
-        .relationshipDisconnected, .consentUpdated, .rewardRedeemed,
+        .relationshipDisconnected, .consentUpdated, .rewardRedeemed, .verificationCompleted,
+        .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
     ]
     static let rotationOverlap: TimeInterval = 24 * 3600
 
@@ -23,7 +24,8 @@ struct WebhookService {
         guard let id = record.id, let url = URL(string: record.url) else { return nil }
         return WebhookSubscription(id: WebhookSubscriptionID(id), url: url,
                                    events: record.events.split(separator: ",").map { WebhookEventType(rawValue: String($0)) },
-                                   active: record.active, createdAt: record.createdAt)
+                                   active: record.active, createdAt: record.createdAt, envelopeVersion: record.envelopeVersion,
+                                   secretVersion: record.secretVersion)
     }
 
     func list(businessId: BusinessID) async throws -> [WebhookSubscription] {
@@ -39,6 +41,15 @@ struct WebhookService {
         guard !events.isEmpty, events.count <= 16, events.allSatisfy({ e in Self.knownEvents.contains { $0.rawValue == e } }) else {
             throw APIError.validation("Unknown or missing event types.", details: ["events": "invalid"])
         }
+        // The opaque v2 envelope (spec 14.3) carries no payload, so a v2 subscription may only ask for events that have an opaque form.
+        if let version = request.envelopeVersion {
+            guard version == WebhookEnvelopeV2.version else {
+                throw APIError.validation("Unknown envelope version.", details: ["envelopeVersion": "invalid"])
+            }
+            guard events.allSatisfy({ e in WebhookEventType.opaqueEvents.contains { $0.rawValue == e } }) else {
+                throw APIError.validation("The opaque envelope supports only approval and interaction events.", details: ["events": "invalid"])
+            }
+        }
         let existing = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
             .filter(\.$active == true).count()
         guard existing < Self.maxSubscriptionsPerBusiness else { throw APIError.conflict("Webhook limit reached.") }
@@ -49,6 +60,8 @@ struct WebhookService {
         record.url = request.url.absoluteString
         record.events = events.sorted().joined(separator: ",")
         record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret", rowId: record.id!)
+        record.envelopeVersion = request.envelopeVersion
+        record.secretVersion = 1
         record.active = true
         record.createdAt = ctx.now
         try await record.create(on: db)
@@ -78,6 +91,7 @@ struct WebhookService {
         record.previousSecretCiphertext = record.secretCiphertext
         record.previousSecretExpiresAt = ctx.now.addingTimeInterval(Self.rotationOverlap)
         record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret", rowId: record.id!)
+        record.secretVersion += 1
         try await record.update(on: db)
         guard let subscription = dto(record) else { throw APIError.internalError }
         _ = try await AuditService(db: db, ctx: ctx).record("webhook.rotated", actor: AuditActor(kind: .business, id: businessId.description),
@@ -89,28 +103,49 @@ struct WebhookService {
 
     /// Queues one delivery per matching active subscription. Runs inside the caller's transaction so an
     /// event is queued if and only if the state change it describes committed.
-    func enqueue<T: Encodable>(_ type: WebhookEventType, businessId: BusinessID, payload: T) async throws {
+    /// `onlySubscription` limits delivery to one registered endpoint (a verification request's `callback_id`).
+    ///
+    /// `opaque` is the event's opaque form (spec 14.3: ids and a `result_ref`, no payload). Subscriptions that opted into the v2 envelope
+    /// receive **only** events that provide one; every other subscription receives the v1 `WebhookEvent` with the payload.
+    func enqueue<T: Encodable>(_ type: WebhookEventType, businessId: BusinessID, payload: T, onlySubscription: UUID? = nil,
+                               opaque: OpaqueWebhookEvent? = nil) async throws {
         let subscriptions = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
-            .filter(\.$active == true).all().filter { $0.events.split(separator: ",").contains { Substring(type.rawValue) == $0 } }
+            .filter(\.$active == true).all().filter { onlySubscription == nil || $0.id == onlySubscription }
+            .filter { $0.events.split(separator: ",").contains { Substring(type.rawValue) == $0 } }
         guard !subscriptions.isEmpty else { return }
         let now = ctx.now
         let data = try ViadereJSON.decode(JSONValue.self, from: ViadereJSON.encode(payload))
         for subscription in subscriptions {
             let id = WebhookDeliveryID()
-            let event = WebhookEvent(id: id, type: type, createdAt: now, businessId: businessId, data: data)
+            let body: Data
+            if subscription.envelopeVersion == WebhookEnvelopeV2.version {
+                guard let opaque else { continue }
+                body = try ViadereJSON.encode(WebhookEnvelopeV2(id: "evt_" + id.uuid.uuidString.lowercased(), type: type.rawValue, tenantId: tenantId(of: businessId),
+                                                                requestId: opaque.requestId, occurredAt: now, resultRef: opaque.resultRef))
+            } else {
+                body = try ViadereJSON.encode(WebhookEvent(id: id, type: type, createdAt: now, businessId: businessId, data: data))
+            }
             let delivery = WebhookDeliveryRecord()
             delivery.id = id.uuid
             delivery.subscriptionId = subscription.id!
             delivery.businessId = businessId.uuid
             delivery.eventType = type.rawValue
             // The body can contain a consumer's message text: encrypted at rest (bound to this row) and purged after the retention window.
-            delivery.body = try ctx.cipher.seal(try ViadereJSON.encode(event), context: "webhook_deliveries.body", rowId: delivery.id!)
+            delivery.body = try ctx.cipher.seal(body, context: "webhook_deliveries.body", rowId: delivery.id!)
             delivery.status = "pending"
             delivery.attempts = 0
             delivery.nextAttemptAt = now
             delivery.createdAt = now
             try await delivery.create(on: db)
         }
+    }
+
+    /// The business's opaque tenant identifier in v2 envelopes: stable per business, not derivable from the business id without the server pepper.
+    func tenantId(of businessId: BusinessID) -> String { "ten_" + String(ctx.hasher.hmacHex("tenant-id", businessId.description).prefix(32)) }
+
+    /// The versioned id of the key that signs a subscription's deliveries (SEC-API-006): `whk_{first 8 of the subscription id}_v{secret version}`.
+    static func keyId(subscription: WebhookSubscriptionRecord) -> String {
+        "whk_" + String((subscription.id?.uuidString.lowercased() ?? "").prefix(8)) + "_v\(subscription.secretVersion)"
     }
 
     // MARK: Bodies at rest
@@ -222,8 +257,11 @@ struct WebhookService {
                 "Content-Type": "application/json",
                 "User-Agent": "Viadere-Webhooks/1",
                 ViadereHeader.signature: WebhookSignature.header(secrets: secrets, body: body, now: now),
-                ViadereHeader.eventId: id.uuidString.lowercased(),
+                ViadereHeader.eventId: subscription.envelopeVersion == WebhookEnvelopeV2.version ? "evt_" + id.uuidString.lowercased() : id.uuidString.lowercased(),
                 ViadereHeader.eventType: delivery.eventType,
+                ViadereHeader.deliveryId: id.uuidString.lowercased(),
+                ViadereHeader.keyId: Self.keyId(subscription: subscription),
+                ViadereHeader.webhookVersion: subscription.envelopeVersion ?? "v1",
             ], body: body)
             do {
                 statusCode = try await ctx.webhookTransport.send(request).statusCode
@@ -263,4 +301,12 @@ struct WebhookService {
                 subjectId: id.uuidString.lowercased(), metadata: ["event_type": delivery.eventType, "attempts_made": String(delivery.attempts)])
         }
     }
+}
+
+/// The opaque form of a webhook event (spec 14.3): what a v2 subscription receives instead of the payload.
+struct OpaqueWebhookEvent: Sendable {
+    /// The request the event is about (a business request id, an enrollment id, or a `subject_ref` for a freeze).
+    var requestId: String
+    /// Where to fetch the result with the business's own credentials, when there is one.
+    var resultRef: String?
 }

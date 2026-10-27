@@ -21,6 +21,9 @@ final class AppEnvironment {
     let captureObserver = ScreenCaptureObserver()
     let liveActivities: LiveActivityManager
     let watchBridge: WatchBridge
+    /// Verify (WP3): which verification request is open, and the client that talks to `/v1/verifications`.
+    let verification = VerificationCenter()
+    let verifyAPI: any VerifyAPI = LiveVerifyAPI.make(services: AppEnvironment.services)
 
     private init() {
         model = AppModel(services: Self.services, walletLibrary: PassKitWalletLibrary())

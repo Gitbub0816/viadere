@@ -158,6 +158,10 @@ final class WebhookSubscriptionRecord: Model, @unchecked Sendable {
     @OptionalField(key: "previous_secret_expires_at") var previousSecretExpiresAt: Date?
     @Field(key: "active") var active: Bool
     @Field(key: "created_at") var createdAt: Date
+    /// `nil` = v1 `WebhookEvent` bodies; `2026-10-27` = the opaque envelope.
+    @OptionalField(key: "envelope_version") var envelopeVersion: String?
+    /// Version of the current signing secret (1, then +1 at every rotation); part of the `Viadere-Key-Id` header.
+    @Field(key: "secret_version") var secretVersion: Int
 
     init() {}
 }
