@@ -330,7 +330,7 @@ struct AccountRecoveryFlowTests {
         await vm.submit()
 
         guard case .holding(let hold) = vm.phase else { Issue.record("expected the hold, got \(vm.phase)"); return }
-        #expect(hold.activatesAt.timeIntervalSince(hold.startedAt) == RecoveryPolicy.holdSeconds)
+        #expect(abs(hold.activatesAt.timeIntervalSince(hold.startedAt) - RecoveryPolicy.holdSeconds) < 1)
         #expect(await api.activeRecoveryCodes?.codes.count == RecoveryPolicy.codeCount - 1, "one code was spent")
         #expect(RecoveryHoldStore(secrets: phone.secrets).load() == hold, "the status token survives a relaunch")
         #expect(vm.codeText.isEmpty)

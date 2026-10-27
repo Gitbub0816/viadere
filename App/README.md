@@ -63,7 +63,7 @@ Override the server with `VIADERE_API_BASE_URL` in `Configs/Local.xcconfig`.
 | Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.Widgets`, `.Clip`, `.watchkitapp` |
 | App group | `group.com.viadere.shared` (app + notification service) |
 | Keychain groups | `$(AppIdentifierPrefix)com.viadere.shared` (app + notification service: request key and access token only) and `$(AppIdentifierPrefix)com.viadere.app.approval` (**app only**: the approval keys). The clip keeps its own private keychain and holds a request key only. |
-| Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.com`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip) |
+| Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.com`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip), **App Attest** (`com.apple.developer.devicecheck.appattest-environment` on the app and the clip, `$(APP_ATTEST_ENVIRONMENT)`: `development` in `Debug.xcconfig`, `production` in `Release.xcconfig`; the server's `APP_ATTEST_ENVIRONMENT` must match) |
 | Developer portal | Enable Push, Associated Domains, App Groups, Time Sensitive Notifications, App Clip; register the App Clip experience in App Store Connect |
 | Server (viadere.com) | Serve `/.well-known/apple-app-site-association` with `applinks` (`/c/*`, `/l/*`, `/h/*`), `webcredentials` (this app) and `appclips` (the clip) |
 
@@ -107,6 +107,49 @@ attempt) and sends bearer tokens only to bearer routes. `401` triggers one **sin
 network call is covered by a short-lived lease file, and it **fails closed**: if the lock file can't be opened or the
 lock isn't acquired in time, no refresh runs and a retryable error surfaces. A generation counter stops a refresh that was
 in flight at sign-out from resurrecting the session. Two consecutive `signature_invalid` responses mean the device was revoked: everything local is wiped.
+
+**Identity hardening (server round 4, `docs/SECURITY.md` §2.5, §2.8, §2.26).**
+
+- **App Attest at enrollment.** `AccountService.enrollThisDevice` generates a **new App Attest key per enrollment** and calls
+  `attestKey(keyId, clientDataHash: AppAttestBinding.clientDataHash(consumerId:challenge:keys:))` over **exactly the keys it
+  sends** (the app's three keys; the Clip's request key only), then sends `appAttest {keyId, attestation}` (app and Clip).
+  `DCAppAttestService` sits behind `AppAttestProviding` (`DeviceCheckAppAttest`, guarded by `#if canImport(DeviceCheck)`;
+  `MockAppAttest` for tests, whose "attestation" the mock server checks against the request's own key list). Where App Attest
+  is unsupported (the Simulator) **DEBUG builds enroll without it; Release reports `AppAttestError.unsupported`**.
+  `403 attestation_required` reads "This iPhone couldn't be verified. Make sure you're using the App Store version of Viadere."
+- **Signed refresh.** `POST /v1/auth/refresh` is declared `.none` in Core, so `APITokenRefresher` asks the executor to sign it
+  explicitly (`RequestExecutor.run(..., signsWhenEnrolled: true)`): when a device is enrolled it carries the `Viadere-*` headers
+  signed with the request key and **no bearer**; with no enrolled device it goes unsigned (a session that has not bound one).
+  A `clock_skew` or `replay_detected` answer is retried once, re-signed. A `signature_invalid` answer is reported without
+  discarding the session (it says something about this device, not the refresh token). The notification service extension
+  gets the same behavior because it builds the same executor over the shared request key and device record.
+- **Recovery codes** (`Recovery/*` in Kit, `Shared/UI/RecoveryCodesView`, `Features/Recovery/*`). `AuthSession.recoveryCodes`
+  arrives once at registration and is shown on the brand-styled **Save your recovery codes** screen (recovery ID and ten
+  codes) with **Copy** (`SecurePasteboard`: local only, expiring), **Save to Files** (the stock share sheet, text only, its own
+  Copy excluded) and a required **I saved these**; screenshots raise a notice and the codes hide while the screen is
+  recorded or mirrored. The codes live only in `RecoveryCodesViewModel` memory: never in the Keychain, defaults, a file, a
+  link, a notification or a log (a test scans everything the stores ever wrote). They are released on confirmation; if the app
+  locks while they show they are gone and Settings → Security → **Recovery codes** generates a new set (needs a trusted
+  device and a fresh passkey assertion: `recoveryCodesBegin` → assertion → `recoveryCodesRegenerate`; the App Clip shows the
+  codes after it creates an account, too). **Lost your devices?** on the welcome and account screens runs
+  `AccountRecoveryViewModel`: recovery ID and one code → `recoveryBegin` → new passkey → `recoveryFinish` (a `statusToken`) →
+  a hold screen (72 hours, other devices can cancel) → `recoveryComplete` polled when the screen opens and when the app returns
+  to the foreground (throttled to once a minute, never a loop) → the replacement codes shown once → sign in with the new
+  passkey → enroll this iPhone like any lapsed account's. The `statusToken` (and recovery id) are the only things kept during
+  the hold, in the Keychain-backed secret store (`RecoveryHoldStore`), so a relaunch resumes the hold. Every refusal of
+  `recoveryBegin` reads the same, so the screen cannot be used to find accounts.
+- **Pending device replacement.** "Set up again" stores `Device.replacementSession` as the new session when the server returns
+  one (a live old device keeps working; the caller's old session stays bound to it). Settings → Trusted devices shows
+  **Replacing this iPhone** / **Being replaced** / **Pending replacement** from `pendingReplacementBy` and
+  `pendingReplacementAt`, with a "Not you? Cancel" button (`deviceReplacementCancel`, acts on the new device, needs a trusted
+  device that is not the new one).
+- **Security notices.** The banner copy is chosen by `SecurityNotice.topic` (`devicePendingReplacement`, `recoveryStarted`,
+  `recoveryCancelled`, `recoveryAttemptsLocked`, plus the existing ones) with a generic fallback for unknown topics. A notice
+  with `action == .cancelRecovery` shows "Account recovery was started. Not you? Cancel recovery" (`recoveryCancel`);
+  `.cancelDeviceReplacement` shows "A new iPhone is replacing this one. Not you? Cancel" (`deviceReplacementCancel`).
+  `device_cool_down` is explained, not shown as a failure. The push category **`viadere.security.cancel`** (action "Review",
+  foreground, authentication required) is registered at launch; the push has no subject id, so opening the app fetches the
+  notices (`AppModel.apply(.open(nil))`, launch and foreground).
 
 **Approvals.** `ApprovalService` builds a **v2** `DecisionPayload` whose `contextDigest` is
 `interaction.displayContextDigest()` of the exact interaction the sheet displayed. Before signing it re-fetches, compares
@@ -229,7 +272,7 @@ All `deviceSignedBearer`. Every route below lives in ViadereCore's `APIRoutes` (
 ## Not verified by compilation
 
 This repository was authored on Linux, where there is no Xcode or iOS SDK. **Everything under `Packages/ViadereKit`
-that is platform-neutral compiles and is covered by `swift test` (260 tests).** The following were written carefully
+that is platform-neutral compiles and is covered by `swift test` (335 tests).** The following were written carefully
 against the iOS 17/18 SDK but never compiled; build them first in Xcode and expect a few mechanical fixes:
 
 1. SwiftUI/UIKit code in `Viadere/`, `Shared/`, the extensions, widgets, clip and watch (only syntax-parsed).
@@ -245,3 +288,7 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
    PassKit calls (`PKAddPassButton`, `PKAddPassesViewController`, `PKPass(data:)`, `PKPassLibrary`). `Text(timerInterval:)`
    in the Dynamic Island, `NavigationLink` destinations inside the typed Home stack, and Swift 6 isolation around
    `PKAddPassesViewControllerDelegate` (`WalletPresenter`) are the likeliest to need a mechanical fix.
+9. Round-4 identity UI and platform code: `DeviceCheckAppAttest` (`DCAppAttestService`; needs a device, the Simulator
+   reports unsupported), the App Attest entitlement and `APP_ATTEST_ENVIRONMENT` xcconfig wiring, `RecoveryCodesView` (the
+   `UIActivityViewController` share sheet), `Features/Recovery/*`, the recovery and replacement rows in Settings, the banner's
+   action button, the Clip sources that now include `SecurePasteboard` and `ScreenCaptureObserver`.

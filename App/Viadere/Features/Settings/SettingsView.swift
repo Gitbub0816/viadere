@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments
+    case devices, phones, consents, sessions, household, acknowledgments, recovery
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -52,6 +52,7 @@ struct SettingsView: View {
                 case .sessions: SessionsView(vm: vm)
                 case .household: HouseholdView(vm: household)
                 case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
+                case .recovery: RecoveryCodesSettingsView(vm: vm)
                 }
             }
             .task {
@@ -133,6 +134,10 @@ struct SettingsView: View {
                 .toggleStyle(.viadere)
                 .padding(.vertical, ViadereSpace.xxs)
                 ViadereHairline()
+                if vm.recoveryAvailable {
+                    navRow("Recovery codes", subtitle: vm.recoveryStatusLine, symbol: "list.number", route: .recovery)
+                    ViadereHairline(inset: 50)
+                }
                 navRow("Trusted devices", subtitle: "\(vm.devices.filter { !$0.isRevoked }.count) active", symbol: "iphone.gen3", route: .devices)
                 ViadereHairline(inset: 50)
                 if vm.phonesAvailable {
@@ -294,6 +299,14 @@ struct DevicesView: View {
                             Text(note).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let state = vm.replacementState(for: device) {
+                            Text(vm.replacementNote(for: state)).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if vm.canCancelReplacement(device) {
+                                Button("Not you? Cancel") { Task { await vm.cancelReplacement(device) } }
+                                    .buttonStyle(.viadere(.secondary, fullWidth: false))
+                            }
+                        }
                         if vm.canConfirm(device) {
                             Button(vm.confirmingId == device.id.description ? "Confirming…" : "Confirm this device") { Task { await vm.confirm(device) } }
                                 .buttonStyle(.viadere(.secondary, fullWidth: false))
@@ -333,8 +346,54 @@ struct DevicesView: View {
 
     @ViewBuilder private func badge(_ device: Device) -> some View {
         if device.isRevoked { ViadereBadge("Removed", kind: .danger) }
+        else if let state = vm.replacementState(for: device) { ViadereBadge(vm.replacementTitle(for: state), kind: .pending) }
         else if device.id == vm.currentDeviceId { ViadereBadge("This iPhone", kind: .success) }
         else { EmptyView() }
+    }
+}
+
+/// Settings → Security → Recovery codes: how many are left, and "Generate new codes" (a trusted device and a fresh passkey assertion).
+/// New codes are shown once, in the same screen as onboarding, and never stored.
+struct RecoveryCodesSettingsView: View {
+    @Bindable var vm: SecuritySettingsViewModel
+    @State private var confirming = false
+
+    var body: some View {
+        SubScreen(title: "Recovery codes", subtitle: "The way back in if you lose every device.") {
+            if let message = vm.recoveryMessage { ViadereNotice(message, kind: .danger) }
+            ViadereRowGroup {
+                ViadereValueRow("Unused codes", vm.recoveryInfo.map { "\($0.remainingCodes) of \(RecoveryPolicy.codeCount)" } ?? "…")
+            }
+            if vm.recoveryInfo?.remainingCodes == 0 {
+                ViadereNotice("You have no unused codes. Generate a set so you can recover your account if you lose your devices.", kind: .warning)
+            }
+            if let pending = vm.recoveryInfo?.pending {
+                ViadereNotice("A recovery was started and finishes \(CoolDownPolicy.timeText(pending.activatesAt, now: Date())). If it wasn't you, cancel it from the notice on Home.", kind: .warning)
+            }
+            Text("Each code works once, together with your recovery ID. Generating new codes makes the old ones stop working. You'll confirm with your passkey, and the new codes are shown only once.")
+                .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !vm.canRegenerateRecoveryCodes {
+                ViadereNotice(SecurityNoticesViewModel.coolDownActionMessage, kind: .info)
+            }
+            Button(vm.isRegeneratingCodes ? "Working…" : "Generate new codes") { confirming = true }
+                .buttonStyle(.viadere(.primary))
+                .disabled(vm.isRegeneratingCodes || !vm.canRegenerateRecoveryCodes)
+        }
+        .task { await vm.loadRecovery() }
+        .confirmationDialog("Generate new codes?", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Generate new codes") { Task { await vm.regenerateRecoveryCodes() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your current codes will stop working.")
+        }
+        .fullScreenCover(isPresented: Binding(get: { vm.newRecoveryCodes != nil }, set: { if !$0 { vm.finishRecoveryCodes() } })) {
+            if let codes = vm.newRecoveryCodes {
+                RecoveryCodesView(model: codes, title: "Save your new recovery codes", continueTitle: "Done") {
+                    if codes.finish() { vm.finishRecoveryCodes() }
+                }
+            }
+        }
     }
 }
 

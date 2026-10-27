@@ -7,15 +7,22 @@ struct ClipRootView: View {
     @State private var showOverlay = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                ViadereLockup(.horizontal, ribbonHeight: 26).padding(.top, ViadereSpace.l)
-                content
+        Group {
+            if flow.step == .recoveryCodes, let codes = flow.recoveryCodes {
+                // Shown once, full screen, with its own pinned actions.
+                RecoveryCodesView(model: codes) { Task { await flow.recoveryCodesSaved() } }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: ViadereSpace.l) {
+                        ViadereLockup(.horizontal, ribbonHeight: 26).padding(.top, ViadereSpace.l)
+                        content
+                    }
+                    .padding(.horizontal, ViadereSpace.screen)
+                    .padding(.bottom, ViadereSpace.xl)
+                }
+                .scrollIndicators(.hidden)
             }
-            .padding(.horizontal, ViadereSpace.screen)
-            .padding(.bottom, ViadereSpace.xl)
         }
-        .scrollIndicators(.hidden)
         .viadereScreenBackground()
         .passkeyExplanation(flow.passkeyGate)
         .animation(ViadereMotion.gentle, value: flow.step)
@@ -30,6 +37,8 @@ struct ClipRootView: View {
         switch flow.step {
         case .account:
             accountStep
+        case .recoveryCodes:
+            EmptyView()   // full screen: see `body`
         case .working:
             ViadereLoading(height: 36).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
         case .done(let name):
