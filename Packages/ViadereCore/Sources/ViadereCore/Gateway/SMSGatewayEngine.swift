@@ -137,6 +137,10 @@ public struct SMSGatewayEngine: Sendable {
                     effects.append(.recordConsent(optedOut: false, keyword: GatewayKeyword.normalize(text), at: now))
                     showMainMenu(header: GatewayCopy.resubscribed)
                     audit("gateway.opt_in")
+                } else if keyword == .help || isEscapedCarrierKeyword(text, .help) {
+                    // Carrier/CTIA guidance: HELP must always be answered, even after opt-out.
+                    send(GatewayCopy.help)
+                    audit("gateway.help")
                 } else {
                     audit("gateway.dropped_opted_out")
                 }

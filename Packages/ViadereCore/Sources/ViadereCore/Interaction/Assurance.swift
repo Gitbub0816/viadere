@@ -116,12 +116,15 @@ public enum AssurancePolicy {
 
     /// Whether a decision received on `channel` with `provided` evidence may satisfy `interaction`.
     ///
-    /// Requires: the channel is listed in `allowedChannels` (text channels may still deliver a
-    /// secure handoff, but a decision *arriving* on them must be allowed), the channel can carry
-    /// the evidence, security-sensitive kinds never arrive via text messaging, and the achieved
-    /// assurance meets `requiredAssurance(for:)`.
+    /// Requires: the channel is allowed (`nativePush` and `inApp` count as one app family, since
+    /// a push can be acted on inside the app), the channel can carry the evidence,
+    /// security-sensitive kinds never arrive via text messaging, and the achieved assurance meets
+    /// `requiredAssurance(for:)`.
     public static func canSatisfy(_ interaction: Interaction, channel: Channel, provided: ProvidedAssurance) -> Bool {
-        guard interaction.allowedChannels.contains(channel) else { return false }
+        let appFamily: Set<Channel> = [.nativePush, .inApp]
+        let allowed = interaction.allowedChannels.contains(channel)
+            || (appFamily.contains(channel) && !appFamily.isDisjoint(with: interaction.allowedChannels))
+        guard allowed else { return false }
         guard self.channel(channel, canCarry: provided) else { return false }
         if interaction.kind.isSecuritySensitive && channel.isTextMessaging { return false }
         return achievedAssurance(provided) >= requiredAssurance(for: interaction)

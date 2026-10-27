@@ -403,17 +403,22 @@ struct GatewayTests {
         #expect(h.context.consent.optedOut)
     }
 
-    @Test("Opted-out users get nothing except START handling")
+    @Test("Opted-out users get nothing except HELP and START handling")
     func optedOutSilence() async {
         let h = GatewayHarness()
         await h.send("Hi")
         await h.send("STOP")
-        for text in ["Hi", "1", "MENU", "HELP", "@amazon hi", "STOP", "BACK"] {
+        for text in ["Hi", "1", "MENU", "@amazon hi", "STOP", "BACK"] {
             let t = await h.send(text)
             #expect(t.smsBodies.isEmpty, "\(text)")
             #expect(h.forwards(t).isEmpty)
             #expect(h.state == .optedOut)
         }
+        // HELP is always answered (carrier requirement) but does not re-subscribe.
+        let help = await h.send("HELP")
+        #expect(help.smsBodies == [GatewayCopy.help])
+        #expect(h.state == .optedOut)
+        #expect(h.context.consent.optedOut)
         // Business messages are held, not sent.
         let held = h.engine.deliverBusinessMessage(businessId: GatewayHarness.airline.id, sessionId: SessionID(), text: "promo",
                                                    context: h.context, now: h.clock)

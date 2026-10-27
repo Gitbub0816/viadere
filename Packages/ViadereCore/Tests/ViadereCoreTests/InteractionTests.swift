@@ -154,5 +154,8 @@ struct AssuranceTests {
         #expect(AssurancePolicy.canSatisfy(j, channel: .sms, provided: .unauthenticatedReply))
         #expect(!AssurancePolicy.channel(.sms, canCarry: .deviceSignature(.biometric)))
         #expect(!AssurancePolicy.channel(.web, canCarry: .deviceSignature(.biometric)))
+        let push = Fixtures.interaction(.confirm(ConfirmPayload(title: "Pickup")), sensitivity: .low, channels: [.nativePush])
+        #expect(AssurancePolicy.canSatisfy(push, channel: .inApp, provided: .deviceSignature(.none)))
+        #expect(!AssurancePolicy.canSatisfy(push, channel: .web, provided: .passkeyAssertion))
     }
 }
