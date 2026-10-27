@@ -78,7 +78,12 @@ public enum ActivityPresentation {
             default: break
             }
         }
-        return rows
+        // Business-supplied references, notes and names: single-line and bounded.
+        return rows.map { row in
+            var copy = row
+            copy.value = UntrustedText.line(row.value, max: 100)
+            return copy
+        }
     }
 
     /// Shown when an item's actions open the secure approval screen.

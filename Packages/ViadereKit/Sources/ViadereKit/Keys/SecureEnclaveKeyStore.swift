@@ -29,11 +29,24 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
     }
 
     private let tagPrefix: String
-    private let accessGroup: String?
+    private let requestAccessGroup: String?
+    private let approvalAccessGroup: String?
 
-    public init(tagPrefix: String = "com.viadere.devicekey.", accessGroup: String?) {
+    /// - Parameters:
+    ///   - accessGroup: shared with the extensions; holds the **request key** only.
+    ///   - approvalAccessGroup: app-only group for the approval keys. When `nil` (extensions, tests) approval keys
+    ///     are looked up in `accessGroup`, where the app never puts them.
+    public init(tagPrefix: String = "com.viadere.devicekey.", accessGroup: String?, approvalAccessGroup: String? = nil) {
         self.tagPrefix = tagPrefix
-        self.accessGroup = accessGroup
+        self.requestAccessGroup = accessGroup
+        self.approvalAccessGroup = approvalAccessGroup
+    }
+
+    private func accessGroup(for purpose: DeviceKeyPurpose) -> String? {
+        switch purpose {
+        case .request: requestAccessGroup
+        case .approvalUserPresence, .approvalBiometric: approvalAccessGroup ?? requestAccessGroup
+        }
     }
 
     private func tag(_ purpose: DeviceKeyPurpose) -> Data { Data((tagPrefix + purpose.rawValue).utf8) }
@@ -44,7 +57,7 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
             kSecAttrApplicationTag as String: tag(purpose),
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
         ]
-        if let accessGroup { q[kSecAttrAccessGroup as String] = accessGroup }
+        if let accessGroup = accessGroup(for: purpose) { q[kSecAttrAccessGroup as String] = accessGroup }
         return q
     }
 
@@ -59,13 +72,14 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
         switch status {
         case errSecSuccess:
             guard let item, CFGetTypeID(item) == SecKeyGetTypeID() else { return nil }
-            return try EnclaveKey(purpose: purpose, tag: tag(purpose), accessGroup: accessGroup,
+            return try EnclaveKey(purpose: purpose, tag: tag(purpose), accessGroup: accessGroup(for: purpose),
                                   privateKey: unsafeBitCast(item, to: SecKey.self))
         case errSecItemNotFound:
             // `.biometryCurrentSet` keys vanish when the enrolled biometrics change.
             return nil
         default:
-            throw KeyStoreError.keyInvalidated(purpose)
+            // -25308 (locked) and friends are "try again later", not "the key is gone".
+            throw KeychainStatus.lookupError(status, purpose: purpose) ?? KeyStoreError.unexpectedStatus(status)
         }
     }
 
@@ -94,7 +108,7 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
             kSecAttrApplicationTag as String: tag(purpose),
             kSecAttrAccessControl as String: access,
         ]
-        if let accessGroup { privateAttributes[kSecAttrAccessGroup as String] = accessGroup }
+        if let accessGroup = accessGroup(for: purpose) { privateAttributes[kSecAttrAccessGroup as String] = accessGroup }
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
@@ -104,12 +118,14 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
         guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &cfError) else {
             throw KeyStoreError.creationFailed(purpose, Int32(CFErrorGetCode(cfError?.takeRetainedValue())))
         }
-        return try EnclaveKey(purpose: purpose, tag: tag(purpose), accessGroup: accessGroup, privateKey: privateKey)
+        return try EnclaveKey(purpose: purpose, tag: tag(purpose), accessGroup: accessGroup(for: purpose), privateKey: privateKey)
     }
 
     public func deleteKey(for purpose: DeviceKeyPurpose) async throws {
         let status = SecItemDelete(baseQuery(purpose) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeyStoreError.keyInvalidated(purpose) }
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainStatus.lookupError(status, purpose: purpose) ?? KeyStoreError.unexpectedStatus(status)
+        }
     }
 }
 
@@ -157,7 +173,8 @@ struct EnclaveKey: ManagedSigningKey {
                 let status = SecItemCopyMatching(query as CFDictionary, &item)
                 guard status == errSecSuccess, let item, CFGetTypeID(item) == SecKeyGetTypeID() else {
                     continuation.resume(throwing: status == errSecItemNotFound
-                        ? KeyStoreError.keyInvalidated(purpose) : KeyStoreError.signingFailed(status))
+                        ? KeyStoreError.keyInvalidated(purpose)
+                        : (KeychainStatus.lookupError(status, purpose: purpose) ?? KeyStoreError.signingFailed(status)))
                     return
                 }
                 let key = unsafeBitCast(item, to: SecKey.self)
@@ -186,6 +203,8 @@ struct EnclaveKey: ManagedSigningKey {
             return .authenticationFailed
         case Int32(errSecItemNotFound), Int32(errSecDecode):
             return .keyInvalidated(purpose)
+        case let code where KeychainStatus.classify(code).isTransientOutcome:
+            return .temporarilyUnavailable(code)
         default:
             return .signingFailed(code)
         }

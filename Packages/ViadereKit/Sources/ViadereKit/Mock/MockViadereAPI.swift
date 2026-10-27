@@ -147,7 +147,7 @@ public actor MockViadereAPI: ViadereAPI {
         return DeviceEnrollmentChallenge(challenge: challenge, expiresAt: clock().addingTimeInterval(300))
     }
 
-    public func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device {
+    public func enrollDevice(_ request: DeviceEnrollmentPayload) async throws -> Device {
         guard enrollmentChallenges.remove(request.challenge) != nil else {
             throw APIError.server(status: 400, code: .badRequest, message: "Unknown or reused challenge")
         }
@@ -165,11 +165,19 @@ public actor MockViadereAPI: ViadereAPI {
         let device = Device(id: deviceId, consumerId: consumerId, name: request.name, platform: request.platform, keys: keys,
                             createdAt: now, lastSeenAt: now)
         deviceList.append(device)
+        if request.isClipDevice { clipDevices.insert(deviceId) }
         deviceKeys[deviceId] = Dictionary(uniqueKeysWithValues: keys.map { ($0.purpose, $0.publicKey) })
         return device
     }
 
     public func devices() async throws -> [Device] { deviceList }
+
+    /// Devices enrolled with the App Clip marker (the server would also refuse their approvals).
+    public private(set) var clipDevices: Set<DeviceID> = []
+
+    public func clipDeviceIDs() async throws -> [DeviceID] {
+        deviceList.filter { clipDevices.contains($0.id) && $0.revokedAt == nil }.map(\.id)
+    }
 
     public func revokeDevice(_ id: DeviceID) async throws {
         guard let index = deviceList.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
@@ -192,6 +200,17 @@ public actor MockViadereAPI: ViadereAPI {
         let link = PhoneLink(id: id, maskedPhone: "+1 ••• ••• 0123", verifiedAt: clock())
         phones.append(link)
         return link
+    }
+
+    /// What the mock's link preview reports (tests change it).
+    public private(set) var linkPreviewPhone = "+1 ••• ••• 0123"
+    public private(set) var previewedLinkTokens: [String] = []
+    public func setLinkPreview(_ masked: String) { linkPreviewPhone = masked }
+
+    public func previewPhoneLink(token: String) async throws -> PhoneLinkPreview {
+        guard token.count >= 8 else { throw APIError.server(status: 404, code: .notFound, message: "This link isn't valid anymore.") }
+        previewedLinkTokens.append(token)
+        return PhoneLinkPreview(maskedPhone: linkPreviewPhone, expiresAt: clock().addingTimeInterval(600))
     }
 
     public func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink {

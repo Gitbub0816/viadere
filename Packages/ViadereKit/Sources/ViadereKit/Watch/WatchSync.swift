@@ -69,9 +69,11 @@ public enum WatchSync {
         content.pending.prefix(maxItems).map { envelope in
             let interaction = envelope.interaction
             var options: [ChoiceOption] = []
-            if case .choose(let choose) = interaction.payload, !choose.allowsMultiple { options = Array(choose.options.prefix(4)) }
+            if case .choose(let choose) = interaction.payload, !choose.allowsMultiple {
+                options = choose.options.prefix(4).map { ChoiceOption(id: $0.id, label: InteractionPresentation.optionLabel($0)) }
+            }
             return WatchPendingItem(
-                id: interaction.id.description, business: envelope.business.displayName,
+                id: interaction.id.description, business: UntrustedText.name(envelope.business.displayName, max: 40).text,
                 headline: InteractionPresentation.headline(interaction), kindLabel: InteractionPresentation.kindLabel(interaction),
                 expiresAt: interaction.expiresAt,
                 requiresPhone: NotificationActionHandler.inlineAssurance(for: interaction, decision: .approve) == nil,

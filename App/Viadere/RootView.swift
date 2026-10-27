@@ -8,17 +8,19 @@ struct RootView: View {
     var capture: ScreenCaptureObserver
 
     var body: some View {
-        ZStack {
-            content
-            if model.isLocked {
-                AppLockView(model: model)
-                    .transition(.opacity)
-                    .zIndex(2)
-            }
-        }
+        // The lock is NOT drawn in this hierarchy: sheets would cover it. `AppLockWindowController` shows it in a
+        // window above everything. Here the content is also hidden, made inert, and rebuilt (`.id(lockEpoch)`)
+        // on every lock, which dismisses any sheet, alert or pushed screen presented from inside it.
+        content
+            .id(model.lockEpoch)
+            .opacity(model.isLocked ? 0 : 1)
+            .allowsHitTesting(!model.isLocked)
+            .accessibilityHidden(model.isLocked)
         .animation(ViadereMotion.gentle, value: model.phase)
-        .animation(ViadereMotion.gentle, value: model.isLocked)
         .viadereScreenBackground()
+        .onChange(of: model.isLocked, initial: true) { _, locked in
+            AppLockWindowController.shared.update(locked: locked, model: model)
+        }
         .task { await model.bootstrap() }
         .sheet(item: $model.presentedApproval) { approval in
             ApprovalSheet(model: approval, capture: capture)
@@ -82,7 +84,7 @@ struct SplashView: View {
     }
 }
 
-/// Face ID / passcode gate shown over everything when the optional app lock is on.
+/// Face ID / passcode gate shown over everything when the optional app lock is on (hosted by `AppLockWindowController`).
 struct AppLockView: View {
     let model: AppModel
 

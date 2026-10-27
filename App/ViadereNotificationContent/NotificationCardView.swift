@@ -11,7 +11,7 @@ struct NotificationCardView: View {
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
             if let card {
                 HStack(spacing: ViadereSpace.xs) {
-                    ViadereAvatar(name: card.business, size: 32, isVerified: true)
+                    ViadereAvatar(name: card.business, size: 32, isVerified: card.isVerified)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(card.business).font(ViadereType.subhead.weight(.semibold)).foregroundStyle(ViadereColor.textPrimary)
                         Text(card.kindLabel).font(ViadereType.caption).foregroundStyle(ViadereColor.textSecondary)
@@ -21,6 +21,9 @@ struct NotificationCardView: View {
                         Text(InteractionPresentation.countdown(until: card.expiresAt, now: context.date))
                             .font(ViadereType.caption).monospacedDigit().foregroundStyle(ViadereColor.accent)
                     }
+                }
+                if card.impersonatesViadere {
+                    ViadereNotice("This is a business using a name like Viadere. Viadere never asks you to approve anything under its own name.", kind: .danger)
                 }
                 Text(card.question)
                     .font(ViadereType.headline)

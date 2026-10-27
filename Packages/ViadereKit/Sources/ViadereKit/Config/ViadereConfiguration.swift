@@ -16,6 +16,11 @@ public struct ViadereConfiguration: Sendable {
     public var keychainService: String
     /// Full keychain access group (team prefix included), shared with extensions. `nil` in tests / unsigned builds.
     public var keychainAccessGroup: String?
+    /// App-only access group for the approval keys (`approvalUserPresence`, `approvalBiometric`). Only the main app
+    /// is entitled to it, so the notification extensions and the App Clip cannot even see those keys; they share
+    /// just the request key and the access token through `keychainAccessGroup`. `nil` in extensions, tests and
+    /// unsigned builds.
+    public var approvalKeychainAccessGroup: String?
     public var pinning: PinningConfiguration
     public var apnsEnvironment: APNsTokenRegistration.Environment
     /// True on release builds: unconfigured certificate pins deny connections.
@@ -78,6 +83,9 @@ public struct ViadereConfiguration: Sendable {
         if let appGroup = info["ViadereAppGroupID"] as? String { config.appGroupID = appGroup }
         if let group = info["ViadereKeychainAccessGroup"] as? String, !group.isEmpty, !group.contains("$(") {
             config.keychainAccessGroup = group
+        }
+        if let group = info["ViadereApprovalKeychainAccessGroup"] as? String, !group.isEmpty, !group.contains("$(") {
+            config.approvalKeychainAccessGroup = group
         }
         #if DEBUG
         config.apnsEnvironment = .sandbox

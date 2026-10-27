@@ -297,9 +297,10 @@ public enum ActivityFeed {
 
         let actions = pending.flatMap { makeActions(for: $0, category: category) }
         return ActivityItem(
-            id: id, business: latest.business, category: category, title: title, subtitle: subtitle, phase: phase, date: date,
+            id: id, business: latest.business, category: category, title: UntrustedText.line(title, max: 100),
+            subtitle: UntrustedText.optionalLine(subtitle, max: 200), phase: phase, date: date,
             statusText: statusText, isAlert: alert, progress: progress, live: live, latest: latest, pending: pending, actions: actions,
-            walletPassId: passId, venueNote: venue)
+            walletPassId: passId, venueNote: UntrustedText.optionalLine(venue, max: 200))
     }
 
     static func category(forTicketType type: String) -> ActivityCategory {

@@ -13,7 +13,8 @@ final class AppEnvironment {
         configuration: ViadereRuntime.configuration,
         passkeys: ApplePasskeyService(anchorProvider: { KeyWindow.current }),
         notificationPermission: UserNotificationPermissionService(),
-        appLock: LocalAuthenticationAppLock())
+        appLock: LocalAuthenticationAppLock(),
+        residue: AppLocalResidueCleaner())
 
     let model: AppModel
     let privacyShield = PrivacyShield()

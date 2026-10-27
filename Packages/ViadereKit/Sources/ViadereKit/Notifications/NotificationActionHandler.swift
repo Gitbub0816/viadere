@@ -66,7 +66,7 @@ public struct NotificationActionHandler: Sendable {
             switch error {
             case .expired: return .expired(id)
             case .notActionable(let status): return .stale(id, status)
-            case .deviceCannotSatisfy, .keyInvalidated, .notEnrolled, .userCancelled, .authenticationFailed: return .requiresApp(id)
+            case .deviceCannotSatisfy, .keyInvalidated, .keysUnavailable, .notEnrolled, .userCancelled, .authenticationFailed: return .requiresApp(id)
             case .invalidSelection, .decisionNotAllowed: return .requiresApp(id)
             default: return .failed(id, error.userMessage)
             }

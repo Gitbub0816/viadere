@@ -30,7 +30,8 @@ public struct LiveActivityPresentation: Equatable, Sendable {
     /// A countdown is only worth showing inside this window; farther out, a status word is calmer.
     public static let countdownWindow: TimeInterval = 99 * 60
 
-    public init(status: LiveActivityStatus, businessName: String, now: Date = Date()) {
+    public init(status: LiveActivityStatus, businessName rawBusinessName: String, now: Date = Date()) {
+        let businessName = UntrustedText.name(rawBusinessName, max: 40, attribution: nil).text
         switch status {
         case .order(let s):
             headline = "Order \(s.orderReference)"
@@ -95,6 +96,11 @@ public struct LiveActivityPresentation: Equatable, Sendable {
             }
             if let provider = s.providerName ?? Optional(businessName), s.stage != .completed { detail += " · \(provider)" }
         }
+        // Business-supplied references, notes and names were interpolated above: sanitize the finished strings.
+        // The stage word always comes first in `detail`, so a long note is what gets cut.
+        headline = UntrustedText.line(headline, max: 60)
+        detail = UntrustedText.line(detail, max: 100)
+        compact = UntrustedText.line(compact, max: 16)
         nextStep = Self.nextStep(for: status)
         if let target, !status.isTerminal, !isAlert, target.timeIntervalSince(now) > 0, target.timeIntervalSince(now) <= Self.countdownWindow {
             trailing = .countdown(to: target)

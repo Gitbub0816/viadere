@@ -3,24 +3,39 @@ import ViadereCore
 
 /// Presentation copy derived from interactions. Pure and testable; views only lay it out.
 public enum InteractionPresentation {
-    /// One-line headline for list rows ("$285.28 at Northfield Market").
+    /// Caps for each kind of business-supplied text. Money is never truncated; free text is cut on its own.
+    public enum Limit {
+        public static let headline = 80, title = 100, detail = 100, merchant = 40, service = 40, location = 40,
+                          device = 60, reference = 40, effect = 160, risk = 60, option = 40, message = 160
+    }
+
+    /// One-line headline for list rows ("$285.28 at Northfield Market"). Business text is sanitized and capped.
     public static func headline(_ interaction: Interaction) -> String {
         switch interaction.payload {
         case .authorize(let p):
-            if let amount = p.amount { return [amount.formatted, p.merchant.map { "at \($0)" }].compactMap { $0 }.joined(separator: " ") }
-            return p.actionDescription
-        case .authenticate(let p): return "Sign in to \(p.service)"
-        case .confirm(let p): return p.title
-        case .choose(let p): return p.prompt
-        case .acknowledge(let p): return p.title
-        case .reply(let p): return p.prompt
-        case .status(let p): return p.title
-        case .reward(let p): return p.title
-        case .ticket(let p): return p.title
-        case .message(let p): return p.text
+            if let amount = p.amount {
+                let merchant = UntrustedText.optionalLine(p.merchant, max: Limit.merchant)
+                return [amount.formatted, merchant.map { "at \($0)" }].compactMap { $0 }.joined(separator: " ")
+            }
+            return text(p.actionDescription, Limit.headline)
+        case .authenticate(let p): return "Sign in to \(service(p.service))"
+        case .confirm(let p): return text(p.title, Limit.headline)
+        case .choose(let p): return text(p.prompt, Limit.headline)
+        case .acknowledge(let p): return text(p.title, Limit.headline)
+        case .reply(let p): return text(p.prompt, Limit.headline)
+        case .status(let p): return text(p.title, Limit.headline)
+        case .reward(let p): return text(p.title, Limit.headline)
+        case .ticket(let p): return text(p.title, Limit.headline)
+        case .message(let p): return text(p.text, Limit.message)
         case .unknown: return "New request"
         }
     }
+
+    /// Sanitized single-line business text (empty string if nothing printable is left).
+    public static func text(_ raw: String, _ limit: Int) -> String { UntrustedText.line(raw, max: limit) }
+
+    /// A service or merchant name, quoted if it imitates Viadere.
+    static func service(_ raw: String) -> String { UntrustedText.name(raw, max: Limit.service, attribution: nil).text }
 
     /// Short kind label ("Approval", "Sign-in").
     public static func kindLabel(_ interaction: Interaction) -> String {
@@ -40,35 +55,60 @@ public enum InteractionPresentation {
     }
 
     /// The question a person answers: "Someone is trying to spend $285.28 at … Is this you?"
+    /// The amount comes first and is never cut; the merchant and place are sanitized and capped separately.
     public static func question(_ interaction: Interaction) -> String {
         switch interaction.payload {
-        case .authorize(let p): return ChannelRenderer.authorizeSentence(p)
+        case .authorize(let p): return authorizeSentence(p)
         case .authenticate(let p):
-            var text = "Someone is trying to sign in to \(p.service)"
-            if let place = p.approximateLocation ?? p.ipRegion { text += " near \(place)" }
-            return text + ". Is this you?"
+            var line = "Someone is trying to sign in to \(service(p.service))"
+            if let place = UntrustedText.optionalLine(p.approximateLocation ?? p.ipRegion, max: Limit.location) { line += " near \(place)" }
+            return line + ". Is this you?"
         default: return headline(interaction)
         }
     }
 
-    /// The facts table for the approval sheet. Only rows with data are included.
+    /// "Someone is trying to spend $285.28 at Walmart near Mesa, Arizona. Is this you?" with sanitized pieces.
+    public static func authorizeSentence(_ p: AuthorizePayload) -> String {
+        var line: String
+        if let amount = p.amount {
+            line = "Someone is trying to spend \(amount.formatted)"
+            if let merchant = UntrustedText.optionalLine(p.merchant, max: Limit.merchant) { line += " at \(UntrustedText.name(merchant, max: Limit.merchant, attribution: nil).text)" }
+        } else {
+            line = text(p.actionDescription, Limit.title)
+            if let merchant = UntrustedText.optionalLine(p.merchant, max: Limit.merchant) { line += " - \(merchant)" }
+        }
+        if let place = UntrustedText.optionalLine(p.location, max: Limit.location) {
+            let lower = place.lowercased()
+            line += (lower.hasPrefix("in ") || lower.hasPrefix("near ") || lower.hasPrefix("at ")) ? " \(place)" : " near \(place)"
+        }
+        return line + ". Is this you?"
+    }
+
+    /// The facts table for the approval sheet. Only rows with data are included. Labels are fixed by Viadere;
+    /// every value is business text made single-line, so nothing can add a row of its own or pose as one.
     public static func details(_ envelope: InteractionEnvelope, now: Date = Date(), timeZone: TimeZone = .current) -> [PresentedDetail] {
         let interaction = envelope.interaction
-        var rows: [PresentedDetail] = [PresentedDetail(label: "From", value: envelope.business.displayName)]
+        let business = UntrustedText.name(envelope.business.displayName, max: 40)
+        var rows: [PresentedDetail] = [PresentedDetail(label: "From", value: business.text)]
+        func add(_ label: String, _ raw: String?, _ limit: Int) {
+            if let value = UntrustedText.optionalLine(raw, max: limit) { rows.append(PresentedDetail(label: label, value: value)) }
+        }
         switch interaction.payload {
         case .authorize(let p):
-            rows.append(PresentedDetail(label: "Purpose", value: p.actionDescription))
+            add("Purpose", p.actionDescription, Limit.detail)
             if let amount = p.amount {
                 rows.append(PresentedDetail(label: "Amount", value: "\(amount.formatted) \(amount.currency.value)", emphasized: true))
             }
-            if let merchant = p.merchant { rows.append(PresentedDetail(label: "Merchant", value: merchant)) }
-            if let location = p.location { rows.append(PresentedDetail(label: "Location", value: location)) }
-            if let account = interaction.scope.accountReference { rows.append(PresentedDetail(label: "Account", value: account)) }
+            if let merchant = p.merchant, !UntrustedText.clean(merchant).isEmpty {
+                rows.append(PresentedDetail(label: "Merchant", value: UntrustedText.name(merchant, max: Limit.merchant, attribution: nil).text))
+            }
+            add("Location", p.location, Limit.location)
+            add("Account", interaction.scope.accountReference, Limit.reference)
         case .authenticate(let p):
-            rows.append(PresentedDetail(label: "Signing in to", value: p.service))
-            rows.append(PresentedDetail(label: "Device", value: p.device))
-            if let location = p.approximateLocation ?? p.ipRegion { rows.append(PresentedDetail(label: "Location", value: location)) }
-            if let account = interaction.scope.accountReference { rows.append(PresentedDetail(label: "Account", value: account)) }
+            rows.append(PresentedDetail(label: "Signing in to", value: service(p.service)))
+            add("Device", p.device, Limit.device)
+            add("Location", p.approximateLocation ?? p.ipRegion, Limit.location)
+            add("Account", interaction.scope.accountReference, Limit.reference)
             rows.append(PresentedDetail(label: "Attempted", value: relative(p.attemptedAt, now: now)))
         default:
             rows.append(PresentedDetail(label: "Request", value: headline(interaction)))
@@ -79,21 +119,39 @@ public enum InteractionPresentation {
         return rows
     }
 
+    /// Risk indicators with sanitized, capped labels (an empty label falls back to a generic one).
     public static func riskIndicators(_ interaction: Interaction) -> [RiskIndicator] {
+        let raw: [RiskIndicator]
         switch interaction.payload {
-        case .authorize(let p): p.riskIndicators
-        case .authenticate(let p): p.riskIndicators
-        default: []
+        case .authorize(let p): raw = p.riskIndicators
+        case .authenticate(let p): raw = p.riskIndicators
+        default: raw = []
+        }
+        return raw.map { indicator in
+            var copy = indicator
+            let cleaned = UntrustedText.line(indicator.label, max: Limit.risk)
+            let label = cleaned.isEmpty ? "Unusual activity" : cleaned
+            copy.label = label
+            copy.code = UntrustedText.clean(indicator.code).lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
+            return copy
         }
     }
 
     public static func effectOfApproval(_ interaction: Interaction) -> String? {
         switch interaction.payload {
-        case .authorize(let p): p.effectOfApproval
-        case .authenticate(let p): "Approving lets this sign-in to \(p.service) continue."
+        case .authorize(let p): UntrustedText.optionalLine(p.effectOfApproval, max: Limit.effect)
+        case .authenticate(let p): "Approving lets this sign-in to \(service(p.service)) continue."
         default: nil
         }
     }
+
+    // MARK: Other payload text (approval sheet bodies)
+
+    public static func confirmTitle(_ p: ConfirmPayload) -> String { text(p.title, Limit.title) }
+    public static func confirmDetails(_ p: ConfirmPayload) -> String? { UntrustedText.optionalLine(p.details, max: Limit.effect) }
+    public static func prompt(_ raw: String) -> String { text(raw, Limit.title) }
+    public static func optionLabel(_ option: ChoiceOption) -> String { text(option.label, Limit.option) }
+    public static func suggestedReply(_ raw: String) -> String { text(raw, Limit.option) }
 
     /// "Face ID required", "Passcode or Face ID", or nil.
     public static func verificationLabel(_ plan: SigningPlan?) -> String? {

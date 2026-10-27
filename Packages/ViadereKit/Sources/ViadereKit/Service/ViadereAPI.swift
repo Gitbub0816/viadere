@@ -24,6 +24,24 @@ public struct ConsumerSession: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// What an SMS account-link token would link: the masked number and when the token expires.
+/// (Kit mirror of the server's `{maskedPhone, expiresAt}` preview; switch to the ViadereCore type when it is published.)
+public struct PhoneLinkPreview: Codable, Sendable, Hashable {
+    public var maskedPhone: String
+    public var expiresAt: Date
+
+    public init(maskedPhone: String, expiresAt: Date) {
+        self.maskedPhone = maskedPhone
+        self.expiresAt = expiresAt
+    }
+
+    /// The last four digits shown in `maskedPhone`, or `nil` if the server's mask doesn't end in four digits.
+    public var last4: String? {
+        let digits = maskedPhone.filter { $0.isASCII && $0.isNumber }
+        return digits.count >= 4 ? String(digits.suffix(4)) : nil
+    }
+}
+
 /// Everything the UI and the extensions need from the server, as typed async calls.
 /// `LiveViadereAPI` talks HTTP; `MockViadereAPI` is an in-memory server for previews, tests and demos.
 public protocol ViadereAPI: Sendable {
@@ -37,13 +55,17 @@ public protocol ViadereAPI: Sendable {
 
     // MARK: Devices
     func beginDeviceEnrollment() async throws -> DeviceEnrollmentChallenge
-    func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device
+    func enrollDevice(_ request: DeviceEnrollmentPayload) async throws -> Device
+    /// Ids of this person's active App Clip devices (request-key-only, short-lived). The full app revokes them on first sign-in.
+    func clipDeviceIDs() async throws -> [DeviceID]
     func devices() async throws -> [Device]
     func revokeDevice(_ id: DeviceID) async throws
 
     // MARK: Phones & sessions
     func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse
     func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink
+    /// Read-only preview of what a `/l/{token}` link would link (`GET /v1/sms/link-tokens/{token}/preview`). Does not consume the token.
+    func previewPhoneLink(token: String) async throws -> PhoneLinkPreview
     func redeemSMSLink(token: String, confirmPhoneLast4: String) async throws -> PhoneLink
     func phoneLinks() async throws -> [PhoneLink]
     func removePhoneLink(_ id: PhoneLinkID) async throws

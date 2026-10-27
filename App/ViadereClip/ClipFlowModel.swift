@@ -64,7 +64,7 @@ final class ClipFlowModel {
         step = .working
         await connect.connect()
         if case .connected(let relationship) = connect.phase {
-            step = .done(relationship.business.displayName)
+            step = .done(relationship.business.safeName)
         } else if case .failed(let message) = connect.phase {
             accountError = message
             step = .account

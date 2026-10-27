@@ -46,9 +46,9 @@ struct BusinessDetailView: View {
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.m) {
-            ViadereAvatar(name: vm.business.displayName, size: 72, isVerified: vm.business.isVerified)
+            ViadereAvatar(name: vm.business.safeName, size: 72, isVerified: vm.business.isVerified)
             VStack(alignment: .leading, spacing: ViadereSpace.xs) {
-                Text(vm.business.displayName).font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
+                Text(vm.business.safeName).font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
                 HStack(spacing: ViadereSpace.xs) {
                     ViadereBadge(vm.business.isVerified ? "Verified business" : "Not verified", kind: vm.business.isVerified ? .verified : .danger)
                     if let category = vm.profile?.category.rawValue, category != "other" {
@@ -83,7 +83,7 @@ struct BusinessDetailView: View {
         } label: {
             HStack(spacing: ViadereSpace.xs) {
                 Image(systemName: "bubble.left")
-                Text("Message \(vm.business.displayName)")
+                Text("Message \(vm.business.safeName)")
             }
         }
         .buttonStyle(.viadere(.secondary))
@@ -141,7 +141,7 @@ struct BusinessDetailView: View {
             if confirmingDisconnect {
                 ViadereCard(padding: ViadereSpace.m) {
                     VStack(alignment: .leading, spacing: ViadereSpace.s) {
-                        Text("Disconnect from \(vm.business.displayName)?")
+                        Text("Disconnect from \(vm.business.safeName)?")
                             .font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
                         Text("You'll stop receiving sign-in checks and notices from them. You can reconnect any time.")
                             .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)

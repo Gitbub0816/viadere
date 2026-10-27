@@ -94,7 +94,7 @@ final class LiveActivityManager {
             // ActivityKit only lets an app *start* an activity while it is in the foreground.
             guard UIApplication.shared.applicationState == .active else { return false }
             let attributes = ViadereActivityAttributes(
-                businessName: envelope.business.displayName, businessId: envelope.business.id.description,
+                businessName: envelope.business.safeName, businessId: envelope.business.id.description,
                 interactionId: interaction.id.description)
             do {
                 let activity = try Activity.request(

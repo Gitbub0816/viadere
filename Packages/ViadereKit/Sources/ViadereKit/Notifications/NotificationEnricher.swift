@@ -28,6 +28,10 @@ public struct NotificationCard: Codable, Sendable, Equatable {
     public static let userInfoKey = "viadere.card"
 
     public var business: String
+    /// Whether Viadere has verified this business (drives the badge; never assumed).
+    public var isVerified: Bool
+    /// True when the business name imitates "Viadere": the card shows a warning.
+    public var impersonatesViadere: Bool
     public var kind: String
     public var kindLabel: String
     public var question: String
@@ -39,9 +43,13 @@ public struct NotificationCard: Codable, Sendable, Equatable {
     /// Sensitive approvals finish in the app (Face ID); the card says so.
     public var finishesInApp: Bool
 
+    /// Every business-supplied string passes through `UntrustedText` (via `InteractionPresentation`).
     public init(envelope: InteractionEnvelope, now: Date, finishesInApp: Bool) {
         let interaction = envelope.interaction
-        business = envelope.business.displayName
+        let name = UntrustedText.name(envelope.business.displayName, max: 40)
+        business = name.text
+        impersonatesViadere = name.impersonatesViadere
+        isVerified = envelope.business.isVerified
         kind = interaction.kind.rawValue
         kindLabel = InteractionPresentation.kindLabel(interaction)
         question = InteractionPresentation.question(interaction)
@@ -57,6 +65,24 @@ public struct NotificationCard: Codable, Sendable, Equatable {
         self.finishesInApp = finishesInApp
     }
 
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        business = UntrustedText.name(try c.decode(String.self, forKey: .business), max: 40).text
+        isVerified = try c.decodeIfPresent(Bool.self, forKey: .isVerified) ?? false
+        impersonatesViadere = try c.decodeIfPresent(Bool.self, forKey: .impersonatesViadere) ?? false
+        kind = try c.decode(String.self, forKey: .kind)
+        kindLabel = try c.decode(String.self, forKey: .kindLabel)
+        question = UntrustedText.line(try c.decode(String.self, forKey: .question), max: 400)
+        rows = try c.decode([Row].self, forKey: .rows).map {
+            Row(label: UntrustedText.line($0.label, max: 30), value: UntrustedText.line($0.value, max: 120), emphasized: $0.emphasized)
+        }
+        risks = try c.decode([String].self, forKey: .risks).map { UntrustedText.line($0, max: 60) }
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        expiresAt = try c.decode(Date.self, forKey: .expiresAt)
+        verification = try c.decodeIfPresent(String.self, forKey: .verification)
+        finishesInApp = try c.decode(Bool.self, forKey: .finishesInApp)
+    }
+
     public func json() -> String? {
         (try? ViadereJSON.encode(self)).flatMap { String(data: $0, encoding: .utf8) }
     }
@@ -70,12 +96,19 @@ public struct NotificationCard: Codable, Sendable, Equatable {
 /// notification service extension). Also computes the per-interaction `choose` category the extension registers.
 public struct NotificationEnricher: Sendable {
     private let api: any ViadereAPI
+    private let preferences: (any PreferencesStore)?
     private let clock: @Sendable () -> Date
 
-    public init(api: any ViadereAPI, clock: @escaping @Sendable () -> Date = { Date() }) {
+    /// - Parameter preferences: when `richNotificationPreviews` is off (the default, and the case when no store is
+    ///   given) approval and sign-in notifications carry only a generic body on the lock screen
+    ///   ("Approval requested by Northfield Market") and no detail card; the details appear inside the app.
+    public init(api: any ViadereAPI, preferences: (any PreferencesStore)? = nil, clock: @escaping @Sendable () -> Date = { Date() }) {
         self.api = api
+        self.preferences = preferences
         self.clock = clock
     }
+
+    private var richPreviews: Bool { preferences?.bool(.richNotificationPreviews) ?? false }
 
     /// Returns `nil` if the push carries no interaction id (leave the notification untouched).
     public func enrich(userInfo: [AnyHashable: Any]) async -> EnrichedNotification? {
@@ -90,7 +123,7 @@ public struct NotificationEnricher: Sendable {
 
         if envelope.status != .pending && envelope.interaction.kind != .status {
             return EnrichedNotification(
-                title: SMSEncoding.field(envelope.business.displayName, maxLength: 40), subtitle: "Already handled",
+                title: UntrustedText.name(envelope.business.displayName, max: 40).text, subtitle: "Already handled",
                 body: "This request was already handled.", threadIdentifier: "business.\(envelope.business.id)",
                 interruptionLevel: .passive, category: NotificationCategoryModel(identifier: "viadere.status", actions: []),
                 userInfo: ["interactionId": id.description, "businessId": envelope.business.id.description], requiresSecureFlow: false,
@@ -98,22 +131,50 @@ public struct NotificationEnricher: Sendable {
         }
         if envelope.interaction.isExpired(at: now) && envelope.interaction.kind != .status {
             return EnrichedNotification(
-                title: SMSEncoding.field(envelope.business.displayName, maxLength: 40), subtitle: "Expired",
+                title: UntrustedText.name(envelope.business.displayName, max: 40).text, subtitle: "Expired",
                 body: "This request has expired.", threadIdentifier: "business.\(envelope.business.id)",
                 interruptionLevel: .passive, category: NotificationCategoryModel(identifier: "viadere.status", actions: []),
                 userInfo: ["interactionId": id.description, "businessId": envelope.business.id.description], requiresSecureFlow: false,
                 isFallback: false)
         }
         let rendering = ChannelRenderer.notification(envelope.interaction, business: envelope.business)
+        let business = UntrustedText.name(envelope.business.displayName, max: 40)
+        let sensitive = envelope.interaction.kind.isSecuritySensitive
         var userInfo = rendering.userInfo
-        if envelope.interaction.kind.isSecuritySensitive,
-           let card = NotificationCard(envelope: envelope, now: now, finishesInApp: rendering.requiresSecureFlow).json() {
-            userInfo[NotificationCard.userInfoKey] = card
+        var subtitle = UntrustedText.line(rendering.subtitle, max: 60)
+        var body = UntrustedText.line(rendering.body, max: 200)
+        if sensitive {
+            if richPreviews {
+                // The user opted in: show the facts, built from sanitized pieces (not the renderer's raw text).
+                body = InteractionPresentation.question(envelope.interaction)
+                if let card = NotificationCard(envelope: envelope, now: now, finishesInApp: rendering.requiresSecureFlow).json() {
+                    userInfo[NotificationCard.userInfoKey] = card
+                }
+            } else {
+                subtitle = InteractionPresentation.kindLabel(envelope.interaction)
+                body = Self.genericBody(for: envelope.interaction.kind, business: business.text, verified: envelope.business.isVerified)
+            }
+        }
+        let actions = rendering.category.actions.map { action -> NotificationActionModel in
+            var model = NotificationActionModel(action)
+            let title = UntrustedText.line(model.title, max: 40)
+            model.title = title.isEmpty ? "Option" : title
+            return model
         }
         return EnrichedNotification(
-            title: rendering.title, subtitle: rendering.subtitle, body: rendering.body, threadIdentifier: rendering.threadIdentifier,
-            interruptionLevel: rendering.interruptionLevel, category: NotificationCategoryModel(rendering.category), userInfo: userInfo,
+            title: business.text, subtitle: subtitle, body: body, threadIdentifier: rendering.threadIdentifier,
+            interruptionLevel: rendering.interruptionLevel,
+            category: NotificationCategoryModel(identifier: rendering.category.identifier, actions: actions), userInfo: userInfo,
             requiresSecureFlow: rendering.requiresSecureFlow, isFallback: false)
+    }
+
+    /// Lock-screen text that names only who is asking, never what for.
+    public static func genericBody(for kind: InteractionKind, business: String, verified: Bool) -> String {
+        let who = verified ? business : "unverified business \(business)"
+        switch kind {
+        case .authenticate: return "Sign-in approval requested by \(who)"
+        default: return "Approval requested by \(who)"
+        }
     }
 
     /// Generic notification when the interaction cannot be fetched (offline, device locked before first unlock).

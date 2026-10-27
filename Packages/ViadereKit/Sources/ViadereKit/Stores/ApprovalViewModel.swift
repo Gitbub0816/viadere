@@ -60,7 +60,7 @@ public final class ApprovalViewModel: Identifiable {
     public var title: String { InteractionPresentation.kindLabel(interaction) }
     public var details: [PresentedDetail] {
         var rows = InteractionPresentation.details(envelope, now: now)
-        if let onBehalfOf { rows.insert(PresentedDetail(label: "On behalf of", value: onBehalfOf, emphasized: true), at: min(1, rows.count)) }
+        if let onBehalfOf { rows.insert(PresentedDetail(label: "On behalf of", value: UntrustedText.line(onBehalfOf, max: 40), emphasized: true), at: min(1, rows.count)) }
         return rows
     }
     public var risks: [RiskIndicator] { InteractionPresentation.riskIndicators(interaction) }

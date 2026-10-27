@@ -11,6 +11,8 @@ public enum ApprovalError: Error, Equatable, Sendable {
     case deviceCannotSatisfy(RequiredAssurance)
     /// A key was invalidated (biometrics changed): the device must be re-enrolled.
     case keyInvalidated(DeviceKeyPurpose)
+    /// The keychain can't be read right now (device locked, early boot). Retry; nothing is wrong with the key.
+    case keysUnavailable
     case userCancelled
     case authenticationFailed
     case invalidSelection
@@ -111,6 +113,7 @@ public struct ApprovalService: Sendable {
         case .authenticationFailed: .authenticationFailed
         case .keyInvalidated(let purpose): .keyInvalidated(purpose)
         case .keyNotFound(let purpose): .keyInvalidated(purpose)
+        case .temporarilyUnavailable: .keysUnavailable
         default: .authenticationFailed
         }
     }
@@ -137,6 +140,7 @@ extension ApprovalError {
         case .notEnrolled: "Set up this device to approve requests."
         case .deviceCannotSatisfy: "This request needs Face ID or Touch ID, which isn't available on this device."
         case .keyInvalidated: "Your device security changed. Set this device up again to approve requests."
+        case .keysUnavailable: "Your keys aren't available right now. Unlock your iPhone and try again."
         case .userCancelled: "Not approved. You can try again."
         case .authenticationFailed: "We couldn't verify it's you. Try again."
         case .replyTooLong: "That reply is too long."

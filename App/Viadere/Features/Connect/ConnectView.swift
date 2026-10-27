@@ -82,8 +82,8 @@ struct ConnectView: View {
             ViadereRowGroup {
                 ForEach(Array(vm.suggestions.enumerated()), id: \.element.id) { index, business in
                     Button { Task { await vm.select(business) } } label: {
-                        ViadereRow(business.displayName, subtitle: business.handle?.display ?? business.code.display) {
-                            ViadereAvatar(name: business.displayName, size: 36, isVerified: true)
+                        ViadereRow(business.safeName, subtitle: business.handle?.display ?? business.code.display) {
+                            ViadereAvatar(name: business.safeName, size: 36, isVerified: true)
                         }
                     }
                     .buttonStyle(.plain)
@@ -146,8 +146,8 @@ struct ConnectView: View {
             ViadereRowGroup {
                 ForEach(Array(matches.enumerated()), id: \.element.id) { index, business in
                     Button { Task { await vm.select(business) } } label: {
-                        ViadereRow(business.displayName, subtitle: business.handle?.display ?? business.code.display) {
-                            ViadereAvatar(name: business.displayName, size: 36, isVerified: true)
+                        ViadereRow(business.safeName, subtitle: business.handle?.display ?? business.code.display) {
+                            ViadereAvatar(name: business.safeName, size: 36, isVerified: true)
                         }
                     }
                     .buttonStyle(.plain)
@@ -170,7 +170,7 @@ private struct ConnectedState: View {
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(ViadereColor.success)
                 .accessibilityHidden(true)
-            Text("Connected to \(relationship.business.displayName)")
+            Text("Connected to \(relationship.business.safeName)")
                 .font(ViadereType.display)
                 .foregroundStyle(ViadereColor.textPrimary)
             Text("Sign-in and approval requests will reach you here, usually as a notification you can answer in one tap.")

@@ -17,12 +17,12 @@ struct BusinessRewardsView: View {
     }
 
     var body: some View {
-        SubScreen(title: vm.program?.programName ?? "Rewards", subtitle: business.displayName, backTitle: "Back") {
+        SubScreen(title: vm.program?.programName ?? "Rewards", subtitle: business.safeName, backTitle: "Back") {
             switch vm.phase {
             case .idle, .loading:
                 ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
             case .noProgram:
-                ViadereEmptyState("No rewards program", message: "\(business.displayName) doesn't offer a rewards program in Viadere.")
+                ViadereEmptyState("No rewards program", message: "\(business.safeName) doesn't offer a rewards program in Viadere.")
             case .failed(let message):
                 ViadereNotice(message, kind: .warning)
             case .loaded:
@@ -179,9 +179,9 @@ struct LoyaltyEnrollSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     HStack(spacing: ViadereSpace.s) {
-                        ViadereAvatar(name: vm.business.displayName, size: 48, isVerified: vm.business.isVerified)
+                        ViadereAvatar(name: vm.business.safeName, size: 48, isVerified: vm.business.isVerified)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(vm.business.displayName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
+                            Text(vm.business.safeName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
                             if vm.business.isVerified { ViadereBadge("Verified", kind: .verified) }
                         }
                     }
@@ -193,13 +193,13 @@ struct LoyaltyEnrollSheet: View {
                         .font(ViadereType.body)
                         .foregroundStyle(ViadereColor.textSecondary)
                     ViadereRowGroup {
-                        ViadereValueRow("Shared with \(vm.business.displayName)", "Your name and visits")
+                        ViadereValueRow("Shared with \(vm.business.safeName)", "Your name and visits")
                         ViadereHairline()
                         ViadereValueRow("Program terms", vm.program?.termsVersion ?? "")
                     }
                     if linking {
                         ViadereTextField("Existing member number", text: $reference, prompt: "Optional",
-                                         message: "We'll ask \(vm.business.displayName) to link your existing points.")
+                                         message: "We'll ask \(vm.business.safeName) to link your existing points.")
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                     } else {

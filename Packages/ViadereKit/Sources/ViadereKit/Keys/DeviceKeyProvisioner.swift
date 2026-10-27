@@ -17,10 +17,12 @@ public struct DeviceKeyProvisioner: Sendable {
     ///
     /// The `.request` key is mandatory; approval keys are optional. Without biometrics the device can still
     /// enroll, but its `maxAssurance` is lower and high-risk approvals are impossible on it.
-    public func provision(consumerId: ConsumerID, challenge: String) async throws -> Result {
+    /// - Parameter purposes: which keys to create. The App Clip passes `[.request]` only: it never holds approval keys.
+    public func provision(consumerId: ConsumerID, challenge: String,
+                          purposes: [DeviceKeyPurpose] = DeviceKeyPurpose.allCases) async throws -> Result {
         var registrations: [DeviceKeyRegistration] = []
         var skipped: [DeviceKeyPurpose] = []
-        for purpose in DeviceKeyPurpose.allCases {
+        for purpose in purposes {
             let key: any ManagedSigningKey
             do {
                 key = try await store.createKey(for: purpose)
@@ -59,17 +61,27 @@ public enum EnrollmentHealth: Sendable, Equatable {
     case healthy
     /// Keys the server knows about are gone or invalidated (biometrics changed, restore, key deletion).
     case needsReenrollment(missing: [DeviceKeyPurpose])
+    /// The keychain can't be read right now (locked, early boot, unexpected status): retry; do **not** re-enroll.
+    case unavailable
 
     public static func check(record: DeviceRecord?, store: any DeviceKeyStore) async -> EnrollmentHealth {
         guard let record else { return .notEnrolled }
         var missing: [DeviceKeyPurpose] = []
+        var unavailable = false
         for purpose in record.purposes {
             do {
+                // Only "not found" for a key this device enrolled means invalidated.
                 if try await store.existingKey(for: purpose) == nil { missing.append(purpose) }
+            } catch let error as KeyStoreError {
+                switch error {
+                case .keyInvalidated, .keyNotFound: missing.append(purpose)
+                default: unavailable = true
+                }
             } catch {
-                missing.append(purpose)
+                unavailable = true
             }
         }
-        return missing.isEmpty ? .healthy : .needsReenrollment(missing: missing)
+        if !missing.isEmpty { return .needsReenrollment(missing: missing) }
+        return unavailable ? .unavailable : .healthy
     }
 }

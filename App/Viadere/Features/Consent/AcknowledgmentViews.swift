@@ -15,14 +15,14 @@ struct AcknowledgmentBody: View {
         VStack(alignment: .leading, spacing: ViadereSpace.l) {
             VStack(alignment: .leading, spacing: ViadereSpace.xs) {
                 if let version = AcknowledgmentPresentation.versionLabel(payload) { ViadereBadge(version, kind: .neutral) }
-                Text(payload.title)
+                Text(AcknowledgmentPresentation.title(payload))
                     .font(ViadereType.title)
                     .foregroundStyle(ViadereColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
             }
             VStack(alignment: .leading, spacing: ViadereSpace.xs) {
-                Text(expanded ? payload.body : AcknowledgmentPresentation.summary(payload))
+                Text(expanded ? AcknowledgmentPresentation.body(payload) : AcknowledgmentPresentation.summary(payload))
                     .font(ViadereType.body)
                     .foregroundStyle(ViadereColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -65,7 +65,7 @@ struct AcknowledgmentReceipt: View {
                     .foregroundStyle(acknowledged ? ViadereColor.success : ViadereColor.textSecondary)
                     .accessibilityHidden(true)
                 Text(AcknowledgmentPresentation.resultTitle(acknowledged: acknowledged)).font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
-                Text(AcknowledgmentPresentation.resultMessage(acknowledged: acknowledged, business: envelope.business.displayName))
+                Text(AcknowledgmentPresentation.resultMessage(acknowledged: acknowledged, business: envelope.business.safeName))
                     .font(ViadereType.body)
                     .foregroundStyle(ViadereColor.textSecondary)
             }

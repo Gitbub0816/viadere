@@ -97,9 +97,9 @@ struct LoyaltyAccountCard: View {
         ViadereCard(padding: ViadereSpace.l) {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
                 HStack(spacing: ViadereSpace.s) {
-                    ViadereAvatar(name: account.business.displayName, size: 36, isVerified: account.business.isVerified)
+                    ViadereAvatar(name: account.business.safeName, size: 36, isVerified: account.business.isVerified)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(account.business.displayName)
+                        Text(account.business.safeName)
                             .font(ViadereType.subhead.weight(.medium))
                             .foregroundStyle(ViadereColor.textPrimary)
                         Text(account.programName)
@@ -159,7 +159,7 @@ struct RewardRow: View {
 
     private var subtitle: String {
         var parts: [String] = []
-        if showsBusiness { parts.append(entry.business.displayName) }
+        if showsBusiness { parts.append(entry.business.safeName) }
         if let recurrence = entry.reward.recurrence { let text = RewardCopy.recurrence(recurrence); if !text.isEmpty { parts.append(text) } }
         parts.append(presentation.statusLine)
         return parts.joined(separator: " · ")
@@ -220,9 +220,9 @@ struct RewardDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     HStack(spacing: ViadereSpace.s) {
-                        ViadereAvatar(name: entry.business.displayName, size: 48, isVerified: entry.business.isVerified)
+                        ViadereAvatar(name: entry.business.safeName, size: 48, isVerified: entry.business.isVerified)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.business.displayName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
+                            Text(entry.business.safeName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
                             HStack(spacing: ViadereSpace.xs) {
                                 if entry.business.isVerified { ViadereBadge("Verified", kind: .verified) }
                                 Text(entry.kind.title).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
@@ -244,7 +244,7 @@ struct RewardDetailSheet: View {
                     facts(entry)
                     if let pass = entry.reward.walletPass { WalletPassAction(pass: pass, wallet: wallet) }
                     if let message { ViadereNotice(message, kind: message.hasPrefix("Claimed") ? .info : .warning) }
-                    Text("Viadere never decides who qualifies. \(entry.business.displayName) does, and it's checked again when you use this.")
+                    Text("Viadere never decides who qualifies. \(entry.business.safeName) does, and it's checked again when you use this.")
                         .font(ViadereType.footnote)
                         .foregroundStyle(ViadereColor.textTertiary)
                 }
@@ -284,7 +284,7 @@ struct RewardDetailSheet: View {
                 ViadereValueRow("Valid until", until.formatted(date: .abbreviated, time: .omitted))
                 ViadereHairline()
             }
-            ViadereValueRow("From", entry.business.displayName)
+            ViadereValueRow("From", entry.business.safeName)
         }
     }
 
@@ -292,7 +292,7 @@ struct RewardDetailSheet: View {
         if busy {
             HStack(spacing: ViadereSpace.s) {
                 ViadereLoading(height: 22)
-                Text("Checking with \(entry.business.displayName)…").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                Text("Checking with \(entry.business.safeName)…").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: 52)
         } else if p.needsRefresh, p.tone == .available {

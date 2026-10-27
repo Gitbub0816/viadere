@@ -406,8 +406,13 @@ struct DetailStoreTests {
         await model.verifyAddPhone(code: "123456")
         #expect(model.addPhoneStage == .idle)
         #expect(model.phones.count == 1)
-        #expect(await model.redeemAccountLink(token: String(repeating: "A", count: 43), last4: "0123"))
-        #expect(!(await model.redeemAccountLink(token: "x", last4: "12")))
+        let token = String(repeating: "A", count: 43)
+        // The link needs a preview and an explicit "This is my phone" before anything is linked.
+        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: true)))
+        await model.loadAccountLinkPreview(token: token)
+        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: false)))
+        #expect(model.phones.count == 1)
+        #expect(await model.redeemAccountLink(token: token, confirmedOwnPhone: true))
         #expect(model.phones.count == 2)
     }
 

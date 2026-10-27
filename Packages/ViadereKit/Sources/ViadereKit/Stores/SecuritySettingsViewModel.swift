@@ -25,11 +25,15 @@ public final class SecuritySettingsViewModel {
     public private(set) var errorMessage: String?
     public private(set) var appLockMethod: String
     public var appLockEnabled: Bool
+    /// Show amounts, places and other details in approval notifications on the lock screen. Off by default: the
+    /// lock screen then names only who is asking.
+    public var richPreviewsEnabled: Bool
     private let services: ViadereServices
 
     public init(services: ViadereServices) {
         self.services = services
         appLockEnabled = services.preferences.bool(.appLockEnabled)
+        richPreviewsEnabled = services.preferences.bool(.richNotificationPreviews)
         appLockMethod = services.appLock.methodName
     }
 
@@ -50,7 +54,7 @@ public final class SecuritySettingsViewModel {
         var history: [ConsentHistoryItem] = []
         for relationship in rels ?? [] {
             for grant in (try? await services.api.consents(for: relationship.id)) ?? [] {
-                history.append(ConsentHistoryItem(grant: grant, businessName: relationship.business.displayName))
+                history.append(ConsentHistoryItem(grant: grant, businessName: relationship.business.safeName))
             }
         }
         consentHistory = history.sorted { $0.grant.updatedAt > $1.grant.updatedAt }
@@ -68,6 +72,21 @@ public final class SecuritySettingsViewModel {
         }
         services.preferences.setBool(enabled, for: .appLockEnabled)
         appLockEnabled = enabled
+    }
+
+    /// Turning detailed previews on needs a successful authentication (it exposes request details to anyone who can
+    /// see the lock screen); turning them off never does.
+    public func setRichPreviews(_ enabled: Bool) async {
+        guard enabled != services.preferences.bool(.richNotificationPreviews) else { return }
+        if enabled {
+            guard await services.appLock.isAvailable(),
+                  await services.appLock.authenticate(reason: "Show request details in notifications") else {
+                richPreviewsEnabled = false
+                return
+            }
+        }
+        services.preferences.setBool(enabled, for: .richNotificationPreviews)
+        richPreviewsEnabled = enabled
     }
 
     public func revoke(_ device: Device) async {
@@ -111,17 +130,46 @@ public final class SecuritySettingsViewModel {
 
     public func cancelAddPhone() { pendingPhoneLinkId = nil; addPhoneStage = .idle }
 
-    /// Redeems an SMS account-link token (`https://viadere.com/l/{token}`) after the person confirms the last 4 digits.
-    public func redeemAccountLink(token: String, last4: String) async -> Bool {
-        guard last4.count == 4, last4.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+    // MARK: SMS account link (https://viadere.com/l/{token})
+
+    /// Warning shown on the link confirmation screen. Linking someone else's number lets them message businesses as you.
+    public static let accountLinkWarning = "Only continue if you started this from your own phone. Linking someone else's number lets them message businesses as you."
+
+    public enum AccountLinkPhase: Equatable, Sendable {
+        case idle, loading
+        /// The token is valid; the screen shows the masked number and waits for an explicit "This is my phone".
+        case ready(PhoneLinkPreview)
+        case failed(String)
+    }
+
+    public private(set) var accountLinkPhase: AccountLinkPhase = .idle
+
+    /// Fetches what the one-time token would link (masked number and expiry). Read-only: nothing is linked yet.
+    public func loadAccountLinkPreview(token: String) async {
+        accountLinkPhase = .loading
+        do {
+            accountLinkPhase = .ready(try await services.api.previewPhoneLink(token: token))
+        } catch {
+            accountLinkPhase = .failed((error as? APIError)?.userMessage ?? "This link isn't valid anymore.")
+        }
+    }
+
+    /// Redeems the token for the number previewed. Refuses unless the person explicitly confirmed "This is my phone"
+    /// for a preview that is still valid.
+    public func redeemAccountLink(token: String, confirmedOwnPhone: Bool) async -> Bool {
+        guard confirmedOwnPhone, case .ready(let preview) = accountLinkPhase, preview.expiresAt > services.clock(),
+              let last4 = preview.last4 else { return false }
         do {
             phones.append(try await services.api.redeemSMSLink(token: token, confirmPhoneLast4: last4))
+            accountLinkPhase = .idle
             return true
         } catch {
-            errorMessage = (error as? APIError)?.userMessage ?? "That didn't match. Check the last 4 digits of your number."
+            errorMessage = (error as? APIError)?.userMessage ?? "We couldn't link that number."
             return false
         }
     }
+
+    public func resetAccountLink() { accountLinkPhase = .idle }
 
     public func removePhone(_ phone: PhoneLink) async {
         do { try await services.api.removePhoneLink(phone.id); phones.removeAll { $0.id == phone.id } } catch {

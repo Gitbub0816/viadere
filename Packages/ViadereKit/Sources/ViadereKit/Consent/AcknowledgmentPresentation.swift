@@ -14,7 +14,7 @@ public enum AcknowledgmentPresentation {
 
     /// The first lines of the body as a summary (full text stays one tap away).
     public static func summary(_ payload: AcknowledgePayload, limit: Int = 220) -> String {
-        let text = payload.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = UntrustedText.paragraphs(payload.body, max: 20_000)
         guard text.count > limit else { return text }
         let cut = text.prefix(limit)
         if let stop = cut.lastIndex(where: { $0 == "." || $0 == "!" || $0 == "?" }), cut.distance(from: cut.startIndex, to: stop) > limit / 2 {
@@ -24,12 +24,16 @@ public enum AcknowledgmentPresentation {
     }
 
     public static func isTruncated(_ payload: AcknowledgePayload, limit: Int = 220) -> Bool {
-        payload.body.trimmingCharacters(in: .whitespacesAndNewlines).count > limit
+        UntrustedText.paragraphs(payload.body, max: 20_000).count > limit
     }
 
     public static func versionLabel(_ payload: AcknowledgePayload) -> String? {
-        payload.documentVersion.map { "Version \($0)" }
+        UntrustedText.optionalLine(payload.documentVersion, max: 20).map { "Version \($0)" }
     }
+
+    /// The full document text, sanitized (paragraph breaks kept, no bidi/zero-width/control characters).
+    public static func body(_ payload: AcknowledgePayload) -> String { UntrustedText.paragraphs(payload.body, max: 20_000) }
+    public static func title(_ payload: AcknowledgePayload) -> String { UntrustedText.line(payload.title, max: InteractionPresentation.Limit.title) }
 
     /// Only `https` documents open; anything else is ignored rather than handed to the system.
     public static func documentURL(_ payload: AcknowledgePayload) -> URL? {
@@ -39,9 +43,9 @@ public enum AcknowledgmentPresentation {
 
     /// Facts shown before acknowledging.
     public static func documentRows(_ envelope: InteractionEnvelope, payload: AcknowledgePayload, now: Date) -> [PresentedDetail] {
-        var rows = [PresentedDetail(label: "From", value: envelope.business.displayName), PresentedDetail(label: "Document", value: payload.title)]
-        if let version = payload.documentVersion { rows.append(PresentedDetail(label: "Version", value: version)) }
-        if let account = envelope.interaction.scope.accountReference { rows.append(PresentedDetail(label: "Account", value: account)) }
+        var rows = [PresentedDetail(label: "From", value: UntrustedText.name(envelope.business.displayName).text), PresentedDetail(label: "Document", value: title(payload))]
+        if let version = UntrustedText.optionalLine(payload.documentVersion, max: 20) { rows.append(PresentedDetail(label: "Version", value: version)) }
+        if let account = UntrustedText.optionalLine(envelope.interaction.scope.accountReference, max: 40) { rows.append(PresentedDetail(label: "Account", value: account)) }
         rows.append(PresentedDetail(label: "Sent", value: InteractionPresentation.relative(envelope.interaction.createdAt, now: now)))
         return rows
     }
@@ -50,9 +54,9 @@ public enum AcknowledgmentPresentation {
     /// when the server omitted it.
     public static func receiptRows(_ envelope: InteractionEnvelope, payload: AcknowledgePayload, outcome: InteractionOutcome?,
                                    fallback: Date, timeZone: TimeZone = .current) -> [PresentedDetail] {
-        var rows = [PresentedDetail(label: "Document", value: payload.title)]
-        if let version = payload.documentVersion { rows.append(PresentedDetail(label: "Version", value: version)) }
-        rows.append(PresentedDetail(label: "Business", value: envelope.business.displayName))
+        var rows = [PresentedDetail(label: "Document", value: title(payload))]
+        if let version = UntrustedText.optionalLine(payload.documentVersion, max: 20) { rows.append(PresentedDetail(label: "Version", value: version)) }
+        rows.append(PresentedDetail(label: "Business", value: UntrustedText.name(envelope.business.displayName).text))
         let recorded = outcome?.decidedAt ?? fallback
         rows.append(PresentedDetail(label: "Recorded", value: timestamp(recorded, timeZone: timeZone), emphasized: true))
         rows.append(PresentedDetail(label: "Reference", value: reference(envelope.id)))

@@ -14,9 +14,9 @@ struct ConnectReview: View {
             ViadereCard {
                 VStack(alignment: .leading, spacing: ViadereSpace.m) {
                     HStack(spacing: ViadereSpace.m) {
-                        ViadereAvatar(name: profile.displayName, size: 60, isVerified: true)
+                        ViadereAvatar(name: profile.safeName, size: 60, isVerified: true)
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(profile.displayName).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
+                            Text(profile.safeName).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
                             ViadereBadge("Verified business", kind: .verified)
                         }
                     }
@@ -50,7 +50,7 @@ struct ConnectReview: View {
             }
 
             VStack(spacing: ViadereSpace.xs) {
-                Button("Connect to \(profile.displayName)") {
+                Button("Connect to \(profile.safeName)") {
                     if let onConnect { onConnect() } else { Task { await vm.connect() } }
                 }
                     .buttonStyle(.viadere(.primary))

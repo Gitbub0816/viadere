@@ -271,7 +271,7 @@ public struct ViadereAvatar: View {
 
     private var initials: String {
         let words = name.split(separator: " ").prefix(2)
-        let letters = words.compactMap { $0.first.map(String.init) }.joined()
+        let letters = words.compactMap { $0.first(where: { $0.isLetter || $0.isNumber }).map(String.init) }.joined()
         return letters.isEmpty ? "·" : letters.uppercased()
     }
 

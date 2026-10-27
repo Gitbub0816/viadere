@@ -211,8 +211,8 @@ struct HouseholdInviteSheet: View {
                     ForEach(Array(vm.businesses.enumerated()), id: \.element.id) { index, business in
                         Toggle(isOn: Binding(get: { vm.draft.businessIds.contains(business.id) }, set: { _ in vm.toggleBusiness(business.id) })) {
                             HStack(spacing: ViadereSpace.s) {
-                                ViadereAvatar(name: business.displayName, size: 32, isVerified: business.isVerified)
-                                Text(business.displayName).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+                                ViadereAvatar(name: business.safeName, size: 32, isVerified: business.isVerified)
+                                Text(business.safeName).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
                             }
                         }
                         .toggleStyle(.viadere)

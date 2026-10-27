@@ -52,11 +52,22 @@ public enum KeyStoreError: Error, Equatable, Sendable {
     /// The device cannot create this key (e.g. no biometrics enrolled for `.approvalBiometric`).
     case creationFailed(DeviceKeyPurpose, Int32)
     case signingFailed(Int32)
+    /// The keychain can't answer right now (locked, early boot): retry later. **Not** an invalidation.
+    case temporarilyUnavailable(Int32)
+    /// An unexpected keychain status. Reported, never interpreted as invalidation.
+    case unexpectedStatus(Int32)
+
+    /// True for errors that say nothing about the key itself and are worth retrying.
+    public var isTransient: Bool {
+        if case .temporarilyUnavailable = self { return true }
+        return false
+    }
 }
 
 /// Owns the device keys, one per `DeviceKeyPurpose`.
 public protocol DeviceKeyStore: Sendable {
-    /// The key for `purpose` if it exists. Throws `.keyInvalidated` when it existed but can no longer be used.
+    /// The key for `purpose` if it exists (`nil` = not found, which for a key the device enrolled means it was invalidated).
+    /// Throws `.temporarilyUnavailable` when the keychain can't answer yet; callers retry instead of re-enrolling.
     func existingKey(for purpose: DeviceKeyPurpose) async throws -> (any ManagedSigningKey)?
     /// Creates (replacing any existing) key. Non-exportable; the private half never leaves the store.
     func createKey(for purpose: DeviceKeyPurpose) async throws -> any ManagedSigningKey

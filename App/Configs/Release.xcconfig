@@ -1,7 +1,11 @@
 #include "Shared.xcconfig"
 
+// Per-developer overrides (team id, a staging server) are read FIRST, so they can never reach the security
+// settings below: whatever Local.xcconfig says, a Release/archive build gets strict ATS and no local-dev
+// plist definitions. (Shared.xcconfig already pulls Local.xcconfig in for team id and API URL.)
+#include? "Local.xcconfig"
+
 // Release: HTTPS only, strict ATS (no exceptions), certificate pinning fail-closed, production APNs.
+// These assignments come after the include on purpose and are not overridable.
 VIADERE_PLIST_DEFS =
 APS_ENVIRONMENT = production
-
-#include? "Local.xcconfig"

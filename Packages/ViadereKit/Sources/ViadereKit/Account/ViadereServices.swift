@@ -13,11 +13,17 @@ public struct ViadereServices: Sendable {
     public var passkeys: any PasskeyService
     public var notificationPermission: any NotificationPermissionService
     public var appLock: any AppLockAuthenticator
+    /// Wipes notifications, Live Activities, watch context and dynamic categories on sign-out (app supplies it).
+    public var residue: any LocalResidueCleaner
+    /// Fires when the server stops trusting this device; `AppModel` wipes local state in response.
+    public let revocation: DeviceRevocationNotifier
+    /// True in the App Clip: it enrolls a request-key-only device and never holds approval keys.
+    public var isAppClip: Bool
     public var clock: @Sendable () -> Date
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
-                       preferences: preferences, secrets: secrets, clock: clock)
+                       preferences: preferences, secrets: secrets, residue: residue, isAppClip: isAppClip, clock: clock)
     }
 
     public var approvals: ApprovalService { ApprovalService(api: api, keys: keys, records: records, clock: clock) }
@@ -26,12 +32,14 @@ public struct ViadereServices: Sendable {
         NotificationActionHandler(api: api, approvals: approvals, clock: clock)
     }
 
-    public var notificationEnricher: NotificationEnricher { NotificationEnricher(api: api, clock: clock) }
+    public var notificationEnricher: NotificationEnricher { NotificationEnricher(api: api, preferences: preferences, clock: clock) }
 
     public init(configuration: ViadereConfiguration, api: any ViadereAPI, sessions: SessionManager, keys: any DeviceKeyStore,
                 records: any DeviceRecordStore, preferences: any PreferencesStore, secrets: any SecretStore,
                 passkeys: any PasskeyService, notificationPermission: any NotificationPermissionService,
-                appLock: any AppLockAuthenticator, clock: @escaping @Sendable () -> Date = { Date() }) {
+                appLock: any AppLockAuthenticator, residue: any LocalResidueCleaner = NoLocalResidueCleaner(),
+                revocation: DeviceRevocationNotifier = DeviceRevocationNotifier(), isAppClip: Bool = false,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
         self.configuration = configuration
         self.api = api
         self.sessions = sessions
@@ -42,6 +50,9 @@ public struct ViadereServices: Sendable {
         self.passkeys = passkeys
         self.notificationPermission = notificationPermission
         self.appLock = appLock
+        self.residue = residue
+        self.revocation = revocation
+        self.isAppClip = isAppClip
         self.clock = clock
     }
 
@@ -54,23 +65,44 @@ public struct ViadereServices: Sendable {
     ///   - passkeys: supply `ApplePasskeyService()` from the iOS app; extensions don't need one.
     public static func live(configuration: ViadereConfiguration, passkeys: any PasskeyService = UnavailablePasskeyService(),
                             notificationPermission: any NotificationPermissionService = MockNotificationPermissionService(result: false),
-                            appLock: any AppLockAuthenticator = MockAppLockAuthenticator(succeeds: false)) -> ViadereServices {
+                            appLock: any AppLockAuthenticator = MockAppLockAuthenticator(succeeds: false),
+                            residue: any LocalResidueCleaner = NoLocalResidueCleaner(), isAppClip: Bool = false) -> ViadereServices {
         let secrets = KeychainSecretStore(service: configuration.keychainService, accessGroup: configuration.keychainAccessGroup)
         let keys = makeKeyStore(configuration: configuration, secrets: secrets)
         let records = SecretDeviceRecordStore(secrets: secrets)
-        let tokens = SecretTokenStore(secrets: secrets)
+        // The refresh token is only readable while the phone is unlocked; the access token (for the notification
+        // extension's fetch) stays readable after first unlock.
+        let refreshSecrets = KeychainSecretStore(service: configuration.keychainService, accessGroup: configuration.keychainAccessGroup,
+                                                 accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
+        let tokens = SecretTokenStore(secrets: secrets, refreshSecrets: refreshSecrets)
         let transport = URLSessionTransport(configuration: configuration)
         let signer = DeviceRequestSigner(records: records, keys: keys)
         let executor = RequestExecutor(baseURL: configuration.apiBaseURL, transport: transport, signer: signer)
         // The app and its extensions rotate the same session; serialize that across processes (single-use refresh tokens).
         let groupID = configuration.appGroupID
-        let lock: any CrossProcessLock = (groupID.isEmpty ? nil : FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID))
-            .map { FileCrossProcessLock(url: $0.appendingPathComponent("session-refresh.lock")) } ?? NoCrossProcessLock()
+        let lock = makeRefreshLock(appGroupID: groupID)
         let sessions = SessionManager(store: tokens, refresher: APITokenRefresher(executor: executor), lock: lock)
-        let client = APIClient(executor: executor, sessions: sessions)
+        let revocation = DeviceRevocationNotifier()
+        let client = APIClient(executor: executor, sessions: sessions, onDeviceRejected: { revocation.notify() })
         return ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
                                records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
-                               secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock)
+                               secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock,
+                               residue: residue, revocation: revocation, isAppClip: isAppClip)
+    }
+
+    /// The cross-process refresh lock. With no app group (the App Clip, which has no extension sharing its session)
+    /// a single-process lock is enough. With an app group configured but its container missing, refreshes **fail
+    /// closed** (retryable error) instead of running unprotected; only DEBUG builds, which may be unsigned, fall back.
+    static func makeRefreshLock(appGroupID: String) -> any CrossProcessLock {
+        guard !appGroupID.isEmpty else { return NoCrossProcessLock() }
+        if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) {
+            return FileCrossProcessLock(url: container.appendingPathComponent("session-refresh.lock"))
+        }
+        #if DEBUG
+        return NoCrossProcessLock()
+        #else
+        return UnavailableCrossProcessLock()
+        #endif
     }
 
     static func makeKeyStore(configuration: ViadereConfiguration, secrets: any SecretStore) -> any DeviceKeyStore {
@@ -81,7 +113,8 @@ public struct ViadereServices: Sendable {
         return UnavailableKeyStore()
         #endif
         #else
-        return SecureEnclaveKeyStore(accessGroup: configuration.keychainAccessGroup)
+        return SecureEnclaveKeyStore(accessGroup: configuration.keychainAccessGroup,
+                                    approvalAccessGroup: configuration.approvalKeychainAccessGroup)
         #endif
     }
     #endif

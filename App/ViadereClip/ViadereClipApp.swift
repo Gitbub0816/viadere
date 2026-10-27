@@ -20,9 +20,12 @@ struct ViadereClipApp: App {
 }
 
 enum ClipEnvironment {
-    /// Keychain items stay private to the clip (no shared group); passkey UI is available.
+    /// Keychain items stay private to the clip (no shared group); passkey UI is available. The clip enrolls a
+    /// **request-key-only, short-lived device** marked as a clip device: it can read and answer low-risk requests
+    /// but holds no approval keys, and the full app revokes it on first sign-in.
     static let services = ViadereServices.live(
         configuration: ViadereRuntime.configuration,
         passkeys: ApplePasskeyService(anchorProvider: { KeyWindow.current }),
-        notificationPermission: UserNotificationPermissionService())
+        notificationPermission: UserNotificationPermissionService(),
+        isAppClip: true)
 }

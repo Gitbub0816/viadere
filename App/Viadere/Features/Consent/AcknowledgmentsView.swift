@@ -21,8 +21,8 @@ struct AcknowledgmentsView: View {
                 } else {
                     ViadereRowGroup {
                         ForEach(Array(vm.records.enumerated()), id: \.element.id) { index, record in
-                            ViadereRow(record.title, subtitle: "\(record.business.displayName) · \(vm.subtitle(record))",
-                                       leading: { ViadereAvatar(name: record.business.displayName, size: 36, isVerified: record.business.isVerified) },
+                            ViadereRow(record.title, subtitle: "\(record.business.safeName) · \(vm.subtitle(record))",
+                                       leading: { ViadereAvatar(name: record.business.safeName, size: 36, isVerified: record.business.isVerified) },
                                        trailing: { record.acknowledged ? AnyView(EmptyView()) : AnyView(ViadereBadge("Declined", kind: .neutral)) })
                             if index < vm.records.count - 1 { ViadereHairline(inset: 50) }
                         }

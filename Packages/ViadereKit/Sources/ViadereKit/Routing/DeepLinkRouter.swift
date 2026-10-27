@@ -7,7 +7,7 @@ public enum DeepLink: Sendable, Equatable {
     case connect(code: BusinessCode, link: ConnectLink?)
     /// `viadere://b/{handle}`
     case business(BusinessHandle)
-    /// `https://viadere.com/l/{token}`: finish linking a phone that texted Viadere.
+    /// `https://viadere.com/l/{token}` (universal link only; no custom-scheme equivalent): finish linking a phone that texted Viadere.
     case accountLink(token: String)
     /// `https://viadere.com/h/{token}`: secure handoff of a request that can't be completed by text.
     case handoff(token: String)
@@ -86,9 +86,9 @@ public enum DeepLinkRouter {
             return InteractionID(arg).map(DeepLink.interaction)
         case "m":
             return SessionID(arg).map(DeepLink.conversation)
-        case "l":
-            guard Base64URL.isValid(arg, minLength: tokenLength, maxLength: tokenLength) else { return nil }
-            return .accountLink(token: arg)
+        // There is deliberately no `viadere://l/{token}`: any app on the device can open a custom-scheme URL, so a
+        // phone-link token is accepted only from the https universal link (`https://viadere.com/l/{token}`), which
+        // iOS verifies against the app-site association.
         case "h":
             guard Base64URL.isValid(arg, minLength: tokenLength, maxLength: tokenLength) else { return nil }
             return .handoff(token: arg)

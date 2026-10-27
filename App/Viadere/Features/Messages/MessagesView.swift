@@ -62,10 +62,10 @@ private struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ViadereAvatar(name: conversation.business.displayName, size: 40, isVerified: conversation.business.isVerified)
+            ViadereAvatar(name: conversation.business.safeName, size: 40, isVerified: conversation.business.isVerified)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(conversation.business.displayName)
+                    Text(conversation.business.safeName)
                         .font(ViadereType.body.weight(conversation.unreadCount > 0 ? .semibold : .regular))
                         .foregroundStyle(ViadereColor.textPrimary)
                     Spacer(minLength: ViadereSpace.xs)
@@ -145,10 +145,10 @@ struct ConversationView: View {
     private var header: some View {
         HStack(spacing: ViadereSpace.s) {
             ViadereBackButton("") { dismiss() }
-            ViadereAvatar(name: conversation.business.displayName, size: 36, isVerified: conversation.business.isVerified)
+            ViadereAvatar(name: conversation.business.safeName, size: 36, isVerified: conversation.business.isVerified)
             VStack(alignment: .leading, spacing: 0) {
-                Text(conversation.business.displayName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
-                Text("Verified business · replies are from \(conversation.business.displayName)")
+                Text(conversation.business.safeName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
+                Text("Verified business · replies are from \(conversation.business.safeName)")
                     .font(ViadereType.caption).foregroundStyle(ViadereColor.textSecondary).lineLimit(1)
             }
             Spacer()
@@ -209,7 +209,7 @@ struct MessageBubble: View {
                     Image(systemName: "checkmark.seal.fill").font(.system(size: 10)).foregroundStyle(ViadereColor.accent).accessibilityHidden(true)
                 }
             }
-            Text(row.message.body)
+            Text(UntrustedText.paragraphs(row.message.body, max: 4_000))
                 .font(ViadereType.body)
                 .foregroundStyle(mine ? ViadereColor.onPrimary : ViadereColor.textPrimary)
                 .padding(.horizontal, 14)
@@ -237,8 +237,8 @@ struct MessageBubble: View {
     }
 
     private var attribution: String {
-        var text = row.message.attribution.displayName
-        if let agent = row.message.attribution.agentName { text += " · \(agent)" }
+        var text = UntrustedText.line(row.message.attribution.displayName, max: 40)
+        if let agent = UntrustedText.optionalLine(row.message.attribution.agentName, max: 40) { text += " · \(agent)" }
         return text
     }
 

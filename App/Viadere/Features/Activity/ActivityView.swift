@@ -94,7 +94,7 @@ struct ActivityGroupSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ViadereSectionHeader(group.business.displayName)
+            ViadereSectionHeader(group.business.safeName)
             ViadereRowGroup {
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                     VStack(alignment: .leading, spacing: 0) {
@@ -160,7 +160,7 @@ struct ActivityActionBar: View {
         case .needsSecureSheet(let id): await model.openInteraction(id)
         case .done:
             await model.home.load()
-            model.toast = "Sent to \(item.business.displayName)."
+            model.toast = "Sent to \(item.business.safeName)."
         case .cancelled, .failed: break
         }
     }

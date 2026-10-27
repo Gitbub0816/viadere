@@ -41,9 +41,9 @@ struct ActivityDetailView: View {
     private func hero(_ item: ActivityItem) -> some View {
         VStack(alignment: .leading, spacing: ViadereSpace.m) {
             HStack(spacing: ViadereSpace.s) {
-                ViadereAvatar(name: item.business.displayName, size: 48, isVerified: item.business.isVerified)
+                ViadereAvatar(name: item.business.safeName, size: 48, isVerified: item.business.isVerified)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.business.displayName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
+                    Text(item.business.safeName).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
                     HStack(spacing: ViadereSpace.xs) {
                         if item.business.isVerified { ViadereBadge("Verified", kind: .verified) }
                         Text(item.category.title).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
@@ -130,7 +130,7 @@ struct ActivityDetailView: View {
                     if await model.messages.start(with: item.business.id) != nil { model.selectedTab = .messages }
                 }
             } label: {
-                HStack(spacing: ViadereSpace.xs) { Image(systemName: "bubble.left"); Text("Message \(item.business.displayName)") }
+                HStack(spacing: ViadereSpace.xs) { Image(systemName: "bubble.left"); Text("Message \(item.business.safeName)") }
             }
             .buttonStyle(.viadere(.quiet))
         }

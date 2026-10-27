@@ -68,9 +68,9 @@ struct ApprovalSheet: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: ViadereSpace.s) {
-            ViadereAvatar(name: model.envelope.business.displayName, size: 48, isVerified: model.envelope.business.isVerified)
+            ViadereAvatar(name: model.envelope.business.safeName, size: 48, isVerified: model.envelope.business.isVerified)
             VStack(alignment: .leading, spacing: 4) {
-                Text(model.envelope.business.displayName)
+                Text(model.envelope.business.safeName)
                     .font(ViadereType.headline)
                     .foregroundStyle(ViadereColor.textPrimary)
                 HStack(spacing: ViadereSpace.xs) {
@@ -97,6 +97,9 @@ struct ApprovalSheet: View {
     // MARK: Body
 
     @ViewBuilder private var mainContent: some View {
+        if model.envelope.business.safeNameInfo.impersonatesViadere {
+            ViadereNotice("This is a business using a name like Viadere. Viadere never asks you to approve anything under its own name.", kind: .danger)
+        }
         if let behalf = model.onBehalfOf {
             ViadereNotice("You're responding on behalf of \(behalf). It's recorded in your household activity.", kind: .info)
         }
@@ -105,7 +108,7 @@ struct ApprovalSheet: View {
                 AcknowledgmentReceipt(envelope: model.envelope, payload: payload, outcome: model.outcome,
                                       acknowledged: decision == .acknowledge, fallback: model.now)
             } else {
-                ResultState(decision: decision, business: model.envelope.business.displayName)
+                ResultState(decision: decision, business: model.envelope.business.safeName)
             }
         } else {
             switch model.availability {
@@ -113,7 +116,7 @@ struct ApprovalSheet: View {
                 requestBody
             case .expired:
                 StateMessage(symbol: "clock", title: "This request expired",
-                             message: "Nothing was approved. If you were trying to do something, start again with \(model.envelope.business.displayName).")
+                             message: "Nothing was approved. If you were trying to do something, start again with \(model.envelope.business.safeName).")
             case .alreadyHandled(let status):
                 StateMessage(symbol: "checkmark.circle", title: "Already handled",
                              message: "This request was already \(Self.pastTense(status)). Nothing more to do.")
@@ -135,14 +138,14 @@ struct ApprovalSheet: View {
         case .authorize, .authenticate:
             securityBody
         case .confirm(let payload):
-            Text(payload.title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
-            if let details = payload.details { Text(details).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary) }
+            Text(InteractionPresentation.confirmTitle(payload)).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
+            if let details = InteractionPresentation.confirmDetails(payload) { Text(details).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary) }
             failureNotice
         case .choose(let payload):
-            Text(payload.prompt).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
+            Text(InteractionPresentation.prompt(payload.prompt)).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
             ViadereFlowLayout {
                 ForEach(payload.options, id: \.id) { option in
-                    ViadereChip(option.label, isSelected: multiSelection.contains(option.id)) {
+                    ViadereChip(InteractionPresentation.optionLabel(option), isSelected: multiSelection.contains(option.id)) {
                         if payload.allowsMultiple {
                             if multiSelection.contains(option.id) { multiSelection.remove(option.id) } else { multiSelection.insert(option.id) }
                         } else {
@@ -157,11 +160,11 @@ struct ApprovalSheet: View {
             AcknowledgmentBody(envelope: model.envelope, payload: payload, now: model.now)
             failureNotice
         case .reply(let payload):
-            Text(payload.prompt).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
+            Text(InteractionPresentation.prompt(payload.prompt)).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
             if !payload.suggestedReplies.isEmpty {
                 ViadereFlowLayout {
                     ForEach(payload.suggestedReplies, id: \.self) { suggestion in
-                        ViadereChip(suggestion) { replyText = suggestion }
+                        ViadereChip(InteractionPresentation.suggestedReply(suggestion)) { replyText = InteractionPresentation.suggestedReply(suggestion) }
                     }
                 }
             }
@@ -237,7 +240,7 @@ struct ApprovalSheet: View {
             VStack(alignment: .leading, spacing: ViadereSpace.s) {
                 Text("Report this as suspicious?")
                     .font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
-                Text("We'll deny it and tell \(model.envelope.business.displayName) it wasn't you.")
+                Text("We'll deny it and tell \(model.envelope.business.safeName) it wasn't you.")
                     .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
                 HStack(spacing: ViadereSpace.s) {
                     Button("Cancel") { confirmingReport = false }.buttonStyle(.viadere(.secondary))

@@ -78,6 +78,8 @@
 	<string>$(VIADERE_API_BASE_URL)</string>
 	<key>ViadereKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
+	<key>ViadereApprovalKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.viadere.app.approval</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

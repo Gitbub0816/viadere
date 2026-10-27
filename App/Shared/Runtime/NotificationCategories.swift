@@ -41,6 +41,12 @@ enum NotificationCategories {
         center.setNotificationCategories(Set(statics).union(dynamic))
     }
 
+    /// Removes the per-interaction `viadere.choose.<id>` categories, keeping only the static ones (sign-out).
+    static func removeDynamic() async {
+        let center = UNUserNotificationCenter.current()
+        center.setNotificationCategories(Set(NotificationEnricher.staticCategorySpecs().map(category)))
+    }
+
     /// Adds one category (the service extension registers `viadere.choose.<id>` before delivery).
     static func register(_ model: NotificationCategoryModel) async {
         let center = UNUserNotificationCenter.current()

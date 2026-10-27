@@ -59,10 +59,10 @@ Override the server with `VIADERE_API_BASE_URL` in `Configs/Local.xcconfig`.
 |---|---|
 | Team id | `Configs/Local.xcconfig` (`DEVELOPMENT_TEAM`) |
 | Server URL | `VIADERE_API_BASE_URL` in `Configs/*.xcconfig` (read from Info.plist key `ViadereAPIBaseURL`) |
-| **Certificate pins** | `ViadereConfiguration.productionPinning` in `Packages/ViadereKit/.../ViadereConfiguration.swift`. **TODO before release:** replace the two `REPLACE_ME_*` placeholders with the SPKI SHA-256 of the current key and a backup key (command in `PinningConfiguration`). Until then Release builds fail closed. |
+| **Certificate pins** (build-checked) | `ViadereConfiguration.productionPinning` in `Packages/ViadereKit/.../ViadereConfiguration.swift`. **TODO before release:** replace the two `REPLACE_ME_*` placeholders with the SPKI SHA-256 of the current key and a backup key (command in `PinningConfiguration`). Until then Release builds fail closed, and `Scripts/check-release-pins.sh` (a pre-build phase of the app and the clip) **fails a Release archive** while the placeholders are present. |
 | Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.Widgets`, `.Clip`, `.watchkitapp` |
 | App group | `group.com.viadere.shared` (app + notification service) |
-| Keychain group | `$(AppIdentifierPrefix)com.viadere.shared` (app + notification service); the clip keeps its own private keychain |
+| Keychain groups | `$(AppIdentifierPrefix)com.viadere.shared` (app + notification service: request key and access token only) and `$(AppIdentifierPrefix)com.viadere.app.approval` (**app only**: the approval keys). The clip keeps its own private keychain and holds a request key only. |
 | Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.com`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip) |
 | Developer portal | Enable Push, Associated Domains, App Groups, Time Sensitive Notifications, App Clip; register the App Clip experience in App Store Connect |
 | Server (viadere.com) | Serve `/.well-known/apple-app-site-association` with `applinks` (`/c/*`, `/l/*`, `/h/*`), `webcredentials` (this app) and `appclips` (the clip) |
@@ -81,16 +81,25 @@ first submission.
 | `approvalUserPresence` | `privateKeyUsage + userPresence` | standard approvals (Face ID/Touch ID **or** passcode) |
 | `approvalBiometric` | `privateKeyUsage + biometryCurrentSet` | high/critical approvals; **invalidated when biometrics change** |
 
-Approval keys are `WhenUnlockedThisDeviceOnly`. The request key and the session tokens are
-`AfterFirstUnlockThisDeviceOnly` so the notification service extension can fetch interaction details while the phone is
-locked (it can read details but can never approve: it has no user-presence key). If a key is invalidated,
-`EnrollmentHealth` reports `needsReenrollment` and the app shows the re-enrollment screen; the old device is revoked
-best-effort and approvals are paused. Enrollment proves possession of every key (`VIADERE-ENROLL-V1`).
+Approval keys are `WhenUnlockedThisDeviceOnly` and live in an **app-only keychain access group**: the notification
+extensions and the App Clip are not entitled to it and cannot even see those keys. The request key and the access token
+are `AfterFirstUnlockThisDeviceOnly` (shared group) so the notification service extension can fetch interaction details
+while the phone is locked; the **refresh token** is `WhenUnlockedThisDeviceOnly`, so a locked phone's extension cannot
+rotate the session and shows a generic banner instead. If a key is invalidated (`errSecItemNotFound` for a key the device
+enrolled), `EnrollmentHealth` reports `needsReenrollment` and the app shows the re-enrollment screen; the old device is
+revoked best-effort and approvals are paused. A locked or unavailable keychain (`errSecInteractionNotAllowed`, -25308, and
+other transient statuses) is **not** invalidation: it reports `unavailable`, the app stays usable and re-checks later.
+Enrollment proves possession of every key (`VIADERE-ENROLL-V1`). The App Clip enrolls a request-key-only device marked
+`clipDevice: true` (the server refuses approvals from it and expires it); the full app revokes the person's clip devices
+(best effort) after enrolling.
 
 **Requests.** `APIClient` signs every `deviceSigned*` request with `RequestSigner` (fresh timestamp and nonce on each
 attempt) and sends bearer tokens only to bearer routes. `401` triggers one **single-flight** refresh
-(`SessionManager`), serialized across the app and extensions with a file lock because refresh tokens are single-use and
-rotated. Two consecutive `signature_invalid` responses mean the device was revoked: everything local is wiped.
+(`SessionManager`), serialized across the app and extensions because refresh tokens are single-use and rotated. The
+`flock` guards only short read-compare-write sections (never network I/O, which risks a `0xdead10cc` kill); the
+network call is covered by a short-lived lease file, and it **fails closed**: if the lock file can't be opened or the
+lock isn't acquired in time, no refresh runs and a retryable error surfaces. A generation counter stops a refresh that was
+in flight at sign-out from resurrecting the session. Two consecutive `signature_invalid` responses mean the device was revoked: everything local is wiped.
 
 **Approvals.** `ApprovalService` builds a `DecisionPayload`, picks the key from `AssurancePolicy` (never weaker),
 signs with an `LAContext` whose reason names the business and amount ("Approve $285.28 at Northfield Market"), and
@@ -101,9 +110,12 @@ for money and high-risk sign-ins. Expired or already-handled requests show a cle
 recorded or mirrored the sheet shows a notice and approving is paused (denying never is).
 
 **Storage and privacy.** Tokens, device record and keys live in the Keychain (`ThisDeviceOnly`), never in defaults or
-logs. Sign-out, account deletion and device revocation wipe tokens, keys, device record, preferences and the keychain
-service. `os.Logger` is wrapped (`ViadereLog`) so every dynamic value is `.private`. The app switcher shows a plain
-cover (`PrivacyShield`). Optional Face ID app lock with a short grace period. Copied codes use
+logs. Sign-out first revokes this device on the server (best effort, bounded), then removes delivered notifications, ends Live
+Activities, clears the watch context and the dynamic notification categories (`LocalResidueCleaner`), then wipes tokens,
+keys, device record, preferences and the keychain service; account deletion and device revocation wipe the same way. `os.Logger` is wrapped (`ViadereLog`) so every dynamic value is `.private`. The app switcher shows a plain
+cover (`PrivacyShield`). Optional Face ID app lock with a short grace period: the lock is shown in its **own window above everything** (sheets,
+alerts), locking tears down presented screens (`AppModel.lock()` + content keyed on `lockEpoch`), and deep links and
+notification opens that arrive while locked are queued and replayed after the unlock. Copied codes use
 `UIPasteboard` with `localOnly` and a 60-second expiry; sensitive text is not selectable; approval details are
 `privacySensitive`.
 
@@ -122,9 +134,21 @@ Pushes carry **no sensitive data**, only an opaque interaction id:
   "v": 1, "iid": "<interaction uuid>" }
 ```
 
-The notification service extension fetches `GET /v1/interactions/{iid}` (device-signed), renders it with
-`ChannelRenderer.notification`, registers the per-interaction `viadere.choose.<id>` category and attaches a compact card
-(`userInfo["viadere.card"]`) for the content extension. Silent status pushes (`content-available`, same `iid`) start or
+The notification service extension fetches `GET /v1/interactions/{iid}` (device-signed), renders it, registers the
+per-interaction `viadere.choose.<id>` category and, **only when the user turned on "Details on the lock screen"**
+(`richNotificationPreviews`, off by default), shows the facts and attaches a compact card (`userInfo["viadere.card"]`)
+for the content extension. By default an approval or sign-in shows only "Approval requested by {business}".
+
+**Business-supplied text.** Every string a business controls (names, merchants, services, locations, notes, labels) goes
+through one sanitizer, `UntrustedText` (ViadereKit): bidi controls (including U+061C), U+180E, zero-width and control
+characters are removed, line breaks become spaces, stacked combining marks and length are capped, and a name that imitates
+"Viadere" is shown quoted and attributed (`Business "Viadere Security"`). It is applied in the Face ID prompt, approval
+sheet, notification, card, watch list, Live Activity and Activity/Home/Messages surfaces; the amount always comes first so
+truncation can never hide it. The card's verification badge uses the real `isVerified` flag.
+
+**SMS account links.** Only the https universal link `https://viadere.com/l/{token}` is accepted (no `viadere://l/`). The
+confirmation sheet first previews what the token would link (masked number, expiry), warns, and links only after an explicit
+"This is my phone". Silent status pushes (`content-available`, same `iid`) start or
 update Live Activities; `pushType: .token` update tokens and the iOS 17.2 push-to-start token are registered through
 `/v1/live-activities/tokens`; the APNs token through `/v1/push/apns-token`.
 
@@ -183,7 +207,7 @@ All `deviceSignedBearer`. Every route below lives in ViadereCore's `APIRoutes` (
 ## Not verified by compilation
 
 This repository was authored on Linux, where there is no Xcode or iOS SDK. **Everything under `Packages/ViadereKit`
-that is platform-neutral compiles and is covered by `swift test` (203 tests).** The following were written carefully
+that is platform-neutral compiles and is covered by `swift test` (260 tests).** The following were written carefully
 against the iOS 17/18 SDK but never compiled; build them first in Xcode and expect a few mechanical fixes:
 
 1. SwiftUI/UIKit code in `Viadere/`, `Shared/`, the extensions, widgets, clip and watch (only syntax-parsed).

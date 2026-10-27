@@ -56,15 +56,26 @@ public enum ApprovalPolicy {
         }
     }
 
-    /// Text for the Face ID / passcode sheet. States the business and amount. Capped to keep the sheet tidy.
+    /// Maximum length of the Face ID / passcode sheet text.
+    public static let promptLimit = 90
+
+    /// Text for the Face ID / passcode sheet. States the business and amount. Every business-supplied piece is
+    /// sanitized (no bidi/zero-width/newlines) and capped on its own, and the amount comes first, so a long
+    /// merchant name can be cut but never hides what is being approved. A business that imitates "Viadere" is
+    /// shown quoted, e.g. `Business "Viadere Security"`.
     public static func promptReason(for envelope: InteractionEnvelope, decision: Decision, onBehalfOf: String? = nil) -> String {
-        let business = envelope.business.displayName
+        let business = UntrustedText.name(envelope.business.displayName, max: 30).text
         let text: String
         switch (envelope.interaction.payload, decision) {
         case (.authorize(let p), .approve):
-            if let amount = p.amount { text = "Approve \(amount.formatted) at \(p.merchant ?? business)" } else { text = "Approve the request from \(business)" }
+            if let amount = p.amount {
+                let place = p.merchant.flatMap { UntrustedText.clean($0).isEmpty ? nil : UntrustedText.name($0, max: 30, attribution: nil).text } ?? business
+                text = "Approve \(amount.formatted) at \(place)"
+            } else {
+                text = "Approve the request from \(business)"
+            }
         case (.authenticate(let p), .approve):
-            text = "Approve sign-in to \(p.service) with \(business)"
+            text = "Approve sign-in to \(UntrustedText.name(p.service, max: 30, attribution: nil).text) with \(business)"
         case (_, .deny), (_, .decline):
             text = "Deny the request from \(business)"
         case (_, .report):
@@ -73,10 +84,10 @@ public enum ApprovalPolicy {
             text = "Confirm with \(business)"
         }
         if let onBehalfOf {
-            let suffix = " on behalf of \(onBehalfOf)"
-            return String(text.prefix(max(0, 90 - suffix.count))) + String(suffix.prefix(90))
+            let suffix = " on behalf of \(UntrustedText.line(onBehalfOf, max: 30))"
+            return UntrustedText.truncate(text, max: max(0, promptLimit - suffix.count)) + suffix
         }
-        return String(text.prefix(90))
+        return UntrustedText.truncate(text, max: promptLimit)
     }
 }
 

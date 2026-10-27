@@ -117,9 +117,9 @@ struct HomeView: View {
                     Button {
                         path.append(relationship)
                     } label: {
-                        ViadereRow(relationship.business.displayName,
+                        ViadereRow(relationship.business.safeName,
                                    subtitle: relationship.business.handle?.display ?? relationship.business.code.display) {
-                            ViadereAvatar(name: relationship.business.displayName, size: 36, isVerified: relationship.business.isVerified)
+                            ViadereAvatar(name: relationship.business.safeName, size: 36, isVerified: relationship.business.isVerified)
                         }
                     }
                     .buttonStyle(.plain)
@@ -141,9 +141,9 @@ struct PendingActionCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: ViadereSpace.s) {
                 HStack(spacing: ViadereSpace.s) {
-                    ViadereAvatar(name: envelope.business.displayName, size: 36, isVerified: envelope.business.isVerified)
+                    ViadereAvatar(name: envelope.business.safeName, size: 36, isVerified: envelope.business.isVerified)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(envelope.business.displayName)
+                        Text(envelope.business.safeName)
                             .font(ViadereType.subhead.weight(.medium))
                             .foregroundStyle(ViadereColor.textPrimary)
                         Text(InteractionPresentation.kindLabel(envelope.interaction))
@@ -188,13 +188,13 @@ struct StatusRow: View {
     let envelope: InteractionEnvelope
 
     private var subtitle: String {
-        if case .status(let payload) = envelope.interaction.payload, let body = payload.body { return body }
-        return envelope.business.displayName
+        if case .status(let payload) = envelope.interaction.payload, let body = UntrustedText.optionalLine(payload.body, max: 120) { return body }
+        return envelope.business.safeName
     }
 
     var body: some View {
         ViadereRow(InteractionPresentation.headline(envelope.interaction), subtitle: subtitle,
-                   leading: { ViadereAvatar(name: envelope.business.displayName, size: 36) },
+                   leading: { ViadereAvatar(name: envelope.business.safeName, size: 36) },
                    trailing: { EmptyView() })
     }
 }
