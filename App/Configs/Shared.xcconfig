@@ -10,5 +10,10 @@ VIADERE_API_BASE_URL = https:/$()/api.viadere.com
 // Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
 DEVELOPMENT_TEAM =
 
+// Approve v2: the public key(s) of Viadere's key-directory transparency log, base64url X9.63 points, comma separated (the first is the
+// signing key; list the next one during a rotation). Empty means the build trusts no log, so Approve v2 stays closed (fails closed).
+// Print it from the server with `ViadereServer key-directory-log-key`; it is a public key, never the private scalar.
+VIADERE_KEY_DIRECTORY_LOG_KEYS =
+
 // Optional per-developer overrides (team id, a staging server).
 #include? "Local.xcconfig"

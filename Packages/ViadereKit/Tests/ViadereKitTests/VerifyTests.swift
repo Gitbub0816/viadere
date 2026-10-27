@@ -201,7 +201,7 @@ struct VerificationFlowTests {
                    VerificationCopy.documentDetail, VerificationCopy.alternativePath].joined(separator: " ").lowercased()
         for banned in ["guarantee of identity", "100%", "unhackable", "bank-grade", "certified", "nist", "ial2", "aal2", "fully secure", "military"] {
             // The notes may *deny* a guarantee, but never claim one.
-            #expect(!all.replacingOccurrences(of: "not a universal guarantee", with: "").replacingOccurrences(of: "or guarantee of legitimacy", with: "").contains(banned) || banned == "guarantee of identity", banned)
+            #expect(!all.replacingOccurrences(of: "not a universal guarantee", with: "").replacingOccurrences(of: "or guarantee of legitimacy", with: "").contains(banned) || banned == "guarantee of identity", Comment(rawValue: banned))
         }
         #expect(VerificationCopy.localAuthNote.contains("does not prove your legal identity"))
         #expect(VerificationCopy.verifiedBusinessNote.contains("endorsement"))

@@ -79,7 +79,6 @@ enum VerifyHTTPRoutes {
         // MARK: Provider
         routes.api(APIRoutes.providerDiditWebhook) { req in
             let ctx = req.ctx
-            guard ctx.config.verify.enabled || ctx.config.verify.diditConfigured else { throw APIError.notFound }
             let body = try await req.collectedBody(limit: 256 * 1024)
             let verifier = DiditWebhookVerifier(secrets: ctx.config.verify.diditWebhookSecrets, tolerance: ctx.config.verify.diditWebhookTolerance)
             let headers = DiditWebhookVerifier.Headers(

@@ -23,6 +23,7 @@ struct BusinessDetailView: View {
                 ViadereBackButton { dismiss() }
                 hero
                 actions
+                ApproveBusinessFreezeRow(controller: AppEnvironment.shared.approve, relationshipId: relationship.id, businessName: vm.business.safeName)
                 BusinessRewardsEntry(business: vm.business, model: model)
                 permissions
                 history

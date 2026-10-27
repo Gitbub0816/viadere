@@ -22,6 +22,8 @@ public struct ViadereServices: Sendable {
     /// App Attest for enrollment (`DeviceCheckAppAttest` on device; unsupported on the Simulator and in extensions).
     public var appAttest: any AppAttestProviding
     public var clock: @Sendable () -> Date
+    /// The Approve v2 API (`nil` in extensions, the App Clip and tests that do not use it).
+    public var approveAPI: (any ApproveAPI)?
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -92,10 +94,12 @@ public struct ViadereServices: Sendable {
         let sessions = SessionManager(store: tokens, refresher: APITokenRefresher(executor: executor), lock: lock)
         let revocation = DeviceRevocationNotifier()
         let client = APIClient(executor: executor, sessions: sessions, onDeviceRejected: { revocation.notify() })
-        return ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
+        var services = ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
                                records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
                                secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock,
                                residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
+        if !isAppClip { services.approveAPI = LiveApproveAPI(client: client) }
+        return services
     }
 
     /// `DCAppAttestService` where DeviceCheck exists, "unsupported" elsewhere.

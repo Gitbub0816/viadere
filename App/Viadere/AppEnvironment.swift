@@ -25,7 +25,11 @@ final class AppEnvironment {
     let verification = VerificationCenter()
     let verifyAPI: any VerifyAPI = LiveVerifyAPI.make(services: AppEnvironment.services)
 
+    /// Approve v2 (WP1): pairwise approval keys, the verified key directory, freeze. Closed (and says so) when the build pins no log key.
+    let approve: ApproveController
+
     private init() {
+        approve = ApproveController(environment: ApproveEnvironment.live(services: Self.services))
         model = AppModel(services: Self.services, walletLibrary: PassKitWalletLibrary())
         liveActivities = LiveActivityManager(services: Self.services)
         watchBridge = WatchBridge(services: Self.services)

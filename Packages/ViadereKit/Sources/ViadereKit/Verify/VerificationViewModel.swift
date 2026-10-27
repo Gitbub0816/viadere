@@ -293,8 +293,9 @@ public final class VerificationHistoryViewModel {
             if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = updated }
             errorMessage = nil
         } catch let error as APIError {
-            errorMessage = error.code == .conflict ? "This was already shared, so it can't be withdrawn." : error.userMessage
+            let message = error.code == .conflict ? "This was already shared, so it can't be withdrawn." : error.userMessage
             await load()
+            errorMessage = message
         } catch {
             errorMessage = "Couldn't withdraw this."
         }

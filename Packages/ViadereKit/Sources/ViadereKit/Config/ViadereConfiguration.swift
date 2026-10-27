@@ -25,6 +25,10 @@ public struct ViadereConfiguration: Sendable {
     public var apnsEnvironment: APNsTokenRegistration.Environment
     /// True on release builds: unconfigured certificate pins deny connections.
     public var failClosedPinning: Bool
+    /// Base64url X9.63 public keys of the Viadere key-directory transparency log (more than one during a log-key rotation). **Pinned in the
+    /// build**: a key taken from the network would let a relay vouch for itself. Empty = Approve v2 and E2EE fail closed.
+    public var keyDirectoryLogKeys: [String] = []
+    public var keyDirectoryLogId: String = TransparencyLog.defaultLogId
 
     public static let productionHost = "api.viadere.com"
 
@@ -87,6 +91,12 @@ public struct ViadereConfiguration: Sendable {
         if let group = info["ViadereApprovalKeychainAccessGroup"] as? String, !group.isEmpty, !group.contains("$(") {
             config.approvalKeychainAccessGroup = group
         }
+        // The transparency-log key(s), pinned at build time (comma separated). Placeholders and malformed values are dropped, so a build
+        // that forgot to set them has none and Approve v2 stays closed.
+        if let raw = info["ViadereKeyDirectoryLogKeys"] as? String {
+            config.keyDirectoryLogKeys = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { (try? DevicePublicKey(base64URL: $0)) != nil }
+        }
+        if let id = info["ViadereKeyDirectoryLogId"] as? String, !id.isEmpty, !id.contains("$(") { config.keyDirectoryLogId = id }
         #if DEBUG
         config.apnsEnvironment = .sandbox
         #endif
@@ -117,4 +127,9 @@ public struct ViadereConfiguration: Sendable {
     }
 
     private static func literal(_ string: String) -> URL { URL(string: string) ?? URL(fileURLWithPath: "/") }
+}
+
+extension ViadereConfiguration {
+    /// The pinned log keys, parsed.
+    public var parsedKeyDirectoryLogKeys: [DevicePublicKey] { keyDirectoryLogKeys.compactMap { try? DevicePublicKey(base64URL: $0) } }
 }

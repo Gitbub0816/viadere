@@ -26,6 +26,8 @@ public final class AppModel {
     public var presentedApproval: ApprovalViewModel?
     public var pendingConnect: PendingConnect?
     public var pendingAccountLinkToken: String?
+    /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
+    public var pendingApproveEnrollment: PendingApproveEnrollment?
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
     public var toast: String?
@@ -143,6 +145,7 @@ public final class AppModel {
         presentedApproval = nil
         pendingConnect = nil
         pendingAccountLinkToken = nil
+        pendingApproveEnrollment = nil
         conversationToOpen = nil
         businessToOpen = nil
         toast = nil
@@ -208,6 +211,9 @@ public final class AppModel {
             conversationToOpen = id
             selectedTab = .messages
         case .settings:
+            selectedTab = .settings
+        case .approveEnrollment(let code, let rootKid):
+            pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid)
             selectedTab = .settings
         }
     }
@@ -297,6 +303,7 @@ public final class AppModel {
         presentedApproval = nil
         pendingConnect = nil
         pendingAccountLinkToken = nil
+        pendingApproveEnrollment = nil
         conversationToOpen = nil
         businessToOpen = nil
         lockedQueue.removeAll()
@@ -305,5 +312,15 @@ public final class AppModel {
         selectedTab = .home
         isLocked = false
         phase = .onboarding(.welcome)
+    }
+}
+
+/// An enrollment code (and the business root key id it carried) opened from a link or QR.
+public struct PendingApproveEnrollment: Sendable, Equatable {
+    public var code: String
+    public var rootKid: String?
+    public init(code: String, rootKid: String?) {
+        self.code = code
+        self.rootKid = rootKid
     }
 }

@@ -15,6 +15,7 @@ do {
     app.asyncCommands.use(SeedCommand(), as: "seed")
     app.asyncCommands.use(CreateOperatorCommand(), as: "create-operator")
     app.asyncCommands.use(AuditHeadCommand(), as: "audit-head")
+    app.asyncCommands.use(KeyDirectoryLogKeyCommand(), as: "key-directory-log-key")
     app.asyncCommands.use(AuditVerifyCommand(), as: "audit-verify")
     app.asyncCommands.use(ExportDisputeCommand(), as: "export-dispute")
     app.asyncCommands.use(ReencryptFieldsCommand(), as: "reencrypt-fields")

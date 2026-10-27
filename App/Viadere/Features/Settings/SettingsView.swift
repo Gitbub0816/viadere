@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -54,10 +54,12 @@ struct SettingsView: View {
                 case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
                 case .recovery: RecoveryCodesSettingsView(vm: vm)
                 case .authenticator: AuthenticatorView(backTitle: "Settings")
+                case .approvals: ApproveSettingsView(controller: AppEnvironment.shared.approve, model: model)
                 case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
                 }
             }
             .task {
+                if model.pendingApproveEnrollment != nil { path = [.approvals] }
                 openDevicesIfRequested()
                 await vm.load()
                 device = try? await model.services.records.load()
@@ -66,6 +68,9 @@ struct SettingsView: View {
             }
         }
         .onChange(of: model.reviewDevicesRequested) { _, _ in openDevicesIfRequested() }
+        .onChange(of: model.pendingApproveEnrollment) { _, pending in
+            if pending != nil, path.last != .approvals { path = [.approvals] }
+        }
         .sheet(isPresented: Binding(get: { model.pendingAccountLinkToken != nil }, set: { if !$0 { model.pendingAccountLinkToken = nil } })) {
             if let token = model.pendingAccountLinkToken {
                 AccountLinkSheet(vm: vm, token: token) { model.pendingAccountLinkToken = nil }
@@ -141,6 +146,8 @@ struct SettingsView: View {
                     ViadereHairline(inset: 50)
                 }
                 navRow("Authenticator", subtitle: "Passkeys and one-time codes", symbol: "key.viewfinder", route: .authenticator)
+                ViadereHairline(inset: 50)
+                navRow("Approvals", subtitle: AppEnvironment.shared.approve.accountFrozen ? "Frozen" : "Payments and sign-ins you confirm", symbol: "checkmark.shield", route: .approvals)
                 ViadereHairline(inset: 50)
                 navRow("Trusted devices", subtitle: "\(vm.devices.filter { !$0.isRevoked }.count) active", symbol: "iphone.gen3", route: .devices)
                 ViadereHairline(inset: 50)

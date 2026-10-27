@@ -30,6 +30,21 @@ struct RootView: View {
                 .presentationCornerRadius(ViadereRadius.sheet)
                 .presentationBackground(ViadereColor.background)
         }
+        .sheet(item: Binding(get: { AppEnvironment.shared.approve.presented }, set: { if $0 == nil { AppEnvironment.shared.approve.closePresented() } })) { prompt in
+            ApproveRequestSheet(prompt: prompt, controller: AppEnvironment.shared.approve, capture: capture)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(ViadereRadius.sheet)
+                .presentationBackground(ViadereColor.background)
+        }
+        .task(id: model.phase) {
+            // Approve v2 requests are verified on this phone and shown here; poll gently while the app is open (pushes wake it too).
+            guard model.phase == .ready else { return }
+            while !Task.isCancelled {
+                if !model.isLocked { await AppEnvironment.shared.approve.refresh() }
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
         .overlay(alignment: .bottom) { ToastHost(model: model) }
     }
 

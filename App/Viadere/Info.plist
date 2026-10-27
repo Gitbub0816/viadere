@@ -86,6 +86,8 @@
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
 	<key>ViadereVaultKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.vault</string>
+	<key>ViadereKeyDirectoryLogKeys</key>
+	<string>$(VIADERE_KEY_DIRECTORY_LOG_KEYS)</string>
 	<key>ViadereApprovalKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.app.approval</string>
 	<key>NSAppTransportSecurity</key>

@@ -16,6 +16,8 @@ public enum DeepLink: Sendable, Equatable {
     /// `viadere://m/{sessionId}`
     case conversation(SessionID)
     case settings
+    /// `https://viadere.com/a/{CODE}?rk={root key id}` (QR or button the business shows in its own session): start an Approve enrollment.
+    case approveEnrollment(code: String, rootKid: String?)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -47,6 +49,11 @@ public enum DeepLinkRouter {
         if components.path.hasPrefix(APIRoutes.Web.connectPrefix) {
             guard let link = try? ConnectLink.parse(url.absoluteString) else { return nil }
             return .connect(code: link.code, link: link)
+        }
+        if components.path.hasPrefix("/a/") {
+            guard components.user == nil, components.password == nil, components.fragment == nil, components.port == nil || components.port == 443,
+                  let parsed = ApprovalEnrollmentCode.parse(link: url) else { return nil }
+            return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid)
         }
         guard components.user == nil, components.password == nil, components.fragment == nil,
               components.query == nil, components.port == nil || components.port == 443 else { return nil }
