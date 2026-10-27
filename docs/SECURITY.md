@@ -22,7 +22,7 @@ Security is the top priority. This document has two parts:
 | | T: stale or duplicate provider webhooks | Provider signatures are verified. The server dedups by provider message id, and the engine is also idempotent (`recentProviderMessageIds`). Menus are versioned, expire, and are checked against `receivedAt` versus `issuedAt`. The context is persisted with CAS on `revision`. |
 | | I: cross-tenant leakage | Each business has its own `SessionID`. `deliverBusinessMessage` renders only the active session (business id **and** session id must match); everything else is held. A switch never forwards to the previous business. |
 | | D: spam or floods | Per-phone and per-business rate limits (server). Dedup memory is capped. |
-| | Carrier compliance | STOP-family keywords and HELP/INFO work in every state and cannot be escaped. START, UNSTOP and YES opt back in only from `OPTED_OUT`. Opted-out numbers receive nothing. |
+| | Carrier compliance | STOP-family keywords and HELP/INFO work in every state and cannot be escaped. START, UNSTOP and YES opt back in only from `OPTED_OUT`. Opted-out numbers receive nothing except HELP replies and START handling. |
 | **Account-link and handoff tokens** | Replay, guessing, open redirect | 256-bit tokens. Only `SHA-256` is stored. Tokens are single-use, have a short TTL (15 min link, 10 min handoff), and are bound to phone + conversation. Fixed paths `/l/{token}` and `/h/{token}`, with no redirect parameters. |
 | **Business API** | S/E: tenant crossover | API key → businessId. Every query is tenant-scoped. Idempotency keys are required on POSTs. |
 | **Webhooks** | S/T: forged or modified events | `Viadere-Signature: t=…,v1=HMAC`, 300 s tolerance, constant-time compare, multi-secret rotation. |
@@ -153,6 +153,6 @@ Matching is on the whole message after trimming, removing trailing `.`/`!`, and 
 | Keywords | Behavior |
 |---|---|
 | `STOP STOPALL UNSUBSCRIBE CANCEL END QUIT OPTOUT REVOKE` | Opt out in every state. Cannot be escaped (`\STOP` still opts out). |
-| `HELP INFO` | Help text in every non-opted-out state. Cannot be escaped. |
+| `HELP INFO` | Help text in every state, including OPTED_OUT (no re-subscribe). Cannot be escaped. |
 | `START UNSTOP YES` | Opt back in, only from `OPTED_OUT`. Otherwise ordinary content. |
 | `MENU`, `BACK` | Gateway controls. Send `\MENU` or `\BACK` to pass the word to the connected business. |

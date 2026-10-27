@@ -105,7 +105,6 @@ Key rules:
 ## Open decisions (tracked from the spec)
 
 - Messaging provider and number type.
-- Whether opted-out users should still receive HELP responses. The engine currently follows the "nothing except START" rule.
 - Retention windows.
 - Simultaneous sessions. The engine allows one active session per thread.
 - RCS and Apple Messages for Business (AMB) enablement.
