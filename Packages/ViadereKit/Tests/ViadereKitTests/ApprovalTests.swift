@@ -69,8 +69,8 @@ struct ApprovalTests {
         let fresh = PreviewData.authorize()
         await api.add(fresh)
         _ = try await services.approvals.submit(fresh, decision: .deny)
-        // Same stale envelope again: the server refuses the second decision (single-use challenge).
-        await #expect(throws: ApprovalError.notActionable(.approved)) { _ = try await services.approvals.submit(fresh, decision: .approve) }
+        // Same stale envelope again: the request is already decided, and the sheet is told what happened to it.
+        await #expect(throws: ApprovalError.notActionable(.denied)) { _ = try await services.approvals.submit(fresh, decision: .approve) }
         let handled = try await api.interaction(fresh.id)
         #expect(handled.status == .denied)
         await #expect(throws: ApprovalError.notActionable(.denied)) { _ = try await services.approvals.submit(handled, decision: .approve) }

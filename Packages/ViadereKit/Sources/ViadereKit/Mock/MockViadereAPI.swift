@@ -33,6 +33,8 @@ public actor MockViadereAPI: ViadereAPI {
     private var consumedChallenges: Set<String> = []
     public private(set) var registeredAPNsTokens: [APNsTokenRegistration] = []
     public private(set) var liveActivityTokens: [LiveActivityTokenRegistration] = []
+    /// Every `decide` call that reached the server, accepted or not.
+    public private(set) var decideAttempts = 0
     public private(set) var decisionLog: [(InteractionID, Decision, DecisionAssurance)] = []
     public private(set) var accountDeleted = false
     /// P3 state: loyalty, rewards, Wallet, household, acknowledgments (see `MockP3.swift`).
@@ -225,7 +227,14 @@ public actor MockViadereAPI: ViadereAPI {
         return flags & 0x01 != 0 && flags & 0x04 != 0
     }
 
-    public func devices() async throws -> [Device] { deviceList }
+    /// Test hook: `GET /v1/devices` fails (offline), so a client-side pre-check can't run and the server's own answer is what counts.
+    public func setDeviceListUnavailable(_ value: Bool) { deviceListUnavailable = value }
+    private var deviceListUnavailable = false
+
+    public func devices() async throws -> [Device] {
+        if deviceListUnavailable { throw APIError.transport("offline") }
+        return deviceList
+    }
 
     public func revokeDevice(_ id: DeviceID) async throws {
         guard let index = deviceList.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
@@ -444,6 +453,7 @@ public actor MockViadereAPI: ViadereAPI {
 
     public func decide(_ id: InteractionID, _ request: DecideInteractionRequest) async throws -> InteractionOutcome {
         await pause()
+        decideAttempts += 1
         guard var envelope = envelopes[id] else { throw Self.notFound() }
         guard envelope.status == .pending else { throw APIError.server(status: 409, code: .conflict, message: "Already decided") }
         let verifier = DecisionVerifier()
