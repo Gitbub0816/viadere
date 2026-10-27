@@ -213,7 +213,7 @@ struct ConsumerTokenService {
             if let bound = family?.deviceId, !deviceIds.contains(bound) { deviceIds.append(bound) }
         case .enrolledAfter(let date):
             deviceIds = try await DeviceRecord.query(on: db).filter(\.$familyId == familyId).filter(\.$revokedAt == nil)
-                .filter(\.$createdAt > date).all().compactMap(\.id)
+                .filter(\.$createdAt >= date).all().compactMap(\.id)
         }
         try await DeviceLifecycle(db: db, ctx: ctx).revoke(deviceIds: deviceIds, now: now, cascadeToFamilies: false)
     }

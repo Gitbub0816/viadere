@@ -36,10 +36,14 @@ struct InteractionTests {
         #expect(again.kind == decoded.kind && again.payload == decoded.payload)
     }
 
-    @Test func unsupportedSchemaVersionFails() throws {
+    @Test func newerSchemaVersionDecodesLenientlyButFailsValidation() throws {
         var object = try #require(try ViadereJSON.decode(JSONValue.self, from: ViadereJSON.encode(
             Fixtures.interaction(.message(MessagePayload(text: "x"))))).objectValue)
         object["schemaVersion"] = .integer(99)
+        let decoded = try ViadereJSON.decode(Interaction.self, from: ViadereJSON.encode(JSONValue.object(object)))
+        #expect(decoded.schemaVersion == 99)
+        #expect(InteractionValidation.issues(in: decoded, now: Fixtures.now).contains { $0.code == .unsupportedVersion })
+        object["schemaVersion"] = .integer(0)
         #expect(throws: (any Error).self) { try ViadereJSON.decode(Interaction.self, from: ViadereJSON.encode(JSONValue.object(object))) }
     }
 

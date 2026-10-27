@@ -133,9 +133,10 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.com`, UV required); returns session + refresh token |
 | `POST /v1/auth/login/begin` · `/finish` | none | passkey login (discoverable credentials) |
 | `POST /v1/auth/refresh` | none | refresh-token rotation; reuse revokes the whole family |
-| `POST /v1/auth/logout` | bearer | revokes the token family (and the devices enrolled through it) |
+| `POST /v1/auth/logout` | device+bearer | ends this session only (never revokes a device) |
+| `GET /v1/security-notices`, `POST /v1/security-notices/{id}/dismiss` | device+bearer | in-app notices for a new device, App Clip, phone link or a device set up again (dismiss needs a trusted device) |
 | `POST /v1/devices/enroll/begin` · `POST /v1/devices` | bearer | proof of possession per key (`VIADERE-ENROLL-V1`), single-use challenge, **plus a fresh user-verified passkey assertion over that challenge** (begin returns the assertion options; a session minted by a passkey ceremony < 5 min ago may enroll once without it). `clientKind: appClip` / `clipDevice: true` = request key only, 7 days, never decides. Keys are stored `attested = false` (App Attest hook is a stub) |
-| `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, user-verified key) |
+| `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, **biometric** key). `POST /v1/devices` accepts `replacesDeviceId` ("Set up again") |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | device+bearer | list / revoke |
 | `POST /v1/phone-links/start` · `/verify` | device+bearer | SMS OTP (HMAC-hashed, 5 attempts, rate-limited) |
 | `GET /v1/sms/link-tokens/{token}/preview` | device+bearer | masked phone + expiry, rate-limited, does not consume |
@@ -310,6 +311,8 @@ and analytics scan per-tenant rows (fine for pilot volumes; add rollups before l
 
 Notes for operators:
 * **Upgrading.** Set `ENVIRONMENT` and `AUDIT_CHAIN_KEY`; set `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` to the highest existing `audit_events.seq`; run `reencrypt-fields` once. Existing sessions keep working (they bind to their device the first time it signs).
+* **Round 3.** New migration `CreateSecurityRound3Schema` (sealed refresh-token successor, `security_notices`). Run `reencrypt-fields` again to strip `signedDecision` from queued `interaction.decided` deliveries. Trusted-device rules (household, phone link by code, revoking others, deletion) and the cool-down scope are in `docs/SECURITY.md` §2.5. Dashboard invitations never claim an existing account.
+* **Rate limiting is per instance, per namespace.** Each limiter name has its own capped table with LRU eviction (`evictions` metric and a warning log).
 * **Rate limiting is per instance.** With more than one instance, supply a shared `RateLimitStore` (`Overrides.rateLimitStore`).
 * **Webhook SSRF.** Deliveries resolve the host once, vet every address and connect to the vetted address (DNS pinning); redirects are never followed.
 * **Test keys** only address sandbox relationships (`POST /v1/business/sandbox/relationships`).

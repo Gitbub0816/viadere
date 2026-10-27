@@ -322,7 +322,7 @@ struct ContextDigestTests {
     }
 
     @Test("the digest includes schemaVersion, so a client that predates a payload field refuses instead of mismatching")
-    func digestCoversSchemaVersion() {
+    func digestCoversSchemaVersion() throws {
         var i = Fixtures.interaction(.confirm(ConfirmPayload(title: "T", reference: "R-1")))
         let v1 = i.displayContextDigest()
         i.schemaVersion = 2

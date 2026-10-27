@@ -293,10 +293,11 @@ struct AuthService {
                            "method": method, "client_kind": request.effectiveClientKind.rawValue, "cool_down": coolDown ? "true" : "false",
                            "attested": attestation.attested ? "true" : "false", "attestation": attestation.reason])
         }
-        // Every enrollment is announced (an App Clip too): in-app notice plus push to the other devices.
-        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(
+        // Every enrollment into an account that already had a device is announced (an App Clip too): in-app notice plus push to the other
+        // devices. The first device of a new account has nobody to tell.
+        if !priorDevices.isEmpty || request.effectiveClientKind == .appClip { await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(
             of: principal.consumerId.uuid, except: device.id!, notice: request.effectiveClientKind == .appClip ? .appClip
-                : (replaced != nil ? .deviceReplaced : .newDevice), subjectId: DeviceID(device.id!).description)
+                : (replaced != nil ? .deviceReplaced : .newDevice), subjectId: DeviceID(device.id!).description) }
         return deviceDTO(device, keys: keyRecords)
     }
 

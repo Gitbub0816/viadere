@@ -82,8 +82,11 @@ final class AuthTests: XCTestCase {
             let expired = try await h.request(.POST, "/v1/devices/enroll/begin", headers: ["Authorization": "Bearer \(consumer.token)"])
             XCTAssertEqual(expired.status, .unauthorized)
 
-            let fresh = try await h.registerConsumer()
-            let logout = try await h.request(.POST, "/v1/auth/logout", headers: ["Authorization": "Bearer \(fresh.token)"])
+            let fresh = try await h.readyConsumer()
+            // Logout is device-signed: a bearer token alone cannot end the session.
+            let bearerOnly = try await h.request(.POST, "/v1/auth/logout", headers: ["Authorization": "Bearer \(fresh.token)"])
+            XCTAssertEqual(bearerOnly.status, .unauthorized)
+            let logout = try await h.signed(fresh, .POST, "/v1/auth/logout")
             XCTAssertEqual(logout.status, .ok)
             let after = try await h.request(.POST, "/v1/devices/enroll/begin", headers: ["Authorization": "Bearer \(fresh.token)"])
             XCTAssertEqual(after.status, .unauthorized)
@@ -107,7 +110,8 @@ final class AuthTests: XCTestCase {
             XCTAssertEqual(oldAccess.status, .unauthorized)
             let newAccess = try await h.request(.POST, "/v1/devices/enroll/begin", headers: ["Authorization": "Bearer \(second.accessToken)"])
             XCTAssertEqual(newAccess.status, .ok)
-            // Presenting the already-used refresh token is theft: the whole family is revoked, including the newest pair.
+            // Presenting the already-used refresh token is theft (after the 60 s grace window): the whole family is revoked, including the newest pair.
+            h.clock.advance(by: 61)
             let reuse = try await h.post("/v1/auth/refresh", AuthRefreshRequest(refreshToken: first))
             XCTAssertEqual(reuse.status, .unauthorized)
             let afterReuse = try await h.request(.POST, "/v1/devices/enroll/begin", headers: ["Authorization": "Bearer \(second.accessToken)"])

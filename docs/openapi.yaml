@@ -19,7 +19,7 @@ info:
     A `vdk_test_…` key can **only address sandbox relationships**, never a real customer: create one with
     `POST /v1/business/sandbox/relationships`. Sandbox consumers have no device and no phone, so test traffic is never pushed,
     texted, decided by a real device, counted against your quota, or billed. A live key cannot address a sandbox relationship
-    (`404`), and a test key used with a real relationship is `403`.
+    (`404`), and a test key used with a real relationship is `403`. The same applies to rewards, points, redemption codes, reward revocation, interaction outcome and cancel (a test key sees only test objects), and a test key cannot change the loyalty program or issue a reward to every member. `interaction.decided` webhooks never carry the raw signed decision (`deviceRef` and `verification` instead).
 
     ## Idempotency
     Every `POST` that creates something takes an `Idempotency-Key` header which **must equal** the body's `idempotencyKey`.

@@ -343,6 +343,11 @@ final class SMSGatewayTests: XCTestCase {
             XCTAssertTrue(link.maskedPhone.hasSuffix("0123"))
             let replay = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
             XCTAssertEqual(replay.status, .gone)
+            // The new link cools down (the gateway treats it as no link); the account's trusted device confirms it with a biometric proof.
+            XCTAssertNotNil(link.usableFrom)
+            let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: link.id.description, deviceId: consumer.device!.id, assurance: .biometric,
+                                                         key: consumer.device!.biometricKey, now: h.clock.now())
+            try await eq(try await h.signedPost(consumer, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: proof)).status, .ok)
             let mallory = try await h.readyConsumer(name: "Mallory")
             let stolen = try await h.signedPost(mallory, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
             XCTAssertEqual(stolen.status, .gone)

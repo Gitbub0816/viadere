@@ -143,9 +143,10 @@ final class HardeningTests: XCTestCase {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()
             let stolenRefresh = try XCTUnwrap(consumer.session.refreshToken)
-            // The legitimate client rotates; the thief later presents the old refresh token.
+            // The legitimate client rotates; the thief later (after the 60 s grace window) presents the old refresh token.
             let rotated = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: stolenRefresh))
             XCTAssertEqual(rotated.status, .ok, rotated.text)
+            h.clock.advance(by: 61)
             let reuse = try await h.post(APIRoutes.authRefresh.template, AuthRefreshRequest(refreshToken: stolenRefresh))
             XCTAssertEqual(reuse.status, .unauthorized)
             let device = try await DeviceRecord.find(consumer.device!.id.uuid, on: h.db)
@@ -514,7 +515,7 @@ final class HardeningTests: XCTestCase {
             let ok = try await h.signedPost(victim, APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0199", confirmMaskedPhone: shown.maskedPhone))
             XCTAssertEqual(ok.status, .ok, ok.text)
             let link = try ok.json(PhoneLink.self)
-            XCTAssertEqual(link.usableFrom, h.clock.now().addingTimeInterval(24 * 3600))
+            XCTAssertEqual(link.usableFrom, h.clock.now().addingTimeInterval(72 * 3600), "no other trusted device exists to confirm it: 72 h")
             XCTAssertEqual(h.push.sent.count, pushesBefore, "the redeeming device is not notified of its own action")
             let second = try await h.enrollDevice(victim)
             XCTAssertNotNil(second.device)
@@ -553,7 +554,7 @@ final class HardeningTests: XCTestCase {
             let link = try await PhoneLinkRecord.query(on: h.db).filter(\.$state == "verified").first()!
             XCTAssertEqual(link.source, "sms_link")
             XCTAssertNotNil(link.usableFrom)
-            h.clock.advance(by: 24 * 3600 + 1)
+            h.clock.advance(by: 72 * 3600 + 1)
             XCTAssertLessThan(link.usableFrom!, h.clock.now())
         }
     }
@@ -580,7 +581,7 @@ final class HardeningTests: XCTestCase {
 
     func testAnotherBusinesssTextNeverAppearsInAThreadConnectedElsewhere() async throws {
         try await withHarness { h in
-            let airline = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
+            _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let hotel = try await h.makeBusiness(name: "Harbor Hotel", handle: "harborhotel")
             let consumer = try await h.readyConsumer()
             try await h.linkVerifiedPhone(consumer)
