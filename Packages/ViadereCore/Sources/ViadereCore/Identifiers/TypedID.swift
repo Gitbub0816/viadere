@@ -65,6 +65,7 @@ public enum IDTag {
     public enum PhoneLink {}
     public enum APIKey {}
     public enum Ceremony {}
+    public enum Redemption {}
 }
 
 public typealias BusinessID = TypedID<IDTag.Business>
@@ -87,3 +88,4 @@ public typealias PhoneLinkID = TypedID<IDTag.PhoneLink>
 public typealias APIKeyID = TypedID<IDTag.APIKey>
 /// Identifies a WebAuthn/passkey ceremony (begin → finish).
 public typealias CeremonyID = TypedID<IDTag.Ceremony>
+public typealias RedemptionID = TypedID<IDTag.Redemption>
