@@ -28,6 +28,29 @@ public struct LiveViadereAPI: ViadereAPI {
     public func enrollDevice(_ request: DeviceEnrollRequest) async throws -> Device {
         try await client.call(APIRoutes.deviceEnroll, body: request)
     }
+    public func cancelDeviceReplacement(_ id: DeviceID) async throws {
+        _ = try await client.call(APIRoutes.deviceReplacementCancel, params: ["deviceId": id.description])
+    }
+
+    // MARK: Recovery
+    public func beginRecovery(_ request: RecoveryBeginRequest) async throws -> PasskeyRegistrationOptions {
+        try await client.call(APIRoutes.recoveryBegin, body: request)
+    }
+    public func finishRecovery(_ request: RecoveryFinishRequest) async throws -> RecoveryStatus {
+        try await client.call(APIRoutes.recoveryFinish, body: request)
+    }
+    public func completeRecovery(_ request: RecoveryCompleteRequest) async throws -> RecoveryStatus {
+        try await client.call(APIRoutes.recoveryComplete, body: request)
+    }
+    public func cancelRecovery(_ id: RecoveryID) async throws -> RecoveryStatus {
+        try await client.call(APIRoutes.recoveryCancel, params: ["recoveryId": id.description])
+    }
+    public func recoveryInfo() async throws -> RecoveryInfo { try await client.call(APIRoutes.recoveryInfo) }
+    public func beginRecoveryCodes() async throws -> PasskeyAssertionOptions { try await client.call(APIRoutes.recoveryCodesBegin) }
+    public func regenerateRecoveryCodes(_ request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet {
+        try await client.call(APIRoutes.recoveryCodesRegenerate, body: request)
+    }
+
     public func devices() async throws -> [Device] { try await client.call(APIRoutes.devicesList) }
     public func revokeDevice(_ id: DeviceID) async throws {
         _ = try await client.call(APIRoutes.deviceRevoke, params: ["deviceId": id.description])

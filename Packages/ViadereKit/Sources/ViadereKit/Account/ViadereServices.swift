@@ -19,11 +19,14 @@ public struct ViadereServices: Sendable {
     public let revocation: DeviceRevocationNotifier
     /// True in the App Clip: it enrolls a request-key-only device and never holds approval keys.
     public var isAppClip: Bool
+    /// App Attest for enrollment (`DeviceCheckAppAttest` on device; unsupported on the Simulator and in extensions).
+    public var appAttest: any AppAttestProviding
     public var clock: @Sendable () -> Date
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
-                       preferences: preferences, secrets: secrets, residue: residue, isAppClip: isAppClip, clock: clock)
+                       preferences: preferences, secrets: secrets, residue: residue, isAppClip: isAppClip, appAttest: appAttest,
+                       clock: clock)
     }
 
     public var approvals: ApprovalService { ApprovalService(api: api, keys: keys, records: records, clock: clock) }
@@ -41,6 +44,7 @@ public struct ViadereServices: Sendable {
                 passkeys: any PasskeyService, notificationPermission: any NotificationPermissionService,
                 appLock: any AppLockAuthenticator, residue: any LocalResidueCleaner = NoLocalResidueCleaner(),
                 revocation: DeviceRevocationNotifier = DeviceRevocationNotifier(), isAppClip: Bool = false,
+                appAttest: any AppAttestProviding = UnavailableAppAttest(),
                 clock: @escaping @Sendable () -> Date = { Date() }) {
         self.configuration = configuration
         self.api = api
@@ -55,6 +59,7 @@ public struct ViadereServices: Sendable {
         self.residue = residue
         self.revocation = revocation
         self.isAppClip = isAppClip
+        self.appAttest = appAttest
         self.clock = clock
     }
 
@@ -68,7 +73,8 @@ public struct ViadereServices: Sendable {
     public static func live(configuration: ViadereConfiguration, passkeys: any PasskeyService = UnavailablePasskeyService(),
                             notificationPermission: any NotificationPermissionService = MockNotificationPermissionService(result: false),
                             appLock: any AppLockAuthenticator = MockAppLockAuthenticator(succeeds: false),
-                            residue: any LocalResidueCleaner = NoLocalResidueCleaner(), isAppClip: Bool = false) -> ViadereServices {
+                            residue: any LocalResidueCleaner = NoLocalResidueCleaner(), isAppClip: Bool = false,
+                            appAttest: any AppAttestProviding = Self.systemAppAttest()) -> ViadereServices {
         let secrets = KeychainSecretStore(service: configuration.keychainService, accessGroup: configuration.keychainAccessGroup)
         let keys = makeKeyStore(configuration: configuration, secrets: secrets)
         let records = SecretDeviceRecordStore(secrets: secrets)
@@ -89,7 +95,16 @@ public struct ViadereServices: Sendable {
         return ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
                                records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
                                secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock,
-                               residue: residue, revocation: revocation, isAppClip: isAppClip)
+                               residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
+    }
+
+    /// `DCAppAttestService` where DeviceCheck exists, "unsupported" elsewhere.
+    public static func systemAppAttest() -> any AppAttestProviding {
+        #if canImport(DeviceCheck)
+        return DeviceCheckAppAttest()
+        #else
+        return UnavailableAppAttest()
+        #endif
     }
 
     /// The cross-process refresh lock. With no app group (the App Clip, which has no extension sharing its session)
@@ -127,6 +142,7 @@ public struct ViadereServices: Sendable {
     /// An in-memory world for previews, tests and demos. Uses software keys, so it is compiled out of release builds.
     public static func mock(api: MockViadereAPI = MockViadereAPI(), signedIn: Bool = true,
                             unsupportedKeys: Set<DeviceKeyPurpose> = [],
+                            appAttest: any AppAttestProviding = MockAppAttest(),
                             clock: @escaping @Sendable () -> Date = { Date() }) async -> ViadereServices {
         let secrets = InMemorySecretStore()
         let keys = SoftwareDeviceKeyStore(secrets: InMemorySecretStore(), unsupported: unsupportedKeys)
@@ -136,7 +152,7 @@ public struct ViadereServices: Sendable {
         let services = ViadereServices(configuration: .local, api: api, sessions: sessions, keys: keys, records: records,
                                        preferences: InMemoryPreferences(), secrets: secrets, passkeys: MockPasskeyService(),
                                        notificationPermission: MockNotificationPermissionService(), appLock: MockAppLockAuthenticator(),
-                                       clock: clock)
+                                       appAttest: appAttest, clock: clock)
         if signedIn {
             let consumerId = api.consumerId
             try? await sessions.set(TokenSet(consumerId: consumerId, accessToken: "mock", accessExpiresAt: clock().addingTimeInterval(3_600)))

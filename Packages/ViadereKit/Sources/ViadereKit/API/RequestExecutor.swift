@@ -41,7 +41,11 @@ public struct RequestExecutor: Sendable {
     }
 
     /// `pathAndQuery` is used **verbatim** both on the request line and in the signature string.
-    public func run(_ endpoint: AnyEndpoint, pathAndQuery: String, body: Data?, bearer: String?) async throws -> HTTPResponse {
+    /// - Parameter signsWhenEnrolled: signs the request with the device's request key **even though the route is declared `.none`**,
+    ///   when this installation has an enrolled device (`POST /v1/auth/refresh`, whose signature is required once the session is bound
+    ///   to a device). With no enrolled device the request goes out unsigned, which is what a not-yet-bound session needs.
+    public func run(_ endpoint: AnyEndpoint, pathAndQuery: String, body: Data?, bearer: String?,
+                    signsWhenEnrolled: Bool = false) async throws -> HTTPResponse {
         var base = baseURL.absoluteString
         while base.hasSuffix("/") { base.removeLast() }
         guard pathAndQuery.hasPrefix("/"), let url = URL(string: base + pathAndQuery) else {
@@ -64,6 +68,14 @@ public struct RequestExecutor: Sendable {
             headers.merge(signed.fields) { _, new in new }
         default:
             break
+        }
+        if signsWhenEnrolled, endpoint.auth == .none, let signer {
+            do {
+                let signed = try await signer.headers(method: endpoint.method.rawValue, pathAndQuery: pathAndQuery, body: body ?? Data())
+                headers.merge(signed.fields) { _, new in new }
+            } catch APIError.notEnrolled {
+                // No device yet: nothing to sign with.
+            }
         }
         do {
             return try await transport.send(HTTPRequest(method: endpoint.method, url: url, headers: headers, body: body))

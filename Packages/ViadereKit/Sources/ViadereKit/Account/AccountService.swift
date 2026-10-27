@@ -13,6 +13,8 @@ public struct AccountService: Sendable {
     let platform: DevicePlatform
     let residue: any LocalResidueCleaner
     let isAppClip: Bool
+    let appAttest: any AppAttestProviding
+    let skipsAttestationWhenUnsupported: Bool
     let clock: @Sendable () -> Date
     /// How long sign-out waits for each best-effort server call before giving up and erasing locally anyway.
     let serverCallTimeout: Duration
@@ -20,9 +22,13 @@ public struct AccountService: Sendable {
     /// - Parameters:
     ///   - residue: clears notifications, Live Activities, watch context and dynamic categories on wipe.
     ///   - isAppClip: the clip enrolls a request-key-only, marked device; the full app revokes clip devices after enrolling.
+    ///   - appAttest: vouches for the enrolled keys (`appAttest {keyId, attestation}`). Where it is unsupported (Simulator), DEBUG builds
+    ///     enroll without it and Release reports `AppAttestError.unsupported`.
     public init(api: any ViadereAPI, sessions: SessionManager, passkeys: any PasskeyService, keys: any DeviceKeyStore,
                 records: any DeviceRecordStore, preferences: any PreferencesStore, secrets: any SecretStore,
                 platform: DevicePlatform = .iOS, residue: any LocalResidueCleaner = NoLocalResidueCleaner(), isAppClip: Bool = false,
+                appAttest: any AppAttestProviding = UnavailableAppAttest(),
+                skipsAttestationWhenUnsupported: Bool = AppAttestPolicy.skipsWhenUnsupported,
                 serverCallTimeout: Duration = .seconds(5), clock: @escaping @Sendable () -> Date = { Date() }) {
         self.api = api
         self.sessions = sessions
@@ -34,19 +40,25 @@ public struct AccountService: Sendable {
         self.platform = platform
         self.residue = residue
         self.isAppClip = isAppClip
+        self.appAttest = appAttest
+        self.skipsAttestationWhenUnsupported = skipsAttestationWhenUnsupported
         self.serverCallTimeout = serverCallTimeout
         self.clock = clock
     }
 
     // MARK: Sign-up / sign-in
 
-    public func signUp(displayName: String) async throws {
+    /// Creates the account. Returns the account's **recovery codes**, which the server sends exactly once: the caller shows them
+    /// (`RecoveryCodesViewModel`) and must not keep them. They are never stored here.
+    @discardableResult
+    public func signUp(displayName: String) async throws -> RecoveryCodeSet? {
         let name = String(displayName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
         guard !name.isEmpty else { throw APIError.invalidRequest("name") }
         let options = try await api.beginRegistration(displayName: name)
         let credential = try await passkeys.register(options: options)
         let grant = try await api.finishRegistration(PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: credential))
         try await store(grant)
+        return grant.recoveryCodes
     }
 
     public func signIn() async throws {
@@ -84,10 +96,16 @@ public struct AccountService: Sendable {
         let provisioned = try await DeviceKeyProvisioner(store: keys).provision(
             consumerId: tokens.consumerId, challenge: challenge.challenge, purposes: purposes)
         guard provisioned.registrations.contains(where: { $0.purpose == .request }) else { throw KeyStoreError.unavailable }
+        // Attest exactly the keys that are sent below (the clientData names the key list), with a fresh App Attest key.
+        let attestation = try await EnrollmentAttester(provider: appAttest, skipsWhenUnsupported: skipsAttestationWhenUnsupported)
+            .evidence(consumerId: tokens.consumerId, challenge: challenge.challenge, keys: provisioned.registrations)
         let device = try await api.enrollDevice(DeviceEnrollRequest(
             name: String(name.prefix(64)), platform: platform, challenge: challenge.challenge, keys: provisioned.registrations,
-            assertion: assertion, clientKind: isAppClip ? .appClip : .app,
+            assertion: assertion, clientKind: isAppClip ? .appClip : .app, appAttest: attestation,
             replacesDeviceId: replacing))
+        // A live device that is being replaced stays valid on the server for now, so the caller's session stays bound to it: the
+        // response carries a session bound to the NEW device, which becomes this installation's session.
+        if let replacement = device.replacementSession { try await store(replacement) }
         let record = DeviceRecord(deviceId: device.id, consumerId: tokens.consumerId, name: device.name,
                                   purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
         try await records.save(record)

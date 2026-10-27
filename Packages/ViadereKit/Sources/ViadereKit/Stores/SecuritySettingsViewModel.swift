@@ -32,6 +32,13 @@ public final class SecuritySettingsViewModel {
     /// Show amounts, places and other details in approval notifications on the lock screen. Off by default: the
     /// lock screen then names only who is asking.
     public var richPreviewsEnabled: Bool
+    /// Recovery codes status (`nil` until loaded, or when the server doesn't offer recovery).
+    public private(set) var recoveryInfo: RecoveryInfo?
+    public private(set) var recoveryAvailable = true
+    public private(set) var isRegeneratingCodes = false
+    public private(set) var recoveryMessage: String?
+    /// New codes from "Generate new codes", on screen once.
+    public private(set) var newRecoveryCodes: RecoveryCodesViewModel?
     private let services: ViadereServices
 
     public init(services: ViadereServices) {
@@ -45,6 +52,7 @@ public final class SecuritySettingsViewModel {
         let record = try? await services.records.load()
         currentDeviceId = record?.deviceId
         thisDevicePurposes = record?.purposes ?? []
+        await loadRecovery()
         async let d = try? services.api.devices()
         async let relationships = try? services.api.relationships()
         let (deviceList, rels) = await (d, relationships)
@@ -64,6 +72,121 @@ public final class SecuritySettingsViewModel {
             }
         }
         consentHistory = history.sorted { $0.grant.updatedAt > $1.grant.updatedAt }
+    }
+
+    // MARK: Recovery codes (§2.26)
+
+    public func loadRecovery() async {
+        do { recoveryInfo = try await services.api.recoveryInfo(); recoveryAvailable = true } catch let error as APIError {
+            if error.code == .notFound { recoveryAvailable = false }
+        } catch {}
+    }
+
+    /// Only a trusted device may generate new codes (it must not be cooling down).
+    public var canRegenerateRecoveryCodes: Bool { isTrustedDevice }
+
+    /// This iPhone is not cooling down and not revoked (`DeviceTrust`, §2.5): it may act on the account's security.
+    public var isTrustedDevice: Bool { thisDeviceLockedUntil == nil && thisDevice?.isRevoked != true }
+
+    /// One calm line about the codes.
+    public var recoveryStatusLine: String {
+        guard let info = recoveryInfo else { return "Checking…" }
+        if info.pending != nil { return "A recovery is waiting. Review it on Home." }
+        if info.remainingCodes == 0 { return "No codes yet. Generate a set to be able to recover your account." }
+        return info.remainingCodes == 1 ? "1 unused code" : "\(info.remainingCodes) unused codes"
+    }
+
+    /// New recovery codes: a trusted device **and** a fresh passkey assertion. The old codes stop working. The codes are shown once
+    /// (`newRecoveryCodes`) and never stored.
+    public func regenerateRecoveryCodes() async {
+        guard !isRegeneratingCodes else { return }
+        guard canRegenerateRecoveryCodes else { recoveryMessage = SecurityNoticesViewModel.coolDownActionMessage; return }
+        isRegeneratingCodes = true
+        recoveryMessage = nil
+        defer { isRegeneratingCodes = false }
+        do {
+            let options = try await services.api.beginRecoveryCodes()
+            let assertion = try await services.passkeys.assert(options: options)
+            let set = try await services.api.regenerateRecoveryCodes(RecoveryCodesRegenerateRequest(ceremonyId: options.ceremonyId, assertion: assertion))
+            newRecoveryCodes = RecoveryCodesViewModel(codes: set)
+            await loadRecovery()
+        } catch let error as PasskeyError {
+            if error != .cancelled { recoveryMessage = error.userMessage }
+        } catch let error as APIError {
+            recoveryMessage = error.code == .deviceCoolDown ? SecurityNoticesViewModel.coolDownActionMessage : error.userMessage
+        } catch {
+            recoveryMessage = "Couldn't generate new codes. Try again in a moment."
+        }
+    }
+
+    /// The codes screen is done (saved, or dismissed): they are released.
+    public func finishRecoveryCodes() {
+        newRecoveryCodes?.release()
+        newRecoveryCodes = nil
+    }
+
+    // MARK: Pending device replacement
+
+    public enum ReplacementState: Equatable, Sendable {
+        /// This row is the device being replaced; `thisIPhone` when it is the one in the person's hand.
+        case beingReplaced(thisIPhone: Bool, until: Date?)
+        /// This row is the new device waiting to take over.
+        case pendingReplacement
+    }
+
+    public func replacementState(for device: Device) -> ReplacementState? {
+        guard !device.isRevoked else { return nil }
+        if device.pendingReplacementBy != nil {
+            return .beingReplaced(thisIPhone: device.id == currentDeviceId, until: device.pendingReplacementAt)
+        }
+        if devices.contains(where: { !$0.isRevoked && $0.pendingReplacementBy == device.id }) { return .pendingReplacement }
+        return nil
+    }
+
+    public func replacementTitle(for state: ReplacementState) -> String {
+        switch state {
+        case .beingReplaced(let thisIPhone, _): thisIPhone ? "Replacing this iPhone" : "Being replaced"
+        case .pendingReplacement: "Pending replacement"
+        }
+    }
+
+    public func replacementNote(for state: ReplacementState) -> String {
+        let now = services.clock()
+        switch state {
+        case .beingReplaced(let thisIPhone, let until):
+            let when = until.map { " It takes over \(CoolDownPolicy.timeText($0, now: now)), unless you cancel." } ?? ""
+            return (thisIPhone ? "A new iPhone is set up to replace this one." : "A new iPhone is set up to replace this device.") + when
+        case .pendingReplacement:
+            return "This iPhone is waiting to replace another device. If that wasn't you, cancel it."
+        }
+    }
+
+    /// The device a "Cancel" on this row would remove: always the NEW one.
+    public func replacementTarget(for device: Device) -> DeviceID? {
+        switch replacementState(for: device) {
+        case .beingReplaced?: device.pendingReplacementBy
+        case .pendingReplacement?: device.id
+        case nil: nil
+        }
+    }
+
+    /// Whether this iPhone may cancel the replacement shown on `device`'s row: it must be trusted and cannot be the new device.
+    public func canCancelReplacement(_ device: Device) -> Bool {
+        guard let target = replacementTarget(for: device) else { return false }
+        return target != currentDeviceId && isTrustedDevice
+    }
+
+    public func cancelReplacement(_ device: Device) async {
+        guard canCancelReplacement(device), let target = replacementTarget(for: device) else { return }
+        do {
+            try await services.api.cancelDeviceReplacement(target)
+            errorMessage = nil
+            await load()
+        } catch let error as APIError {
+            errorMessage = error.code == .deviceCoolDown ? SecurityNoticesViewModel.coolDownActionMessage : error.userMessage
+        } catch {
+            errorMessage = "Couldn't cancel that."
+        }
     }
 
     /// Turning the lock on requires a successful authentication first, so a stranger can't enable and lock out the owner.

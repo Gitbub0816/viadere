@@ -80,7 +80,8 @@ public final class AppModel {
         let complete = services.preferences.bool(.onboardingComplete)
         guard hasSession, complete else {
             phase = .onboarding(OnboardingFlow.resume(hasSession: hasSession, hasDevice: record != nil,
-                                                      primingShown: services.preferences.bool(.notificationPrimingShown), complete: complete))
+                                                      primingShown: services.preferences.bool(.notificationPrimingShown), complete: complete,
+                                                      recoveryPending: RecoveryHoldStore(secrets: services.secrets).load() != nil))
             return
         }
         switch await services.account.health() {
@@ -246,7 +247,10 @@ public final class AppModel {
         switch outcome {
         case .requiresApp(let id): await openInteraction(id)
         case .open(let id?): await openInteraction(id)
-        case .open(nil): selectedTab = .home
+        case .open(nil):
+            // A security push ("Review") carries no subject: the notices are fetched when the app opens.
+            selectedTab = .home
+            await securityNotices.load()
         case .submitted: await home.load()
         case .stale: toast = "That was already handled."; await home.load()
         case .expired: toast = "That request expired."; await home.load()

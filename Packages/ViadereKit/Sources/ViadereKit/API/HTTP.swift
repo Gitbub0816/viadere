@@ -64,6 +64,7 @@ public enum APIError: Error, Sendable, Equatable {
             case .passkeyAssertionRequired: "Confirm with your passkey to add this device."
             case .deviceCoolDown: "For your security, this iPhone can't approve high-risk requests yet. You can still deny or report them."
             case .contextMismatch, .contextDigestRequired: "This request changed. Review the updated details."
+            case .attestationRequired: AttestationMessage.notVerified
             case .notFound: "We couldn't find that."
             case .conflict: "This was already handled."
             default: message.isEmpty ? "Something went wrong. Please try again." : message

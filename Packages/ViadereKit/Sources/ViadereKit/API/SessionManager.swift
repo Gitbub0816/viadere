@@ -21,10 +21,20 @@ public struct APITokenRefresher: TokenRefresher {
         let endpoint = APIRoutes.authRefresh
         let path = try endpoint.path()
         let body = try ViadereJSON.encode(AuthRefreshRequest(refreshToken: refreshToken))
-        let response = try await executor.run(endpoint.descriptor, pathAndQuery: path, body: body, bearer: nil)
+        // The route is public (the refresh token is the credential, so no bearer), but once the session is bound to a device the
+        // server also requires that device's request-key signature over this exact request. It is added here, explicitly, because the
+        // route is declared `.none`. The notification extension gets the same behaviour: it shares the request key and device record.
+        var response = try await executor.run(endpoint.descriptor, pathAndQuery: path, body: body, bearer: nil, signsWhenEnrolled: true)
+        // A fresh timestamp and nonce fix a skewed clock or a replayed nonce; try once more, re-signed.
+        if response.status == 401, let code = RequestExecutor.error(from: response).code, code == .clockSkew || code == .replayDetected {
+            response = try await executor.run(endpoint.descriptor, pathAndQuery: path, body: body, bearer: nil, signsWhenEnrolled: true)
+        }
         guard (200..<300).contains(response.status) else {
+            let error = RequestExecutor.error(from: response)
+            // A rejected signature is about this device, not about the refresh token: report it without discarding the session.
+            if response.status == 401, error.code == .signatureInvalid || error.code == .clockSkew || error.code == .replayDetected { throw error }
             if response.status == 400 || response.status == 401 || response.status == 403 { throw APIError.sessionExpired }
-            throw RequestExecutor.error(from: response)
+            throw error
         }
         guard let session = try? ViadereJSON.decode(AuthSession.self, from: response.body) else { throw APIError.decoding("refresh") }
         var tokens = TokenSet(session)

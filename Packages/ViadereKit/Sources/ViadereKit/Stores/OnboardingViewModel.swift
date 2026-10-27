@@ -5,15 +5,19 @@ import Observation
 #endif
 
 public enum OnboardingStep: Int, Comparable, Sendable {
-    case welcome, account, device, notifications, phone, done
+    /// `recovery` is "Lost your devices?" (§2.26); `recoveryCodes` is the one-time "Save your recovery codes" screen after sign-up.
+    case welcome, recovery, account, recoveryCodes, device, notifications, phone, done
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
 public enum OnboardingFlow {
     /// Where to resume after a relaunch.
-    public static func resume(hasSession: Bool, hasDevice: Bool, primingShown: Bool, complete: Bool) -> OnboardingStep {
+    ///
+    /// The recovery codes are never persisted, so there is nothing to resume on the codes screen: a person who left it unsaved
+    /// continues at the device step and generates new codes in Settings. A recovery that is holding resumes on its own screen.
+    public static func resume(hasSession: Bool, hasDevice: Bool, primingShown: Bool, complete: Bool, recoveryPending: Bool = false) -> OnboardingStep {
         if complete { return .done }
-        if !hasSession { return .welcome }
+        if !hasSession { return recoveryPending ? .recovery : .welcome }
         if !hasDevice { return .device }
         if !primingShown { return .notifications }
         return .phone
@@ -43,6 +47,10 @@ public final class OnboardingViewModel {
     /// Shows the passkey explanation before the system sheet when this enrollment needs an assertion.
     public let passkeyGate = PasskeyExplanationGate()
     public var onFinished: (@MainActor () -> Void)?
+    /// The recovery codes from sign-up, on screen once (`.recoveryCodes`). Released as soon as they are confirmed saved.
+    public private(set) var recoveryCodes: RecoveryCodesViewModel?
+    /// "Lost your devices?". Created when the person opens it, or when a hold from an earlier launch is resumed.
+    public private(set) var recovery: AccountRecoveryViewModel?
 
     public init(services: ViadereServices, deviceName: String = "My iPhone", start: OnboardingStep = .welcome) {
         self.services = services
@@ -64,6 +72,7 @@ public final class OnboardingViewModel {
         do { try await work() } catch let error as APIError { errorMessage = error.userMessage }
         catch let error as PasskeyError { if error != .cancelled { errorMessage = error.userMessage } }
         catch let error as KeyStoreError { errorMessage = Self.message(for: error) }
+        catch let error as AppAttestError { errorMessage = error.userMessage }
         catch { errorMessage = "Something went wrong. Please try again." }
     }
 
@@ -84,8 +93,14 @@ public final class OnboardingViewModel {
 
     public func createAccount() async {
         await run {
-            try await services.account.signUp(displayName: displayName)
-            step = .device
+            let codes = try await services.account.signUp(displayName: displayName)
+            // The codes exist only in this object, and only until they are saved.
+            if let codes {
+                recoveryCodes = RecoveryCodesViewModel(codes: codes)
+                step = .recoveryCodes
+            } else {
+                step = .device
+            }
         }
     }
 
@@ -94,6 +109,54 @@ public final class OnboardingViewModel {
             try await services.account.signIn()
             // A returning person may already have a device record on this phone.
             if let record = try? await services.records.load() { enrolled = record; step = .notifications } else { step = .device }
+        }
+    }
+
+    /// "I saved these": releases the codes and continues. Does nothing until the confirmation is ticked.
+    public func recoveryCodesSaved() {
+        guard let recoveryCodes, recoveryCodes.finish() else { return }
+        self.recoveryCodes = nil
+        step = .device
+    }
+
+    /// The codes screen went away without being confirmed (the app locked or was backgrounded). They are gone; Settings → Security →
+    /// Recovery codes generates a new set. Setup continues.
+    public func recoveryCodesLost() {
+        recoveryCodes?.release()
+        recoveryCodes = nil
+        if step == .recoveryCodes { step = .device }
+    }
+
+    // MARK: Lost your devices?
+
+    public func beginRecovery() {
+        let model = AccountRecoveryViewModel(services: services)
+        model.onSignedIn = { [weak self] in self?.recoveredAccountSignedIn() }
+        recovery = model
+        errorMessage = nil
+        step = .recovery
+    }
+
+    /// Resumes a recovery whose hold was running when the app last closed.
+    public func resumeRecoveryIfPending() async {
+        if recovery == nil, RecoveryHoldStore(secrets: services.secrets).load() != nil { beginRecovery() }
+        await recovery?.resumeIfPending()
+    }
+
+    public func leaveRecovery() {
+        recovery = nil
+        step = .welcome
+    }
+
+    private func recoveredAccountSignedIn() {
+        recovery = nil
+        // The new passkey is the account's passkey. Every old device was revoked, so anything left from an earlier install here is
+        // stale: this iPhone is enrolled afresh, like any lapsed account's (it cools down and attests).
+        Task { @MainActor in
+            try? await services.records.clear()
+            try? await services.keys.deleteAllKeys()
+            enrolled = nil
+            step = .device
         }
     }
 

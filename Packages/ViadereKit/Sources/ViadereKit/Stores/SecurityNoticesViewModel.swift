@@ -15,6 +15,8 @@ public final class SecurityNoticesViewModel {
     /// Set when a dismissal was refused because this device is not trusted yet.
     public private(set) var message: String?
     public private(set) var isDismissing = false
+    /// A notice's action (Cancel recovery, Cancel replacement) is running.
+    public private(set) var isActing = false
     private let services: ViadereServices
 
     public init(services: ViadereServices) { self.services = services }
@@ -54,19 +56,103 @@ public final class SecurityNoticesViewModel {
 
     public static let coolDownMessage = "This iPhone is new to your account, so it can't dismiss this yet. Use a device you already trust, or review your devices."
 
+    // MARK: Actions ("Not you? Cancel")
+
+    /// The button a notice offers besides "This was me", or `nil` for an informational notice.
+    public func actionTitle(for notice: SecurityNotice) -> String? {
+        switch notice.action {
+        case .cancelRecovery?: "Cancel recovery"
+        case .cancelDeviceReplacement?: "Cancel"
+        case .unknown?, nil: nil
+        }
+    }
+
+    /// What the button is called in the accessibility tree (more than "Cancel").
+    public func actionHint(for notice: SecurityNotice) -> String? {
+        switch notice.action {
+        case .cancelRecovery?: "Stops the account recovery that was started"
+        case .cancelDeviceReplacement?: "Removes the new iPhone and keeps this one"
+        case .unknown?, nil: nil
+        }
+    }
+
+    /// Runs the notice's action. Both need a trusted device (`403 device_cool_down` otherwise, said calmly). Returns whether it worked.
+    @discardableResult
+    public func perform(_ notice: SecurityNotice) async -> Bool {
+        guard !isActing, let action = notice.action else { return false }
+        isActing = true
+        defer { isActing = false }
+        do {
+            switch action {
+            case .cancelRecovery:
+                guard let id = notice.subjectId.flatMap(RecoveryID.init) else { throw APIError.invalidRequest("id") }
+                _ = try await services.api.cancelRecovery(id)
+                message = Self.recoveryCancelledMessage
+            case .cancelDeviceReplacement:
+                guard let id = notice.subjectId.flatMap(DeviceID.init) else { throw APIError.invalidRequest("id") }
+                try await services.api.cancelDeviceReplacement(id)
+                message = Self.replacementCancelledMessage
+            case .unknown:
+                return false
+            }
+        } catch let error as APIError {
+            switch error.code {
+            case .deviceCoolDown?:
+                message = Self.coolDownActionMessage
+            case .notFound?, .gone?, .conflict?:
+                // Already cancelled, finished or handled from another device.
+                notices.removeAll { $0.id == notice.id }
+                message = Self.alreadyHandledMessage
+            default:
+                message = error.userMessage
+            }
+            return false
+        } catch {
+            message = "Couldn't do that. Try again in a moment."
+            return false
+        }
+        notices.removeAll { $0.id == notice.id }
+        // The notice has served its purpose; clearing it on the server is best effort.
+        try? await services.api.dismissSecurityNotice(notice.id)
+        return true
+    }
+
+    public static let recoveryCancelledMessage = "Recovery was cancelled. Its recovery codes no longer work, so generate new ones in Settings."
+    public static let replacementCancelledMessage = "The new iPhone was removed. This one keeps working."
+    public static let coolDownActionMessage = "This iPhone is new to your account, so it can't do that yet. Use a device you already trust."
+    public static let alreadyHandledMessage = "That was already taken care of."
+
     // MARK: Copy
 
-    /// The headline. Uses the server's plain-text message for kinds this app doesn't know, so new kinds still read sensibly.
+    /// The headline, chosen by the notice's `topic` so kinds newer than this app's `SecurityNoticeKind` read properly. Anything the app
+    /// doesn't know falls back to the server's plain-text message, then to a generic line.
     public func headline(for notice: SecurityNotice) -> String {
         let when = InteractionPresentation.relative(notice.createdAt, now: services.clock()).lowercased()
-        switch notice.kind {
+        switch notice.topic {
         case .newDevice: return "A new device was added to your account \(when)."
         case .newPhone: return "A new phone number was linked to your account \(when)."
         case .appClip: return "Viadere was opened as an App Clip on your account \(when)."
         case .deviceReplaced: return "A device on your account was set up again \(when)."
+        case .devicePendingReplacement: return "A new iPhone is replacing this one."
+        case .recoveryStarted: return "Account recovery was started \(when)."
+        case .recoveryCancelled: return "An account recovery was cancelled \(when)."
+        case .recoveryAttemptsLocked: return "Several wrong recovery codes were entered, so recovery is paused for a day."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
+        }
+    }
+
+    /// The second line under the headline.
+    public func prompt(for notice: SecurityNotice) -> String {
+        switch notice.action {
+        case .cancelRecovery?: return "Not you? Cancel recovery."
+        case .cancelDeviceReplacement?: return "Not you? Cancel."
+        case .unknown?, nil: break
+        }
+        switch notice.topic {
+        case .recoveryCancelled, .recoveryAttemptsLocked: return "Your devices were told. You can generate new recovery codes in Settings."
+        default: return Self.prompt
         }
     }
 

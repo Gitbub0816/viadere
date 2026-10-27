@@ -34,6 +34,10 @@ public struct NotificationActionHandler: Sendable {
     }
 
     public func handle(_ response: NotificationResponseInfo) async -> NotificationOutcome {
+        // A security push has no subject: tapping it or "Review" opens the app, which fetches the notices itself.
+        if response.categoryIdentifier == SecurityPush.categoryIdentifier || response.actionIdentifier == SecurityPush.reviewActionIdentifier {
+            return response.actionIdentifier == NotificationActionID.systemDismiss ? .ignored : .open(nil)
+        }
         let intent = NotificationActionParser.parse(actionIdentifier: response.actionIdentifier)
         let id = response.interactionId
         switch intent {

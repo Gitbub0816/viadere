@@ -188,6 +188,16 @@ public struct NotificationEnricher: Sendable {
             userInfo: ["interactionId": interactionId.description], requiresSecureFlow: true, isFallback: true)
     }
 
+    /// The push for a security notice (recovery started, a device being replaced). It carries no subject: the single action opens the
+    /// app (foreground, behind authentication), which fetches the notices and shows the "Not you? Cancel" banner.
+    public static let securityCancelCategory = NotificationCategoryModel(
+        identifier: SecurityPush.categoryIdentifier,
+        actions: [NotificationActionModel(identifier: SecurityPush.reviewActionIdentifier, title: "Review", style: .normal,
+                                          requiresAuthentication: true, opensApp: true)])
+
+    /// Everything the app registers at launch: the renderer's static categories plus the security-cancel category.
+    public static func registeredCategorySpecs() -> [NotificationCategoryModel] { staticCategorySpecs() + [securityCancelCategory] }
+
     /// Static categories (`ChannelRenderer.staticCategories`) with their actions, so the app registers the
     /// same shapes the renderer produces. Built by rendering a representative interaction per category.
     public static func staticCategorySpecs() -> [NotificationCategoryModel] {
@@ -227,4 +237,10 @@ public struct NotificationEnricher: Sendable {
         }
         return specs
     }
+}
+
+/// Identifiers for the security-notice push (`viadere.security.cancel`).
+public enum SecurityPush {
+    public static let categoryIdentifier = "viadere.security.cancel"
+    public static let reviewActionIdentifier = "viadere.security.review"
 }

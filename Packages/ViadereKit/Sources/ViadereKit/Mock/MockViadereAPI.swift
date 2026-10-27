@@ -34,6 +34,19 @@ public actor MockViadereAPI: ViadereAPI {
     /// Test hook: when true, dismissing answers `403 device_cool_down` like a device that is not trusted yet.
     public var dismissNeedsTrustedDevice = false
     public private(set) var dismissedNoticeIds: [UUID] = []
+    /// Test hook: refuse an enrollment that carries no App Attest evidence (`403 attestation_required`), like `APP_ATTEST_MODE=require`.
+    public var requiresAttestation = false
+    /// Every enrollment request the server received.
+    public private(set) var enrollRequests: [DeviceEnrollRequest] = []
+    /// Test hook: a live device being replaced is revoked at once instead of waiting for the owner (`false` = the server's real rule).
+    public var replacesLiveDevicesImmediately = false
+    /// Recovery state (§2.26).
+    private var recoverySet: RecoveryCodeSet?
+    private var recoveryRecord: MockRecoveryRecord?
+    private var recoveryCodesChallenges: [CeremonyID: String] = [:]
+    public private(set) var cancelledReplacementIds: [DeviceID] = []
+    public private(set) var cancelledRecoveryIds: [RecoveryID] = []
+    public private(set) var recoveryCompleteCalls = 0
     private var consumedChallenges: Set<String> = []
     public private(set) var registeredAPNsTokens: [APNsTokenRegistration] = []
     public private(set) var liveActivityTokens: [LiveActivityTokenRegistration] = []
@@ -141,7 +154,10 @@ public actor MockViadereAPI: ViadereAPI {
     }
     public func finishRegistration(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession {
         freshSession = true
-        return grant()
+        var session = grant()
+        // Recovery codes arrive exactly once, with the session that created the account.
+        session.recoveryCodes = issueRecoveryCodes()
+        return session
     }
     public func beginLogin() async throws -> PasskeyAssertionOptions {
         await pause()
@@ -194,6 +210,17 @@ public actor MockViadereAPI: ViadereAPI {
         if kind == .appClip, purposes != [.request] {
             throw APIError.server(status: 422, code: .validationFailed, message: "An App Clip device can only register a request key.")
         }
+        enrollRequests.append(request)
+        if let evidence = request.appAttest {
+            // The mock "attestation" is `mock-attestation:` + clientDataHash: it must vouch for exactly these keys, this challenge and account.
+            let prefix = Data("mock-attestation:".utf8)
+            if let raw = Base64URL.decode(evidence.attestation), raw.starts(with: prefix),
+               Data(raw.dropFirst(prefix.count)) != AppAttestBinding.clientDataHash(consumerId: consumerId, challenge: request.challenge, keys: request.keys) {
+                throw APIError.server(status: 403, code: .attestationRequired, message: "The attestation does not match this enrollment.")
+            }
+        } else if requiresAttestation {
+            throw APIError.server(status: 403, code: .attestationRequired, message: "This device could not be verified.")
+        }
         guard let options = enrollmentChallenges[request.challenge] else {
             throw APIError.server(status: 401, code: .unauthorized, message: "The enrollment challenge is invalid or expired.")
         }
@@ -215,15 +242,24 @@ public actor MockViadereAPI: ViadereAPI {
         let keys = request.keys.map {
             DeviceKey(id: DeviceKeyID(), purpose: $0.purpose, publicKey: $0.publicKey, hardwareBacked: $0.hardwareBacked, createdAt: now)
         }
-        let device = Device(id: deviceId, consumerId: consumerId, name: request.name, platform: request.platform, keys: keys,
+        var device = Device(id: deviceId, consumerId: consumerId, name: request.name, platform: request.platform, keys: keys,
                             createdAt: now, lastSeenAt: now, clientKind: kind,
                             approvalsLockedUntil: coolDown ? now.addingTimeInterval(Self.newDeviceCoolDown) : nil,
                             expiresAt: kind == .appClip ? now.addingTimeInterval(Self.appClipLifetime) : nil)
-        deviceList.append(device)
-        // "Set up again": the replaced device is revoked together with the enrollment (it still counted for the cool-down above).
-        if let replaced = request.replacesDeviceId, let index = deviceList.firstIndex(where: { $0.id == replaced && $0.revokedAt == nil }) {
-            deviceList[index].revokedAt = now
+        // "Set up again". A device that is already revoked is replaced at once. A LIVE one keeps working: it is marked as pending
+        // replacement, and the response carries a session bound to the new device (the caller's own session stays with the old one).
+        if let replaced = request.replacesDeviceId, let index = deviceList.firstIndex(where: { $0.id == replaced }) {
+            if deviceList[index].revokedAt != nil || replacesLiveDevicesImmediately {
+                if deviceList[index].revokedAt == nil { deviceList[index].revokedAt = now }
+            } else {
+                deviceList[index].pendingReplacementBy = deviceId
+                deviceList[index].pendingReplacementAt = now.addingTimeInterval(Self.newDeviceCoolDown)
+                device.replacementSession = grant()
+                addNotice(rawKind: "devicePendingReplacement", message: "A new iPhone is replacing one of your devices.",
+                          subjectId: deviceId.description, action: .cancelDeviceReplacement)
+            }
         }
+        deviceList.append(device)
         enrollmentLog.append((deviceId, request.assertion != nil))
         freshSession = false
         deviceKeys[deviceId] = Dictionary(uniqueKeysWithValues: keys.map { ($0.purpose, $0.publicKey) })
@@ -254,6 +290,24 @@ public actor MockViadereAPI: ViadereAPI {
         if let failure = signOutCallsFail { throw failure }
         guard let index = deviceList.firstIndex(where: { $0.id == id }) else { throw Self.notFound() }
         deviceList[index].revokedAt = clock()
+    }
+
+    private func addNotice(rawKind: String, message: String, subjectId: String?, action: SecurityNoticeAction?) {
+        noticeList.append(SecurityNotice(id: UUID(), rawKind: rawKind, message: message, createdAt: clock(), subjectId: subjectId, action: action))
+    }
+
+    /// "Not you? Cancel": revokes the NEW device and clears the pending mark on the old one.
+    public func cancelDeviceReplacement(_ id: DeviceID) async throws {
+        if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        guard let index = deviceList.firstIndex(where: { $0.id == id && $0.revokedAt == nil }),
+              deviceList.contains(where: { $0.pendingReplacementBy == id }) else { throw Self.notFound() }
+        deviceList[index].revokedAt = clock()
+        for old in deviceList.indices where deviceList[old].pendingReplacementBy == id {
+            deviceList[old].pendingReplacementBy = nil
+            deviceList[old].pendingReplacementAt = nil
+        }
+        noticeList.removeAll { $0.action == .cancelDeviceReplacement && $0.subjectId == id.description }
+        cancelledReplacementIds.append(id)
     }
 
     /// Test hook: puts a device into (or out of) its new-device cool-down.
@@ -560,4 +614,125 @@ public actor MockViadereAPI: ViadereAPI {
 
     public func registerAPNsToken(_ registration: APNsTokenRegistration) async throws { registeredAPNsTokens.append(registration) }
     public func registerLiveActivityToken(_ registration: LiveActivityTokenRegistration) async throws { liveActivityTokens.append(registration) }
+}
+
+// MARK: - Account recovery (§2.26)
+
+struct MockRecoveryRecord {
+    var id: RecoveryID
+    var state: RecoveryState
+    var startedAt: Date
+    var activatesAt: Date?
+    var statusToken: String?
+    var ceremonyId: CeremonyID
+    var codesDelivered = false
+}
+
+extension MockViadereAPI {
+    /// A fresh recovery ID and ten codes; the previous set dies.
+    func issueRecoveryCodes() -> RecoveryCodeSet {
+        let set = RecoveryCodeSet(recoveryId: RecoveryCodeFormat.generateRecoveryID(),
+                                  codes: (0..<RecoveryPolicy.codeCount).map { _ in RecoveryCodeFormat.generateCode() }, issuedAt: clock())
+        recoverySet = set
+        return set
+    }
+
+    /// Test hook: what the server holds as the account's active codes (a real server holds only HMACs).
+    public var activeRecoveryCodes: RecoveryCodeSet? { recoverySet }
+
+    public func beginRecovery(_ request: RecoveryBeginRequest) async throws -> PasskeyRegistrationOptions {
+        await pause()
+        let denied = APIError.server(status: 401, code: .unauthorized, message: "")
+        guard var set = recoverySet, let id = RecoveryCodeFormat.normalizeRecoveryID(request.recoveryId),
+              id == RecoveryCodeFormat.normalizeRecoveryID(set.recoveryId),
+              let code = RecoveryCodeFormat.normalizeCode(request.code),
+              let index = set.codes.firstIndex(where: { RecoveryCodeFormat.normalizeCode($0) == code }) else { throw denied }
+        if let record = recoveryRecord, record.state == .awaitingPasskey || record.state == .holding { throw denied }
+        set.codes.remove(at: index)   // the code is spent
+        recoverySet = set
+        let ceremony = CeremonyID()
+        recoveryRecord = MockRecoveryRecord(id: RecoveryID(), state: .awaitingPasskey, startedAt: clock(), ceremonyId: ceremony)
+        return PasskeyRegistrationOptions(ceremonyId: ceremony, challenge: SecureToken.generate(), relyingPartyId: ViadereCore.domain,
+                                          relyingPartyName: "Viadere", userId: SecureToken.generate(byteCount: 16),
+                                          userName: "Viadere", userDisplayName: "Viadere")
+    }
+
+    public func finishRecovery(_ request: RecoveryFinishRequest) async throws -> RecoveryStatus {
+        guard var record = recoveryRecord, record.state == .awaitingPasskey, record.ceremonyId == request.ceremonyId else {
+            throw APIError.server(status: 401, code: .unauthorized, message: "")
+        }
+        record.state = .holding
+        record.startedAt = clock()
+        record.activatesAt = clock().addingTimeInterval(RecoveryPolicy.holdSeconds)
+        record.statusToken = SecureToken.generate()
+        recoveryRecord = record
+        // Every existing device hears about it.
+        addNotice(rawKind: "recoveryStarted", message: "Account recovery was started.", subjectId: record.id.description, action: .cancelRecovery)
+        return RecoveryStatus(id: record.id, state: .holding, startedAt: record.startedAt, activatesAt: record.activatesAt, statusToken: record.statusToken)
+    }
+
+    public func completeRecovery(_ request: RecoveryCompleteRequest) async throws -> RecoveryStatus {
+        recoveryCompleteCalls += 1
+        guard var record = recoveryRecord, record.id == request.recoveryId, record.statusToken == request.statusToken else {
+            throw APIError.server(status: 401, code: .unauthorized, message: "")
+        }
+        if record.state == .holding, let at = record.activatesAt, at <= clock() {
+            record.state = .activated
+            let now = clock()
+            for index in deviceList.indices where deviceList[index].revokedAt == nil { deviceList[index].revokedAt = now }
+            freshSession = true
+        }
+        var status = RecoveryStatus(id: record.id, state: record.state, startedAt: record.startedAt, activatesAt: record.activatesAt)
+        if record.state == .activated, !record.codesDelivered {
+            record.codesDelivered = true
+            status.recoveryCodes = issueRecoveryCodes()
+        }
+        recoveryRecord = record
+        return status
+    }
+
+    public func cancelRecovery(_ id: RecoveryID) async throws -> RecoveryStatus {
+        if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        guard var record = recoveryRecord, record.id == id else { throw APIError.server(status: 404, code: .notFound, message: "") }
+        if record.state == .holding || record.state == .awaitingPasskey { record.state = .cancelled }
+        recoveryRecord = record
+        // Whoever started it held a code: the rest are invalidated.
+        if var set = recoverySet { set.codes = []; recoverySet = set }
+        noticeList.removeAll { $0.action == .cancelRecovery }
+        cancelledRecoveryIds.append(id)
+        return RecoveryStatus(id: record.id, state: record.state, startedAt: record.startedAt, activatesAt: record.activatesAt)
+    }
+
+    public func recoveryInfo() async throws -> RecoveryInfo {
+        let pending = recoveryRecord.flatMap { record -> PendingRecovery? in
+            guard record.state == .holding, let at = record.activatesAt else { return nil }
+            return PendingRecovery(id: record.id, startedAt: record.startedAt, activatesAt: at)
+        }
+        return RecoveryInfo(remainingCodes: recoverySet?.codes.count ?? 0, issuedAt: recoverySet?.issuedAt, pending: pending)
+    }
+
+    public func beginRecoveryCodes() async throws -> PasskeyAssertionOptions {
+        if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        let options = PasskeyAssertionOptions(ceremonyId: CeremonyID(), challenge: SecureToken.generate(), relyingPartyId: ViadereCore.domain)
+        recoveryCodesChallenges[options.ceremonyId] = options.challenge
+        return options
+    }
+
+    public func regenerateRecoveryCodes(_ request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet {
+        if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        guard let challenge = recoveryCodesChallenges.removeValue(forKey: request.ceremonyId), Self.assertionIsUserVerified(request.assertion, challenge: challenge) else {
+            throw APIError.server(status: 401, code: .passkeyAssertionRequired, message: "")
+        }
+        return issueRecoveryCodes()
+    }
+
+    /// Test hook: the 72 h hold passes (the next `complete` activates the recovery).
+    public func elapseRecoveryHold() {
+        guard var record = recoveryRecord else { return }
+        record.activatesAt = clock().addingTimeInterval(-1)
+        recoveryRecord = record
+    }
+
+    /// Test hook: puts a recovery code set on the account (e.g. an account that predates recovery codes has none).
+    public func setRecoveryCodes(_ set: RecoveryCodeSet?) { recoverySet = set }
 }

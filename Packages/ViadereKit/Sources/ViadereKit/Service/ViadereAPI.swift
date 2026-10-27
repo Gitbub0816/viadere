@@ -52,6 +52,24 @@ public protocol ViadereAPI: Sendable {
     func revokeDevice(_ id: DeviceID) async throws
     /// `POST /v1/devices/{id}/confirm`: a trusted device lifts the new-device cool-down of another one (`ConfirmationProof`, subject `device`).
     func confirmDevice(_ id: DeviceID, proof: ConfirmationProof) async throws -> Device
+    /// `POST /v1/devices/{id}/cancel-replacement`: "Not you? Cancel" on a pending replacement. `id` is the NEW device, which is revoked;
+    /// the old one keeps working. Needs a trusted device other than `id` (`403 device_cool_down` otherwise).
+    func cancelDeviceReplacement(_ id: DeviceID) async throws
+
+    // MARK: Account recovery (§2.26)
+    /// `POST /v1/recovery/begin` (public): spends one code and returns options for a NEW passkey. Every failure is one `401`.
+    func beginRecovery(_ request: RecoveryBeginRequest) async throws -> PasskeyRegistrationOptions
+    /// `POST /v1/recovery/finish` (public): registers the new passkey and starts the 72 h hold; the response carries the `statusToken`.
+    func finishRecovery(_ request: RecoveryFinishRequest) async throws -> RecoveryStatus
+    /// `POST /v1/recovery/complete` (public): polls with the status token; returns the replacement codes once after activation.
+    func completeRecovery(_ request: RecoveryCompleteRequest) async throws -> RecoveryStatus
+    /// `POST /v1/recovery/{id}/cancel`: "Not you? Cancel". A trusted device.
+    func cancelRecovery(_ id: RecoveryID) async throws -> RecoveryStatus
+    func recoveryInfo() async throws -> RecoveryInfo
+    /// `POST /v1/recovery/codes/begin`: passkey assertion options for regenerating codes (trusted device).
+    func beginRecoveryCodes() async throws -> PasskeyAssertionOptions
+    /// `POST /v1/recovery/codes/regenerate`: a fresh passkey assertion in, a new `RecoveryCodeSet` out (once).
+    func regenerateRecoveryCodes(_ request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet
 
     // MARK: Phones & sessions
     func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse
