@@ -75,13 +75,22 @@ extension VerifyService {
             }
         }
         // Results: payloads erased after retrieval and at expiry.
-        for result in try await VerificationResultRecord.query(on: db).filter(\.$payload != nil).group(.or, { group in
+        for result in try await VerificationResultRecord.query(on: db).group(.or, { group in
+            group.filter(\.$payload != nil)
+            group.filter(\.$encryptedPayload != nil)
+        }).group(.or, { group in
             group.filter(\.$retrievedAt != nil)
             group.filter(\.$expiresAt <= now)
         }).limit(100).all() {
             result.payload = nil
+            result.encryptedPayload = nil
+            result.encryptedKid = nil
             try await result.update(on: db)
             changed += 1
+        }
+        // Attempts kept past their request's deletion (account deletion) go once their provider session is gone.
+        for attempt in try await VerificationAttemptRecord.query(on: db).filter(\.$purgeStatus == "done").limit(200).all() {
+            if try await VerificationRequestRecord.find(attempt.requestId, on: db) == nil { try await attempt.delete(on: db) }
         }
         if await ctx.limiter.allow("verify-retention", key: "all", rule: .perMinute(1, burst: 1)) {
             try await VerificationProviderEventRecord.query(on: db).filter(\.$receivedAt < now.addingTimeInterval(-Self.providerEventRetention)).delete()
@@ -89,12 +98,33 @@ extension VerifyService {
             let old = try await VerificationRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status !~ open).limit(200).all()
             for record in old {
                 let id = record.id!
-                try await VerificationAttemptRecord.query(on: db).filter(\.$requestId == id).filter(\.$purgeStatus != "pending").delete()
+                try await VerificationAttemptRecord.query(on: db).filter(\.$requestId == id).group(.or) { group in
+                    group.filter(\.$providerSessionId == nil)
+                    group.filter(\.$purgeStatus == "done")
+                }.delete()
                 try await VerificationResultRecord.query(on: db).filter(\.$requestId == id).delete()
                 if try await VerificationAttemptRecord.query(on: db).filter(\.$requestId == id).count() == 0 { try await record.delete(on: db) }
             }
         }
         return changed
+    }
+
+    /// Account deletion (LEG-PR-004): the person's requests and results are deleted. An attempt whose provider session still has to be deleted
+    /// stays (it holds no customer id, only an opaque session reference) until `runMaintenance` has purged it.
+    static func wipe(consumer: UUID, on db: any Database) async throws {
+        let requests = try await VerificationRequestRecord.query(on: db).filter(\.$consumerId == consumer).all()
+        let ids = requests.compactMap(\.id)
+        guard !ids.isEmpty else { return }
+        try await VerificationResultRecord.query(on: db).filter(\.$requestId ~~ ids).delete()
+        try await VerificationAttemptRecord.query(on: db).filter(\.$requestId ~~ ids).filter(\.$nonce != nil).set(\.$nonce, to: nil).update()
+        // A provider session that is still open is over now: the next maintenance run deletes it at the provider.
+        try await VerificationAttemptRecord.query(on: db).filter(\.$requestId ~~ ids).filter(\.$status ~~ ["issued", "processing"])
+            .set(\.$status, to: "failed").set(\.$failureReason, to: "account_deleted").update()
+        try await VerificationAttemptRecord.query(on: db).filter(\.$requestId ~~ ids).group(.or) { group in
+            group.filter(\.$providerSessionId == nil)
+            group.filter(\.$purgeStatus == "done")
+        }.delete()
+        try await VerificationRequestRecord.query(on: db).filter(\.$id ~~ ids).delete()
     }
 
     private func repair(_ record: VerificationRequestRecord, resultId: UUID) async throws {

@@ -172,7 +172,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             let ok = try await h.signedPost(alice, "/v1/approve/enrollments/lookup", ApproveEnrollmentLookupRequest(code: ticket.code))
             XCTAssertEqual(ok.status, .ok, ok.text)
             // After expiry the code is dead.
-            h.clock.advance(by: 1000)
+            h.clock.advance(by: 650)
             let late = try await h.signedPost(alice, "/v1/approve/enrollments/lookup", ApproveEnrollmentLookupRequest(code: ticket.code))
             XCTAssertEqual(late.status, .notFound)
         }
@@ -227,7 +227,8 @@ final class ApproveEnrollmentTests: XCTestCase {
             let reuse = try await complete(p2, try await statement(p2).sign(with: key))
             XCTAssertEqual(reuse.status, .conflict, reuse.text)
             // Completing again is refused (single use).
-            aeq(try await complete(p1, try await statement(p1, key: SoftwareP256SigningKey()).sign(with: key)).status, .unprocessableEntity)
+            let again = SoftwareP256SigningKey()
+            aeq(try await complete(p1, try await statement(p1, key: again).sign(with: again)).status, .conflict)
         }
     }
 

@@ -251,6 +251,32 @@ this app added, so it is **not requested**. The pass type id and its signing cer
 shows "In Wallet" going stale for passes added outside the app, add the entitlement to `Viadere/Viadere.entitlements`
 via `project.yml` and the pass type ids in the Developer portal.
 
+### Verify with Wallet entitlement and the Didit SDK (WP3)
+
+Verify offers two ways to prove an age threshold or an identity attribute (`App/Viadere/Features/Verify`):
+
+1. **An ID in Apple Wallet** (`PKIdentityAuthorizationController`, iOS 16+). Requires the `com.apple.developer.in-app-identity-presentment`
+   entitlement, which **Apple grants per bundle ID** after a request by the Account Holder
+   (<https://developer.apple.com/wallet/get-started-with-verify-with-wallet/>). Prepare for the request:
+   * app name, bundle ID, TestFlight/App Store URL; a description of the good or service that needs age or identity verification;
+   * **screenshots of the verification flow for people who do not use an ID in Wallet** (the Didit screens and the "no way to verify" and
+     "decline" paths: Verify always shows the alternative and never makes Wallet the only route, VER-008);
+   * screenshots of the Wallet flow (the request screen with the exact disclosure), the privacy policy URL of Viadere **and of Didit**;
+   * request only `Age Over N Flag` (and `Issuing Authority`) first; `Given Name`, `Family Name` and `Address` only for tiers that need identity
+     attributes. Apple entitles the app to a fixed element set: the app can never ask for more.
+   Then create the **merchant identifier** and the **identity encryption certificate** in the developer portal (its private key goes to the
+   server's KMS, `WALLET_ENCRYPTION_KEY_WRAPPED`) and add the capability in Xcode (Signing & Capabilities → Verify with Wallet). The entitlement
+   is deliberately **not** in `project.yml` until Apple has issued it (an unapproved entitlement fails signing); until then Wallet is simply not
+   offered. `NSIdentityUsageDescription` is in `Info.plist`. The simulator returns a mock mDL without issuer or device signatures: the server
+   refuses it (test the server path with Apple's sample and the synthetic issuers in the server tests).
+2. **Scan an ID document** with Didit's native SDK (`DiditSDKCore` 4.9.1, Swift Package, iOS 13+, no NFC, no OpenSSL). The SDK renders its
+   own screens, themed to Viadere in the Didit console (White Label); camera, microphone and photo-library usage strings are in `Info.plist`.
+   Images and biometrics go from the phone to Didit; Viadere never receives them. If passport chip reading is added later, switch to
+   `DiditSDKNFC` (iOS 15+) and add the NFC capability and ISO7816 identifiers.
+
+The Didit console must have the identity workflow (document + liveness + face match), a `status.updated` webhook destination pointing at
+`/v1/providers/didit/webhook`, the shortest data retention, and biometric-template retention **off**.
+
 ### Server contract
 
 All `deviceSignedBearer`. Every route below lives in ViadereCore's `APIRoutes` (shared with the server); a `404` still means "the business has no such feature" and hides it.
@@ -317,7 +343,9 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
    conformances are used; if needed set `SWIFT_VERSION` to 5 for the UI targets).
 4. The preprocessed Info.plist approach for the Debug-only ATS exception (`INFOPLIST_PREPROCESS`, `-traditional`).
 5. `@Observable` view models (compile on Linux as plain classes because Observation does not link there).
-6. Passkeys inside an App Clip, Live Activity push-to-start, the Dynamic Island layout, and the content-extension card.
+6. Verify (WP3): `Features/Verify/*`, `PassKitWalletIdentity` (`PKIdentityAuthorizationController`, `PKIdentityError` codes) and the DiditSDK launcher
+   (`DiditSdk.shared.startVerification(token:)`, `.diditVerification`); the DiditSDK package requirement and the entitlement are untested here.
+7. Passkeys inside an App Clip, Live Activity push-to-start, the Dynamic Island layout, and the content-extension card.
 7. XcodeGen spec details (extension embedding, on-demand-install-capable type, watch embedding).
 8. P3 UI: everything under `Features/Rewards`, `Activity`, `Wallet`, `Household`, `Consent`, the reworked widget, and the
    PassKit calls (`PKAddPassButton`, `PKAddPassesViewController`, `PKPass(data:)`, `PKPassLibrary`). `Text(timerInterval:)`

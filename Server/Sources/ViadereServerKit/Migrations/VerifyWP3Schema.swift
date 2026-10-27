@@ -41,7 +41,8 @@ struct CreateVerifyWP3Schema: AsyncMigration {
 
         try await db.schema("verification_attempts")
             .id()
-            .field("request_id", .uuid, .required, .references("verification_requests", "id"))
+            // No foreign key: account deletion removes the request, while an attempt whose provider purge is still pending must outlive it.
+            .field("request_id", .uuid, .required)
             .field("business_id", .uuid, .required)
             .field("method", .string, .required)
             .field("status", .string, .required)
@@ -64,6 +65,8 @@ struct CreateVerifyWP3Schema: AsyncMigration {
             .field("ref_hash", .string, .required)
             .field("outcome", .string, .required)
             .field("payload", .string)
+            .field("encrypted_payload", .string)
+            .field("encrypted_kid", .string)
             .field("provenance", .string)
             .field("created_at", .datetime, .required)
             .field("expires_at", .datetime, .required)

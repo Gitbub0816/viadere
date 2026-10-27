@@ -25,6 +25,10 @@ public actor MockVerifyAPI: VerifyAPI {
     public func setWalletOutcome(_ outcome: VerificationAttemptOutcome) { walletOutcome = outcome }
     public func setDocumentOutcome(_ outcome: VerificationAttemptOutcome) { documentOutcome = outcome }
     public func setFailure(_ error: APIError?) { failNext = error }
+    public func setServerMethods(wallet: Bool, document: Bool) {
+        walletAvailableOnServer = wallet
+        documentAvailableOnServer = document
+    }
 
     private func check() throws {
         if let error = failNext {

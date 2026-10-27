@@ -1063,4 +1063,129 @@ final class VerifyFlowTests: XCTestCase {
         stale.validUntil = now
         XCTAssertNil(ClaimsBuilder.build(capability: .ageMinimum, parameters: ["years": .integer(21)], claims: stale, audience: BusinessID(), now: now))
     }
+
+    // MARK: End-to-end encrypted identity attributes (acceptance 4)
+
+    func testIdentityAttributesAreSealedToTheBusinessKeyThePublishedInTheDirectory() async throws {
+        try await withVerify { h, fake in
+            let r = try await rig(h, fake)
+            let keys = try await h.publishDirectory(r.b, hpke: true, signing: false)
+            let id = try await createdID(r, capability: .identityName)
+            try await consent(r, id)
+            let names: [String: [(String, CBORValue)]] = [WalletElementPlan.isoNamespace: [("given_name", .text("Jane")), ("family_name", .text("Doe"))]]
+            try await eq(try attemptOutcome(try await wallet(r, id, elements: names).result).status, .released)
+            // At rest, Viadere holds no readable name: the clear payload has only the non-personal fields and the names are ciphertext.
+            let row = try await unwrap(VerificationResultRecord.query(on: h.db).first())
+            let clear = try ViadereJSON.decode(JSONValue.self, from: try h.ctx.cipher.open(try XCTUnwrap(row.payload), context: "verification_results.payload", rowId: row.id!))
+            XCTAssertEqual(Set(try XCTUnwrap(clear.objectValue).keys), ["assurance", "issued_at", "expires_at", "audience"])
+            XCTAssertFalse(try XCTUnwrap(row.encryptedPayload).contains("Jane"))
+            XCTAssertEqual(row.encryptedKid, keys.hpke.publicKey.kid)
+            try await assertNoEvidence(h)
+            // The business retrieves the envelope and opens it with its own key.
+            let ref = try await unwrap(resource(r, id).resultRef)
+            let fetched = try await result(r, ref).json(VerificationResult.self)
+            XCTAssertNil(fetched.result["given_name"])
+            XCTAssertEqual(fetched.encryptedResultKid, keys.hpke.publicKey.kid)
+            let envelope = try E2EEEnvelope.parse(try XCTUnwrap(Base64URL.decode(try XCTUnwrap(fetched.encryptedResult))))
+            let opened = try E2EE.open(envelope, using: keys.hpke, expecting: E2EEExpectation(purpose: VerificationResult.e2eePurpose, requestId: id.description,
+                                                                                            sender: VerificationResult.e2eeSender, recipient: VerificationResult.e2eeRecipient(r.b.id)), now: h.clock.now())
+            let sensitive = try XCTUnwrap(try ViadereJSON.decode(JSONValue.self, from: opened).objectValue)
+            XCTAssertEqual(sensitive["given_name"], .string("Jane"))
+            XCTAssertEqual(sensitive["family_name"], .string("Doe"))
+            XCTAssertEqual(CapabilityCatalog.definition(for: .identityName)!.violations(in: fetched.result), [])
+            // Another business's key (or another request) cannot open it.
+            XCTAssertThrowsError(try E2EE.open(envelope, using: SoftwareE2EEPrivateKey(), expecting: E2EEExpectation(purpose: VerificationResult.e2eePurpose), now: h.clock.now()))
+            XCTAssertThrowsError(try E2EE.open(envelope, using: keys.hpke, expecting: E2EEExpectation(purpose: VerificationResult.e2eePurpose, requestId: VerificationRequestID().description), now: h.clock.now()))
+            // After the one retrieval both parts are erased.
+            let after = try await unwrap(VerificationResultRecord.query(on: h.db).first())
+            XCTAssertNil(after.payload)
+            XCTAssertNil(after.encryptedPayload)
+            try await assertNoEvidence(h)
+            try await eq(try await result(r, ref).status, .gone)
+        }
+    }
+
+    func testWithoutAPublishedKeyIdentityIsAuthenticatedRetrievalAndCanBeRequiredToBeEncrypted() async throws {
+        try await withVerify { h, fake in
+            let r = try await rig(h, fake)
+            let id = try await createdID(r, capability: .identityName)
+            try await consent(r, id)
+            _ = try await wallet(r, id, elements: [WalletElementPlan.isoNamespace: [("given_name", .text("Jane")), ("family_name", .text("Doe"))]])
+            let fetched = try await result(r, try await unwrap(resource(r, id).resultRef)).json(VerificationResult.self)
+            XCTAssertEqual(fetched.result["given_name"], .string("Jane"))
+            XCTAssertNil(fetched.encryptedResult)
+        }
+        try await withHarness({ config in
+            config.verify.enabled = true
+            config.verify.requireEncryptedIdentity = true
+        }) { h in
+            let r = try await rig(h, FakeDidit())
+            // Identity attributes are refused until the business has a published encryption key; an age threshold needs none.
+            let refused = try await create(r, capability: .identityName)
+            XCTAssertEqual(refused.status, .unprocessableEntity, refused.text)
+            try await eq(try await create(r).status, .created)
+            _ = try await h.publishDirectory(r.b, hpke: true, signing: false)
+            try await eq(try await create(r, capability: .identityName).status, .created)
+        }
+    }
+
+    // MARK: Dashboard card (counts by outcome only)
+
+    func testTheDashboardShowsCountsByOutcomeAndNothingElse() async throws {
+        try await withVerify { h, fake in
+            let owner = try await h.verifiedOwner(email: "verify-owner@example.com", org: "Spirits Co", handle: "spiritsco")
+            try await h.entitle(owner.businessId, Self.verifyCapabilities)
+            let b = try await h.testBusiness(owner.businessId)
+            let key = try await BusinessAPIKeys.issue(businessId: owner.businessId, name: "v", live: true, scopes: BusinessAPIKeys.Scope.all, capabilities: Capability.operational + Self.verifyCapabilities, now: h.clock.now(), on: h.db).key
+            let consumer = try await h.readyConsumer()
+            let relationship = try await h.connect(consumer, to: b)
+            let hook = try await h.businessPost(b, "/v1/business/webhooks", CreateWebhookRequest(url: URL(string: "https://hooks.example.com/v")!, events: [.verificationCompleted]), key: key)
+            let rig = Rig(h: h, b: TestBusiness(record: b.record, key: key, summary: b.summary), consumer: consumer, relationship: relationship,
+                          ref: try await subjectRef(h, relationship), didit: fake, hook: try hook.json(WebhookSecretResponse.self).subscription.id.uuid, hookSecret: "")
+            let a = try await createdID(rig), declined = try await createdID(rig), pending = try await createdID(rig)
+            try await consent(rig, a)
+            try await eq(try attemptOutcome(try await wallet(rig, a, elements: ageOver(21), flaws: .init()).result).status, .released)
+            try await eq(try await h.signedPost(consumer, "/v1/verifications/\(declined)/decline", EmptyBody()).status, .ok)
+            _ = pending
+            let counts = try await VerifyDashboard.counts(db: h.db, ctx: h.ctx, businessId: owner.businessId, days: 30)
+            XCTAssertEqual(counts.map(\.capability), [.ageMinimum])
+            XCTAssertEqual(counts.first?.counts, VerifyDashboard.Counts(verified: 1, notVerified: 1, pending: 1))
+            let page = try await h.page("/dashboard", owner.session).text
+            XCTAssertTrue(page.contains("Verify"), "the entitled business sees the card")
+            XCTAssertTrue(page.contains(">3</div><div class=\"l\">Verification requests"), page)
+            XCTAssertTrue(page.contains(">1</div><div class=\"l\">Verified"))
+            // Counts only: no reference, no id, no purpose of any customer.
+            for secret in [rig.ref.rawValue, a.description, consumer.id.description, "age_restricted_access"] { XCTAssertFalse(page.contains(secret), secret) }
+        }
+        try await withVerify { h, _ in
+            let owner = try await h.verifiedOwner(email: "plain-owner@example.com", org: "Plain Co", handle: "plainco")
+            let page = try await h.page("/dashboard", owner.session).text
+            XCTAssertFalse(page.contains("Verification requests"), "no Verify capability, no Verify card")
+        }
+    }
+
+    // MARK: Account deletion
+
+    func testAccountDeletionRemovesVerificationDataAndStillPurgesTheProvider() async throws {
+        try await withVerify { h, fake in
+            let r = try await rig(h, fake)
+            let done = try await createdID(r)
+            try await consent(r, done)
+            _ = try await wallet(r, done, elements: ageOver(21))
+            let open = try await createdID(r, years: 18)
+            try await consent(r, open)
+            let (_, session) = try await beginDocument(r, open)
+            try await eq(try await h.signed(r.consumer, .DELETE, "/v1/account").status, .ok)
+            try await eq(try await VerificationRequestRecord.query(on: h.db).count(), 0)
+            try await eq(try await VerificationResultRecord.query(on: h.db).count(), 0)
+            // The open provider session survives only as an opaque attempt that still has to be deleted at the provider.
+            let attempts = try await VerificationAttemptRecord.query(on: h.db).all()
+            XCTAssertEqual(attempts.count, 1)
+            XCTAssertEqual(attempts.first?.providerSessionId, session)
+            try await h.runJobs()
+            XCTAssertEqual(fake.deleted.map(\.session), [session])
+            try await h.runJobs()
+            try await eq(try await VerificationAttemptRecord.query(on: h.db).count(), 0)
+        }
+    }
 }

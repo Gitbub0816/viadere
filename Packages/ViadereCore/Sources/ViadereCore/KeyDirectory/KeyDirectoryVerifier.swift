@@ -207,7 +207,8 @@ public struct KeyDirectoryVerifier: Sendable {
         return VerifiedDirectory(head: head, state: state)
     }
 
-    static func hash(_ hex: String) throws -> Data {
+    /// A 32-byte hash from its lowercase hex wire form.
+    public static func hash(_ hex: String) throws -> Data {
         guard hex.utf8.count == 64, let data = Hex.decode(hex) else { throw KeyDirectoryError.malformed("hash") }
         return data
     }

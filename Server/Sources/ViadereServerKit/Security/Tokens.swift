@@ -264,6 +264,8 @@ struct DeviceLifecycle {
         try await DeviceRecord.query(on: db).filter(\.$id ~~ deviceIds).filter(\.$revokedAt == nil).set(\.$revokedAt, to: now).update()
         try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).delete()
         try await LiveActivityTokenRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).delete()
+        // Approval keys live and die with their device: a lost, replaced or expired device leaves no usable key behind (acceptance 7).
+        try await ApproveKeyService(db: db, ctx: ctx).revokeKeys(where: .devices(deviceIds), reason: "device_revoked")
         guard cascadeToFamilies else { return }
         var familyIds = Set(try await TokenFamilyRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).filter(\.$revokedAt == nil).all().compactMap(\.id))
         for device in try await DeviceRecord.query(on: db).filter(\.$id ~~ deviceIds).all() {

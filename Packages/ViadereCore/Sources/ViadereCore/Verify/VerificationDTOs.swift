@@ -133,8 +133,14 @@ public enum VerificationOutcome: String, Sendable, Codable, Hashable, CaseIterab
     case notVerified = "not_verified"
 }
 
-/// `GET /v1/verification-results/{result_ref}`: single use, audience-bound, expiring (AGE-004). `result` holds exactly the capability's
-/// output fields (acceptance 6) and is empty for `not_verified`.
+/// `GET /v1/verification-results/{result_ref}`: single use, audience-bound, expiring (AGE-004). `result` holds the capability's output
+/// fields (acceptance 6) and is empty for `not_verified`.
+///
+/// **End-to-end encrypted identity attributes.** When the business has published an `hpke-encryption` key in the authenticated key
+/// directory, the personal-data fields of `identity.name` / `identity.address` are not in `result`: they are in `encrypted_result`, an
+/// `E2EEEnvelope` (RFC 9180 HPKE, purpose `verify.result`, bound to this request, to Viadere as sender and to the business as recipient)
+/// that only the business's private key opens, so a database compromise at Viadere reveals none of them. `result` then carries the
+/// non-personal fields (assurance, validity, audience) and `encrypted_result_kid` names the key.
 public struct VerificationResult: Codable, Sendable, Hashable {
     public var resultRef: VerificationResultRef
     public var requestId: VerificationRequestID
@@ -144,9 +150,13 @@ public struct VerificationResult: Codable, Sendable, Hashable {
     public var createdAt: Date
     public var outcome: VerificationOutcome
     public var result: [String: JSONValue]
+    /// Base64url `E2EEEnvelope` holding the personal-data fields, when the business has a published encryption key.
+    public var encryptedResult: String?
+    public var encryptedResultKid: String?
 
     public init(resultRef: VerificationResultRef, requestId: VerificationRequestID, capability: Capability, subjectRef: SubjectRef,
-                parameters: [String: JSONValue], createdAt: Date, outcome: VerificationOutcome, result: [String: JSONValue]) {
+                parameters: [String: JSONValue], createdAt: Date, outcome: VerificationOutcome, result: [String: JSONValue],
+                encryptedResult: String? = nil, encryptedResultKid: String? = nil) {
         self.resultRef = resultRef
         self.requestId = requestId
         self.capability = capability
@@ -155,14 +165,23 @@ public struct VerificationResult: Codable, Sendable, Hashable {
         self.createdAt = createdAt
         self.outcome = outcome
         self.result = result
+        self.encryptedResult = encryptedResult
+        self.encryptedResultKid = encryptedResultKid
     }
 
     enum CodingKeys: String, CodingKey {
-        case resultRef = "result_ref", requestId = "request_id", capability, subjectRef = "subject_ref", parameters, createdAt = "created_at", outcome, result
+        case resultRef = "result_ref", requestId = "request_id", capability, subjectRef = "subject_ref", parameters, createdAt = "created_at", outcome, result,
+             encryptedResult = "encrypted_result", encryptedResultKid = "encrypted_result_kid"
     }
 
-    /// The top-level members of a result response: the shared envelope (`CapabilityCatalog.resultEnvelopeFields`) plus the reference and the outcome.
-    public static let topLevelFields: Set<String> = Set(CapabilityCatalog.resultEnvelopeFields).union(["result_ref", "outcome", "result"])
+    /// The top-level members of a result response: the shared envelope (`CapabilityCatalog.resultEnvelopeFields`) plus the reference, the
+    /// outcome and the optional encrypted part.
+    public static let topLevelFields: Set<String> = Set(CapabilityCatalog.resultEnvelopeFields).union(["result_ref", "outcome", "result", "encrypted_result", "encrypted_result_kid"])
+
+    /// The E2EE purpose and the sender name of an encrypted result.
+    public static let e2eePurpose = "verify.result"
+    public static let e2eeSender = "viadere"
+    public static func e2eeRecipient(_ businessId: BusinessID) -> String { "biz_" + businessId.description }
 }
 
 /// Data of the `verification.completed` webhook. Opaque: it names the request and the result and nothing else (spec §14.3). The result

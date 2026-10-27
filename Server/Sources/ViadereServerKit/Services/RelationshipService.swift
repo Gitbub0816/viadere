@@ -172,6 +172,8 @@ struct RelationshipService {
             }
             try await ConversationSessionRecord.query(on: tx).filter(\.$relationshipId == record.id!).filter(\.$state != "closed")
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
+            // Disconnecting ends the business's ability to ask for approvals: its keys for this relationship are revoked and the requests stop.
+            try await ApproveKeyService(db: tx, ctx: ctx).revokeKeys(where: .relationship(record.id!), reason: "disconnected")
             try await WebhookService(db: tx, ctx: ctx).enqueue(.relationshipDisconnected, businessId: businessId,
                 payload: RelationshipEventPayload(relationshipId: relationshipId, subjectRef: ctx.subjects.subjectRef(businessId: businessId, consumerId: consumer),
                                                        source: nil, occurredAt: now))

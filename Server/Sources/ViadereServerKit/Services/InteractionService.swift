@@ -220,7 +220,8 @@ struct InteractionService {
         record.status = InteractionStatus.cancelled.rawValue
         record.outcomeJSON = String(decoding: try ViadereJSON.encode(outcome), as: UTF8.self)
         try await InteractionRecord.query(on: db).filter(\.$id == record.id!).set(\.$outcomeJSON, to: record.outcomeJSON).update()
-        if notify { try await WebhookService(db: db, ctx: ctx).enqueue(.interactionCancelled, businessId: outcome.businessId, payload: outcome) }
+        if notify { try await WebhookService(db: db, ctx: ctx).enqueue(.interactionCancelled, businessId: outcome.businessId, payload: outcome,
+                                                                                     opaque: OpaqueWebhookEvent(requestId: outcome.interactionId.description, resultRef: nil)) }
         _ = try await AuditService(db: db, ctx: ctx).record("interaction.cancelled", actor: AuditActor(kind: .system),
             consumerId: ConsumerID(record.consumerId), businessId: outcome.businessId, subjectType: "interaction",
             subjectId: outcome.interactionId.description)
@@ -241,7 +242,8 @@ struct InteractionService {
         record.expiryNotified = true
         try await InteractionRecord.query(on: db).filter(\.$id == record.id!).set(\.$outcomeJSON, to: record.outcomeJSON)
             .set(\.$expiryNotified, to: true).update()
-        try await WebhookService(db: db, ctx: ctx).enqueue(.interactionExpired, businessId: outcome.businessId, payload: outcome)
+        try await WebhookService(db: db, ctx: ctx).enqueue(.interactionExpired, businessId: outcome.businessId, payload: outcome,
+                                                           opaque: OpaqueWebhookEvent(requestId: outcome.interactionId.description, resultRef: nil))
         return true
     }
 
@@ -444,7 +446,8 @@ struct InteractionService {
             try await decision.create(on: tx)
             try await InteractionChallengeRecord.query(on: tx).filter(\.$interactionId == id.uuid)
                 .set(\.$consumedAt, to: now).set(\.$consumedByDevice, to: deviceId.uuid).update()
-            try await WebhookService(db: tx, ctx: ctx).enqueue(.interactionDecided, businessId: outcome.businessId, payload: businessOutcome)
+            try await WebhookService(db: tx, ctx: ctx).enqueue(.interactionDecided, businessId: outcome.businessId, payload: businessOutcome,
+                                                                opaque: OpaqueWebhookEvent(requestId: outcome.interactionId.description, resultRef: businessOutcome.verification?.evidenceRef))
             let auditService = AuditService(db: tx, ctx: ctx)
             _ = try await auditService.record("interaction.decided", principal: principal, businessId: outcome.businessId,
                 subjectType: "interaction", subjectId: id.description,

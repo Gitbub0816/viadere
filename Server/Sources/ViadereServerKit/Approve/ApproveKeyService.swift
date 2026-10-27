@@ -43,11 +43,39 @@ struct ApproveKeyService {
 
     // MARK: Revocation
 
+    enum Target {
+        case devices([UUID])
+        case relationship(UUID)
+        case consumer(UUID)
+    }
+
+    /// Revokes (by the system) every live key a lifecycle event ends: a device that was revoked or expired, a relationship that was
+    /// disconnected, an account that was deleted. The business is told with an opaque event, as for any revocation.
+    func revokeKeys(where target: Target, reason: String, notify: Bool = true) async throws {
+        var query = ApproveKeyRecord.query(on: db).filter(\.$status != ApprovalKeyStatus.revoked.rawValue)
+        switch target {
+        case .devices(let ids): query = query.filter(\.$deviceId ~~ ids)
+        case .relationship(let id): query = query.filter(\.$relationshipId == id)
+        case .consumer(let id): query = query.filter(\.$consumerId == id)
+        }
+        for key in try await query.all() {
+            try await revoke(key, by: .system, reason: reason, actor: AuditActor(kind: .system), notify: notify)
+        }
+    }
+
+    /// Account deletion: keys revoked, and the relay forgets the displayed details, nonces, ciphertext and freezes of the person.
+    static func wipe(consumer: UUID, on db: any Database, ctx: ServerContext) async throws {
+        try await ApproveKeyService(db: db, ctx: ctx).revokeKeys(where: .consumer(consumer), reason: "account_deleted", notify: false)
+        try await ApproveRequestRecord.query(on: db).filter(\.$consumerId == consumer).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
+        try await ApproveDeliveryRecord.query(on: db).filter(\.$consumerId == consumer).delete()
+        try await ApproveFreezeRecord.query(on: db).filter(\.$consumerId == consumer).delete()
+    }
+
     enum Revoker: String { case consumer, business, system }
 
     /// Revokes one key. Pending deliveries to it stop working at once (every read and every decision checks the key's status).
     @discardableResult
-    func revoke(_ key: ApproveKeyRecord, by revoker: Revoker, reason: String?, actor: AuditActor, except device: UUID? = nil) async throws -> ApproveKeyRecord {
+    func revoke(_ key: ApproveKeyRecord, by revoker: Revoker, reason: String?, actor: AuditActor, except device: UUID? = nil, notify: Bool = true) async throws -> ApproveKeyRecord {
         guard key.statusValue != .revoked else { return key }
         let now = ctx.now
         let swapped = try await DB.swap(db, table: ApproveKeyRecord.schema, id: key.id!, column: "status", expected: key.status, newValue: ApprovalKeyStatus.revoked.rawValue,
@@ -70,7 +98,7 @@ struct ApproveKeyService {
             if !alive { _ = try await ApproveRequestService(db: db, ctx: ctx).finish(request, status: .cancelled, reason: "key_revoked", notify: true) }
         }
         try await ApproveWebhooks(db: db, ctx: ctx).keyRevoked(fresh)
-        await ApproveNotifier(db: db, ctx: ctx).notice(.approvalKeyRevoked, consumerId: fresh.consumerId, except: revoker == .consumer ? device : nil, subjectId: fresh.kid)
+        if notify { await ApproveNotifier(db: db, ctx: ctx).notice(.approvalKeyRevoked, consumerId: fresh.consumerId, except: revoker == .consumer ? device : nil, subjectId: fresh.kid) }
         return fresh
     }
 }

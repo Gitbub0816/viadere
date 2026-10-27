@@ -69,6 +69,10 @@ struct VerifyService {
                                       details: ["expires_in_seconds": "invalid"])
         }
         let callbackId = try await resolveCallback(body.callbackId, principal: principal)
+        if settings.requireEncryptedIdentity, !(capability.definition?.output.personalDataFields.isEmpty ?? true),
+           try await encryptionKey(for: principal.businessId.uuid) == nil {
+            throw APIError.validation("Publish an hpke-encryption key in the key directory to receive identity attributes.", details: ["encryption_key": "required"])
+        }
 
         // 3. Idempotency (the same key and body return the same request; the same key with another body is a conflict).
         let idemHash = ctx.hasher.hmacHex("verify-idempotency", "\(principal.businessId)\n\(idempotencyKey)")
@@ -130,6 +134,12 @@ struct VerifyService {
         return id
     }
 
+    /// The business's current `hpke-encryption` key from the authenticated key directory, if it has published one.
+    func encryptionKey(for businessId: UUID) async throws -> E2EEPublicKey? {
+        let state = try await KeyLogService(db: db, ctx: ctx).state(for: businessId)
+        return state.validKeys(for: .hpkeEncryption, at: ctx.now).first?.encryptionKey
+    }
+
     func resource(_ record: VerificationRequestRecord) throws -> VerificationRequestResource {
         guard let ref = SubjectRef(record.subjectRef) else { throw APIError.internalError }
         let done = record.resultId != nil && !record.consumerStatus.isOpen
@@ -151,7 +161,7 @@ struct VerifyService {
     func request(principal: BusinessPrincipal, id: VerificationRequestID) async throws -> VerificationRequestResource {
         guard let record = try await VerificationRequestRecord.query(on: db).filter(\.$id == id.uuid)
             .filter(\.$businessId == principal.businessId.uuid).filter(\.$livemode == principal.livemode).first() else { throw APIError.notFound }
-        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(record.capabilityValue), principal: principal, auditAllowed: false)
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(record.capabilityValue, parameters: record.parameterValues, purpose: record.purpose), principal: principal, auditAllowed: false)
         // A request past its expiry that nobody finished is finished now, so the business never waits on the sweeper.
         if record.consumerStatus.isOpen, ctx.now >= record.expiresAt { try await close(record, status: .expired, reason: "expired") }
         let fresh = try await VerificationRequestRecord.find(record.id, on: db) ?? record
@@ -166,7 +176,7 @@ struct VerifyService {
         guard let row = try await VerificationResultRecord.query(on: db).filter(\.$refHash == hash).filter(\.$businessId == principal.businessId.uuid).first(),
               let request = try await VerificationRequestRecord.find(row.requestId, on: db), request.livemode == principal.livemode else { throw APIError.notFound }
         let capability = request.capabilityValue
-        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(capability), principal: principal, auditAllowed: false)
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(capability, parameters: request.parameterValues, purpose: request.purpose), principal: principal, auditAllowed: false)
         try await limit("verify-result", key: principal.businessId.description, rule: .perMinute(120, burst: 60))
         let now = ctx.now
         guard row.retrievedAt == nil, now < row.expiresAt else { throw APIError.gone("This result was already retrieved or has expired.") }
@@ -194,8 +204,13 @@ struct VerifyService {
         _ = try? await AuditService(db: db, ctx: ctx).record("verification.result_retrieved", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
             businessId: principal.businessId, subjectType: "verification_request", subjectId: request.requestID.description,
             metadata: ["capability": capability.rawValue, "outcome": outcome.rawValue])
+        let encrypted = row.encryptedPayload
+        let encryptedKid = row.encryptedKid
+        row.encryptedPayload = nil
+        row.encryptedKid = nil
+        try await row.update(on: db)
         return VerificationResult(resultRef: ref, requestId: request.requestID, capability: capability, subjectRef: subjectRef, parameters: request.parameterValues,
-                                  createdAt: row.createdAt, outcome: outcome, result: values)
+                                  createdAt: row.createdAt, outcome: outcome, result: values, encryptedResult: encrypted, encryptedResultKid: encryptedKid)
     }
 
     // MARK: Consumer: read
@@ -331,7 +346,20 @@ struct VerifyService {
         let row = VerificationResultRecord(id: resultId, requestId: record.id!, businessId: record.businessId, refHash: SecureToken.sha256Hex(Data(ref.rawValue.utf8)),
                                            outcome: outcome, now: now, expiresAt: validity)
         if let built {
-            row.payload = try ctx.cipher.seal(try CanonicalJSON.serialize(.object(built.values)), context: "verification_results.payload", rowId: resultId)
+            var clear = built.values
+            // Identity attributes are sealed to the business's published HPKE key when it has one: the database then holds ciphertext that
+            // Viadere cannot open (the relay-compromise property of acceptance 4). The non-personal fields stay readable.
+            let personal = Set(record.capabilityValue.definition?.output.personalDataFields ?? [])
+            if !personal.isEmpty, let key = try await encryptionKey(for: record.businessId) {
+                var sensitive: [String: JSONValue] = [:]
+                for name in personal { sensitive[name] = clear.removeValue(forKey: name) }
+                let context = E2EEContext(purpose: VerificationResult.e2eePurpose, requestId: record.requestID.description, sender: VerificationResult.e2eeSender,
+                                          recipient: VerificationResult.e2eeRecipient(BusinessID(record.businessId)), expiresAt: validity)
+                let envelope = try E2EE.seal(try CanonicalJSON.serialize(.object(sensitive)), to: key, context: context)
+                row.encryptedPayload = Base64URL.encode(try envelope.serialized())
+                row.encryptedKid = key.kid
+            }
+            row.payload = try ctx.cipher.seal(try CanonicalJSON.serialize(.object(clear)), context: "verification_results.payload", rowId: resultId)
             row.provenance = String(decoding: try ViadereJSON.encode(built.provenance), as: UTF8.self)
         }
         try await db.transaction { tx in
@@ -359,6 +387,11 @@ struct VerifyService {
     /// missing attribute). Releases the disclosure only through `PolicyService.authorizeDisclosure`, which consumes the receipt.
     func conclude(_ record: VerificationRequestRecord, claims: EvidenceClaims?, source: String) async throws -> VerificationAttemptOutcome {
         let now = ctx.now
+        // The release gate is also a kill switch: with Verify switched off nothing is disclosed, even for a request already in flight.
+        guard settings.enabled else {
+            if record.consumerStatus.isOpen { try await close(record, status: .notVerified, reason: "verify_disabled") }
+            return outcome(try await VerificationRequestRecord.find(record.id, on: db) ?? record)
+        }
         guard record.consumerStatus == .consented, now < record.expiresAt else {
             if record.consumerStatus.isOpen { try await close(record, status: .expired, reason: "expired") }
             return outcome(try await VerificationRequestRecord.find(record.id, on: db) ?? record)

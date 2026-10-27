@@ -250,6 +250,8 @@ struct ApproveRequestService {
                                         newValue: status.rawValue)
         guard swapped else { return false }
         if let reason { try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$reason, to: reason).update() }
+        // The relay keeps nothing it does not need: the displayed details and the nonce go as soon as the request is over.
+        try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
         record.status = status.rawValue
         record.reason = reason
         _ = try await AuditService(db: db, ctx: ctx).record("approve.request_\(status.rawValue)", actor: AuditActor(kind: .system), consumerId: ConsumerID(record.consumerId),
@@ -265,6 +267,11 @@ struct ApproveRequestService {
         let overdue = try await ApproveRequestRecord.query(on: db).filter(\.$status == ApprovalRequestStatus.pending.rawValue).filter(\.$expiresAt <= now).limit(limit).all()
         var count = 0
         for record in overdue where try await finish(record, status: .expired, reason: nil, notify: true) { count += 1 }
+        // Requests are kept for the capability's maximum result retention (400 days), then purged with their deliveries.
+        let cutoff = now.addingTimeInterval(-400 * 86_400)
+        if try await ApproveRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status != ApprovalRequestStatus.pending.rawValue).count() > 0 {
+            try await ApproveRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status != ApprovalRequestStatus.pending.rawValue).delete()
+        }
         // Enrollments the customer never completed.
         try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now)
             .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
@@ -405,6 +412,7 @@ struct ApproveRequestService {
                                             newValue: status.rawValue, extra: [("decided_at", now), ("decided_kid", key.kid), ("decision", decision.rawValue),
                                                                                ("amr", verified.claims.amr.rawValue), ("result_ref", resultRef), ("result_jws", body.result)])
             guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
+            try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
             guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
             try await ApproveWebhooks(db: tx, ctx: ctx).requestDecided(decided)
             let auditService = AuditService(db: tx, ctx: ctx)

@@ -142,6 +142,11 @@ public final class SecurityNoticesViewModel {
         case .vaultDeviceAdded: return "A device was added to your synced credential vault \(when)."
         case .vaultDeviceRemoved: return "A device was removed from your synced credential vault \(when)."
         case .vaultDeleted: return "Your synced credential vault was deleted from Viadere's servers \(when)."
+        case .approvalKeyEnrolled: return "A business can now ask you to approve requests with a new approval key (\(when))."
+        case .approvalKeyRevoked: return "An approval key was removed \(when)."
+        case .approvalsFrozen: return "Approvals were frozen \(when)."
+        case .approvalsUnfrozen: return "Approvals were unfrozen \(when)."
+        case .approvalRequestsPaused: return "A business sent you several approval requests, so Viadere paused it \(when)."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
@@ -160,6 +165,9 @@ public final class SecurityNoticesViewModel {
         case .recoveryCompleted: return "Confirm your phone numbers from a device you trust, and share access again if you want to."
         case .delegationEnded: return "Ask them to invite you again if you still want to share."
         case .vaultDeviceAdded: return "Not you? Open Authenticator, remove the device and change the passwords and passkeys stored there."
+        case .approvalKeyEnrolled: return "Not you? Open Approvals, remove the key and freeze approvals."
+        case .approvalsUnfrozen: return "Not you? Open Approvals and freeze them again."
+        case .approvalRequestsPaused: return "Don't recognize it? Open Approvals and report the business."
         default: return Self.prompt
         }
     }

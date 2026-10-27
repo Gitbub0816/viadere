@@ -185,3 +185,38 @@ func anil<T>(_ value: T?, _ message: String = "", file: StaticString = #filePath
 func unwrap<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) throws -> T {
     try XCTUnwrap(value, file: file, line: line)
 }
+func agt<T: Comparable>(_ lhs: T, _ rhs: T, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) { XCTAssertGreaterThan(lhs, rhs, message, file: file, line: line) }
+
+/// An independent log with its own key: what a malicious relay would serve in place of the real one.
+final class TestLog {
+    let key = SoftwareP256SigningKey()
+    var tree = MerkleTree()
+    var entries: [(entry: KeyLogEntry, bytes: Data)] = []
+    let now: Date
+
+    init(now: Date) { self.now = now }
+
+    var verifier: KeyDirectoryVerifier { KeyDirectoryVerifier(logKeys: [key.publicKey]) }
+
+    func append(_ entry: KeyLogEntry) throws {
+        let bytes = try entry.leafData()
+        entries.append((entry, bytes))
+        tree.append(leafData: bytes)
+    }
+
+    func response(for business: BusinessID) async throws -> KeyDirectoryResponse {
+        let head = try await SignedTreeHead.sign(TreeHead(treeSize: tree.size, rootHash: tree.root(), timestamp: now), with: key)
+        let items = entries.enumerated().filter { $0.element.entry.businessId == business }.map { index, item in
+            KeyLogEntryProof(index: index, entry: Base64URL.encode(item.bytes), inclusionProof: tree.inclusionProof(index: index, size: tree.size)!.map(Hex.encode))
+        }
+        return KeyDirectoryResponse(sth: head, entries: items)
+    }
+}
+
+func assertDirectoryError(_ expected: KeyDirectoryError, _ verifier: KeyDirectoryVerifier, _ response: KeyDirectoryResponse, business: BusinessID,
+                          lastSeen: SeenTreeHead?, now: Date, file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertThrowsError(try verifier.verify(response, businessId: business, lastSeen: lastSeen, now: now), file: file, line: line) {
+        XCTAssertEqual($0 as? KeyDirectoryError, expected, file: file, line: line)
+    }
+}
+func anotnil<T>(_ value: T?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) { XCTAssertNotNil(value, message, file: file, line: line) }

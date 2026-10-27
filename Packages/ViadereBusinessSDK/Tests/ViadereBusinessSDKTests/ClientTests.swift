@@ -111,7 +111,11 @@ struct ClientTests {
                                     "business.rewards.issue", "business.rewards.list", "business.rewards.revoke", "business.loyalty.program.get",
                                     "business.loyalty.program.put", "business.loyalty.points", "business.redemptions.consume",
                                     "business.sandbox.relationships.create", "business.capabilities.get",
-                                    "business.verification.requests.create", "business.verification.requests.get", "business.verification.results.get"]
+                                    "business.verification.requests.create", "business.verification.requests.get", "business.verification.results.get",
+                                    "business.approve.enrollments.create", "business.approve.enrollments.get", "business.approve.enrollments.confirm", "business.approve.enrollments.cancel",
+                                    "business.approve.keys.list", "business.approve.keys.revoke", "business.approve.requests.create", "business.approve.requests.get",
+                                    "business.approve.requests.cancel", "business.approve.results.get", "business.approve.freeze",
+                                    "business.keyDirectory.publish", "business.keyDirectory.entries"]
         #expect(Set(business).subtracting(covered).isEmpty)
     }
 

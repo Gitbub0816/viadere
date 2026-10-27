@@ -123,6 +123,9 @@ final class VerificationResultRecord: Model, @unchecked Sendable {
     @Field(key: "ref_hash") var refHash: String
     @Field(key: "outcome") var outcome: String
     @OptionalField(key: "payload") var payload: String?
+    /// The personal-data fields sealed to the business's published HPKE key (base64url `E2EEEnvelope`); Viadere cannot open it. Erased with the payload.
+    @OptionalField(key: "encrypted_payload") var encryptedPayload: String?
+    @OptionalField(key: "encrypted_kid") var encryptedKid: String?
     @OptionalField(key: "provenance") var provenance: String?
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date

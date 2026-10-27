@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "ViadereBusinessSDK", targets: ["ViadereBusinessSDK"]),
+        .executable(name: "viadere-key-monitor", targets: ["viadere-key-monitor"]),
     ],
     dependencies: [
         .package(path: "../ViadereCore"),
@@ -18,6 +19,13 @@ let package = Package(
         .target(
             name: "ViadereBusinessSDK",
             dependencies: [
+                .product(name: "ViadereCore", package: "ViadereCore"),
+            ]
+        ),
+        .executableTarget(
+            name: "viadere-key-monitor",
+            dependencies: [
+                "ViadereBusinessSDK",
                 .product(name: "ViadereCore", package: "ViadereCore"),
             ]
         ),

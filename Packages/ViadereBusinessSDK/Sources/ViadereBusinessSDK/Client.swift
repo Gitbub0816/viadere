@@ -197,10 +197,10 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
 
     // MARK: Plumbing
 
-    func perform<Body: Encodable>(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], body: Body?, idempotencyKey: String? = nil,
+    func perform<Body: Encodable>(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: Body?, idempotencyKey: String? = nil,
                                   naturallyIdempotent: Bool = false) async throws -> BusinessHTTPResponse {
         let path: String
-        do { path = try endpoint.path(parameters) } catch { throw ViadereSDKError.invalidPath }
+        do { path = try endpoint.path(parameters, query: query) } catch { throw ViadereSDKError.invalidPath }
         guard let url = URL(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else { throw ViadereSDKError.invalidPath }
         var headers = ["Authorization": "Bearer \(apiKey)", "Accept": "application/json", "User-Agent": Self.userAgent]
         var payload: Data?
@@ -217,8 +217,8 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         return try await send(request, retryable: safeToRetry)
     }
 
-    func perform(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], naturallyIdempotent: Bool = false) async throws -> BusinessHTTPResponse {
-        try await perform(endpoint, parameters: parameters, body: Optional<EmptyBody>.none, naturallyIdempotent: naturallyIdempotent)
+    func perform(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], naturallyIdempotent: Bool = false) async throws -> BusinessHTTPResponse {
+        try await perform(endpoint, parameters: parameters, query: query, body: Optional<EmptyBody>.none, naturallyIdempotent: naturallyIdempotent)
     }
 
     private func send(_ request: BusinessHTTPRequest, retryable: Bool) async throws -> BusinessHTTPResponse {
@@ -257,7 +257,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
                                requestId: response.header("X-Request-Id"), details: nil, retryAfter: retryAfter)
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ response: BusinessHTTPResponse) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, _ response: BusinessHTTPResponse) throws -> T {
         do { return try ViadereJSON.decode(type, from: response.body) } catch {
             throw ViadereSDKError.decodingFailed(String(describing: T.self))
         }

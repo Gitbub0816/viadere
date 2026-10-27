@@ -179,6 +179,7 @@ def verify(header: str, raw_body: bytes, secrets: list[str], now: float | None =
 | `relationship.connected` / `.disconnected` | connection changes | `{relationshipId, source?, occurredAt}` |
 | `consent.updated` | a consent changed | `{relationshipId, purpose, granted, occurredAt}` |
 | `reward.redeemed` | you consumed a redemption code | `RedemptionReceipt` (pseudonymous) |
+| `verification.completed` | a verification request ended (any outcome) | `{request_id, result_ref}` only; fetch the result (section 5b) |
 
 The body is `{id, type, createdAt, businessId, apiVersion, data}`. The dashboard delivery log redacts customer-authored text.
 
@@ -282,6 +283,49 @@ the `ticket`, and `confirm`/`choose` actions (for example a `confirm` titled "Ch
 customer's Activity tab shows them as one item. A `status` whose `liveActivity` is set drives a Live Activity when its purpose is `transactional`, `accountService` or
 `support` and you use a live key; marketing, rewards and security statuses never do.
 
+## 5b. Verify: age thresholds and identity attributes
+
+Verify lets a connected customer prove one fact to you: that they meet an age threshold (`age.minimum`) or an identity attribute
+(`identity.name`, `identity.address`, `identity.verified`). It is optional, **off until Viadere enables it for your business**, and
+available only where Viadere has completed legal and privacy validation (spec Phase 3 gate); availability depends on place, device and
+the customer's ID. A result describes the attribute and assurance evaluated. It is not a guarantee of identity or eligibility, it does
+not fulfil KYC/AML, age-assurance or other legal duties by itself, and you decide what to do with it.
+
+**What you need.** The capability on your business (granted after review: age needs risk tier V and a stated purpose; identity
+attributes also need a recorded heightened review) and on the key. A key that only carries messaging capabilities cannot create or read
+verifications (`403 insufficient_scope`). Register a webhook endpoint subscribed to `verification.completed`; its id is your
+`callback_id`.
+
+```swift
+let created = try await client.createVerificationRequest(
+    CreateVerificationRequest(subjectRef: customer, capability: .ageMinimum, parameters: ["years": .integer(21)],
+                              purposeCode: "age_restricted_access", callbackId: webhook.id.description, expiresInSeconds: 180),
+    idempotencyKey: IdempotencyKey.deterministic(namespace: "age", [orderId]))
+```
+
+1. **Create** (`POST /v1/verification-requests`, idempotent). The customer is notified. They see your verified name, the purpose, exactly
+   what will be shared, that only you receive it, and when the request expires, and they consent to that. They can verify with an ID in
+   Apple Wallet or by scanning an ID document, and can decline.
+2. **Wait for `verification.completed`** at your registered endpoint, or poll `GET /v1/verification-requests/{request_id}`. The webhook is
+   opaque: `{request_id, result_ref}` and nothing else (spec 14.3). It arrives for **every** end.
+3. **Retrieve** with `GET /v1/verification-results/{result_ref}` using your key (`verificationResult(ref:)`). The result is bound to your
+   business and that request, valid for 15 minutes, and **single use**: a second call is `410`. Store what you need.
+
+| `outcome` | Meaning |
+|---|---|
+| `verified` | `result` holds the capability's fields. For `age.minimum`: `meets_threshold: true`, `assurance`, `issued_at`, `expires_at`, `audience`. Never a birthdate, an age, a name or a document number. |
+| `not_verified` | `result` is empty. It does **not** say why: under the threshold, declined, abandoned, expired, unsupported document, a provider outage and withdrawn consent are all the same. Do not try to infer more, and offer the customer another route. |
+
+`assurance` names how it was established (`issuer_signed_credential_device_bound`: an ID in Apple Wallet checked against the issuing
+authority; `document_and_biometric_match`: a scanned document, liveness check and face match by our provider; `sandbox_simulated`: test
+mode). A selfie age estimate is never reported as a verified age. Check `audience` is your business id.
+
+**Test mode.** With a `vdk_test_` key and a sandbox relationship a request completes at once with a simulated result
+(`sandbox_simulated`), so you can build the whole flow without a real customer.
+
+**Things to build in.** Treat `not_verified` as "not proven", not as "underage". Do not retain more than you need, and tell customers what you keep.
+Do not ask a customer to verify repeatedly: Viadere limits open requests per customer, and each request needs the customer's consent.
+
 ## 6. Errors
 
 Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.
@@ -358,4 +402,5 @@ The files are versioned and immutable (`Cache-Control: public, max-age=31536000,
 - [ ] You never treat an RCS or SMS reply as approval of a sensitive action.
 - [ ] Customer-authored text (`message.received`) is handled as untrusted input.
 - [ ] Redemption codes are validated server-side with `consumeRedemption` (never trusted from the app) and `409`/`410` mean "do not hand over the reward".
+- [ ] If you use Verify: you handle `not_verified` without inferring why, retrieve each result exactly once and store only what you need, and you have your own legal basis for the age or identity check you run.
 - [ ] You monitor `429`s, your complaint rate and your opt-out rate; you rotate keys and webhook secrets on a schedule (rotation keeps the old secret valid for 24 hours).

@@ -145,7 +145,7 @@ struct VerifyTests {
     }
 
     @Test func resultTopLevelFieldsAreTheEnvelopePlusReferenceAndOutcome() {
-        #expect(VerificationResult.topLevelFields == Set(CapabilityCatalog.resultEnvelopeFields).union(["result_ref", "outcome", "result"]))
+        #expect(VerificationResult.topLevelFields == Set(CapabilityCatalog.resultEnvelopeFields).union(["result_ref", "outcome", "result", "encrypted_result", "encrypted_result_kid"]))
         #expect(VerificationOutcome.allCases.count == 2, "no outcome distinguishes underage from unable or unwilling (AGE-005)")
         #expect(BusinessVerificationStatus.allCases.count == 2)
     }

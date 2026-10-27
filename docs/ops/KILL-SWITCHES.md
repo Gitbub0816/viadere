@@ -25,6 +25,7 @@ credential revocation, business suspension, replay-cache enforcement, webhook pa
 | E-15 | **Reject unsafe configuration** | startup | `ENVIRONMENT` required, secrets mandatory and distinct, `seed` refused in staging/production | Prevents misconfiguration, not an incident control |
 | E-16 | **Audit and dispute tooling** | forensic | `ViadereServer audit-head`, `audit-verify [--head file]`, `export-dispute --interaction <id>` | Detection and evidence, see RUNBOOKS.md |
 | E-17 | **Operator enrollment** | operators | `ViadereServer create-operator` creates an operator enrollment link (audited `operator.created`) | Operators are the people who use E-1 to E-3; protect the console and review membership monthly |
+| E-18 | **Stop Verify** (WP3) | whole fleet; per capability or business via WP2 | `VERIFY_ENABLED` unset/`false` (plain `[env]` value, redeploy): every Verify route answers `404` and any request in flight ends `not_verified` with nothing disclosed; provider sessions are still purged. Finer: operator console capability switches for `age.minimum`, `identity.*` (global or one business, immediate within 5 s) deny creation and disclosure; revoking an API key or an entitlement also stops requests already in flight | The Wallet method alone is stopped by removing `WALLET_MERCHANT_ID`; Didit alone by removing `DIDIT_API_KEY` (new sessions refuse, finished ones still purge). Rotate `DIDIT_WEBHOOK_SECRET` if the webhook secret leaks (the previous one overlaps 24 h) |
 
 ## 2. Gaps (what is missing)
 

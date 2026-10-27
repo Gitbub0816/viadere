@@ -19,6 +19,10 @@ public struct WebhookVerifier: Sendable {
     private let tolerance: TimeInterval
     private let clock: @Sendable () -> Date
 
+    var secretList: [String] { secrets }
+    var toleranceValue: TimeInterval { tolerance }
+    func now() -> Date { clock() }
+
     /// - Parameters:
     ///   - secrets: the endpoint's `whsec_…` secret; pass the old one too during a rotation (any match is accepted).
     ///   - tolerance: allowed clock difference in seconds (default 300, the protocol maximum).

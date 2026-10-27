@@ -33,6 +33,11 @@ public struct VerifySettings: Sendable {
     /// How far a webhook's `X-Timestamp` may differ from now.
     public var diditWebhookTolerance: TimeInterval = 300
 
+    /// Refuse `identity.name` / `identity.address` requests from a business that has not published an `hpke-encryption` key in the key
+    /// directory (`VERIFY_REQUIRE_E2EE_IDENTITY`, default off). With it off, a business without a key retrieves identity attributes over its
+    /// authenticated, recipient-bound, single-use API response; with a key, they are always end-to-end encrypted to it.
+    public var requireEncryptedIdentity = false
+
     /// How often the consumer may start verification attempts, and request creation per business.
     public var createRate: RateRule = .perMinute(60, burst: 30)
     public var attemptRate: RateRule = .perMinute(30, burst: 20)
@@ -57,6 +62,7 @@ extension ServerConfig {
         var settings = VerifySettings()
         settings.enabled = env["VERIFY_ENABLED"] == "true"
         settings.gateReference = value("VERIFY_GATE_REFERENCE")
+        settings.requireEncryptedIdentity = env["VERIFY_REQUIRE_E2EE_IDENTITY"] == "true"
         settings.walletMerchantIdentifier = value("WALLET_MERCHANT_ID")
         settings.walletEncryptionKeyPaths = list("WALLET_ENCRYPTION_KEY_PATHS")
         settings.walletEncryptionKeyWrapped = list("WALLET_ENCRYPTION_KEY_WRAPPED")

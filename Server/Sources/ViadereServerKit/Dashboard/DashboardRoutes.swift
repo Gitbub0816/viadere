@@ -375,9 +375,10 @@ enum DashboardRoutes {
              issued.count == 0 ? "—" : DashboardFormat.percent(Double(decided.count) / Double(issued.count))]
         }
         let byKind = "<div class=\"card\"><h2>By kind</h2>\(DashboardFormat.table(["Kind", "Issued", "Decided", "Decision rate"], rows))</div>"
+        let verifyCard = try await VerifyDashboard.card(db: req.db, ctx: req.ctx, businessId: businessId, days: o.days)
         let note = "<p class=\"mu sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>"
         return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "The last \(o.days) days", actions: periods,
-                                        flash: DashboardFormat.flash(req), body: tiles + chart + byKind + note)
+                                        flash: DashboardFormat.flash(req), body: tiles + chart + byKind + verifyCard + note)
     }
 
     // MARK: API keys

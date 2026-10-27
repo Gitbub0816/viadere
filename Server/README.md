@@ -126,6 +126,18 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `RCS_PROVIDER_BASE_URL`, `RCS_PROVIDER_TOKEN`, `RCS_AGENT_ID`, `RCS_WEBHOOK_SECRET` | generic RBM-style RCS provider; **all four or none** (none = RCS off, SMS only). The secret is base64url, ≥ 32 bytes |
 | `FEATURE_APPLE_MESSAGES_FOR_BUSINESS` | defaults `false`; the AMB adapter is a non-functional placeholder even when `true` |
 | `VAULT_SYNC_ENABLED` | **release gate and kill switch for credential-vault sync (WP5).** Defaults `false` everywhere; only the literal `true` enables it. Off: every `/v1/vault/**` route answers `404` (after authentication) and devices keep working from their local encrypted vaults. Keep it **off in production until the independent vault cryptography and recovery review passes** (spec §17, Phase 4 gate). Needs the `CreateVaultWP5Schema.v1` migration |
+| `VERIFY_ENABLED` | **release gate and kill switch for Verify (WP3).** Defaults `false` everywhere; only the literal `true` enables it. Off: every `/v1/verification-*` and `/v1/verifications*` route answers `404`; in-flight provider sessions are still finished and purged. In `staging`/`production` enabling it **requires `VERIFY_GATE_REFERENCE`** (the id of the recorded Phase 3 gate decision) and at least one fully configured method. Per-capability kill switches (WP2) apply on top. Needs the `CreateVerifyWP3Schema.v1` migration |
+| `VERIFY_GATE_REFERENCE` | ticket or document id of the recorded Phase 3 gate (legal validation by market, privacy assessment). Not a secret; it is audited by being required |
+| `WALLET_MERCHANT_ID` | the Apple merchant identifier of the app's `PKIdentityRequest` (the same one the identity-encryption certificate was created for). Wallet is offered only when this, an encryption key and the IACA directory are configured |
+| `WALLET_ENCRYPTION_KEY_WRAPPED` | comma-separated base64url blobs of the KMS-**wrapped** private key(s) of the Wallet identity-encryption certificate, current first (the previous one stays during a rotation so responses to earlier requests still open). Unwrapped in memory only, through `VerifyRuntime.keyUnwrapper` (**integration point for the WP8 KMS provider; until one is assigned the Wallet method is unavailable and the boot log says why**) |
+| `WALLET_ENCRYPTION_KEY_PATHS` | development only: comma-separated PEM files of the identity-encryption private key(s). Refused in `staging`/`production` |
+| `WALLET_IACA_DIR` | directory of trusted **IACA root certificates** (`.pem`, `.crt`, `.cer`, `.der`: one per issuing authority, plus Apple's Digital ID IACA <https://www.apple.com/certificateauthority/apki202505/>). Each must be a self-signed CA with keyCertSign, EC P-256/384/521, valid now. Viadere ships no trust list: you download the state roots from each DMV (Apple lists them) and review them |
+| `WALLET_IACA_SHA256` | comma-separated SHA-256 fingerprints (hex of the DER) the directory is **pinned** to. Only listed certificates are trusted, so a file dropped into the directory cannot add an issuer. Required in `staging`/`production` |
+| `DIDIT_API_KEY` | Didit application API key (`x-api-key`); needs `write:sessions`, `read:sessions`, `delete:sessions` and user-delete rights. Never logged |
+| `DIDIT_WORKFLOW_ID_IDENTITY` | the Didit workflow with **document check + liveness + face match** (and no biometric-template retention). The only workflow used for age thresholds and identity attributes |
+| `DIDIT_WEBHOOK_SECRET`, `DIDIT_WEBHOOK_SECRET_PREVIOUS` | the destination's signing secret, and (for the 24 h after a rotation) the replaced one. The `status.updated` destination is `POST {PUBLIC_BASE_URL}/v1/providers/didit/webhook` |
+| `DIDIT_API_BASE` | default `https://verification.didit.me`; must be `https` (plain `http` only outside staging/production, for local fakes) |
+| `VERIFY_REQUIRE_E2EE_IDENTITY` | default `false`. `true`: `identity.name`/`identity.address` requests are refused for a business that has not published an `hpke-encryption` key in the key directory (with a key the attributes are always end-to-end encrypted to it) |
 | `DASHBOARD_ORIGIN` | optional separate origin (same `RP_ID`) for dashboard passkeys, e.g. a `business.` sub-domain |
 | `DASHBOARD_IDLE_MINUTES`, `DASHBOARD_ABSOLUTE_HOURS` | business session idle (30) and absolute (12) timeouts; operators are fixed shorter (15 min / 8 h) |
 | `ABUSE_COMPLAINT_RATE`, `ABUSE_OPTOUT_RATE`, `ABUSE_MIN_SAMPLE`, `ABUSE_WINDOW_DAYS`, `ABUSE_THROTTLE_FACTOR` | auto-throttle thresholds (defaults 2 %, 10 %, 20, 7 d, ×0.25) |
@@ -284,6 +296,26 @@ The server is a verifying store for the Authenticator's end-to-end encrypted vau
 | `PUT/GET/DELETE /v1/vault/joins/{joinId}` · `PUT …/request` | new-device pairing channel; payloads are sealed under a secret the server never sees; one request per join, 10 min, 3 open per account |
 
 Limits per account per hour: writes 120 (burst 30), reads 1,200, joins 30, recovery envelope 5; 16 devices, 2,000 items, 32 KiB per blob, 16 MiB per vault. Security notices (`vaultDeviceAdded`, `vaultDeviceRemoved`, `vaultDeleted`) and audit events (`vault.created`, `vault.updated`, `vault.device_removed`, `vault.deleted`, `vault.recovery_envelope_fetched`: counts and ids only). Account deletion wipes the vault whether or not the gate is on.
+
+### Verify: age thresholds and identity attributes (WP3; `VERIFY_ENABLED`, default off)
+
+`POST /v1/verification-requests` (business, capability-gated, idempotent) creates a request the customer sees in the app; the customer
+consents to the exact disclosure (a `DisclosureReceipt`), verifies with **an ID in Apple Wallet** (HPKE envelope + ISO 18013-5 mdoc
+verified on the server) or **Didit** (SDK in the app, session from the server), and the business retrieves the result once with
+`GET /v1/verification-results/{result_ref}`. Normative formats, the trust store and the data handling: `docs/SECURITY.md` §2.60.
+
+* **Apple Wallet** (`Verify/Wallet`): `AppleIdentityEnvelope` (strict CBOR, `APPLE-HPKE-v1`, DHKEM(P-256)/HKDF-SHA256/AES-128-GCM, `info` = the
+  session transcript), `MDocVerifier` (issuer chain to a pinned IACA, COSE ES256/384/512 only, digests of every item, MSO validity, device signature
+  over the transcript), `WalletClaims` (only the requested elements). Verified against Apple's published sample (`identity_verification_sample.zip`,
+  see `Tests/ViadereServerKitTests/Fixtures/AppleWalletSample`) and against synthetic issuers. The single-use nonce is the attempt's row.
+* **Didit** (`Verify/Didit`): session creation with `vendor_data` = the attempt id, webhook verification (`X-Signature-V2`/`X-Signature`,
+  `X-Timestamp` ±300 s, previous-secret overlap, `event_id` dedup), decision **re-fetched** from the API, mapped to the assurance taxonomy,
+  reduced in memory to one claim, then the session and the vendor user are deleted (`privacy_erasure`) and the deletion is recorded; failures
+  are retried by the background job. A selfie age estimate never becomes a verified age.
+* **Results** are sealed per row, single use, audience-bound and expire after 15 minutes; identity attributes are sealed to the business's
+  published HPKE key when it has one. Every non-positive end is the same `not_verified`.
+* **Not configured is not broken**: without Wallet or Didit settings the methods are simply not offered. Test-mode keys complete requests
+  with a simulated result (`sandbox_simulated`) and never reach a real person.
 
 ### "Connect with Viadere" button
 
