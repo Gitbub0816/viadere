@@ -56,7 +56,7 @@ Server/
 ## Running
 
 ```bash
-export PATH=/opt/swift/usr/bin:$PATH        # Swift 6.2
+export PATH=/opt/swift/usr/bin:$PATH        # Swift 6.4.1
 
 # Local, zero config: in-memory SQLite, random ephemeral secrets (data does not survive a restart)
 swift run ViadereServer serve --hostname 127.0.0.1 --port 8080

@@ -6,7 +6,7 @@
 #   docker build -f Server/Dockerfile -t viadere-server .
 #
 # ---- build ----------------------------------------------------------------
-FROM swift:6.2-jammy AS build
+FROM swift:6.4.1-resolute AS build
 WORKDIR /build
 
 RUN apt-get update \
@@ -27,7 +27,7 @@ RUN swift build -c release --product ViadereServer --static-swift-stdlib \
  && cp "$(swift build -c release --show-bin-path)/ViadereServer" /staging/ViadereServer
 
 # ---- runtime --------------------------------------------------------------
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu:26.04 AS runtime
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tzdata \

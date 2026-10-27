@@ -35,7 +35,7 @@ xcodegen
 open Viadere.xcodeproj
 ```
 
-Requires Xcode 16+ (Swift 6.0 language mode). Run the `Viadere` scheme on a device for Secure Enclave keys; on the
+Requires the latest stable Xcode (27.1; Swift 6 language mode, `SWIFT_VERSION` 6.0). Run the `Viadere` scheme on a device for Secure Enclave keys; on the
 simulator Debug builds fall back to clearly marked **software keys** (`SoftwareDeviceKeyStore`, compiled out of
 Release, reported to the server as `hardwareBacked: false`).
 

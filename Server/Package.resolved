@@ -1,13 +1,13 @@
 {
-  "originHash" : "a93d6c7edbd6e18289a7d6fe9040412a3d2c3c6eb25ebf3ac7b845d1e365004e",
+  "originHash" : "42e8317aed710d052af685663e28d6c709f5f57316f15efc6a8c33fc1f688c21",
   "pins" : [
     {
       "identity" : "apnswift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-server-community/APNSwift.git",
       "state" : {
-        "revision" : "81eb92b6d5cbea9dac154becedf316c05189a47a",
-        "version" : "6.6.0"
+        "revision" : "b48c98ffab59d0a78a86c737e58add52a4ac24dc",
+        "version" : "8.0.0"
       }
     },
     {
@@ -204,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-crypto.git",
       "state" : {
-        "revision" : "95ba0316a9b733e92bb6b071255ff46263bbe7dc",
-        "version" : "3.15.1"
+        "revision" : "c2cbadd7263439d8015189668f96ff5b5be565ce",
+        "version" : "5.0.3"
       }
     },
     {
@@ -357,8 +357,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-server/webauthn-swift.git",
       "state" : {
-        "revision" : "909cf4193cde7d64196553c4245ab647a68aaaca",
-        "version" : "1.0.0-beta.1"
+        "revision" : "030acd1eedaa835958ae3fcc0e491bec03b2abf1"
       }
     },
     {

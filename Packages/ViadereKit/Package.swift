@@ -13,8 +13,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../ViadereCore"),
-        // Same range as ViadereCore so a single swift-crypto version resolves (5.x needs a newer compiler).
-        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0" ..< "5.0.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "5.0.3"),
     ],
     targets: [
         .target(

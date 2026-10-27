@@ -7,7 +7,7 @@
 # When behind a proxy, set TRUSTED_PROXY_COUNT so rate limits key on the real client address.
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: viadere

@@ -20,7 +20,7 @@ This repository is Swift end to end: an iOS 17 app, a Vapor backend, and shared 
 ## Running
 
 ```sh
-# Shared packages and backend (Swift 6.x; swift-crypto must stay < 5.0)
+# Shared packages and backend (Swift 6.4.1)
 (cd Packages/ViadereCore && swift test)
 (cd Packages/ViadereKit && swift test)
 (cd Packages/ViadereBusinessSDK && swift test)

@@ -10,6 +10,8 @@
 name: Viadere
 
 options:
+  # Latest stable Xcode (27.1, 2026-10-27); XcodeGen encodes it as MMmp. Deployment targets below are a documented exception.
+  xcodeVersion: "2710"
   bundleIdPrefix: com.viadere
   developmentLanguage: en
   deploymentTarget:
