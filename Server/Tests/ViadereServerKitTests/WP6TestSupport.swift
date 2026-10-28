@@ -115,6 +115,14 @@ extension TestHarness {
         return (response.status, shownSecret(response.text), response.text)
     }
 
+    /// Creates a key through the console, asserts it worked and returns the one-time secret.
+    func newKey(_ session: DashSession, name: String = "k", mode: String = "test", scopes: [String] = ["interactions:write", "messages:write"],
+                extra: [(String, String)] = []) async throws -> String {
+        let result = try await createKey(session, name: name, mode: mode, scopes: scopes, extra: extra)
+        XCTAssertEqual(result.status, .ok, result.text)
+        return try XCTUnwrap(result.secret)
+    }
+
     func apiGet(_ key: String, _ path: String, headers: [String: String] = [:]) async throws -> HTTPResult {
         var all = ["Authorization": "Bearer \(key)"]
         for (name, value) in headers { all[name] = value }

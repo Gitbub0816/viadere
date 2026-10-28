@@ -124,6 +124,10 @@ struct DashboardActions {
         guard let networks = IPNetwork.parseList(request.ipAllowlist, limit: 20) else {
             throw APIError.validation("Enter addresses or CIDR blocks such as 203.0.113.0/24, separated by commas.", details: ["ipAllowlist": "invalid"])
         }
+        // An unknown choice is refused rather than quietly becoming "never expires".
+        if let days = request.expiresInDays, days != 0, !Self.expiryChoices.contains(days) {
+            throw APIError.validation("Choose when the key expires from the list.", details: ["expires": "invalid"])
+        }
         let expiry = request.expiresInDays.flatMap { Self.expiryChoices.contains($0) ? ctx.now.addingTimeInterval(TimeInterval($0) * 86_400) : nil }
         let elevates = KeyScopePolicy.elevates(scopes: chosen, capabilities: capabilities.map(\.rawValue))
         return ValidatedKey(name: name, scopes: chosen.sorted(), capabilities: capabilities, expiry: expiry, networks: networks, elevates: elevates)
