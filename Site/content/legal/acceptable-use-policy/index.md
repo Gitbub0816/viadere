@@ -160,3 +160,28 @@ We will never ask you for a password, a code or an approval by text or email.
 ## 7. Changes
 
 Viadere may update this AUP. Material changes are published as a new version at a stable address and announced as the Business Services Agreement describes. Continuing to use the services after the effective date is acceptance.
+
+## 8. Examples
+
+These examples illustrate the rules. They are not a complete list.
+
+| Situation | Allowed? | Why |
+|---|---|---|
+| A bank asks a customer to approve a sign-in, showing the device, approximate location and time | Yes | A clear security request, with the customer's connection and consent |
+| A retailer sends an order-shipped update to a customer who connected for transactional messages | Yes | Within the purpose the customer allowed |
+| A retailer adds a 20 percent coupon to a sign-in approval request | No | Marketing combined with a security request, which hides a promotion in an authentication message |
+| A business texts a coupon to a customer who allowed only transactional messages | No | Marketing needs separate consent for the channel |
+| A business sets its display name to "Viadere Support" | No | Impersonates Viadere |
+| A business sends 20 approval requests in an hour to one customer | No | Prompt bombing; Viadere refuses more than the hourly limit |
+| A support agent replies to a customer's question through the Viadere thread | Yes | A reply in a conversation the customer started |
+| A developer tests with a `vdk_test_` key and sandbox customers | Yes | The sandbox is for testing |
+| A developer posts a `vdk_live_` key in a public repository | No | Exposes a credential; rotate it at once and tell Viadere |
+| A researcher tests their own account under the Vulnerability Disclosure Policy | Yes | Good-faith research within the rules |
+
+## 9. Good practice
+
+You are encouraged to: tell people at connection what you will send and how often; keep your handle, contacts and domain verification current; keep suppression and consent records; monitor your own complaint and opt-out rates in the Dashboard; use the least scope for each key; rotate keys on a schedule; and review your integration against the Documentation before you go live.
+
+## 10. Contact
+
+Questions about this policy: [TRUST-CONTACT-PLACEHOLDER].
