@@ -38,9 +38,13 @@ struct AddCodeSheet: View {
                 .font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
             Button { mode = .scan } label: { Label("Scan the QR code", systemImage: "qrcode.viewfinder") }.buttonStyle(.viadere(.primary))
             Button { mode = .manual } label: { Label("Enter the setup key", systemImage: "keyboard") }.buttonStyle(.viadere(.secondary))
+            #if DEBUG
+            // The file-based stand-in encourages exporting a plaintext credential file to Files. It is not shipped: release builds get the
+            // system import (`ASCredentialImportManager`) once that is wired (see CredentialExchangeImport.swift).
             if #available(iOS 26.0, *) {
                 CredentialExchangeImportButton(model: model, onDone: onClose)
             }
+            #endif
             if let message = model.message { ViadereNotice(message, kind: .warning) }
             Spacer()
         }

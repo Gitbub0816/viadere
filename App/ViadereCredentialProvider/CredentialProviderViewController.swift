@@ -19,6 +19,12 @@ import ViadereKit
 final class CredentialProviderViewController: ASCredentialProviderViewController {
     private let flow = ProviderFlowModel()
     private var task: Task<Void, Never>?
+    /// One engine, and so one fresh biometric evaluation, per time the extension is on screen: choosing a row in the picker reuses the unlock that
+    /// opened the picker instead of asking for Face ID a second time (gate review L7).
+    private var sessionEngine: VaultEngine?
+    private var verifiedAt: Date?
+    /// A user verification stays good for this long. The authenticator data says UV only for an evaluation this recent.
+    private static let verificationWindow: TimeInterval = 60
 
     // MARK: Lifecycle
 
@@ -36,9 +42,20 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         task?.cancel()
+        let engine = sessionEngine
+        sessionEngine = nil
+        verifiedAt = nil
+        Task { await engine?.lock() }
     }
 
     private func engine() throws -> VaultEngine {
+        if let sessionEngine { return sessionEngine }
+        let made = try makeEngine()
+        sessionEngine = made
+        return made
+    }
+
+    private func makeEngine() throws -> VaultEngine {
         let info = Bundle.main.infoDictionary ?? [:]
         return try VaultRuntime.makeEngine(appGroupID: info["ViadereAppGroupID"] as? String ?? "", vaultKeychainAccessGroup: info["ViadereVaultKeychainAccessGroup"] as? String,
                                            api: nil, deviceLabel: "")
@@ -48,13 +65,22 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         extensionContext.cancelRequest(withError: NSError(domain: ASExtensionErrorDomain, code: code.rawValue))
     }
 
-    /// Opens the vault. This is the user verification: the system asks for Face ID / Touch ID / the passcode inside the key use.
+    /// Opens the vault. This is the user verification: the system asks for Face ID / Touch ID / the passcode inside the key use. An unlock that
+    /// is less than `verificationWindow` old is reused (one prompt per interaction); an older one is repeated before anything is signed.
     private func unlockedEngine() async throws -> VaultEngine {
         let engine = try engine()
+        let recent = verifiedAt.map { Date().timeIntervalSince($0) <= Self.verificationWindow } ?? false
         switch try await engine.phase() {
         case .empty: throw ProviderError.noVault
-        case .locked: try await engine.unlock()
-        case .unlocked: break
+        case .locked:
+            try await engine.unlock()
+            verifiedAt = Date()
+        case .unlocked:
+            if !recent {
+                await engine.lock()
+                try await engine.unlock()
+                verifiedAt = Date()
+            }
         }
         return engine
     }
@@ -157,9 +183,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let rpId = identity.relyingPartyIdentifier
         let site = ProviderText.clean(rpId)
         let account = ProviderText.clean(identity.userName)
+        // The relying party's "don't register again" list (iOS 18): a credential in the vault for this site that it lists blocks the new one.
+        var excluded: [Data] = []
+        if #available(iOS 18.0, *) { excluded = (request.excludedCredentials ?? []).map(\.credentialID) }
         let registration = PasskeyRegistrationRequest(rpId: rpId, userName: identity.userName, displayName: nil, userHandle: identity.userHandle,
                                                       clientDataHash: request.clientDataHash, supportedAlgorithms: request.supportedAlgorithms.map(\.rawValue),
-                                                      excludedCredentialIds: [], requireUserVerification: true)
+                                                      excludedCredentialIds: excluded, requireUserVerification: true)
         flow.step = .confirmCreate(site: site, account: account)
         flow.onConfirm = { [weak self] in
             guard let self else { return }
@@ -189,7 +218,19 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         task = Task {
             do {
                 let engine = try await unlockedEngine()
-                let identities = try await engine.oneTimeCodeIdentities()
+                // Only codes that belong to the site that asked: a page must not be able to make the picker list every account.
+                let domains = serviceIdentifiers.compactMap { identifier -> String? in
+                    switch identifier.type {
+                    case .domain: identifier.identifier
+                    case .URL: URL(string: identifier.identifier)?.host
+                    @unknown default: nil
+                    }
+                }
+                let identities = try await engine.oneTimeCodeIdentities(matching: domains)
+                if identities.isEmpty, let site = domains.first {
+                    await MainActor.run { flow.step = .failed("No saved code matches \(ProviderText.clean(site)). Open Viadere to find the code.") }
+                    return
+                }
                 let rows = identities.compactMap { identity -> ProviderFlowModel.Row? in
                     guard let id = UUID(uuidString: identity.recordIdentifier) else { return nil }
                     return ProviderFlowModel.Row(id: id, title: ProviderText.clean(identity.label), subtitle: "One-time code")

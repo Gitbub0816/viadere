@@ -13,6 +13,10 @@ import ViadereKit
 /// surface is new and was not available to build against in this change, so the parser is covered by tests against CXF-shaped JSON but the
 /// glue below is a file picker for a CXF `.json` export as a stand-in that can be exercised today. Verify the CXF field names against a real
 /// export before release.
+///
+/// DEBUG builds only: a plaintext export sitting in Files is exactly what a credential manager should not encourage, so release builds do not
+/// offer the file picker at all (gate review, Info).
+#if DEBUG
 @available(iOS 26.0, *)
 struct CredentialExchangeImportButton: View {
     let model: AuthenticatorViewModel
@@ -46,3 +50,4 @@ struct CredentialExchangeImportButton: View {
         }
     }
 }
+#endif
