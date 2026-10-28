@@ -217,6 +217,8 @@ final class TestHarness: @unchecked Sendable {
     let emails: RecordingEmailSender
     /// Scripted DNS and well-known answers for domain verification.
     var domainChecker = FakeDomainChecker()
+    /// When set, every request without its own `X-Viadere-Edge-Token` gets this value (setup of a harness whose origin lock is on).
+    var edgeTokenForRequests: String?
 
     init(app: Application, clock: ManualClock, config: ServerConfig, signer: FakePassSigner, passPush: RecordingPassPush,
          emails: RecordingEmailSender = RecordingEmailSender()) {
@@ -279,6 +281,7 @@ final class TestHarness: @unchecked Sendable {
                  contentType: String? = "application/json") async throws -> HTTPResult {
         var httpHeaders = HTTPHeaders()
         for (name, value) in headers { httpHeaders.replaceOrAdd(name: name, value: value) }
+        if let edgeTokenForRequests, !httpHeaders.contains(name: "X-Viadere-Edge-Token") { httpHeaders.replaceOrAdd(name: "X-Viadere-Edge-Token", value: edgeTokenForRequests) }
         if let body, !body.isEmpty, let contentType { httpHeaders.replaceOrAdd(name: .contentType, value: contentType) }
         let box = Box<HTTPResult>()
         try await app.test(method, path, headers: httpHeaders, body: body.map { ByteBuffer(data: $0) }) { response async throws in
