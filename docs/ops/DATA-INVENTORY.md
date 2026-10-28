@@ -140,7 +140,7 @@ Sections 1 to 5 are unchanged (they were written before these tables existed). S
 
 | Table | Data | Class | P | Protection | Retention | Notes |
 |---|---|---|---|---|---|---|
-| `vault_vaults`, `vault_members`, `vault_manifests`, `vault_blobs`, `vault_joins` | **end-to-end encrypted** blobs and manifests of a person's credentials, member device keys, join tokens | PKP/SMP | P | the server holds ciphertext only (keys never leave the devices) | Deleted with the vault or the account; expired joins removed by the vault job | anti-rollback counters are plaintext integers |
+| `vault_vaults`, `vault_members`, `vault_manifests`, `vault_blobs`, `vault_joins`, `vault_recovery_releases` | **end-to-end encrypted** blobs and manifests of a person's credentials, member device keys, join tokens | PKP/SMP | P | the server holds ciphertext only (keys never leave the devices) | Deleted with the vault or the account; expired joins removed by the vault job | anti-rollback counters are plaintext integers; `vault_recovery_releases` holds account/device ids and times of recovery-envelope release requests (72 h hold, 24 h window); `vault_members.former_device_id` remembers the account device of a removed member |
 
 ### 6.4 Business platform (WP6)
 
