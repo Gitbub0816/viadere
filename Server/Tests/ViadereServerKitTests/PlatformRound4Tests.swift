@@ -485,7 +485,7 @@ final class PlatformRound4Tests: XCTestCase {
             let alice = try await XCTUnwrapAsync(try await DashboardUserRecord.query(on: h.db).filter(\.$displayName == "Alice").first())
             XCTAssertEqual(alice.status, "active")
             let membership = try await XCTUnwrapAsync(try await OrgMembershipRecord.query(on: h.db).filter(\.$userId == alice.id!).first())
-            XCTAssertEqual(membership.role, "admin")
+            XCTAssertEqual(membership.role, "org_admin")
             // Mallory's passkey is gone: it signs nothing.
             try await isNil(try await h.dashLogin(mallory).session)
             // And a squatted address can be taken by a normal sign-up too (covered above); a verified account is never replaced:

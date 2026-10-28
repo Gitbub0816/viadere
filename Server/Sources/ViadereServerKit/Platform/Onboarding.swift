@@ -284,7 +284,16 @@ struct OnboardingService {
     }
 
     func sandboxKeyIssued(businessId: UUID) async throws {
-        guard try await row(businessId).sandboxKeyAt == nil else { return }
+        let current = try await row(businessId)
+        guard current.sandboxKeyAt == nil else { return }
+        // An operator-approved business may hold test keys before its domain is verified (`OnboardingGate`); the fact is recorded, and the
+        // domain stays an open go-live blocker. The machine's ordering rule applies to the event, not to a key that already exists.
+        guard current.controlVerifiedAt != nil else {
+            current.sandboxKeyAt = ctx.now
+            current.updatedAt = ctx.now
+            try await current.update(on: db)
+            return
+        }
         try await apply(.sandboxKeyIssued, businessId: businessId, actor: AuditActor(kind: .system)) { row, now in row.sandboxKeyAt = now }
     }
 

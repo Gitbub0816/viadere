@@ -10,7 +10,7 @@ final class DashboardPagesTests: XCTestCase {
 
     func testEveryRoleSeesExactlyWhatItsJobNeeds() async throws {
         try await withHarness { h in
-            let (owner, _, _) = try await h.verifiedOwner()
+            let (owner, ownerAccount, _) = try await h.verifiedOwner()
             let expectations: [(path: String, allowed: Set<OrgRole>)] = [
                 ("/dashboard", Set(OrgRole.allCases)),
                 ("/dashboard/templates", Set(OrgRole.allCases)),
@@ -35,6 +35,8 @@ final class DashboardPagesTests: XCTestCase {
             var sessions: [OrgRole: DashSession] = [.owner: owner]
             for role in OrgRole.allCases where role != .owner {
                 sessions[role] = try await h.addMember(owner: owner, role: role, email: "\(role.rawValue)@example.com").session
+                h.clock.advance(by: 90) // nine invitations in one minute would trip the ceremony limiter, as designed
+                try await h.dashReauth(owner, ownerAccount)
             }
             for (path, allowed) in expectations {
                 for role in OrgRole.allCases {
@@ -75,8 +77,8 @@ final class DashboardPagesTests: XCTestCase {
             let member = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "analyst").first()!
             try await eq(try await h.formPost("/dashboard/team/members/\(member.id!.uuidString.lowercased())/remove", developer).status, .forbidden)
             try await eq(try await h.formPost("/dashboard/team/members/\(member.id!.uuidString.lowercased())/role", developer, [("role", "owner")]).status, .forbidden)
-            // Campaign links are not for support.
-            try await eq(try await h.formPost("/dashboard/campaigns", support, [("campaign", "spring"), ("days", "30")]).status, .forbidden)
+            // Campaign links are for messaging roles, not for an analyst.
+            try await eq(try await h.formPost("/dashboard/campaigns", analyst, [("campaign", "spring"), ("days", "30")]).status, .forbidden)
         }
     }
 
@@ -102,7 +104,7 @@ final class DashboardPagesTests: XCTestCase {
     func testOwnersAreProtectedAdminsCannotEscalateAndTheLastOwnerCannotLeave() async throws {
         try await withHarness { h in
             let (owner, ownerAccount, _) = try await h.verifiedOwner()
-            let admin = try await h.addMember(owner: owner, role: .admin, email: "admin@example.com").session
+            let (admin, adminAccount) = try await h.addMember(owner: owner, role: .admin, email: "admin@example.com")
             let ownerMembership = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "owner").first()!
             let adminMembership = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "org_admin").first()!
             // Admins cannot invite owners, promote to owner, demote an owner or remove one.
@@ -124,6 +126,7 @@ final class DashboardPagesTests: XCTestCase {
             try await eq(try await OrgMembershipRecord.find(adminMembership.id!, on: h.db)?.role, "owner")
             // Two owners now: the new owner may demote the first (never the last).
             let newOwner = admin
+            try await h.dashReauth(newOwner, adminAccount)
             try await eq(try await h.formPost("/dashboard/team/members/\(ownerMembership.id!.uuidString.lowercased())/role", newOwner, [("role", "admin")]).status, .seeOther)
             // The only remaining owner is protected from any change by others.
             let remaining = try await OrgMembershipRecord.query(on: h.db).filter(\.$role == "owner").count()
@@ -308,7 +311,7 @@ final class DashboardPagesTests: XCTestCase {
             // Never shown again: the listing has prefix and last four only.
             let list = try await h.page("/dashboard/api-keys", owner).text
             XCTAssertFalse(list.contains(secret))
-            XCTAssertTrue(list.contains("vdk_test_…\(record.last4)"))
+            XCTAssertTrue(list.contains("vdk_test_\(try XCTUnwrap(record.kid))"), "the listing names the key by its non-secret id")
             XCTAssertTrue(list.contains("Production"))
             // Scoped: it works for its scopes and only those.
             let webhooks = try await h.request(.GET, "/v1/business/webhooks", headers: ["Authorization": "Bearer \(secret)"])
@@ -317,7 +320,11 @@ final class DashboardPagesTests: XCTestCase {
             XCTAssertEqual(notAllowed.status, .forbidden)
             // Last-used shows up.
             try await notNil(try await BusinessAPIKeyRecord.find(record.id!, on: h.db)?.lastUsedAt)
-            try await isFalse(try await h.page("/dashboard/api-keys", owner).text.contains("<td>—</td><td>"), "last used is shown")
+            let usedList = try await h.page("/dashboard/api-keys", owner).text
+            XCTAssertFalse(usedList.contains(secret))
+            let usedRecord = try await BusinessAPIKeyRecord.find(record.id!, on: h.db)
+            let usedAt = try XCTUnwrap(usedRecord?.lastUsedAt)
+            XCTAssertTrue(usedList.contains(DashboardFormat.date(usedAt)), "last used is shown")
             // Revoke: immediate, idempotent, audited.
             try await eq(try await h.formPost("/dashboard/api-keys/\(record.id!.uuidString.lowercased())/revoke", owner).status, .seeOther)
             let after = try await h.request(.GET, "/v1/business/webhooks", headers: ["Authorization": "Bearer \(secret)"])
@@ -526,17 +533,19 @@ final class DashboardPagesTests: XCTestCase {
     func testPendingOrganizationsCannotCreateKeysWebhooksOrLinks() async throws {
         try await withHarness { h in
             let (owner, _, _) = try await h.dashSignup()
-            for (path, form) in [("/dashboard/api-keys", [("name", "k"), ("mode", "test"), ("scopes[]", "interactions:write")]),
-                                 ("/dashboard/webhooks", [("url", "https://hooks.example.com/x"), ("events[]", "message.received")]),
-                                 ("/dashboard/campaigns", [("campaign", "c"), ("days", "30")])] {
+            // Sandbox work needs a verified domain; campaign links need the approved application (handle and code).
+            for (path, form, message) in [("/dashboard/api-keys", [("name", "k"), ("mode", "test"), ("scopes[]", "interactions:write")], "Verify a domain you control"),
+                                          ("/dashboard/webhooks", [("url", "https://hooks.example.com/x"), ("events[]", "message.received")], "Verify a domain you control"),
+                                          ("/dashboard/campaigns", [("campaign", "c"), ("days", "30")], "verified your organization")] {
                 let r = try await h.formPost(path, owner, form)
                 XCTAssertEqual(r.status, .forbidden, path)
-                XCTAssertTrue(r.text.contains("verified your organization"), path)
+                XCTAssertTrue(r.text.contains(message), path)
             }
+            // A live key is never available to a pending organization, even with a verified domain.
             try await eq(try await BusinessAPIKeyRecord.query(on: h.db).count(), 0)
             let page = try await h.page("/dashboard", owner).text
             XCTAssertTrue(page.contains("awaiting verification"))
-            try await isTrue(try await h.page("/dashboard/api-keys", owner).text.contains("Keys can be created after Viadere verifies your organization"))
+            try await isTrue(try await h.page("/dashboard/api-keys", owner).text.contains("Keys unlock when you have verified a domain you control"))
         }
     }
 
