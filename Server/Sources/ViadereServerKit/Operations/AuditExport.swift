@@ -92,7 +92,8 @@ struct DirectoryHeadSink: AuditHeadSink {
         let url = URL(fileURLWithPath: directory).appendingPathComponent(name)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard !FileManager.default.fileExists(atPath: url.path) else { throw Abort(.conflict) }
-        try data.write(to: url, options: [.atomic, .withoutOverwriting])
+        // `withoutOverwriting` makes the write create-only (it cannot be combined with `atomic`).
+        try data.write(to: url, options: [.withoutOverwriting])
     }
 }
 
