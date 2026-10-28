@@ -90,7 +90,7 @@ enum ConsoleSections {
         let channels = """
         <div class="card"><h2>Channels</h2><ul>\
         <li>In-app and push: always on. Customers choose their channels per purpose.</li>\
-        <li>SMS fallback: \(config.twilio != nil ? "available" : "not configured on this deployment"); it is used only where the customer's consent allows it and never for approvals.</li>\
+        <li>SMS fallback: \(config.twilio != nil || config.mailerSendSMS != nil ? "available" : "not configured on this deployment"); it is used only where the customer's consent allows it and never for approvals.</li>\
         <li>RCS: \(config.rcs != nil ? "available" : "not configured on this deployment").</li>\
         <li>Opt-outs (STOP) are honored for every channel and shown in Consent.</li></ul>\
         <p class="mu sm">Templates for common interactions are under <a href="/dashboard/templates">Developers &gt; Templates</a>. Inbox and agent assignment are not offered yet.</p></div>

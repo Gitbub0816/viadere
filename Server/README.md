@@ -20,7 +20,7 @@ Server/
     Services/                   Auth, Directory/Registry, Relationships/Consent, Interactions, Webhooks,
                                 Conversations, Phone links, Audit, PasskeyVerifier, Rewards (+ RewardEligibility), Household,
                                 LiveActivity, Acknowledgments
-    SMS/                        SMSProvider, Twilio adapter, DB DirectoryLookup, GatewayService, outbound queue
+    SMS/                        SMSProvider, Twilio and MailerSend adapters, DB DirectoryLookup, GatewayService, outbound queue
     Channels/                   ChannelAdapter protocol (SMS, RCS, AMB placeholder), RCSProvider + generic RBM adapter,
                                 ChannelRouter (durable outbox, capability, SMS fallback), RCS postback tokens + inbound
     Dashboard/                  business dashboard + operator console: passkey ceremonies, sessions, CSRF, roles,
@@ -55,7 +55,7 @@ Server/
   `revision` → effects (queue rows, webhook deliveries, link tokens, consent, audit). A lost CAS rolls back everything and
   retries; nothing is half-applied. External I/O (SMS send, webhook HTTP) happens afterwards from durable queues.
 * **Pluggable edges.** `APNsSender`, `PassSigner`, `PassPushSender`, `SMSProvider`, `PasskeyVerifier`, `WebhookTransport`, `RateLimitStore` and the clock are
-  injected through `ServerContext`; tests replace them, production wires APNSwift, Twilio and webauthn-swift.
+  injected through `ServerContext`; tests replace them, production wires APNSwift, Twilio or MailerSend, and webauthn-swift.
 
 ## Running
 
@@ -114,7 +114,10 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS`, `LINK_TOKEN_RETENTION_DAYS` | retention for finished webhook deliveries (30), finished SMS/RCS outbound rows (30) and used/expired link tokens (7) |
 | `APPLE_TEAM_ID`, `APP_STORE_ID` | AASA file; Smart App Banner |
 | `APNS_KEY_P8` or `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_ENVIRONMENT` | APNs token auth |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID` | SMS provider |
+| `SMS_PROVIDER` | `twilio` (default) or `mailersend` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID` | Twilio SMS |
+| `MAILERSEND_SMS_API_TOKEN`, `MAILERSEND_SMS_FROM_NUMBER`, `MAILERSEND_SMS_INBOUND_SECRET`, `MAILERSEND_SMS_WEBHOOK_SECRET` | MailerSend SMS (US/CA); the two secrets are distinct, at least 16 characters |
+| `EMAIL_API_FORMAT` | `simple` (default) or `mailersend` (body shape of the email API) |
 | `RATE_LIMIT_STORE` | `database` (shared, atomic, default in staging/production) or `memory` (per instance; development). Needs the round-4 migration |
 | `EMAIL_API_URL`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS` | transactional email for dashboard verification codes and invitations; **all three or none**; required in staging/production (https only there). Optional `EMAIL_API_AUTH_HEADER` (default `Authorization`) and `EMAIL_API_AUTH_SCHEME` (default `Bearer`; empty sends the bare key) |
 | `TRUSTED_PROXY_COUNT` | reverse proxies whose `X-Forwarded-For` hop is trusted for rate limiting (default 0 = ignore header; **set this behind a load balancer**) |
@@ -197,7 +200,7 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `POST /v1/business/statuses` | API key `statuses:write` + `message.send` | ongoing-event updates replace earlier ones |
 | `GET /v1/business/capabilities` | API key (any) | tiers, entitlements, the key's capabilities, `effective` now, and the capability catalog |
 | `GET/POST /v1/business/webhooks`, `DELETE …/{id}`, `POST …/{id}/rotate-secret` | API key `webhooks:manage` | HTTPS only, SSRF-checked, secrets shown once |
-| `POST /v1/providers/sms/inbound` · `/status` | provider | Twilio `X-Twilio-Signature` HMAC-SHA1, constant time |
+| `POST /v1/providers/sms/inbound` · `/status` | provider | Twilio `X-Twilio-Signature` HMAC-SHA1, or MailerSend `Signature` hex HMAC-SHA256 of the raw body with the route's own secret; constant time, unsigned refused |
 | `GET /c/{code}` · `/l/{token}` · `/h/{token}` | none | server-rendered fallback pages, strict CSP, Smart App Banner |
 | `GET /.well-known/apple-app-site-association` | none | applinks, webcredentials, appclips |
 | `GET /healthz` · `/readyz` | none | `{"status":"ok"}` only |

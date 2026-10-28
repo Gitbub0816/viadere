@@ -40,6 +40,23 @@ public struct TwilioConfig: Sendable {
     public var messagingServiceSID: String?
 }
 
+/// MailerSend SMS credentials (`SMS_PROVIDER=mailersend`). The two webhook secrets are distinct: the status webhook's signing
+/// secret and the inbound route's secret, each shown once in the MailerSend dashboard.
+public struct MailerSendSMSConfig: Sendable {
+    public var apiToken: String
+    /// The MailerSend number in E.164.
+    public var fromNumber: String
+    public var inboundSecret: String
+    public var statusSecret: String
+
+    public init(apiToken: String, fromNumber: String, inboundSecret: String, statusSecret: String) {
+        self.apiToken = apiToken
+        self.fromNumber = fromNumber
+        self.inboundSecret = inboundSecret
+        self.statusSecret = statusSecret
+    }
+}
+
 public enum ServerConfigError: Error, CustomStringConvertible, Sendable {
     case missing(String)
     case invalid(String)
@@ -76,6 +93,8 @@ public struct ServerConfig: Sendable {
     public var dataEncryptionKey: SymmetricKey
     public var apns: APNsConfig?
     public var twilio: TwilioConfig?
+    /// MailerSend SMS, the alternative to Twilio. At most one of the two is set.
+    public var mailerSendSMS: MailerSendSMSConfig?
     /// Number of reverse proxies in front of the server whose `X-Forwarded-For` entries are trusted.
     public var trustedProxyCount: Int
     /// Exact origins allowed by CORS. Empty (the default) means no cross-origin access.
@@ -218,13 +237,29 @@ public struct ServerConfig: Sendable {
         }
 
         var twilio: TwilioConfig?
-        if let sid = env["TWILIO_ACCOUNT_SID"], let token = env["TWILIO_AUTH_TOKEN"], !sid.isEmpty, !token.isEmpty {
-            let from = env["TWILIO_FROM_NUMBER"] ?? ""
-            let service = env["TWILIO_MESSAGING_SERVICE_SID"].flatMap { $0.isEmpty ? nil : $0 }
-            guard !from.isEmpty || service != nil else { throw ServerConfigError.missing("TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID") }
-            twilio = TwilioConfig(accountSID: sid, authToken: token, fromNumber: from, messagingServiceSID: service)
-        } else if production {
-            throw ServerConfigError.missing("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN")
+        var mailerSendSMS: MailerSendSMSConfig?
+        switch env["SMS_PROVIDER"].flatMap({ $0.isEmpty ? nil : $0.lowercased() }) ?? "twilio" {
+        case "twilio":
+            if let sid = env["TWILIO_ACCOUNT_SID"], let token = env["TWILIO_AUTH_TOKEN"], !sid.isEmpty, !token.isEmpty {
+                let from = env["TWILIO_FROM_NUMBER"] ?? ""
+                let service = env["TWILIO_MESSAGING_SERVICE_SID"].flatMap { $0.isEmpty ? nil : $0 }
+                guard !from.isEmpty || service != nil else { throw ServerConfigError.missing("TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID") }
+                twilio = TwilioConfig(accountSID: sid, authToken: token, fromNumber: from, messagingServiceSID: service)
+            } else if production {
+                throw ServerConfigError.missing("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN (or SMS_PROVIDER=mailersend)")
+            }
+        case "mailersend":
+            let names = ["MAILERSEND_SMS_API_TOKEN", "MAILERSEND_SMS_FROM_NUMBER", "MAILERSEND_SMS_INBOUND_SECRET", "MAILERSEND_SMS_WEBHOOK_SECRET"]
+            let values = names.map { env[$0] ?? "" }
+            if let missing = names.indices.first(where: { values[$0].isEmpty }) { throw ServerConfigError.missing(names[missing]) }
+            guard let fromNumber = PhoneNumber(values[1]) else { throw ServerConfigError.invalid("MAILERSEND_SMS_FROM_NUMBER (E.164)") }
+            // Webhook secrets are HMAC keys: refuse anything short enough to guess.
+            guard values[2].count >= 16, values[3].count >= 16, values[2] != values[3] else {
+                throw ServerConfigError.invalid("MAILERSEND_SMS_INBOUND_SECRET / MAILERSEND_SMS_WEBHOOK_SECRET (at least 16 characters, different values)")
+            }
+            mailerSendSMS = MailerSendSMSConfig(apiToken: values[0], fromNumber: fromNumber.e164, inboundSecret: values[2], statusSecret: values[3])
+        default:
+            throw ServerConfigError.invalid("SMS_PROVIDER (twilio or mailersend)")
         }
 
         let teamID = env["APPLE_TEAM_ID"] ?? ""
@@ -249,6 +284,7 @@ public struct ServerConfig: Sendable {
             accessTokenTTL: 15 * 60, refreshTokenTTL: 30 * 24 * 3600,
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
+        config.mailerSendSMS = mailerSendSMS
         config.auditChainKey = SymmetricKey(data: try secretBytes("AUDIT_CHAIN_KEY", minimum: 32))
         config.subjectRefKey = SymmetricKey(data: try secretBytes("SUBJECT_REF_KEY", minimum: 32))
         if production {

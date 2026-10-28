@@ -146,6 +146,14 @@ public enum RateLimitStoreMode: String, Sendable, Equatable {
 
 /// A generic transactional-email HTTP API: `POST <url>` with a JSON body `{"from","to","subject","text"}` and the API key in a header
 /// (default `Authorization: Bearer <key>`). See Server/README.md for how to point it at a provider.
+/// Body shape of the transactional-email API.
+public enum EmailAPIFormat: String, Sendable, Equatable {
+    /// `{"from": "Name <addr>", "to": "addr", "subject", "text"}` (Resend and most "send one email" APIs).
+    case simple
+    /// MailerSend v1: `{"from": {"email", "name"}, "to": [{"email"}], "subject", "text"}`.
+    case mailersend
+}
+
 public struct EmailConfig: Sendable, Equatable {
     public var apiURL: URL
     public var apiKey: String
@@ -153,6 +161,8 @@ public struct EmailConfig: Sendable, Equatable {
     /// Header carrying the key and the scheme prefix put before it (`Authorization` + `Bearer`; an empty scheme sends the bare key).
     public var authHeader: String = "Authorization"
     public var authScheme: String = "Bearer"
+    /// Request body shape (`EMAIL_API_FORMAT`).
+    public var format: EmailAPIFormat = .simple
 
     public init(apiURL: URL, apiKey: String, fromAddress: String, authHeader: String = "Authorization", authScheme: String = "Bearer") {
         self.apiURL = apiURL
@@ -192,6 +202,10 @@ extension ServerConfig {
             config.authHeader = header
         }
         if let scheme = env["EMAIL_API_AUTH_SCHEME"] { config.authScheme = scheme }
+        if let raw = env["EMAIL_API_FORMAT"], !raw.isEmpty {
+            guard let format = EmailAPIFormat(rawValue: raw.lowercased()) else { throw ServerConfigError.invalid("EMAIL_API_FORMAT (simple or mailersend)") }
+            config.format = format
+        }
         email = config
     }
 }

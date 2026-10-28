@@ -30,8 +30,8 @@ public protocol EmailSender: Sendable {
 
 /// Generic transactional-email HTTP API: `POST <EMAIL_API_URL>` with `Content-Type: application/json`, the API key in `EMAIL_API_AUTH_HEADER`
 /// (default `Authorization: Bearer <key>`) and the body `{"from": …, "to": …, "subject": …, "text": …}`. Any 2xx is success. This is the
-/// request shape of Resend, Mailgun-compatible relays and most "send one email" APIs; a provider with another body shape needs a small
-/// adapter in front (see Server/README.md). Redirects are not followed and nothing from the response is logged.
+/// request shape of Resend, Mailgun-compatible relays and most "send one email" APIs. `EMAIL_API_FORMAT=mailersend` sends MailerSend's
+/// v1 shape instead (`POST https://api.mailersend.com/v1/email`). Redirects are not followed and nothing from the response is logged.
 public struct HTTPEmailSender: EmailSender {
     public let config: EmailConfig
     let client: any Client
@@ -48,6 +48,25 @@ public struct HTTPEmailSender: EmailSender {
         var text: String
     }
 
+    struct MailerSendBody: Encodable {
+        struct Address: Encodable {
+            var email: String
+            var name: String?
+        }
+        var from: Address
+        var to: [Address]
+        var subject: String
+        var text: String
+    }
+
+    /// Splits `Name <addr>` into its parts; a bare address has no name.
+    static func address(_ value: String) -> MailerSendBody.Address {
+        guard value.hasSuffix(">"), let open = value.lastIndex(of: "<") else { return .init(email: value) }
+        let email = String(value[value.index(after: open)..<value.index(before: value.endIndex)])
+        let name = value[..<open].trimmingCharacters(in: .whitespaces)
+        return .init(email: email, name: name.isEmpty ? nil : name)
+    }
+
     public func send(_ message: EmailMessage) async throws {
         let response: ClientResponse
         do {
@@ -55,7 +74,13 @@ public struct HTTPEmailSender: EmailSender {
                 let value = config.authScheme.isEmpty ? config.apiKey : config.authScheme + " " + config.apiKey
                 request.headers.replaceOrAdd(name: config.authHeader, value: value)
                 request.headers.replaceOrAdd(name: .accept, value: "application/json")
-                try request.content.encode(Body(from: config.fromAddress, to: message.to, subject: message.subject, text: message.text), as: .json)
+                switch config.format {
+                case .simple:
+                    try request.content.encode(Body(from: config.fromAddress, to: message.to, subject: message.subject, text: message.text), as: .json)
+                case .mailersend:
+                    let body = MailerSendBody(from: Self.address(config.fromAddress), to: [.init(email: message.to)], subject: message.subject, text: message.text)
+                    try request.content.encode(body, as: .json)
+                }
             }
         } catch {
             throw EmailError.transport

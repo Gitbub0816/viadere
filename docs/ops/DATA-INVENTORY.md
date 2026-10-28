@@ -85,12 +85,12 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 | Email (verification codes, invitations) | transactional email provider | OPS | Address and code in transit; provider is a sub-processor |
 | Didit session data (WP3): ID images, selfie, liveness video, document fields, face embedding and scores | Didit (processor, EU by default), only for the duration of one verification | RIE | Captured on the device and sent **directly to Didit**; Viadere never receives images or biometrics. After reading the decision in memory and deriving the one claim, the server deletes the session with `privacy_erasure` and deletes the vendor user (`POST /v3/users/delete/`), and records the deletion; failures are retried. Configure the shortest retention in the Didit console as a backstop and keep biometric-template retention **off**. No biometric template is retained at Didit. `[counsel: BIPA / GDPR Art. 9, DPA, residency]` |
 | Apple Wallet presentment (WP3): the encrypted DeviceResponse | transient, in server memory | RIE | Decrypted with the merchant key (KMS-wrapped, ADR-03), verified, reduced to the requested elements, **never persisted or logged**. Apple and the issuing authority do not learn where the ID was shared (Apple's design). IACA trust anchors are public certificates on disk |
-| SMS/RCS content | Twilio / RCS provider | SMP | Provider retains per its terms: sub-processor `[counsel]` |
+| SMS/RCS content | MailerSend or Twilio / RCS provider | SMP | Provider retains per its terms: sub-processor `[counsel]` |
 
 ## 3. Sub-processors (to publish; LEG-PR-006)
 
-Fly.io (hosting), Cloudflare (edge, site), Neon (database), Google Cloud (KMS), Twilio (SMS), RCS provider (TBD), Apple (APNs, Wallet, App Attest),
-Didit (identity verification), email provider (Resend or other). Each needs a DPA, a transfer mechanism and a breach-notification
+Fly.io (hosting), Cloudflare (edge, site), Neon (database), Google Cloud (KMS), MailerSend (SMS and transactional email; Twilio as the alternative SMS provider), RCS provider (TBD), Apple (APNs, Wallet, App Attest),
+Didit (identity verification). Each needs a DPA, a transfer mechanism and a breach-notification
 clause `[counsel]`; the public sub-processor list must match this table (Site, WP7).
 
 ## 4. Lawful basis, purpose and rights (placeholders for counsel)

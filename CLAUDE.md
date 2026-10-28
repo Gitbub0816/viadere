@@ -37,7 +37,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
 9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
 
-### Current versions (checked 2026-10-27)
+### Current versions (checked 2026-10-28)
 
 | Component | Required | Notes |
 |---|---|---|
@@ -51,6 +51,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | PostgreSQL | 18.6 | Docker Compose (`postgres:18-alpine`) and production; server suite verified on 18.6 |
 | Container base | `swift:6.4.1-resolute` (build) / `ubuntu:26.04` (runtime) | Ubuntu 26.04 LTS is the newest LTS the Swift image supports; both stages on the same LTS |
 | Python (tooling only) | 3.15.x | |
+| MailerSend API (partner) | v1 (`/v1/email`, `/v1/sms`) | Staging and production email and SMS (US/CA); Twilio remains a supported alternative |
 | Xcode / iOS SDK | Xcode 27.1 (latest stable; 27.2 is RC) | `App/project.yml` `xcodeVersion: "2710"` |
 
 ### Exceptions

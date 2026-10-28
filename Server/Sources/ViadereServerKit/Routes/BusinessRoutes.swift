@@ -109,7 +109,7 @@ enum ProviderRoutes {
     static func register(_ routes: any RoutesBuilder) {
         routes.api(APIRoutes.providerSMSInbound) { req in
             let ctx = req.ctx
-            let webhook = try await verified(req, template: APIRoutes.providerSMSInbound.template)
+            let webhook = try await verified(req, template: APIRoutes.providerSMSInbound.template, route: .inbound)
             let audit = AuditService(db: req.db, ctx: ctx)
             let sms: InboundSMS
             do { sms = try ctx.sms.parseInbound(webhook) } catch { throw APIError.badRequest("Unrecognized message.") }
@@ -161,7 +161,7 @@ enum ProviderRoutes {
         }
         routes.api(APIRoutes.providerSMSStatus) { req in
             let ctx = req.ctx
-            let webhook = try await verified(req, template: APIRoutes.providerSMSStatus.template)
+            let webhook = try await verified(req, template: APIRoutes.providerSMSStatus.template, route: .status)
             if let update = try? ctx.sms.parseDeliveryUpdate(webhook) {
                 try await OutboundSMS(db: req.db, ctx: ctx).applyDeliveryUpdate(update)
             }
@@ -170,11 +170,11 @@ enum ProviderRoutes {
     }
 
     /// Verifies the provider signature against the **configured** public URL (never the Host header).
-    private static func verified(_ req: Request, template: String) async throws -> ProviderWebhookRequest {
+    private static func verified(_ req: Request, template: String, route: ProviderWebhookRequest.Route) async throws -> ProviderWebhookRequest {
         let ctx = req.ctx
         let body = try await req.collectedBody(limit: 16 * 1024)
-        let webhook = ProviderWebhookRequest(url: ctx.config.publicBaseURL + template,
-                                             signature: req.headers.first(name: "X-Twilio-Signature"), body: body, receivedAt: ctx.now)
+        let webhook = ProviderWebhookRequest(url: ctx.config.publicBaseURL + template, route: route,
+                                             signature: req.headers.first(name: ctx.sms.signatureHeader), body: body, receivedAt: ctx.now)
         guard ctx.sms.verifyWebhook(webhook) else {
             _ = try? await AuditService(db: req.db, ctx: ctx).record("gateway.webhook_rejected", outcome: .denied,
                 actor: AuditActor(kind: .gateway), metadata: ["reason": "bad_signature"])

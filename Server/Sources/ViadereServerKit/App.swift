@@ -21,6 +21,8 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     let sms: any SMSProvider
     if let override = overrides.sms { sms = override } else if let twilio = config.twilio {
         sms = TwilioProvider(config: twilio, client: app.client, logger: app.logger)
+    } else if let mailerSend = config.mailerSendSMS {
+        sms = MailerSendSMSProvider(config: mailerSend, client: app.client)
     } else {
         sms = UnconfiguredSMSProvider()
     }

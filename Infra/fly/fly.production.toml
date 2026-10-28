@@ -90,8 +90,11 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   APNS_TEAM_ID = "REPLACE_WITH_TEAM_ID"
   PASS_TYPE_IDENTIFIER = ""             # set with the three PASS_*_PEM secrets, or leave all four unset (passes off)
   # ---- provider endpoints / senders (public values) -------------------------------------------------
-  EMAIL_API_URL = "https://api.resend.com/emails"
-  EMAIL_FROM_ADDRESS = "Viadere <no-reply@viadere.com>"
+  EMAIL_API_URL = "https://api.mailersend.com/v1/email"
+  EMAIL_API_FORMAT = "mailersend"
+  EMAIL_FROM_ADDRESS = "Viadere <no-reply@viadere.com>"   # a domain verified in MailerSend
+  SMS_PROVIDER = "mailersend"           # token and both webhook secrets are Fly secrets (secrets.txt)
+  MAILERSEND_SMS_FROM_NUMBER = "REPLACE_WITH_MAILERSEND_NUMBER"   # E.164 (MailerSend > SMS > Phone numbers)
   RCS_PROVIDER_BASE_URL = ""            # all four RCS_* values or none (token + webhook secret are secrets)
   RCS_AGENT_ID = ""
   FEATURE_APPLE_MESSAGES_FOR_BUSINESS = "false"

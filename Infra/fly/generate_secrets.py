@@ -49,11 +49,11 @@ INDEPENDENT_KEYS = ["CONNECT_LINK_SIGNING_KEY", "SERVER_PEPPER", "DATA_ENCRYPTIO
 THIRD_PARTY = [
     ("DATABASE_URL", "'postgres://viadere_app:<password>@<endpoint>.neon.tech/viadere?sslmode=verify-full'"),
     ("DATABASE_MIGRATION_URL", "'postgres://viadere_migrator:<password>@<endpoint>.neon.tech/viadere?sslmode=verify-full'"),
-    ("EMAIL_API_KEY", "'<Resend API key>'"),
+    ("EMAIL_API_KEY", "'<MailerSend API token (email)>'"),
     ("APNS_KEY_P8", '"$(cat AuthKey_<KEYID>.p8)"'),
-    ("TWILIO_ACCOUNT_SID", "'<AC...>'"),
-    ("TWILIO_AUTH_TOKEN", "'<auth token>'"),
-    ("TWILIO_FROM_NUMBER", "'<+1... Twilio number>'"),
+    ("MAILERSEND_SMS_API_TOKEN", "'<MailerSend API token (SMS)>'"),
+    ("MAILERSEND_SMS_INBOUND_SECRET", "'<inbound route secret>'"),
+    ("MAILERSEND_SMS_WEBHOOK_SECRET", "'<SMS webhook signing secret>'"),
 ]
 
 

@@ -5,14 +5,19 @@ import ViadereCore
 
 /// A webhook request from the messaging provider, as received.
 public struct ProviderWebhookRequest: Sendable {
+    /// Which provider callback the request arrived on (a provider may use a different signing secret per route).
+    public enum Route: Sendable, Equatable { case inbound, status }
+
     /// The exact public URL the provider called (built from configuration, never from the Host header).
     public var url: String
+    public var route: Route
     public var signature: String?
     public var body: Data
     public var receivedAt: Date
 
-    public init(url: String, signature: String?, body: Data, receivedAt: Date) {
+    public init(url: String, route: Route = .inbound, signature: String?, body: Data, receivedAt: Date) {
         self.url = url
+        self.route = route
         self.signature = signature
         self.body = body
         self.receivedAt = receivedAt
@@ -48,11 +53,17 @@ public struct SMSDeliveryUpdate: Sendable, Equatable {
 /// Provider-agnostic SMS adapter: webhook authenticity, parsing and sending.
 public protocol SMSProvider: Sendable {
     var name: String { get }
+    /// The request header carrying the webhook signature.
+    var signatureHeader: String { get }
     /// Constant-time verification of the provider's webhook signature.
     func verifyWebhook(_ request: ProviderWebhookRequest) -> Bool
     func parseInbound(_ request: ProviderWebhookRequest) throws -> InboundSMS
     func parseDeliveryUpdate(_ request: ProviderWebhookRequest) throws -> SMSDeliveryUpdate?
     func send(_ request: OutboundSMSRequest) async throws -> OutboundSMSResult
+}
+
+extension SMSProvider {
+    public var signatureHeader: String { "X-Twilio-Signature" }
 }
 
 /// Parses `application/x-www-form-urlencoded` bodies into ordered pairs.
