@@ -171,7 +171,10 @@ enum PayloadRedactor {
             }
             return .object(out)
         case .array(let items): return .array(items.prefix(20).map { redact($0, depth: depth + 1) })
-        case .string(let s): return .string(s.count > 120 ? String(s.prefix(120)) + "…" : s)
+        case .string(let s):
+            // Whatever the key, a string that looks like a credential or a phone number is masked.
+            let safe = LogRedactor.redact(s)
+            return .string(safe.count > 120 ? String(safe.prefix(120)) + "…" : safe)
         default: return value
         }
     }

@@ -67,10 +67,10 @@ extension TestHarness {
 
     /// A browser-like form POST: cookie, matching Origin, CSRF token unless overridden.
     func formPost(_ path: String, _ session: DashSession?, _ pairs: [(String, String)] = [], csrf override: String? = nil,
-                  includeCSRF: Bool = true, origin: String? = nil) async throws -> HTTPResult {
+                  includeCSRF: Bool = true, origin: String? = nil, headers extra: [String: String] = [:]) async throws -> HTTPResult {
         var fields = pairs
         if includeCSRF, let session { fields.append(("_csrf", override ?? csrf(session))) }
-        var headers = cookieHeaders(session)
+        var headers = cookieHeaders(session, extra: extra)
         headers["Origin"] = origin ?? self.origin
         return try await request(.POST, path, headers: headers, body: formBody(fields), contentType: "application/x-www-form-urlencoded")
     }

@@ -7,7 +7,8 @@ public enum LogRedactor {
     private static let patterns: [(NSRegularExpression, String)] = {
         let specs: [(String, String)] = [
             (#"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"#, "Bearer [redacted]"),
-            (#"vdk_(live|test)_[A-Za-z0-9_-]{8,}"#, "vdk_$1_[redacted]"),
+            // Keys are `vdk_<env>_<16 hex key id>.<43 char secret>`: the dot belongs to the key (older keys have none).
+            (#"vdk_(live|test)_[A-Za-z0-9_.-]{8,}"#, "vdk_$1_[redacted]"),
             (#"vd[ar]_[A-Za-z0-9_-]{16,}"#, "[redacted-token]"),
             (#"whsec_[A-Za-z0-9_-]{8,}"#, "whsec_[redacted]"),
             (#"(?i)(t=\d+,\s*)?v1=[0-9a-f]{32,}"#, "[redacted-signature]"),

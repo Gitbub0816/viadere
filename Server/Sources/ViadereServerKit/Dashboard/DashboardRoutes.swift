@@ -341,7 +341,7 @@ enum DashboardRoutes {
             [DashboardUI.esc(issued.kind), String(issued.count), String(decided.count),
              issued.count == 0 ? "—" : DashboardFormat.percent(Double(decided.count) / Double(issued.count))]
         }
-        let byKind = "<div class=\"card\"><h2>By kind</h2>\(DashboardFormat.table(["Kind", "Issued", "Decided", "Decision rate"], rows))</div>"
+        let byKind = "<div class=\"card\"><h2>By kind</h2>\(DashboardFormat.table(["Kind", "Issued", "Decided", "Decision rate"], rows, caption: "Interactions by kind"))</div>"
         let verifyCard = try await VerifyDashboard.card(db: req.db, ctx: req.ctx, businessId: businessId, days: o.days)
         let note = "<p class=\"mu sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>"
         return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "The last \(o.days) days", actions: periods,
@@ -421,7 +421,7 @@ enum DashboardRoutes {
         let rows = status.rows.map { [DashboardUI.esc($0.purpose.rawValue), String($0.granted), String($0.notGranted)] }
         let body = """
         <div class="grid">\(DashboardFormat.stat(String(status.active), "Connected customers"))\(DashboardFormat.stat(String(status.disconnected), "Disconnected"))</div>\
-        <div class="card"><h2>Consent by purpose</h2>\(DashboardFormat.table(["Purpose", "Granted", "Not granted"], rows))\
+        <div class="card"><h2>Consent by purpose</h2>\(DashboardFormat.table(["Purpose", "Granted", "Not granted"], rows, caption: "Consent by purpose"))\
         <p class="mu sm">Counts of current relationships only. Customers control these; marketing and rewards are off until a customer opts in, and security and account-service messages can't be turned off while connected. Individual customers are not shown.</p></div>
         """
         return DashboardUI.businessPage(p, title: "Consent", active: "/dashboard/consent", subtitle: "Where your customers stand, in aggregate.", body: body)
@@ -451,7 +451,7 @@ enum DashboardRoutes {
         if page > 0 { pager += "<a class=\"btn s sm\" href=\"/dashboard/audit?page=\(page - 1)\">Newer</a>" }
         if events.count > size { pager += "<a class=\"btn s sm\" href=\"/dashboard/audit?page=\(page + 1)\">Older</a>" }
         pager += "</div>"
-        let body = "<div class=\"card\">\(DashboardFormat.table(["When", "Action", "Outcome", "Actor", "Subject", "Details"], Array(rows), empty: "No events yet."))\(pager)</div><p class=\"mu sm\">Append-only and hash-chained. Secrets and message content are never recorded.</p>"
+        let body = "<div class=\"card\">\(DashboardFormat.table(["When", "Action", "Outcome", "Actor", "Subject", "Details"], Array(rows), empty: "No events yet.", caption: "Audit log"))\(pager)</div><p class=\"mu sm\">Append-only and hash-chained. Secrets and message content are never recorded.</p>"
         return DashboardUI.businessPage(p, title: "Audit log", active: "/dashboard/audit", subtitle: "Everything that happened in your organization.", body: body)
     }
 
@@ -503,8 +503,8 @@ enum DashboardRoutes {
             """
         }
         let roles = OrgRole.allCases.sorted(by: >).map { "<tr><th scope=\"row\">\($0.title)</th><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
-        let body = form + "<div class=\"card\"><h2>Members</h2>\(DashboardFormat.table(["Name", "Email", "Role", "Joined", ""], memberRows))</div>"
-            + "<div class=\"card\"><h2>Pending invitations</h2>\(DashboardFormat.table(["Email", "Role", "Expires", ""], inviteRows, empty: "None."))</div>"
+        let body = form + "<div class=\"card\"><h2>Members</h2>\(DashboardFormat.table(["Name", "Email", "Role", "Joined", ""], memberRows, caption: "Team members"))</div>"
+            + "<div class=\"card\"><h2>Pending invitations</h2>\(DashboardFormat.table(["Email", "Role", "Expires", ""], inviteRows, empty: "None.", caption: "Pending invitations"))</div>"
             + "<div class=\"card\"><h2>Roles</h2><div class=\"tw\"><table><caption class=\"vh\">Roles and what they can do</caption><tbody>\(roles)</tbody></table></div></div>"
         return DashboardUI.businessPage(p, title: "Team", active: "/dashboard/team", subtitle: "Everyone signs in with their own passkey.", flash: DashboardFormat.flash(req), body: body)
     }
@@ -536,9 +536,9 @@ enum DashboardRoutes {
         let tier = p.business?.tier ?? "free"
         let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(usage.totals.interactions), "Interactions this month"))\(DashboardFormat.stat(String(usage.totals.smsSegments), "SMS segments"))\(DashboardFormat.stat(String(usage.totals.rcsMessages), "RCS messages"))\(DashboardFormat.stat(tier.capitalized, "Plan"))</div>"
         let body = tiles + """
-        <div class="card"><h2>Platform fees</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.platform)))\
+        <div class="card"><h2>Platform fees</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.platform), caption: "Platform fees"))\
         <p><strong>Platform subtotal: \(InvoicePreview.format(micros: invoice.platformTotalMicros))</strong></p></div>\
-        <div class="card"><h2>Transport (carrier and provider pass-through)</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.transport)))\
+        <div class="card"><h2>Transport (carrier and provider pass-through)</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.transport), caption: "Transport pass-through"))\
         <p><strong>Transport subtotal: \(InvoicePreview.format(micros: invoice.transportTotalMicros))</strong></p></div>\
         <div class="card"><h2>Preview total</h2><p class="stat"><span class="n">\(InvoicePreview.format(micros: invoice.totalMicros))</span></p>\
         <p class="mu sm">\(DashboardFormat.date(invoice.periodStart)) – \(DashboardFormat.date(invoice.periodEnd)). This is a usage preview, not an invoice: no payment processor is connected, rates are configurable and final pricing is not yet set. Your plan affects quotas only — it never changes the priority of your messages or bypasses a customer's consent.</p></div>

@@ -42,7 +42,7 @@ enum VerifyDashboard {
         let total = counts.reduce(Counts()) { Counts(verified: $0.verified + $1.counts.verified, notVerified: $0.notVerified + $1.counts.notVerified, pending: $0.pending + $1.counts.pending) }
         let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(total.total), "Verification requests"))\(DashboardFormat.stat(String(total.verified), "Verified"))\(DashboardFormat.stat(String(total.notVerified), "Not verified"))\(DashboardFormat.stat(String(total.pending), "Waiting for the customer"))</div>"
         let rows = counts.map { [DashboardUI.esc($0.capability.rawValue), String($0.counts.verified), String($0.counts.notVerified), String($0.counts.pending)] }
-        let table = rows.isEmpty ? "<p class=\"mu sm\">No verification requests in this period.</p>" : DashboardFormat.table(["Capability", "Verified", "Not verified", "Pending"], rows)
+        let table = rows.isEmpty ? "<p class=\"mu sm\">No verification requests in this period.</p>" : DashboardFormat.table(["Capability", "Verified", "Not verified", "Pending"], rows, caption: "Verification requests by capability")
         return "<div class=\"card\"><h2>Verify</h2>\(tiles)\(table)<p class=\"mu sm\">Counts only. \"Not verified\" covers every way a request can end without a positive result, including a customer who declined: Viadere does not tell you why, and neither does this page.</p></div>"
     }
 }

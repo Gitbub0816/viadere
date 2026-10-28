@@ -236,7 +236,7 @@ enum OperatorRoutes {
                     DashboardUI.esc(b.tier), flags, DashboardFormat.date(b.createdAt)]
         }
         return DashboardUI.operatorPage(p, title: "Businesses", active: "/operator/businesses", flash: DashboardFormat.flash(req),
-                                        body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Status", "Tier", "Controls", "Created"], rows))</div>")
+                                        body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Status", "Tier", "Controls", "Created"], rows, caption: "Businesses"))</div>")
     }
 
     private static func business(_ req: Request) async throws -> Response {
@@ -293,6 +293,6 @@ enum OperatorRoutes {
         }
         let days = Int(await AbuseService(db: req.db, ctx: req.ctx).thresholds().window / 86_400)
         return DashboardUI.operatorPage(p, title: "Abuse signals", active: "/operator/abuse", subtitle: "Last \(days) days. Aggregates only.",
-            body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Issued", "Reports", "Complaint rate", "Opt-outs", "Opt-out rate", "Rate-limit hits", "State"], rows))</div>")
+            body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Issued", "Reports", "Complaint rate", "Opt-outs", "Opt-out rate", "Rate-limit hits", "State"], rows, caption: "Abuse signals by business"))</div>")
     }
 }

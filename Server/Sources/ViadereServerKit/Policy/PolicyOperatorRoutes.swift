@@ -156,14 +156,14 @@ enum PolicyOperatorRoutes {
         <div class="card"><h2>\(DashboardUI.esc(business.displayName))</h2><p>\(tiers)</p>\
         <p class="mu sm">Every verified business holds Tier M and the three messaging capabilities. A category, a plan or a verified badge never grants anything else: only a justified grant below does, and every grant and revocation is audited. Changes need your passkey.</p>\
         \(revokeTierButtons)</div>\
-        <div class="card"><h2>Capabilities</h2>\(DashboardFormat.table(["Capability", "Needs", "State", ""], capabilityRows))</div>\
+        <div class="card"><h2>Capabilities</h2>\(DashboardFormat.table(["Capability", "Needs", "State", ""], capabilityRows, caption: "Capabilities of this business"))</div>\
         <div class="card"><h2>Grant</h2><form method="post" action="\(base)/grant">\(csrf)\
         <div class="cols"><div><label for="gk">Type</label><select id="gk" name="kind"><option value="tier">Risk tier</option><option value="capability">Capability</option></select></div>\
         <div><label for="gt">Tier</label><select id="gt" name="value" aria-describedby="gh"><optgroup label="Tier">\(tierOptions)</optgroup><optgroup label="Capability">\(capabilityOptions)</optgroup></select><p id="gh" class="mu sm">Pick a tier with type Risk tier, or a capability with type Capability. A capability needs its tier first.</p></div></div>\
         <label for="gj">Purpose justification (required, 20+ characters)</label><textarea id="gj" name="justification" maxlength="1000" required></textarea>\
         <label for="gr">Heightened review reference (identity name and address only)</label><input id="gr" name="reviewReference" type="text" maxlength="120">\
         <button class="btn" type="submit">Grant</button></form></div>\
-        <div class="card"><h2>History</h2>\(DashboardFormat.table(["Entitlement", "By", "When", "Justification", "State"], historyRows, empty: "No grants: Tier M defaults only."))</div>
+        <div class="card"><h2>History</h2>\(DashboardFormat.table(["Entitlement", "By", "When", "Justification", "State"], historyRows, empty: "No grants: Tier M defaults only.", caption: "Entitlement history"))</div>
         """
         return DashboardUI.operatorPage(p, title: "Entitlements", active: "/operator/businesses", subtitle: "Risk tiers and capabilities.", flash: flash(req), body: body)
     }
@@ -194,14 +194,14 @@ enum PolicyOperatorRoutes {
         }
         let body = """
         <div class="card"><h2>Kill switches</h2><p class="mu sm">Turn one capability off for the whole platform, or for one business. It is enforced on the next request (other instances within \(Int(PolicyService.cacheTTL)) seconds). Sensitive capabilities also fail closed if this table cannot be read.</p>\
-        \(DashboardFormat.table(["Capability", "Scope", "State", "Reason", "Changed"], switchRows, empty: "No switches have been set."))\
+        \(DashboardFormat.table(["Capability", "Scope", "State", "Reason", "Changed"], switchRows, empty: "No switches have been set.", caption: "Capability switches"))\
         <form method="post" action="/operator/policy/switch">\(csrf)<div class="cols">\
         <div><label for="sc">Capability</label><select id="sc" name="capability">\(capabilityOptions)</select></div>\
         <div><label for="sd">Action</label><select id="sd" name="disabled"><option value="on">Disable</option><option value="off">Re-enable</option></select></div>\
         <div><label for="sb">Business id (blank = whole platform)</label><input id="sb" name="businessId" type="text" maxlength="36"></div></div>\
         <label for="sr">Reason (required)</label><input id="sr" name="reason" type="text" maxlength="300" required><button class="btn d" type="submit">Apply</button></form></div>\
         <div class="card"><h2>Law and policy rules</h2><p class="mu sm">Block a capability in listed jurisdictions, or allow it only in them (an unknown jurisdiction then fails closed).</p>\
-        \(DashboardFormat.table(["Capability", "Rule", "Jurisdictions", "Reason", ""], ruleRows, empty: "No rules."))\
+        \(DashboardFormat.table(["Capability", "Rule", "Jurisdictions", "Reason", ""], ruleRows, empty: "No rules.", caption: "Jurisdiction rules"))\
         <form method="post" action="/operator/policy/rules">\(csrf)<div class="cols">\
         <div><label for="rc">Capability</label><select id="rc" name="capability">\(capabilityOptions)</select></div>\
         <div><label for="rk">Rule</label><select id="rk" name="kind"><option value="jurisdiction_block">Block in</option><option value="jurisdiction_allow_only">Allow only in</option></select></div>\
