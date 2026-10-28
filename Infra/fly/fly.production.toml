@@ -13,6 +13,8 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   # Migrations run in a throwaway machine BEFORE any new machine starts; a non-zero exit aborts the deploy (old version keeps serving).
   # `migrate` is Vapor's built-in command; --yes skips the interactive prompt. ENTRYPOINT is /app/ViadereServer, so this runs
   # `ViadereServer migrate --yes --env production`.
+  # Hardened layout (Infra/fly/README.md 1a): run `migrate` from a separate release app that holds DATABASE_MIGRATION_URL, then delete this line and
+  # `fly secrets unset DATABASE_MIGRATION_URL` here, so the serving machines never hold the schema owner's credential.
   release_command = "migrate --yes --env production"
   release_command_timeout = "10m"
   strategy = "rolling"
@@ -42,6 +44,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   AUDIT_CHAIN_KEY_EPOCH = "1"
   CONNECT_LINK_SIGNING_KEY_ID = ""
   DATABASE_APP_ROLE = "viadere_app"   # the runtime role; `migrate` (release command, DATABASE_MIGRATION_URL) grants it DML only
+  # REQUIRED in production (the server refuses to start without AUDIT_HEAD_EXPORT, its target and AUDIT_HEAD_KMS_KEY + the GCP_* values):
   AUDIT_HEAD_EXPORT = ""              # gcs | r2 (write-once storage); set with AUDIT_HEAD_EXPORT_TARGET after `tofu apply` (Infra/terraform/audit_bucket.tf)
   AUDIT_HEAD_EXPORT_TARGET = ""
   AUDIT_HEAD_EXPORT_PREFIX = "audit-heads/"

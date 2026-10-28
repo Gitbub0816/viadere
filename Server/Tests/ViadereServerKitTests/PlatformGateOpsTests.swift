@@ -180,4 +180,60 @@ final class PlatformGateOpsTests: XCTestCase {
         XCTAssertEqual(LogRedactor.redact("invite K7M2-9QXP now"), "invite [redacted-code] now")
         XCTAssertEqual(LogRedactor.redact("token=12345678-1234-5678-1234-567812345678"), "token=[redacted]")
     }
+
+    // MARK: C1, C2
+
+    /// A complete production environment (everything the server requires there, including the audit-head export and its HSM key).
+    static func productionEnvironment(_ environment: String = "production") -> [String: String] {
+        [
+            "ENVIRONMENT": environment, "DATABASE_URL": "postgres://u:p@db/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(), "SERVER_PEPPER": SecureToken.generate(),
+            "DATA_ENCRYPTION_KEY": SecureToken.generate(), "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG",
+            "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(), "EDGE_TOKEN": SecureToken.generate(),
+            "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
+            "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.com",
+            "AUDIT_HEAD_EXPORT": "gcs", "AUDIT_HEAD_EXPORT_TARGET": "viadere-audit-heads",
+            "AUDIT_HEAD_KMS_KEY": "projects/p/locations/l/keyRings/r/cryptoKeys/audit-head/cryptoKeyVersions/1",
+            "GCP_WORKLOAD_IDENTITY_AUDIENCE": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/fly",
+            "GCP_SERVICE_ACCOUNT_EMAIL": "audit@p.iam.gserviceaccount.com", "GCP_SUBJECT_TOKEN_FILE": "/tmp/subject-token",
+        ]
+    }
+
+    /// Platform gate C2: production without an HSM-signed audit head (a database-and-chain-key compromise could then forge heads that nobody can
+    /// tell from real ones) must not start.
+    func testProductionRequiresTheHSMSignedAuditHeadExport() throws {
+        XCTAssertNoThrow(try ServerConfig.fromEnvironment(Self.productionEnvironment()))
+        var noKey = Self.productionEnvironment()
+        noKey["AUDIT_HEAD_KMS_KEY"] = nil
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(noKey), "production without AUDIT_HEAD_KMS_KEY")
+        var blank = Self.productionEnvironment()
+        blank["AUDIT_HEAD_KMS_KEY"] = ""
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(blank))
+        var noExport = Self.productionEnvironment()
+        for name in ["AUDIT_HEAD_EXPORT", "AUDIT_HEAD_EXPORT_TARGET", "AUDIT_HEAD_KMS_KEY"] { noExport[name] = nil }
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(noExport), "production without any audit-head export")
+        // Staging may run without the HSM key (it has no production audit trail).
+        var staging = Self.productionEnvironment("staging")
+        staging["AUDIT_HEAD_KMS_KEY"] = nil
+        XCTAssertNoThrow(try ServerConfig.fromEnvironment(staging))
+    }
+
+    /// Platform gate C1: in staging and production the schema owner's URL is mandatory for `migrate` (no silent fallback to the runtime login), and
+    /// every serving process verifies that its own login cannot change the schema, whether or not it holds the migration URL (it should not).
+    func testStrictModeNeedsTheMigratorForMigrationsAndAlwaysChecksTheRuntimeRole() throws {
+        var production = try ServerConfig.fromEnvironment(Self.productionEnvironment())
+        XCTAssertNil(production.operations.migrationDatabaseURL)
+        XCTAssertThrowsError(try DatabaseRoles.requireMigrationURL(config: production, migrating: true), "migrate without DATABASE_MIGRATION_URL")
+        XCTAssertNoThrow(try DatabaseRoles.requireMigrationURL(config: production, migrating: false), "a serving machine does not need the secret")
+        XCTAssertTrue(DatabaseRoles.mustVerifyRuntimeRole(config: production, migrating: false), "checked even though no migration URL is present")
+        XCTAssertFalse(DatabaseRoles.mustVerifyRuntimeRole(config: production, migrating: true), "the migrator is the schema owner by design")
+        production.operations.migrationDatabaseURL = "postgres://viadere_migrator:pw@db/viadere"
+        XCTAssertNoThrow(try DatabaseRoles.requireMigrationURL(config: production, migrating: true))
+        XCTAssertTrue(DatabaseRoles.mustVerifyRuntimeRole(config: production, migrating: false))
+        var staging = try ServerConfig.fromEnvironment(Self.productionEnvironment("staging"))
+        XCTAssertThrowsError(try DatabaseRoles.requireMigrationURL(config: staging, migrating: true))
+        // Development and tests keep working with one login.
+        staging = ServerConfig.testing()
+        XCTAssertNoThrow(try DatabaseRoles.requireMigrationURL(config: staging, migrating: true))
+        XCTAssertFalse(DatabaseRoles.mustVerifyRuntimeRole(config: staging, migrating: false))
+    }
 }

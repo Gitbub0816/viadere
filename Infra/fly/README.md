@@ -68,14 +68,25 @@ every variable in `Server/.env.example` is covered.
 `neon.tf` creates `viadere_migrator` (owns the schema) and `viadere_app` (runtime). Two secrets, two connection strings: `DATABASE_MIGRATION_URL` = the migrator's, read **only** by
 `ViadereServer migrate` (the release command); `DATABASE_URL` = `viadere_app`'s, used by every serving machine; `DATABASE_APP_ROLE = "viadere_app"` is a plain `[env]` value. The `migrate` run grants
 `viadere_app` SELECT/INSERT/UPDATE/DELETE on all tables and sequence usage, sets default privileges for tables later migrations create, revokes `CREATE` on schema `public` and `UPDATE` on `audit_events`.
-Staging and production refuse to start when `DATABASE_MIGRATION_URL` is set and the runtime login could still change the schema. Residual risk: Fly secrets are app-wide, so the migration URL is also in the
-serving machines' environment (the server reads it only in the `migrate` command). Rotate the migrator's password (Neon) after any suspected host compromise. Recovery from a mistaken single-role deployment: set both URLs,
+In staging and production the split is **mandatory** (platform gate C1): `ViadereServer migrate` refuses to run without `DATABASE_MIGRATION_URL` (it never falls back to the runtime login), and every serving
+process checks at startup that its own login cannot change the schema (`CREATE` on `public`, or owning tables) and refuses to start if it can, whether or not it holds the migration URL.
+
+**Keep the migrator's secret off the serving machines.** Fly secrets are app-wide, and a `release_command` runs with the serving app's secrets, so the single-app layout leaves `DATABASE_MIGRATION_URL` in every
+serving machine's environment (the server reads it only in `migrate`, but a code-execution compromise of a serving machine could read it). The hardened layout, which staging and production should move to:
+
+1. Create a second app per environment that never serves traffic (`viadere-migrate-staging`, `viadere-migrate`; no `[http_service]`, no public IP). It holds `DATABASE_MIGRATION_URL` plus the configuration the server needs to
+   start in strict mode (`migrate` loads the full configuration; import the same secrets and use the same `[env]` values as the serving app). Only the release workflow's deploy token can run machines in it.
+2. The release workflow pushes the same image digest to that app's registry and runs the migration there before it deploys the serving app: `fly machine run registry.fly.io/<release app>@<digest> migrate --yes --env production --app <release app> --rm`
+   (wait for exit code 0; a non-zero exit stops the release and the old version keeps serving).
+3. On the serving app: delete `release_command` from the toml and run `fly secrets unset DATABASE_MIGRATION_URL --app <serving app>`. The serving app now holds `DATABASE_URL` (the `viadere_app` login) only.
+
+Until step 3 is done for an app, the migration URL is present in its serving machines and the residual risk in docs/SECURITY.md (2.80 item 4) stands. Rotate the migrator's password (Neon) after any suspected host compromise. Recovery from a mistaken single-role deployment: set both URLs,
 run the release; the startup check names the variable that is wrong.
 
 ### 1b. Metrics, audit export
 
 `METRICS_TOKEN` protects `GET /metrics` (counters and gauges, no personal data; add the header `Authorization: Bearer <token>` in the scraper; the edge token is required as for everything else, so scrape through
-Cloudflare or set `METRICS_PORT` and scrape the machine's private 6PN address: the internal listener binds to `FLY_PRIVATE_IP` when Fly sets it, else to loopback, never to `0.0.0.0`, and it requires the same bearer token; the server refuses to start with `METRICS_PORT` and no `METRICS_TOKEN`). `AUDIT_HEAD_EXPORT=gcs` with `AUDIT_HEAD_EXPORT_TARGET=$(tofu output -raw audit_head_bucket)`, `AUDIT_HEAD_KMS_KEY=<audit_head_kms_key output>/cryptoKeyVersions/1`
+Cloudflare or set `METRICS_PORT` and scrape the machine's private 6PN address: the internal listener binds to `FLY_PRIVATE_IP` when Fly sets it, else to loopback, never to `0.0.0.0`, and it requires the same bearer token; the server refuses to start with `METRICS_PORT` and no `METRICS_TOKEN`). **Production refuses to start without `AUDIT_HEAD_EXPORT` and `AUDIT_HEAD_KMS_KEY`** (platform gate C2; staging may omit them). `AUDIT_HEAD_EXPORT=gcs` with `AUDIT_HEAD_EXPORT_TARGET=$(tofu output -raw audit_head_bucket)`, `AUDIT_HEAD_KMS_KEY=<audit_head_kms_key output>/cryptoKeyVersions/1`
 and the three `GCP_*` workload-identity values writes a signed head every `AUDIT_HEAD_EXPORT_INTERVAL_HOURS` to the locked bucket (`Infra/terraform/audit_bucket.tf`); `AUDIT_HEAD_EXPORT=r2` is the Cloudflare
 alternative (bucket with Object Lock, `AUDIT_HEAD_EXPORT_ENDPOINT=https://<account>.r2.cloudflarestorage.com`, an access key limited to PutObject on that bucket). Alert when `viadere_audit_head_export_age_seconds` exceeds twice the interval.
 

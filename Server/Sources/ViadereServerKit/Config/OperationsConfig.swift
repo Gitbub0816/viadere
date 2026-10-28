@@ -201,6 +201,12 @@ extension ServerConfig {
             }
             ops.auditExport = export
         }
+        // Production signs every exported head with the HSM key as well as the chain MAC: without it a compromise of the database and the chain key
+        // could forge heads that nobody can tell from real ones (platform gate C2).
+        if env["ENVIRONMENT"].flatMap(DeploymentEnvironment.parse) == .production {
+            guard ops.auditExport != nil else { throw ServerConfigError.missing("AUDIT_HEAD_EXPORT (required in production: gcs or r2, with AUDIT_HEAD_EXPORT_TARGET)") }
+            guard ops.auditExport?.kmsKey != nil else { throw ServerConfigError.missing("AUDIT_HEAD_KMS_KEY (required in production: the KMS key version that signs each exported audit head)") }
+        }
         operations = ops
     }
 

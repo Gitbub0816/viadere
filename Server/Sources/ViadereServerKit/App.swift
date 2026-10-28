@@ -77,6 +77,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     // MARK: Database
     // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL); every other process uses the runtime role (DATABASE_URL).
     let migrating = app.environment.arguments.dropFirst().contains("migrate")
+    try DatabaseRoles.requireMigrationURL(config: config, migrating: migrating)
     if let url = migrating ? (config.operations.migrationDatabaseURL ?? config.databaseURL) : config.databaseURL {
         try app.databases.use(.postgres(url: url), as: .psql)
     } else {
@@ -84,8 +85,8 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         app.databases.use(.sqlite(.memory), as: .sqlite)
     }
     app.migrations.add(Migrations.all)
-    // The serving process must not hold DDL rights when the deployment split the roles (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
-    if config.isStrict, !migrating, config.operations.migrationDatabaseURL != nil, config.databaseURL != nil, try await DatabaseRoles.runtimeCanChangeSchema(app.db) {
+    // The serving process must not hold DDL rights: the role split is mandatory in staging and production (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
+    if DatabaseRoles.mustVerifyRuntimeRole(config: config, migrating: migrating), try await DatabaseRoles.runtimeCanChangeSchema(app.db) {
         throw ServerConfigError.invalid("DATABASE_URL (the runtime role can change the schema; use a data-only role and DATABASE_MIGRATION_URL for migrations)")
     }
     PolicyRegistration.configure(app, config: config)

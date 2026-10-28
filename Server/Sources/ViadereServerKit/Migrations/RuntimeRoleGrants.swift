@@ -37,9 +37,23 @@ struct GrantRuntimeRolePrivileges: AsyncMigration {
     func revert(on db: any Database) async throws {}
 }
 
-/// Startup check for the runtime role: when `DATABASE_MIGRATION_URL` is configured (the deployment intends to split roles) the process that serves
-/// requests must not be able to change the schema. Refuses to start in staging and production if it can.
+/// Startup check for the runtime role: in staging and production the process that serves requests must not be able to change the schema; it
+/// refuses to start if it can (the role split is mandatory there, see `requireMigrationURL`).
 enum DatabaseRoles {
+    /// Platform gate C1: in staging and production `ViadereServer migrate` connects as the schema owner and only as the schema owner. Without
+    /// `DATABASE_MIGRATION_URL` it refuses to run instead of silently migrating (and holding DDL) as the runtime login. Serving processes do not need
+    /// the secret, and should not have it (run the release from a separate app or machine: Infra/fly/README.md section 1a).
+    static func requireMigrationURL(config: ServerConfig, migrating: Bool) throws {
+        guard config.isStrict, migrating, config.operations.migrationDatabaseURL == nil else { return }
+        throw ServerConfigError.missing("DATABASE_MIGRATION_URL (required to run migrations in staging and production)")
+    }
+
+    /// Whether this process must prove that its login cannot change the schema: every serving process in staging and production that uses
+    /// PostgreSQL, whether or not it holds the migration URL (the role split is mandatory, not opt-in).
+    static func mustVerifyRuntimeRole(config: ServerConfig, migrating: Bool) -> Bool {
+        config.isStrict && !migrating && config.databaseURL != nil
+    }
+
     /// Whether the connected role may create objects in the `public` schema or owns tables there (i.e. has DDL).
     static func runtimeCanChangeSchema(_ db: any Database) async throws -> Bool {
         guard DB.isPostgres(db), let sql = db as? any SQLDatabase else { return false }

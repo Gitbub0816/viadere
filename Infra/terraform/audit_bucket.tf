@@ -22,7 +22,7 @@ resource "google_storage_bucket" "audit_heads" {
     retention_period = var.audit_head_retention_seconds
     # A locked policy can never be shortened or removed and the bucket cannot be deleted until every object has aged out. Keep false in
     # staging and until counsel has agreed the period (docs/ops/DATA-INVENTORY.md, audit log retention); set true in production.
-    is_locked = var.audit_bucket_lock
+    is_locked = local.audit_bucket_locked
   }
 
   labels = { purpose = "audit-heads", environment = var.environment }
@@ -60,9 +60,14 @@ variable "audit_head_retention_seconds" {
 }
 
 variable "audit_bucket_lock" {
-  description = "Lock the retention policy (IRREVERSIBLE). Production only, after the period is agreed."
+  description = "Lock the retention policy (IRREVERSIBLE). Leave unset (null) for the default: locked in production, unlocked in staging. A locked policy is what stops a compromised server or cloud admin from shortening retention or deleting exported heads; set false in production only for a first apply to rehearse the period, and never leave it that way."
   type        = bool
-  default     = false
+  default     = null
+}
+
+locals {
+  # Platform gate C2: production defaults to a locked retention policy. Staging stays unlocked so the bucket can be torn down.
+  audit_bucket_locked = coalesce(var.audit_bucket_lock, var.environment == "production")
 }
 
 variable "audit_bucket_auditors" {

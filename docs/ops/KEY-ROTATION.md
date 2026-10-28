@@ -57,6 +57,23 @@ So: **rotating `SERVER_PEPPER` is a planned, user-visible maintenance event**, j
 guessing from a database leak alone). Until the lookup hashes are migrated to `versionedHex` with multi-pepper lookup (tracked as residual risk in SECURITY.md section 2.80) do not rotate it
 casually. `SUBJECT_REF_KEY` has its own re-derivation (clear `relationships.subject_ref`; the job re-derives; businesses re-fetch references).
 
+### Residual risk: what a pepper rotation cannot do (platform gate C3)
+
+State this precisely before anyone decides to rotate; there is no code that makes it safe today.
+
+* **Lookup hashes are single-pepper.** Every `hmacHex` value stored in the database was computed with the pepper in force when it was written and is looked up by recomputing it with the current
+  pepper. There is no second lookup under `SERVER_PEPPERS_PREVIOUS`, so the moment `SERVER_PEPPER` changes every stored lookup hash (list in the bullet above) stops matching. Nothing is re-hashed in the
+  background, and for several of them the plaintext is gone (phone numbers, OTPs, recovery codes are stored only as hashes), so they **cannot** be re-derived: the person must re-verify or be re-issued.
+* **Identifiers that are derived from the pepper change too.** The webhook `tenantId` (`ten_...`, sent in every v2 envelope) is `HMAC(pepper, "tenant-id" || business id)`, and the CSRF token derivation uses
+  the pepper. After a rotation every tenant id changes (receivers that stored the old one to route events break until updated; existing deliveries in flight carry the old value), and every open dashboard
+  form and session CSRF token is invalid until the page is reloaded. Wallet pass authentication tokens (`HMAC(pepper, id || salt)`) change, so installed passes stop updating until re-downloaded.
+* **Rotation therefore does not contain a leak retroactively.** A copy of the database plus the old pepper still lets the holder test guesses against every hash that existed before the rotation; rotating
+  only protects hashes created afterwards. Treat pepper exposure as "assume the old hashes are guessable" and handle the affected populations (phone-number space, e-mail addresses) accordingly.
+* **A rotation is an availability event, not a routine control.** Run it only for a suspected pepper exposure together with a database copy, in a maintenance window, with the support and business
+  communication prepared, and with the re-verification and tenant-id change announced to integrators in advance.
+* **Open work (not scheduled):** migrate lookup hashes to `versionedHex` with multi-pepper lookup and lazy re-hash on use, and derive `tenantId` and CSRF from a separate, independently rotatable key. Until
+  then this stays a recorded residual risk (RISK-REGISTER R-043, SECURITY.md 2.80 item 1).
+
 ## 4. Audit chain key (`AUDIT_CHAIN_KEY`)
 
 Events written under epoch N record N inside the MAC (chain version 3); epoch 1 keeps the version-2 form. `verifyChain` requires epochs never to decrease along the chain, so an attacker
