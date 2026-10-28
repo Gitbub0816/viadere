@@ -96,6 +96,33 @@ struct CreateRetentionDeleteGate: AsyncMigration {
     func revert(on db: any Database) async throws {}
 }
 
+/// PostgreSQL only: `decisions` has its own guard function (`viadere_decisions_guard`, which also allows the `[erased]` payload scrub), and it did not
+/// honor the retention gate, so the purge of signed decisions was refused. This replaces it so that a DELETE passes only inside the gate, exactly as for
+/// the other gated tables. UPDATE rules are unchanged. (SQLite keeps a separate `decisions_no_delete` trigger that the gate already opens.)
+struct CreateDecisionsRetentionGate: AsyncMigration {
+    var name: String { "CreateDecisionsRetentionGate.v1" }
+
+    func prepare(on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase, sql.dialect.name == "postgresql" else { return }
+        try await sql.raw("""
+            CREATE OR REPLACE FUNCTION viadere_decisions_guard() RETURNS trigger AS $$
+            BEGIN
+                IF TG_OP = 'DELETE' AND current_setting('viadere.retention', true) = 'on' THEN
+                    RETURN OLD;
+                END IF;
+                IF TG_OP = 'UPDATE' AND NEW.signed_payload = '[erased]'
+                   AND (to_jsonb(NEW) - 'signed_payload') = (to_jsonb(OLD) - 'signed_payload') THEN
+                    RETURN NEW;
+                END IF;
+                RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+            END;
+            $$ LANGUAGE plpgsql
+            """).run()
+    }
+
+    func revert(on db: any Database) async throws {}
+}
+
 enum RetentionDeleteGate {
     /// Runs `body` in a transaction in which the gated tables accept DELETE. Only the retention job calls this.
     static func perform<T: Sendable>(on db: any Database, _ body: @escaping @Sendable (any Database) async throws -> T) async throws -> T {

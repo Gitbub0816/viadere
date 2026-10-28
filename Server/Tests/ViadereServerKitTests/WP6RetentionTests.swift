@@ -1,4 +1,6 @@
 import Fluent
+import FluentSQL
+import SQLKit
 import Foundation
 import Vapor
 import ViadereCore
@@ -145,6 +147,10 @@ final class WP6RetentionTests: XCTestCase {
             h.clock.advance(by: days(2_600))
             report = await purger.run()
             XCTAssertTrue(report.skipped.filter { $0.value == "error" }.isEmpty, "\(report.skipped)")
+            // The audit chain is never purged without an export target (its signed heads must leave the system first); this harness configures none.
+            XCTAssertEqual(report.skipped[RetentionClass.auditEvents.rawValue], "no_export_target")
+            let auditRows = try await AuditEventRecord.query(on: h.db).count()
+            XCTAssertGreaterThan(auditRows, 0, "audit events stay when nothing was exported")
             let interaction = try await XCTUnwrapAsync(await InteractionRecord.find(ids["interaction"]!, on: h.db))
             XCTAssertTrue(interaction.contentErased)
             XCTAssertEqual(interaction.interactionJSON, "{}", "payload text is gone, the row (ids, status) stays for reporting")
@@ -207,6 +213,34 @@ final class WP6RetentionTests: XCTestCase {
             let gone = try await DecisionRecord.find(id, on: h.db)
             XCTAssertNil(gone)
             _ = consumer
+        }
+    }
+
+    /// The gate is transaction-local: it is not open outside `perform`, does not leak to the pooled connection afterwards, and a `SET LOCAL`
+    /// outside a transaction (what any ordinary statement runs in) does not open it. Ordinary request paths never call `perform`.
+    func testRetentionGateStaysClosedOutsideItsTransaction() async throws {
+        try await withHarness { h in
+            let (_, _, ids) = try await seed(h)
+            let id = ids["decision"]!
+            if let sql = h.db as? any SQLDatabase, sql.dialect.name == "postgresql" {
+                struct Row: Decodable { var v: String? }
+                try await RetentionDeleteGate.perform(on: h.db) { tx in
+                    let inside = try await (tx as! any SQLDatabase).raw("SELECT current_setting('viadere.retention', true) AS v").first(decoding: Row.self)
+                    XCTAssertEqual(inside?.v, "on")
+                }
+                for _ in 0..<5 {
+                    let after = try await sql.raw("SELECT current_setting('viadere.retention', true) AS v").first(decoding: Row.self)
+                    XCTAssertNotEqual(after?.v, "on", "the gate must not survive the transaction on a pooled connection")
+                }
+                // SET LOCAL outside a transaction block is a no-op for later statements.
+                try? await sql.raw("SET LOCAL viadere.retention = 'on'").run()
+                let decision = try await XCTUnwrapAsync(await DecisionRecord.find(id, on: h.db))
+                do { try await decision.delete(on: h.db); XCTFail("delete must be refused") } catch {}
+            }
+            let decision = try await XCTUnwrapAsync(await DecisionRecord.find(id, on: h.db))
+            do { try await decision.delete(on: h.db); XCTFail("delete must be refused") } catch {}
+            let still = try await DecisionRecord.find(id, on: h.db)
+            XCTAssertNotNil(still)
         }
     }
 
