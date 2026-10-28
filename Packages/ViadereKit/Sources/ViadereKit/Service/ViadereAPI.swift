@@ -55,6 +55,8 @@ public protocol ViadereAPI: Sendable {
     /// `POST /v1/devices/{id}/cancel-replacement`: "Not you? Cancel" on a pending replacement. `id` is the NEW device, which is revoked;
     /// the old one keeps working. Needs a trusted device other than `id` (`403 device_cool_down` otherwise).
     func cancelDeviceReplacement(_ id: DeviceID) async throws
+    /// `POST /v1/vault/recovery-release/{id}/cancel`: "Not you? Cancel" on a request to release the vault's recovery key envelope.
+    func cancelVaultRecoveryRelease(_ id: UUID) async throws
 
     // MARK: Account recovery (§2.26)
     /// `POST /v1/recovery/begin` (public): spends one code and returns options for a NEW passkey. Every failure is one `401`.

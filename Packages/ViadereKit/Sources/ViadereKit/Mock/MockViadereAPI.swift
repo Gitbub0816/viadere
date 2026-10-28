@@ -302,6 +302,12 @@ public actor MockViadereAPI: ViadereAPI {
         noticeList.append(SecurityNotice(id: UUID(), rawKind: rawKind, message: message, createdAt: clock(), subjectId: subjectId, action: action))
     }
 
+    public func cancelVaultRecoveryRelease(_ id: UUID) async throws {
+        if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }
+        guard noticeList.contains(where: { $0.action == .cancelVaultRecovery && $0.subjectId == id.uuidString.lowercased() }) else { throw Self.notFound() }
+        noticeList.removeAll { $0.action == .cancelVaultRecovery && $0.subjectId == id.uuidString.lowercased() }
+    }
+
     /// "Not you? Cancel": revokes the NEW device and clears the pending mark on the old one.
     public func cancelDeviceReplacement(_ id: DeviceID) async throws {
         if dismissNeedsTrustedDevice { throw APIError.server(status: 403, code: .deviceCoolDown, message: "") }

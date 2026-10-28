@@ -10,6 +10,10 @@ public protocol VaultKeyProvider: Sendable {
     /// returns are usable only for that authenticated session.
     func existingIdentity() async throws -> VaultDeviceIdentity?
     func createIdentity() async throws -> VaultDeviceIdentity
+    /// The identity again, with a **fresh** authentication evaluated now for `reason` (Face ID / Touch ID / passcode). Membership and recovery
+    /// operations (approve or remove a device, replace the recovery key, restore) sign with this one, so the unlock earlier in the session
+    /// does not cover them (gate review L2). Throws `VaultKeyError.userCancelled` when the person declines.
+    func freshIdentity(reason: String) async throws -> VaultDeviceIdentity
     func deleteIdentity() async throws
 }
 
@@ -31,6 +35,10 @@ public final class SoftwareVaultKeyProvider: VaultKeyProvider, @unchecked Sendab
             identity = new
             return new
         }
+    }
+    public func freshIdentity(reason: String) async throws -> VaultDeviceIdentity {
+        guard let identity = try await existingIdentity() else { throw VaultEngineError.deviceKeyMissing }
+        return identity
     }
     public func deleteIdentity() async throws { lock.withLock { identity = nil } }
 }

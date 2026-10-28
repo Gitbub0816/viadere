@@ -12,6 +12,10 @@ public protocol VaultSyncAPI: Sendable {
     func blobs(_ ids: [UUID]) async throws -> [VaultBlobDTO]
     func envelope() async throws -> VaultEnvelopeResponse
     func recoveryEnvelope() async throws -> VaultEnvelopeResponse
+    /// Starts the 72 h hold before the recovery envelope is released to this device (M2). Idempotent for the requesting device.
+    func requestRecoveryRelease() async throws -> VaultRecoveryRelease
+    /// "Not you? Cancel" (a vault device or a trusted account device).
+    func cancelRecoveryRelease(_ releaseId: UUID) async throws -> VaultRecoveryRelease
     func devices() async throws -> [VaultDeviceInfo]
     func removeDevice(_ memberId: String) async throws
     func createJoin(_ joinId: String) async throws -> VaultJoinState
@@ -43,6 +47,10 @@ public struct LiveVaultSyncAPI: VaultSyncAPI {
     }
     public func envelope() async throws -> VaultEnvelopeResponse { try await client.call(APIRoutes.vaultEnvelope) }
     public func recoveryEnvelope() async throws -> VaultEnvelopeResponse { try await client.call(APIRoutes.vaultRecoveryEnvelope) }
+    public func requestRecoveryRelease() async throws -> VaultRecoveryRelease { try await client.call(APIRoutes.vaultRecoveryReleaseRequest) }
+    public func cancelRecoveryRelease(_ releaseId: UUID) async throws -> VaultRecoveryRelease {
+        try await client.call(APIRoutes.vaultRecoveryReleaseCancel, params: ["releaseId": releaseId.uuidString.lowercased()])
+    }
     public func devices() async throws -> [VaultDeviceInfo] { try await client.call(APIRoutes.vaultDevices) }
     public func removeDevice(_ memberId: String) async throws { _ = try await client.call(APIRoutes.vaultDeviceRemove, params: ["memberId": memberId]) }
     public func createJoin(_ joinId: String) async throws -> VaultJoinState { try await client.call(APIRoutes.vaultJoinCreate, params: ["joinId": joinId]) }
@@ -78,10 +86,18 @@ public final class InMemoryVaultServer: @unchecked Sendable {
     private var bound: [String: String] = [:]            // account device -> member id
     private var removed: Set<String> = []
     private var joins: [String: Join] = [:]
+    private var releases: [UUID: Release] = [:]
+    private var skew: TimeInterval = 0
     public private(set) var requestLog: [String] = []
     public var available = true
     /// Fail the next `put` with a conflict (simulates another device winning a race).
     public var failNextPutWithConflict = false
+
+    struct Release { var device: String; var requestedAt: Date; var releaseAt: Date; var expiresAt: Date; var state = "pending" }
+
+    /// Test hook: time passes (the 72 h hold and the 24 h window run on this clock).
+    public func advance(by seconds: TimeInterval) { lock.withLock { skew += seconds } }
+    private var now: Date { Date().addingTimeInterval(skew) }
 
     struct Join { var requester: String?; var request: Data?; var approval: Data?; var approvedMember: String?; var approvedVersion: UInt64? }
 
@@ -126,7 +142,49 @@ public final class InMemoryVaultServer: @unchecked Sendable {
         let m = head.manifest
         let mine = memberId(of: device)
         return VaultStatus(exists: true, vaultId: vaultId, version: m.version, epoch: m.epoch, bound: mine != nil, memberId: mine,
-                           deviceCount: m.devices.filter { !removed.contains($0.id) }.count, recoveryConfigured: m.recoveryMember != nil)
+                           deviceCount: m.devices.filter { !removed.contains($0.id) }.count, recoveryConfigured: m.recoveryMember != nil,
+                           recoveryRelease: openRelease().map { releaseDTO($0.key, $0.value, device) })
+    }
+
+    // The recovery-envelope release, as the real server does it: a 72 h hold, then 24 h for the requesting device only.
+    fileprivate func openRelease() -> (key: UUID, value: Release)? {
+        releases.filter { $0.value.state == "pending" && $0.value.expiresAt > now }.max { $0.value.requestedAt < $1.value.requestedAt }
+    }
+
+    fileprivate func releaseDTO(_ id: UUID, _ r: Release, _ device: String) -> VaultRecoveryRelease {
+        let state: VaultRecoveryRelease.State = r.state == "cancelled" ? .cancelled : r.state == "consumed" ? .consumed : (now < r.releaseAt ? .holding : (now < r.expiresAt ? .released : .expired))
+        return VaultRecoveryRelease(releaseId: id, state: state, requestedAt: r.requestedAt, releaseAt: r.releaseAt, expiresAt: r.expiresAt, requestedByThisDevice: r.device == device)
+    }
+
+    /// The device's open window (hold passed, 24 h not): the only thing that lets a non-member read.
+    fileprivate func requireWindow(_ device: String) throws -> UUID {
+        guard let open = openRelease(), open.value.device == device, open.value.releaseAt <= now else { throw fail(403, .forbidden) }
+        return open.key
+    }
+
+    fileprivate func requestRelease(device: String) throws -> VaultRecoveryRelease {
+        try perform("release-request") {
+            guard head?.manifest.recoveryMember != nil else { throw fail(404, .notFound) }
+            guard memberId(of: device) == nil else { throw fail(409, .conflict) }
+            if let open = openRelease() {
+                guard open.value.device == device else { throw fail(409, .conflict) }
+                return releaseDTO(open.key, open.value, device)
+            }
+            let id = UUID()
+            let release = Release(device: device, requestedAt: now, releaseAt: now.addingTimeInterval(VaultRecoveryRelease.holdSeconds),
+                                  expiresAt: now.addingTimeInterval(VaultRecoveryRelease.holdSeconds + VaultRecoveryRelease.windowSeconds))
+            releases[id] = release
+            return releaseDTO(id, release, device)
+        }
+    }
+
+    fileprivate func cancelRelease(_ id: UUID, device: String) throws -> VaultRecoveryRelease {
+        try perform("release-cancel") {
+            guard var release = releases[id] else { throw fail(404, .notFound) }
+            for key in releases.keys where releases[key]?.state == "pending" { releases[key]?.state = "cancelled" }
+            release.state = "cancelled"
+            return releaseDTO(id, release, device)
+        }
     }
 
     fileprivate func put(_ request: VaultPutRequest, device: String) throws -> VaultStatus {
@@ -134,6 +192,7 @@ public final class InMemoryVaultServer: @unchecked Sendable {
             if failNextPutWithConflict { failNextPutWithConflict = false; throw fail(409, .conflict) }
             guard let signed = request.manifest.signed else { throw fail(422, .validationFailed) }
             let verified: VerifiedManifest
+            var consumeWindow: UUID?
             if request.expectedVersion == 0 {
                 guard head == nil else { throw fail(409, .conflict) }
                 verified = try validated { try VaultChainVerifier.verifyGenesis(signed) }
@@ -143,6 +202,8 @@ public final class InMemoryVaultServer: @unchecked Sendable {
                 verified = try validated { try VaultChainVerifier.verify(signed, after: head) }
                 if signed.recoveryAuthorization == nil {
                     guard memberId(of: device) == verified.manifest.signerId else { throw fail(403, .forbidden) }
+                } else {
+                    consumeWindow = try requireWindow(device)
                 }
             }
             let m = verified.manifest
@@ -177,6 +238,7 @@ public final class InMemoryVaultServer: @unchecked Sendable {
             }
             for (id, blob) in newBlobs { blobs[id] = blob }
             for id in blobs.keys where !m.items.contains(where: { $0.itemId == id }) { blobs[id] = nil }
+            if let consumeWindow { releases[consumeWindow]?.state = "consumed" }
             vaultId = m.vaultId
             chain.append(signed)
             head = verified
@@ -199,25 +261,29 @@ public final class InMemoryVaultServer: @unchecked Sendable {
     fileprivate func deleteVault(device: String) throws {
         try perform("delete") {
             _ = try requireBound(device)
-            vaultId = nil; chain = []; head = nil; blobs = [:]; envelopes = [:]; bound = [:]; removed = []; joins = [:]
+            vaultId = nil; chain = []; head = nil; blobs = [:]; envelopes = [:]; bound = [:]; removed = []; joins = [:]; releases = [:]
         }
     }
 
     fileprivate func manifests(after: UInt64, device: String) throws -> VaultManifestsResponse {
         try perform("manifests") {
             guard head != nil else { throw fail(404, .notFound) }
+            if memberId(of: device) == nil { _ = try requireWindow(device) }
             let rows = chain.filter { (try? VaultManifest.decode($0.manifestBytes).version) ?? 0 > after }
             return VaultManifestsResponse(manifests: rows.prefix(100).map(VaultManifestDTO.init), latestVersion: head?.manifest.version ?? 0)
         }
     }
 
     fileprivate func blobs(_ ids: [UUID], device: String) throws -> [VaultBlobDTO] {
-        try perform("blobs") { ids.compactMap { id in blobs[id].map { VaultBlobDTO(itemId: id, blob: Base64URL.encode($0)) } } }
+        try perform("blobs") {
+            if memberId(of: device) == nil { _ = try requireWindow(device) }
+            return ids.compactMap { id in blobs[id].map { VaultBlobDTO(itemId: id, blob: Base64URL.encode($0)) } } }
     }
 
     fileprivate func envelope(device: String, recovery: Bool) throws -> VaultEnvelopeResponse {
         try perform(recovery ? "recovery-envelope" : "envelope") {
             guard let head else { throw fail(404, .notFound) }
+            if recovery { _ = try requireWindow(device) }
             let id = recovery ? head.manifest.recoveryMember?.id : try requireBound(device)
             guard let id, let envelope = envelopes[id] else { throw fail(404, .notFound) }
             return VaultEnvelopeResponse(memberId: id, envelope: Base64URL.encode(envelope))
@@ -286,6 +352,8 @@ public struct InMemoryVaultSyncAPI: VaultSyncAPI {
     public func blobs(_ ids: [UUID]) async throws -> [VaultBlobDTO] { try server.blobs(ids, device: device) }
     public func envelope() async throws -> VaultEnvelopeResponse { try server.envelope(device: device, recovery: false) }
     public func recoveryEnvelope() async throws -> VaultEnvelopeResponse { try server.envelope(device: device, recovery: true) }
+    public func requestRecoveryRelease() async throws -> VaultRecoveryRelease { try server.requestRelease(device: device) }
+    public func cancelRecoveryRelease(_ releaseId: UUID) async throws -> VaultRecoveryRelease { try server.cancelRelease(releaseId, device: device) }
     public func devices() async throws -> [VaultDeviceInfo] { try server.devices(device: device) }
     public func removeDevice(_ memberId: String) async throws { try server.removeDevice(memberId, device: device) }
     public func createJoin(_ joinId: String) async throws -> VaultJoinState { try server.createJoin(joinId, device: device) }

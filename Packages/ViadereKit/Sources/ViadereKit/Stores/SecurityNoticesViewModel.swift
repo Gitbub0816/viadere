@@ -63,6 +63,7 @@ public final class SecurityNoticesViewModel {
         switch notice.action {
         case .cancelRecovery?: "Cancel recovery"
         case .cancelDeviceReplacement?: "Cancel"
+        case .cancelVaultRecovery?: "Cancel release"
         case .unknown?, nil: nil
         }
     }
@@ -72,6 +73,7 @@ public final class SecurityNoticesViewModel {
         switch notice.action {
         case .cancelRecovery?: "Stops the account recovery that was started"
         case .cancelDeviceReplacement?: "Removes the new iPhone and keeps this one"
+        case .cancelVaultRecovery?: "Stops the request to release your vault's recovery key envelope"
         case .unknown?, nil: nil
         }
     }
@@ -92,6 +94,10 @@ public final class SecurityNoticesViewModel {
                 guard let id = notice.subjectId.flatMap(DeviceID.init) else { throw APIError.invalidRequest("id") }
                 try await services.api.cancelDeviceReplacement(id)
                 message = Self.replacementCancelledMessage
+            case .cancelVaultRecovery:
+                guard let id = notice.subjectId.flatMap(UUID.init(uuidString:)) else { throw APIError.invalidRequest("id") }
+                try await services.api.cancelVaultRecoveryRelease(id)
+                message = Self.vaultReleaseCancelledMessage
             case .unknown:
                 return false
             }
@@ -118,6 +124,7 @@ public final class SecurityNoticesViewModel {
     }
 
     public static let recoveryCancelledMessage = "Recovery was cancelled. Its recovery codes no longer work, so generate new ones in Settings."
+    public static let vaultReleaseCancelledMessage = "The request was cancelled. Nothing was released. If you didn't ask for it, replace your recovery key in Authenticator."
     public static let replacementCancelledMessage = "The new iPhone was removed. This one keeps working."
     public static let coolDownActionMessage = "This iPhone is new to your account, so it can't do that yet. Use a device you already trust."
     public static let alreadyHandledMessage = "That was already taken care of."
@@ -142,6 +149,11 @@ public final class SecurityNoticesViewModel {
         case .vaultDeviceAdded: return "A device was added to your synced credential vault \(when)."
         case .vaultDeviceRemoved: return "A device was removed from your synced credential vault \(when)."
         case .vaultDeleted: return "Your synced credential vault was deleted from Viadere's servers \(when)."
+        case .vaultRecoveryRequested: return "Someone asked to release your vault's recovery key envelope \(when). Nothing is released for 72 hours."
+        case .vaultRecoveryCancelled: return "A request to release your vault's recovery key envelope was cancelled \(when)."
+        case .vaultRecoveryReleased: return "Your vault's recovery key envelope is now available to the device that asked for it \(when)."
+        case .vaultRecoveryFetched: return "Your vault's recovery key envelope was downloaded \(when)."
+        case .vaultRestored: return "Your synced credential vault was restored on a new device with the recovery key \(when)."
         case .approvalKeyEnrolled: return "A business can now ask you to approve requests with a new approval key (\(when))."
         case .approvalKeyRevoked: return "An approval key was removed \(when)."
         case .approvalsFrozen: return "Approvals were frozen \(when)."
@@ -159,6 +171,7 @@ public final class SecurityNoticesViewModel {
         switch notice.action {
         case .cancelRecovery?: return "Not you? Cancel recovery."
         case .cancelDeviceReplacement?: return "Not you? Cancel."
+        case .cancelVaultRecovery?: return "Not you? Cancel the release now."
         case .unknown?, nil: break
         }
         switch notice.topic {
@@ -166,6 +179,8 @@ public final class SecurityNoticesViewModel {
         case .recoveryCompleted: return "Confirm your phone numbers from a device you trust, and share access again if you want to."
         case .delegationEnded: return "Ask them to invite you again if you still want to share."
         case .vaultDeviceAdded: return "Not you? Open Authenticator, remove the device and change the passwords and passkeys stored there."
+        case .vaultRecoveryFetched: return "It opens nothing without your recovery key. Not you? Open Authenticator and replace the recovery key."
+        case .vaultRestored: return "Not you? Open Authenticator, replace your recovery key and change the passwords and passkeys stored there."
         case .approvalKeyEnrolled: return "Not you? Open Approvals, remove the key and freeze approvals."
         case .approvalsUnfrozen: return "Not you? Open Approvals and freeze them again."
         case .approvalRequestsPaused: return "Don't recognize it? Open Approvals and report the business."

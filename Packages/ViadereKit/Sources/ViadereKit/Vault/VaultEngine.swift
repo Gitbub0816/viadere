@@ -33,6 +33,12 @@ public enum VaultEngineError: Error, Equatable, Sendable {
     case joinNotApproved
     case noRecoveryKey
     case tooManySyncAttempts
+    /// The vault holds as much ciphertext as one key rotation can upload (`VaultFormat.maxTotalBlobBytes`): delete something to add more.
+    case vaultFull
+    /// Restoring with the recovery key needs a released envelope: the 72-hour wait has not passed, was cancelled, or its 24 hours are over.
+    case restoreNotReleased
+    /// `commitRestore` without a preview that is still fresh (call `prepareRestore` again).
+    case noPreparedRestore
 }
 
 /// A passkey-registration request as the credential-provider extension receives it.
@@ -94,6 +100,20 @@ public struct AddDeviceInvite: Sendable {
     public var joinId: String { secret.joinId }
 }
 
+/// What the person sees before a restore is committed (gate review L1/M1): taken from the authenticated, decrypted vault, so they can tell
+/// whether this is their vault and whether it is as recent as they expect. A server that serves a stale but genuine state shows an old
+/// `lastChange` here.
+public struct RestorePreview: Sendable, Equatable {
+    public var version: UInt64
+    /// When the newest manifest was signed, and by which device (its name is sealed in the vault, so the server cannot choose it).
+    public var lastChange: Date
+    public var lastChangedBy: String?
+    public var deviceNames: [String]
+    public var itemCount: Int
+    public var passkeyCount: Int
+    public var codeCount: Int
+}
+
 public struct JoinRequestPreview: Sendable, Equatable {
     /// The name the new device gave itself, authenticated by the pairing secret.
     public var deviceLabel: String
@@ -103,6 +123,9 @@ public struct JoinRequestPreview: Sendable, Equatable {
 
 public struct JoinHandle: Sendable {
     public let secret: PairingSecret
+    /// The fingerprint of **this** device's keys. The approving device shows the same one for the request it received; the person compares the
+    /// two screens before approving (gate review L3).
+    public let fingerprint: String
     public var joinId: String { secret.joinId }
 }
 
@@ -126,6 +149,13 @@ public actor VaultEngine {
     private let clock: @Sendable () -> Date
     private let deviceLabel: String
     private var unlocked: UnlockedVault?
+    private var prepared: PreparedRestore?
+
+    private struct PreparedRestore {
+        var key: RecoveryKey
+        var snapshot: VaultSnapshot
+        var preparedAt: Date
+    }
 
     private static let anchorAccount = "vault.head"
 
@@ -187,6 +217,15 @@ public actor VaultEngine {
     public func lock() {
         unlocked = nil
         totpCache = nil
+        prepared = nil
+    }
+
+    /// The vault opened with a **fresh** authentication for `reason`: for approving or removing a device, replacing the recovery key,
+    /// turning sync on. The unlock earlier in the session does not cover these (gate review L2).
+    private func freshlyAuthenticated(_ reason: String) async throws -> UnlockedVault {
+        let vault = try await refreshed()
+        let identity = try await keys.freshIdentity(reason: reason)
+        return try vault.withIdentity(identity)
     }
 
     // MARK: Create, unlock
@@ -250,7 +289,8 @@ public actor VaultEngine {
 
     private func apply(upserts: [VaultItemPayload], deletes: [UUID]) async throws {
         let vault = try await refreshed()
-        let mutation = try await vault.applying(upserts: upserts, deletes: deletes, now: clock())
+        let mutation: VaultMutation
+        do { mutation = try await vault.applying(upserts: upserts, deletes: deletes, now: clock()) } catch VaultError.limitExceeded("vault size") { throw VaultEngineError.vaultFull }
         try commit(mutation, upserted: upserts.map(\.id), deleted: deletes)
     }
 
@@ -286,7 +326,8 @@ public actor VaultEngine {
             requireUserVerification: request.requireUserVerification, userVerified: userVerified, backedUp: try currentState()?.sync.enabled ?? false,
             attestation: attestation, now: clock())
         let item = VaultItemPayload(body: .passkey(created.credential), createdAt: clock())
-        let mutation = try await vault.applying(upserts: [item], now: clock())
+        let mutation: VaultMutation
+        do { mutation = try await vault.applying(upserts: [item], now: clock()) } catch VaultError.limitExceeded("vault size") { throw VaultEngineError.vaultFull }
         try commit(mutation, upserted: [item.id])
         return created
     }
@@ -338,9 +379,12 @@ public actor VaultEngine {
         }
     }
 
-    public func oneTimeCodeIdentities() async throws -> [OneTimeCodeIdentity] {
+    /// - Parameter domains: the sites the system says the request is for. When non-empty, only codes whose issuer or account belongs to one of
+    ///   them are returned (`OneTimeCodeDomainMatcher`), so a page cannot make the picker list every account's label. Empty means all.
+    public func oneTimeCodeIdentities(matching domains: [String] = []) async throws -> [OneTimeCodeIdentity] {
         try await refreshed().items().compactMap { item in
             guard case .totp(let t) = item.body else { return nil }
+            if !domains.isEmpty, !domains.contains(where: { OneTimeCodeDomainMatcher.matches(issuer: t.issuer, accountName: t.accountName, domain: $0) }) { return nil }
             let label = [t.issuer, t.accountName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             return OneTimeCodeIdentity(recordIdentifier: item.id.uuidString.lowercased(), label: DisplayTextSanitizer.sanitize(label, maxCharacters: 80))
         }
@@ -370,7 +414,7 @@ public actor VaultEngine {
 
     /// Installs (or replaces) the recovery key. Replace with `rotateVaultKey` when the old key may have leaked.
     public func installRecoveryKey(_ key: RecoveryKey, rotateVaultKey: Bool = false) async throws {
-        let vault = try await refreshed()
+        let vault = try await freshlyAuthenticated(rotateVaultKey ? "Replace your recovery key and the vault key" : "Replace your recovery key")
         let mutation = try await vault.settingRecoveryKey(key, rotateKey: rotateVaultKey, now: clock())
         try commit(mutation)
         if try currentState()?.sync.enabled == true { try await syncNow() }
@@ -404,7 +448,7 @@ public actor VaultEngine {
         let api = try requireAPI()
         guard let state = try currentState() else { throw VaultEngineError.notCreated }
         guard !state.sync.enabled else { return }
-        let vault = try await refreshed()
+        let vault = try await freshlyAuthenticated("Turn on sync for your passkeys and codes")
         let remote = try await mapped { try await api.status() }
         guard !remote.exists else { throw VaultEngineError.remoteVaultExists }
         let items = try vault.items()
@@ -557,7 +601,7 @@ public actor VaultEngine {
     public func approveJoin(_ invite: AddDeviceInvite) async throws {
         let api = try requireAPI()
         _ = try await syncNow()
-        let vault = try await refreshed()
+        let vault = try await freshlyAuthenticated("Add this device to your vault")
         let state = try await mapped { try await api.join(invite.joinId) }
         guard let sealed = state.request.flatMap(Base64URL.decode) else { throw VaultEngineError.joinNotApproved }
         let request = try JoinRequest.open(sealed, with: invite.secret)
@@ -584,7 +628,7 @@ public actor VaultEngine {
         let identity = try await keys.createIdentity()
         let sealed = try JoinRequest.make(for: identity, label: label ?? deviceLabel).sealed(with: secret)
         _ = try await mapped { try await api.submitJoinRequest(secret.joinId, sealed: Base64URL.encode(sealed)) }
-        return JoinHandle(secret: secret)
+        return JoinHandle(secret: secret, fingerprint: CrockfordFingerprint.short(of: identity.signingPublicKey))
     }
 
     /// Completes the join once the approving device has approved: verifies, through the pairing channel, that the manifest and the approving
@@ -629,7 +673,7 @@ public actor VaultEngine {
     public func removeDevice(_ memberId: String) async throws {
         let api = try requireAPI()
         _ = try await syncNow()
-        let vault = try await refreshed()
+        let vault = try await freshlyAuthenticated("Remove this device from your vault")
         let mutation = try await vault.removingDevice(memberId, now: clock())
         _ = try await mapped { try await api.put(Self.request(mutation.delta, expected: vault.manifest.version)) }
         guard let current = try currentState() else { throw VaultEngineError.notCreated }
@@ -641,19 +685,36 @@ public actor VaultEngine {
 
     // MARK: Restoring with the recovery key (new device)
 
-    /// Restores the synced vault onto this device with the vault recovery key. Account sign-in alone never reaches this: without the key the
-    /// server's data cannot be opened or authenticated. The recovery key is used up: `newRecoveryKey` (shown to the person and confirmed BEFORE
-    /// this call) replaces it, the vault key is replaced, and every other device is removed.
-    public func restore(recoveryKey text: String, newRecoveryKey: RecoveryKey, label: String? = nil) async throws {
+    /// Step 0: asks the server to release the vault's recovery envelope to this device. Nothing is released for 72 hours; every other device is
+    /// told and can cancel (gate review M2). Poll `restoreRelease()`.
+    public func requestRestoreRelease() async throws -> VaultRecoveryRelease {
+        guard try currentState() == nil else { throw VaultEngineError.alreadyExists }
+        return try await mapped { try await requireAPI().requestRecoveryRelease() }
+    }
+
+    /// The account's open release as the server reports it (`nil` when there is none).
+    public func restoreRelease() async throws -> VaultRecoveryRelease? {
+        try await mapped { try await requireAPI().status() }.recoveryRelease
+    }
+
+    public func cancelRestoreRelease(_ id: UUID) async throws {
+        _ = try await mapped { try await requireAPI().cancelRecoveryRelease(id) }
+    }
+
+    /// Step 1: authenticates the server's history with **only the recovery key**, downloads and decrypts the vault, and returns what the person
+    /// should check. **Nothing is committed**: no device key is made, the server is not written, the local store is untouched. Needs the
+    /// released window of step 0.
+    public func prepareRestore(recoveryKey text: String) async throws -> RestorePreview {
         let api = try requireAPI()
         guard try currentState() == nil else { throw VaultEngineError.alreadyExists }
         let key = try RecoveryKey(parsing: text)
         let status = try await mapped { try await api.status() }
         guard status.exists else { throw VaultEngineError.remoteVaultMissing }
+        guard let release = status.recoveryRelease, release.state == .released, release.requestedByThisDevice else { throw VaultEngineError.restoreNotReleased }
         var chain: [SignedVaultManifest] = []
         var after: UInt64 = 0
         while after < status.version {
-            let page = try await mapped { try await api.manifests(after: after) }
+            let page = try await restoreRead { try await api.manifests(after: after) }
             let signed = page.manifests.compactMap(\.signed)
             guard let newest = signed.last, let version = try? VaultManifest.decode(newest.manifestBytes).version, version > after else { break }
             chain += signed
@@ -662,14 +723,48 @@ public actor VaultEngine {
         let head = try await mapped { try UnlockedVault.authenticateChain(chain, recoveryKey: key) }
         guard head.manifest.version == status.version else { throw VaultEngineError.rollbackDetected }
         guard let recoveryMember = head.manifest.recoveryMember else { throw VaultEngineError.noRecoveryKey }
-        let envelope = try await mapped { try await api.recoveryEnvelope() }
+        let envelope = try await restoreRead { try await api.recoveryEnvelope() }
         guard envelope.memberId == recoveryMember.id, let envelopeBytes = Base64URL.decode(envelope.envelope) else { throw VaultError.blobMismatch }
         var blobs: [UUID: Data] = [:]
-        for dto in try await mapped({ try await api.blobs(head.manifest.items.map(\.itemId)) }) { if let data = Base64URL.decode(dto.blob) { blobs[dto.itemId] = data } }
+        for dto in try await restoreRead({ try await api.blobs(head.manifest.items.map(\.itemId)) }) { if let data = Base64URL.decode(dto.blob) { blobs[dto.itemId] = data } }
         let snapshot = VaultSnapshot(verified: head, blobs: blobs, envelopes: [recoveryMember.id: envelopeBytes])
+        // Open it as the recovery member: every envelope, blob hash and item must verify and decrypt before the person is asked anything.
+        let opened = try UnlockedVault.open(snapshot, identity: try key.identity(vaultId: head.manifest.vaultId))
+        let items = try opened.items()
+        let signer = head.manifest.member(head.manifest.signerId)
+        let preview = RestorePreview(version: head.manifest.version, lastChange: Date(timeIntervalSince1970: TimeInterval(head.manifest.createdAt)),
+                                     lastChangedBy: signer.flatMap { opened.label(of: $0.id) },
+                                     deviceNames: head.manifest.devices.compactMap { opened.label(of: $0.id) }.map { DisplayTextSanitizer.sanitize($0, maxCharacters: 40) }.sorted(),
+                                     itemCount: items.count,
+                                     passkeyCount: items.filter { if case .passkey = $0.body { true } else { false } }.count,
+                                     codeCount: items.filter { if case .totp = $0.body { true } else { false } }.count)
+        prepared = PreparedRestore(key: key, snapshot: snapshot, preparedAt: clock())
+        return preview
+    }
+
+    /// A read the released window allows; `403` means the window is not (or no longer) open.
+    private func restoreRead<T>(_ body: () async throws -> T) async throws -> T {
+        do { return try await mapped(body) } catch APIError.server(let status, _, _) where status == 403 { throw VaultEngineError.restoreNotReleased }
+    }
+
+    /// Walks away from a preview (the person said no, or the screen closed).
+    public func discardRestore() { prepared = nil }
+
+    /// Step 2: after the person has seen the preview and confirmed the **new** recovery key. The recovery key is used up: `newRecoveryKey`
+    /// replaces it, the vault key is replaced, and every other device is removed. The preview expires after 15 minutes.
+    public func commitRestore(newRecoveryKey: RecoveryKey, label: String? = nil) async throws {
+        let api = try requireAPI()
+        guard let pending = prepared, clock().timeIntervalSince(pending.preparedAt) <= 15 * 60 else {
+            prepared = nil
+            throw VaultEngineError.noPreparedRestore
+        }
+        prepared = nil
+        guard try currentState() == nil else { throw VaultEngineError.alreadyExists }
         let identity = try await keys.createIdentity()
-        let mutation = try await UnlockedVault.recovering(snapshot, recoveryKey: key, newRecoveryKey: newRecoveryKey, newDevice: identity, label: label ?? deviceLabel, now: clock())
-        _ = try await mapped { try await api.put(Self.request(mutation.delta, expected: head.manifest.version, bind: identity.memberId)) }
+        let version = pending.snapshot.manifest.version
+        let mutation = try await UnlockedVault.recovering(pending.snapshot, recoveryKey: pending.key, newRecoveryKey: newRecoveryKey, newDevice: identity,
+                                                          label: label ?? deviceLabel, now: clock())
+        _ = try await mapped { try await api.put(Self.request(mutation.delta, expected: version, bind: identity.memberId)) }
         try save(VaultLocalState(snapshot: mutation.vault.snapshot, sync: .init(enabled: true, anchor: mutation.delta.manifest)), ifHeadIs: nil)
         unlocked = mutation.vault
     }

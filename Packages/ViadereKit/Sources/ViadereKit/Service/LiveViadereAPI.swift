@@ -31,6 +31,9 @@ public struct LiveViadereAPI: ViadereAPI {
     public func cancelDeviceReplacement(_ id: DeviceID) async throws {
         _ = try await client.call(APIRoutes.deviceReplacementCancel, params: ["deviceId": id.description])
     }
+    public func cancelVaultRecoveryRelease(_ id: UUID) async throws {
+        _ = try await client.call(APIRoutes.vaultRecoveryReleaseCancel, params: ["releaseId": id.uuidString.lowercased()])
+    }
 
     // MARK: Recovery
     public func beginRecovery(_ request: RecoveryBeginRequest) async throws -> PasskeyRegistrationOptions {

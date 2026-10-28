@@ -333,14 +333,19 @@ struct VaultEngineSyncTests {
 
         // The phone is lost. Account recovery gives a new device an account session, nothing more: signing in cannot reach the vault.
         let fresh = Phone(server: server, label: "New phone")
-        await #expect(throws: VaultEngineError.alreadyExists) { try await a.engine.restore(recoveryKey: recovery.displayString, newRecoveryKey: .generate()) }
-        await #expect(throws: (any Error).self) { try await fresh.engine.restore(recoveryKey: RecoveryKey.generate().displayString, newRecoveryKey: .generate()) }
+        await #expect(throws: VaultEngineError.alreadyExists) { _ = try await a.engine.prepareRestore(recoveryKey: recovery.displayString) }
+        await #expect(throws: VaultEngineError.restoreNotReleased) { _ = try await fresh.engine.prepareRestore(recoveryKey: recovery.displayString) }
+        _ = try await fresh.engine.requestRestoreRelease()
+        server.advance(by: VaultRecoveryRelease.holdSeconds + 1)
+        await #expect(throws: (any Error).self) { _ = try await fresh.engine.prepareRestore(recoveryKey: RecoveryKey.generate().displayString) }
         #expect(try await fresh.engine.phase() == .empty)
         await #expect(throws: (any Error).self) { try await fresh.engine.unlock() }
 
-        // With the recovery key, and a new one that was shown first:
+        // With the recovery key, a preview, and a new key that was shown first:
+        let preview = try await fresh.engine.prepareRestore(recoveryKey: recovery.displayString)
+        #expect(preview.itemCount == 1 && preview.deviceNames == ["Phone"])
         let newKey = await fresh.engine.makeRecoveryKey()
-        try await fresh.engine.restore(recoveryKey: recovery.displayString, newRecoveryKey: newKey)
+        try await fresh.engine.commitRestore(newRecoveryKey: newKey)
         #expect(try await fresh.engine.items().map(\.id) == [item])
         #expect(try await fresh.engine.verifyRecoveryKey(newKey.displayString))
         #expect(try await fresh.engine.verifyRecoveryKey(recovery.displayString) == false, "the used key is retired")
@@ -348,7 +353,9 @@ struct VaultEngineSyncTests {
         await #expect(throws: (any Error).self) { _ = try await a.engine.syncNow() }
         // And the used recovery key cannot restore a second time.
         let another = Phone(server: server)
-        await #expect(throws: (any Error).self) { try await another.engine.restore(recoveryKey: recovery.displayString, newRecoveryKey: .generate()) }
+        _ = try await another.engine.requestRestoreRelease()
+        server.advance(by: VaultRecoveryRelease.holdSeconds + 1)
+        await #expect(throws: (any Error).self) { _ = try await another.engine.prepareRestore(recoveryKey: recovery.displayString) }
     }
 
     @Test func disablingSyncKeepsTheLocalVaultAndCanErasetheServerCopy() async throws {

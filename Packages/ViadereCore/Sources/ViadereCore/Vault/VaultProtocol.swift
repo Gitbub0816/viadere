@@ -65,6 +65,14 @@ public struct UnlockedVault: Sendable {
         self.identity = identity
     }
 
+    /// The same vault opened with a freshly authenticated copy of this device's own keys. Membership and recovery operations (approve a
+    /// device, remove one, replace the recovery key) sign with a key bound to an authentication evaluated **for that operation** instead of
+    /// the one from unlock (gate review L2). The member must be the same one.
+    public func withIdentity(_ fresh: VaultDeviceIdentity) throws -> UnlockedVault {
+        guard fresh.memberId == identity.memberId, fresh.agreementPublicKey == identity.agreementPublicKey else { throw VaultError.forbidden("different device identity") }
+        return UnlockedVault(vaultKey: vaultKey, snapshot: snapshot, identity: fresh)
+    }
+
     // MARK: Labels
 
     private static func labelKey(_ key: VaultKey, vaultId: UUID) -> SymmetricKey {

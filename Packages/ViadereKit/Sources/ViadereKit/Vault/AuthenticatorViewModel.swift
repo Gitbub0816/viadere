@@ -55,6 +55,11 @@ public final class AuthenticatorViewModel {
     public private(set) var recoveryKeyText: String?
     public private(set) var invite: AddDeviceInvite?
     public private(set) var joinPreview: JoinRequestPreview?
+    /// This device's own fingerprint while it waits to be approved: compare it with the one the approving device shows.
+    public private(set) var ownFingerprint: String?
+    /// Restoring with the recovery key: the release (72 h hold, then 24 h), and the preview shown before anything is committed.
+    public private(set) var restoreRelease: VaultRecoveryRelease?
+    public private(set) var restorePreview: RestorePreview?
     public private(set) var isWorking = false
 
     private let engine: VaultEngine
@@ -351,7 +356,9 @@ public final class AuthenticatorViewModel {
     /// The person typed (or scanned) the pairing code shown on the approving device.
     public func requestJoin(code: String) async -> Bool {
         do {
-            joinHandle = try await engine.requestJoin(code: code)
+            let handle = try await engine.requestJoin(code: code)
+            joinHandle = handle
+            ownFingerprint = handle.fingerprint
             return true
         } catch VaultError.invalidPairingCode {
             message = "That code doesn't look right. Check it against the other device."
@@ -368,6 +375,7 @@ public final class AuthenticatorViewModel {
         do {
             try await engine.completeJoin(joinHandle)
             self.joinHandle = nil
+            ownFingerprint = nil
             try await refresh()
             return true
         } catch VaultEngineError.joinNotApproved {
@@ -378,7 +386,60 @@ public final class AuthenticatorViewModel {
         }
     }
 
-    /// Restoring with the recovery key: first a new recovery key is made and shown; `restore` runs after the person confirms it.
+    // MARK: Restoring with the recovery key
+    //
+    // 1. `requestRestoreRelease()`: asks for the recovery envelope. Nothing is released for 72 hours; the person's other devices are told and can cancel.
+    // 2. `checkRestoreRelease()` until it is `.released` (24 hours to use it).
+    // 3. `previewRestore(recoveryKey:)`: authenticates and decrypts; shows when the vault last changed, its devices and how many items. Nothing is committed.
+    // 4. `beginRestore()` shows the new recovery key; `restore(confirmingNewKey:)` commits after the person typed it back.
+
+    public func requestRestoreRelease() async {
+        do {
+            restoreRelease = try await engine.requestRestoreRelease()
+            message = nil
+        } catch {
+            message = Self.describe(error)
+        }
+    }
+
+    public func checkRestoreRelease() async {
+        restoreRelease = try? await engine.restoreRelease()
+    }
+
+    public func cancelRestoreRelease() async {
+        guard let release = restoreRelease else { return }
+        do {
+            try await engine.cancelRestoreRelease(release.releaseId)
+            restoreRelease = nil
+        } catch {
+            message = Self.describe(error)
+        }
+    }
+
+    @discardableResult
+    public func previewRestore(recoveryKey: String) async -> Bool {
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            restorePreview = try await engine.prepareRestore(recoveryKey: recoveryKey)
+            message = nil
+            return true
+        } catch VaultError.invalidRecoveryKey {
+            message = "That recovery key doesn't match this vault. Check it and try again."
+            return false
+        } catch {
+            message = Self.describe(error)
+            return false
+        }
+    }
+
+    public func discardRestorePreview() async {
+        await engine.discardRestore()
+        restorePreview = nil
+        releaseRecoveryKey()
+    }
+
+    /// Making and showing the new recovery key (after the preview).
     public func beginRestore() async {
         let key = await engine.makeRecoveryKey()
         pendingRecoveryKey = key
@@ -386,7 +447,11 @@ public final class AuthenticatorViewModel {
     }
 
     @discardableResult
-    public func restore(recoveryKey: String, confirmingNewKey typed: String) async -> Bool {
+    public func restore(confirmingNewKey typed: String) async -> Bool {
+        guard restorePreview != nil else {
+            message = "Check the vault first."
+            return false
+        }
         guard let key = pendingRecoveryKey, let entered = try? RecoveryKey(parsing: typed), entered == key else {
             message = "That doesn't match the new recovery key shown."
             return false
@@ -394,12 +459,11 @@ public final class AuthenticatorViewModel {
         isWorking = true
         defer { isWorking = false; releaseRecoveryKey() }
         do {
-            try await engine.restore(recoveryKey: recoveryKey, newRecoveryKey: key)
+            try await engine.commitRestore(newRecoveryKey: key)
+            restorePreview = nil
+            restoreRelease = nil
             try await refresh()
             return true
-        } catch VaultError.invalidRecoveryKey {
-            message = "That recovery key doesn't match this vault. Check it and try again."
-            return false
         } catch {
             message = Self.describe(error)
             return false
@@ -425,6 +489,10 @@ public final class AuthenticatorViewModel {
         case VaultEngineError.deviceKeyMissing: return "This device's vault key is gone, so the vault can't be opened here. Restore it with your recovery key."
         case VaultEngineError.locked: return "Unlock the vault first."
         case VaultEngineError.tooManySyncAttempts: return "Sync is busy. Try again in a moment."
+        case VaultEngineError.vaultFull: return "Your vault is full. Delete a passkey or code you no longer use, then try again."
+        case VaultEngineError.restoreNotReleased: return "The recovery key isn't available yet. Ask for it and wait the 72 hours, or it was cancelled or expired."
+        case VaultEngineError.noPreparedRestore: return "That check timed out. Check the vault again."
+        case VaultError.limitExceeded("vault size"): return "Your vault is full. Delete a passkey or code you no longer use, then try again."
         case let error as APIError: return error.userMessage
         default: return "Something went wrong. Please try again."
         }

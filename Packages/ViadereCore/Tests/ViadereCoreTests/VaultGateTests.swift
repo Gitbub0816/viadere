@@ -92,4 +92,16 @@ struct VaultGateCoreTests {
         let honest = try await joined.removingDevice(b.memberId, now: g0.addingTimeInterval(2))
         #expect(honest.vault.manifest.epoch == 2)
     }
+
+    // MARK: L2
+
+    @Test func aFreshIdentityMustBeTheSameDevice() async throws {
+        let a = VaultDeviceIdentity.software()
+        let vault = try await UnlockedVault.create(identity: a, label: "Phone", items: [smallTotp(1)], now: g0).vault
+        let fresh = VaultDeviceIdentity(signingKey: a.signingKey, agreementKey: a.agreementKey)
+        #expect(try vault.withIdentity(fresh).memberId == vault.memberId)
+        #expect(throws: VaultError.forbidden("different device identity")) { try vault.withIdentity(.software()) }
+        // A different agreement key under the same signing key is not the same device either.
+        #expect(throws: VaultError.forbidden("different device identity")) { try vault.withIdentity(VaultDeviceIdentity(signingKey: a.signingKey, agreementKey: SoftwareVaultAgreementKey())) }
+    }
 }
