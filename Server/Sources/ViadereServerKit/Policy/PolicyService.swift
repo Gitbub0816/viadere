@@ -54,6 +54,10 @@ struct PolicyInput: Sendable {
 struct PolicyService {
     let db: any Database
     let ctx: ServerContext
+    /// Disclosure-stage denials about a *customer* (revoked consent, a policy block on the person's evidence, a lost receipt race) are written
+    /// to the platform-only trail, without a business id: a business-visible denial reason would tell the business why a person was not
+    /// verified (AGE-005). Denials about the business itself (entitlement, scope) stay in its own log.
+    var platformOnlyDenials = false
 
     /// How long the global switches and rules may be served from memory.
     static let cacheTTL: TimeInterval = 5
@@ -138,6 +142,13 @@ struct PolicyService {
     func record(_ decision: PolicyDecision, input: PolicyInput, principal: BusinessPrincipal) async throws {
         let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
         if !decision.allowed {
+            if platformOnlyDenials {
+                var metadata = decision.audit.metadata
+                if let requestId = input.requestId { metadata["request_id"] = requestId }
+                _ = try? await AuditService(db: db, ctx: ctx).record(decision.audit.action, outcome: decision.audit.outcome, actor: actor,
+                    subjectType: "capability", subjectId: input.capability.rawValue, metadata: metadata)
+                return
+            }
             _ = try? await AuditService(db: db, ctx: ctx).record(decision.audit.action, outcome: decision.audit.outcome, actor: actor,
                 businessId: principal.businessId, subjectType: "capability", subjectId: input.capability.rawValue, metadata: decision.audit.metadata)
         } else if input.capability.definition?.auditsAllowedDecisions == true {

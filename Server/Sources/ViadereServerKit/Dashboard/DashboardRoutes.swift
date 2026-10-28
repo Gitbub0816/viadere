@@ -439,10 +439,11 @@ enum DashboardRoutes {
         let members = try await OrgMembershipRecord.query(on: req.db).filter(\.$businessId == businessId).all()
         let users = try await DashboardUserRecord.query(on: req.db).filter(\.$id ~~ members.map(\.userId)).all()
         let names = Dictionary(users.compactMap { u in u.id.map { ($0.uuidString.lowercased(), u.displayName) } }, uniquingKeysWith: { a, _ in a })
-        let rows = events.prefix(size).map { e -> [String] in
-            let actor = e.actorId.flatMap { names[$0] } ?? (e.actorId.map { "…" + $0.suffix(6) } ?? "")
-            let meta = (try? JSONDecoder().decode([String: String].self, from: Data(e.metadataJSON.utf8))) ?? [:]
-            let metaText = meta.keys.sorted().map { "\($0)=\(meta[$0] ?? "")" }.joined(separator: " ")
+        // The one business-facing projection: consumer actors are this business's subject_ref, Verify events carry no oracle.
+        let projection = BusinessAuditProjection(ctx: req.ctx)
+        let rows = events.prefix(size).compactMap { projection.project($0) }.map { e -> [String] in
+            let actor = e.actorId.flatMap { names[$0] } ?? (e.actorKind == AuditActor.Kind.consumer.rawValue ? (e.actorId ?? "customer") : (e.actorId.map { "…" + $0.suffix(6) } ?? ""))
+            let metaText = e.metadata.keys.sorted().map { "\($0)=\(e.metadata[$0] ?? "")" }.joined(separator: " ")
             return [DashboardFormat.date(e.occurredAt), "<code>\(DashboardUI.esc(e.action))</code>",
                     DashboardFormat.badge(e.outcome, e.outcome == "success" ? "ok" : "dg"), "\(DashboardUI.esc(e.actorKind)) \(DashboardUI.esc(actor))",
                     DashboardUI.esc([e.subjectType, e.subjectId.map { "…" + $0.suffix(6) }].compactMap { $0 }.joined(separator: " ")), "<span class=\"mu sm\">\(DashboardUI.esc(metaText))</span>"]

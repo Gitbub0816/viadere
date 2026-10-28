@@ -32,7 +32,7 @@ struct DisclosureReceiptService {
             try await db.transaction { tx in
                 try await DisclosureReceiptRecord(receipt: receipt, consumerId: consumer.uuid).create(on: tx)
                 _ = try await AuditService(db: tx, ctx: ctx).record("consent.disclosure_granted", actor: AuditActor(kind: .consumer, id: consumer.description),
-                    consumerId: consumer, businessId: receipt.businessId, subjectType: "disclosure_receipt", subjectId: receipt.id.uuidString.lowercased(),
+                    consumerId: consumer, subjectType: "disclosure_receipt", subjectId: receipt.id.uuidString.lowercased(),
                     metadata: ["capability": capability.rawValue, "purpose": purpose, "request_id": requestId, "fields": receipt.fields.joined(separator: " "),
                                "expires_at": ISO8601DateFormatter().string(from: receipt.expiresAt)])
             }
@@ -54,7 +54,7 @@ struct DisclosureReceiptService {
             throw APIError.conflict("This disclosure was already made.")
         }
         _ = try await AuditService(db: db, ctx: ctx).record("consent.disclosure_revoked", actor: AuditActor(kind: .consumer, id: consumer.description),
-            consumerId: consumer, businessId: BusinessID(row.businessId), subjectType: "disclosure_receipt", subjectId: receiptId.uuidString.lowercased())
+            consumerId: consumer, subjectType: "disclosure_receipt", subjectId: receiptId.uuidString.lowercased())
     }
 
     /// The receipt of **this business** for this subject, capability and request. Tenant-scoped: another business's receipt is never

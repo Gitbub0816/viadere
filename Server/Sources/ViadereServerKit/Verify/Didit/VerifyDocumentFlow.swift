@@ -155,7 +155,7 @@ extension VerifyService {
         try? await attempt.update(on: db)
         _ = try? await AuditService(db: db, ctx: ctx).record(attempt.purgeStatus == "done" ? "verification.provider_purged" : "verification.provider_purge_failed",
             outcome: attempt.purgeStatus == "done" ? .success : .failure, actor: AuditActor(kind: .system, id: "verify"),
-            businessId: BusinessID(attempt.businessId), subjectType: "verification_attempt", subjectId: attempt.id!.uuidString.lowercased(),
+            subjectType: "verification_attempt", subjectId: attempt.id!.uuidString.lowercased(),
             metadata: ["attempts": String(attempt.purgeAttempts)])
     }
 }

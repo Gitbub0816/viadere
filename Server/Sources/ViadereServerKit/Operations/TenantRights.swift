@@ -155,7 +155,10 @@ struct TenantDataRequests {
                                "mtlsRequired": settings.mtlsRequired, "alertSubscriptions": settings.alertSubscriptions]
         }
         let events = try await AuditEventRecord.query(on: db).filter(\.$businessId == businessId).sort(\.$seq, .descending).limit(10_000).all()
-        out["auditEvents"] = events.map { ["at": iso($0.occurredAt), "action": $0.action, "outcome": $0.outcome, "actor": ($0.actorId as Any?) ?? NSNull(), "subject": ($0.subjectId as Any?) ?? NSNull()] }
+        // The same projection as the dashboard: a consumer is this business's subject_ref, Verify events carry no oracle (AGE-005).
+        out["auditEvents"] = BusinessAuditProjection(ctx: ctx).project(events).map {
+            ["at": iso($0.occurredAt), "action": $0.action, "outcome": $0.outcome, "actor": ($0.actorId as Any?) ?? NSNull(), "subject": ($0.subjectId as Any?) ?? NSNull()]
+        }
         let relationships = try await RelationshipRecord.query(on: db).filter(\.$businessId == businessId).all()
         out["customers"] = ["connected": relationships.filter { $0.status == "active" }.count, "disconnected": relationships.filter { $0.status != "active" }.count]
         return out

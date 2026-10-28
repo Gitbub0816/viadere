@@ -35,8 +35,7 @@ extension VerifyService {
         let expiresAt = min(now.addingTimeInterval(VerifyPolicy.walletNonceLifetime), record.expiresAt)
         let attempt = VerificationAttemptRecord(requestId: record.id!, businessId: record.businessId, method: .wallet, nonce: Base64URL.encode(nonce), now: now, expiresAt: expiresAt)
         try await attempt.create(on: db)
-        _ = try? await AuditService(db: db, ctx: ctx).record("verification.attempt_started", actor: AuditActor(kind: .consumer, id: consumer.description), consumerId: consumer,
-            businessId: BusinessID(record.businessId), subjectType: "verification_request", subjectId: id.description, metadata: ["method": "wallet"])
+        await audit("verification.attempt_started", record, metadata: ["method": "wallet"])
         return WalletAttemptStart(attemptId: attempt.id!, nonce: Base64URL.encode(nonce), merchantIdentifier: merchant, expiresAt: expiresAt)
     }
 
@@ -105,10 +104,9 @@ extension VerifyService {
         await audit("verification.attempt_failed", record, metadata: ["reason": reason], outcome: .failure)
     }
 
+    /// Detailed events: the platform-only trail (no business id; see `platformAudit`).
     func audit(_ action: String, _ record: VerificationRequestRecord, metadata: [String: String] = [:], outcome: AuditEvent.Outcome = .success) async {
-        _ = try? await AuditService(db: db, ctx: ctx).record(action, outcome: outcome, actor: AuditActor(kind: .consumer, id: record.consumerId.uuidString.lowercased()),
-            consumerId: ConsumerID(record.consumerId), businessId: BusinessID(record.businessId), subjectType: "verification_request",
-            subjectId: record.requestID.description, metadata: metadata)
+        await platformAudit(action, record, metadata: metadata, outcome: outcome)
     }
 }
 

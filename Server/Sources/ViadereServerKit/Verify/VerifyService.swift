@@ -369,8 +369,14 @@ struct VerifyService {
             record.label = built?.label.rawValue
             record.disclosedFields = built.map { Array($0.values.keys.filter { !(["assurance", "issued_at", "expires_at", "audience"].contains($0)) }).sorted().joined(separator: ",") }
             try await record.update(on: tx)
+            // AGE-005: the business-scoped event is the same for every end of the same polarity (no reason, status, label or method);
+            // the detail goes to the platform-only trail, which has no business id and is never rendered to a business.
             _ = try await AuditService(db: tx, ctx: ctx).record("verification.completed", outcome: outcome == .verified ? .success : .failure,
                 actor: AuditActor(kind: .system, id: "verify"), consumerId: ConsumerID(record.consumerId), businessId: BusinessID(record.businessId),
+                subjectType: "verification_request", subjectId: record.requestID.description,
+                metadata: ["capability": record.capability, "outcome": outcome.rawValue])
+            _ = try await AuditService(db: tx, ctx: ctx).record("verification.concluded", outcome: outcome == .verified ? .success : .failure,
+                actor: AuditActor(kind: .system, id: "verify"), consumerId: ConsumerID(record.consumerId),
                 subjectType: "verification_request", subjectId: record.requestID.description,
                 metadata: ["capability": record.capability, "outcome": outcome.rawValue, "status": status.rawValue, "reason": reason,
                            "label": built?.label.rawValue ?? "none", "method": built?.provenance.method.rawValue ?? "none",
@@ -418,7 +424,7 @@ struct VerifyService {
             return outcome(try await VerificationRequestRecord.find(record.id, on: db) ?? record)
         }
         let input = PolicyInput(capability, subjectRef: subjectRef, parameters: record.parameterValues, purpose: record.purpose, requestId: record.requestID.description)
-        let decision = try await PolicyService(db: db, ctx: ctx).authorizeDisclosure(input, principal: principal, relationship: relationship, evidence: [holding])
+        let decision = try await PolicyService(db: db, ctx: ctx, platformOnlyDenials: true).authorizeDisclosure(input, principal: principal, relationship: relationship, evidence: [holding])
         guard decision.allowed else {
             // Revoked receipt, withdrawn entitlement, switched-off capability, ...: the same `not_verified` for the business.
             try await persist(record, resultId: resultId, outcome: .notVerified, status: .notVerified, built: nil, reason: "policy_" + (decision.primaryReason?.rawValue ?? "denied"))
@@ -436,6 +442,18 @@ struct VerifyService {
               let business = try await BusinessRecord.find(record.businessId, on: db) else { return nil }
         return BusinessPrincipal(businessId: BusinessID(record.businessId), keyId: record.keyId, livemode: key.livemode, scopes: key.scopeSet,
                                  businessName: business.displayName, capabilities: key.capabilitySet)
+    }
+
+    // MARK: Platform-only trail
+
+    /// Detailed Verify events (attempts, reasons, methods, consent, provider purge) go to the platform-only trail: **no business id**, so
+    /// no business-facing view or export can ever contain them (AGE-005: a business must not tell "under the threshold" from "declined"
+    /// or "expired"). The request id in `subject_id` lets the platform correlate; the consumer id is platform-internal.
+    @discardableResult
+    func platformAudit(_ action: String, _ record: VerificationRequestRecord, metadata: [String: String] = [:], outcome: AuditEvent.Outcome = .success,
+                       on database: (any Database)? = nil) async -> Bool {
+        (try? await AuditService(db: database ?? db, ctx: ctx).record(action, outcome: outcome, actor: AuditActor(kind: .consumer, id: record.consumerId.uuidString.lowercased()),
+            consumerId: ConsumerID(record.consumerId), subjectType: "verification_request", subjectId: record.requestID.description, metadata: metadata)) != nil
     }
 
     // MARK: Push
