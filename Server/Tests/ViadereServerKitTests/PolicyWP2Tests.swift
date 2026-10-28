@@ -225,6 +225,8 @@ final class PolicyWP2Tests: XCTestCase {
             try await fails("tier V first") { try await service.grant(businessId: id, capability: .identityName, actor: actor, justification: "KYC for account opening", reviewReference: "REV-1") }
             try await service.grant(businessId: id, tier: .v, actor: actor, justification: "Purpose assessment and retention rules approved by privacy review")
             try await fails("review reference") { try await service.grant(businessId: id, capability: .identityName, actor: actor, justification: "Name check for regulated account opening") }
+            // Gate: identity.verified releases no attribute, but it is an identity capability and needs the heightened-review reference too.
+            try await fails("review reference") { try await service.grant(businessId: id, capability: .identityVerified, actor: actor, justification: "Verified-ID check for regulated onboarding") }
             try await service.grant(businessId: id, capability: .identityName, actor: actor, justification: "Name check for regulated account opening", reviewReference: "REV-2026-114")
             try await service.grant(businessId: id, capability: .ageMinimum, actor: actor, justification: "Age-gate for alcohol delivery in launch markets")
             let snapshot = try await service.snapshot(businessId: id)

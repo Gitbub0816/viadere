@@ -171,7 +171,7 @@ enum PolicyOperatorRoutes {
         <div class="cols"><div><label for="gk">Type</label><select id="gk" name="kind"><option value="tier">Risk tier</option><option value="capability">Capability</option></select></div>\
         <div><label for="gt">Tier</label><select id="gt" name="value" aria-describedby="gh"><optgroup label="Tier">\(tierOptions)</optgroup><optgroup label="Capability">\(capabilityOptions)</optgroup></select><p id="gh" class="mu sm">Pick a tier with type Risk tier, or a capability with type Capability. A capability needs its tier first.</p></div></div>\
         <label for="gj">Purpose justification (required, 20+ characters)</label><textarea id="gj" name="justification" maxlength="1000" required></textarea>\
-        <label for="gr">Heightened review reference (identity name and address only)</label><input id="gr" name="reviewReference" type="text" maxlength="120">\
+        <label for="gr">Heightened review reference (required for every identity capability)</label><input id="gr" name="reviewReference" type="text" maxlength="120">\
         <button class="btn" type="submit">Grant</button></form></div>\
         <div class="card"><h2>Legacy approval path</h2>\(DashboardFormat.badge(snapshot.legacyApproval ? "Granted" : "Closed", snapshot.legacyApproval ? "wa" : "ok"))\
         <p class="mu sm">Approve v2 is the only approval path whose result the business verifies itself. The legacy authorize and high-risk authenticate interactions trust the relay's status, so they are closed for live traffic unless this entitlement is granted: justified, audited, at most 180 days, and never past \(DashboardUI.esc(ISO8601DateFormatter().string(from: LegacyApproval.sunset))). The sandbox is not affected.</p>\

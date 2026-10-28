@@ -46,6 +46,8 @@
 | R-038 | TLS 1.2 compatibility window keeps older clients (and downgrade surface) alive | SEC-TR-001 | Security lead | 2 | 2 | Low | Accept under reviewed policy (TLS-COMPATIBILITY-POLICY.md); AEAD/ECDHE only; review gate to 1.3-only. | Accepted (time-boxed) |
 | R-039 | Apple Messages for Business adapter placeholder could be mistaken for a working channel | SECURITY.md AMB | Product lead | 1 | 3 | Low | Mitigate: flag defaults off; adapter inert; documented. | Mitigated |
 | R-040 | Single-region deployment (Fly iad + Neon us-east-1) | ADR-01/02 | SRE lead | 2 | 4 | Medium | Accept for launch; multi-region decision at RTO review (RESILIENCE.md). | Accepted (time-boxed) |
+| R-041 | Wallet credential revocation (MSO status list) is not checked; a revoked-but-unexpired Wallet ID verifies | SECURITY.md 2.60 | Engineering lead | 2 | 3 | Medium | Accept for now (decision recorded, `revocation: notChecked` in provenance); TODO fetch and verify issuer status lists when published; regulated uses must not treat a Wallet result as proof of non-revocation. | Accepted |
+| R-042 | Didit holds ID images, selfie and template if our purge cannot run (key revoked, prolonged outage) | SECURITY.md 2.60 | Privacy lead | 2 | 4 | Medium | Mitigate: unbounded backoff retry, overdue-purge alert (`viadere_verify_provider_purge_overdue`), Didit's own shortest retention window configured as backstop. | Mitigated |
 
 ## Documented exceptions (OPS-001)
 

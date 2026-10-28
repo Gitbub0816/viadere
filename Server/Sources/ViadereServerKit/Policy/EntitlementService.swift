@@ -61,7 +61,7 @@ struct EntitlementService {
     // MARK: Grant
 
     /// Grants a tier or a capability. The justification is required for **every** grant and must state the purpose; capabilities
-    /// that release personal data also need the reference of the heightened review (AGE-007). A capability needs its minimum tier
+    /// that release personal data, and every identity.* capability, also need the reference of the heightened review (AGE-007). A capability needs its minimum tier
     /// to be held first. Idempotent: an already-active grant returns without a second row.
     @discardableResult
     func grant(businessId: UUID, tier: BusinessRiskTier, actor: EntitlementActor, justification: String) async throws -> BusinessEntitlementRecord {
@@ -83,11 +83,12 @@ struct EntitlementService {
         guard snapshot.tiers.contains(definition.minimumTier) else {
             throw APIError.validation("Grant tier \(definition.minimumTier.rawValue) first.", details: ["tier": definition.minimumTier.rawValue])
         }
-        // Capabilities that release personal data (AGE-007) need a heightened-review reference besides the purpose justification.
-        if !definition.output.personalDataFields.isEmpty {
+        // Every identity.* capability (and any capability that releases personal data) needs the reference of the heightened review (AGE-007)
+        // besides the purpose justification: `identity.verified` releases no attribute, but it is the same sensitive-industry access path.
+        if capability.rawValue.hasPrefix("identity.") || !definition.output.personalDataFields.isEmpty {
             let reference = (reviewReference ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard (4...120).contains(reference.count) else {
-                throw APIError.validation("Identity attributes need the reference of the heightened review.", details: ["reviewReference": "required"])
+                throw APIError.validation("Identity capabilities need the reference of the heightened review.", details: ["reviewReference": "required"])
             }
         }
         return try await create(businessId: businessId, kind: BusinessEntitlementRecord.capabilityKind, value: capability.rawValue, actor: actor,

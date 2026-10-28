@@ -338,7 +338,7 @@ the customer's ID. A result describes the attribute and assurance evaluated. It 
 not fulfil KYC/AML, age-assurance or other legal duties by itself, and you decide what to do with it.
 
 **What you need.** The capability on your business (granted after review: age needs risk tier V and a stated purpose; identity
-attributes also need a recorded heightened review) and on the key. A key that only carries messaging capabilities cannot create or read
+attributes and `identity.verified` also need a recorded heightened review whose reference we keep) and on the key. A key that only carries messaging capabilities cannot create or read
 verifications (`403 insufficient_scope`). Register a webhook endpoint subscribed to `verification.completed`; its id is your
 `callback_id`.
 
@@ -361,6 +361,25 @@ let created = try await client.createVerificationRequest(
 |---|---|
 | `verified` | `result` holds the capability's fields. For `age.minimum`: `meets_threshold: true`, `assurance`, `issued_at`, `expires_at`, `audience`. Never a birthdate, an age, a name or a document number. |
 | `not_verified` | `result` is empty. It does **not** say why: under the threshold, declined, abandoned, expired, unsupported document, a provider outage and withdrawn consent are all the same. Do not try to infer more, and offer the customer another route. |
+
+**Your audit log shows the same.** Your organization's audit page and tenant export record a verification as `requested`,
+`completed` (only the capability and `verified` or `not_verified`) and `result_retrieved`: never an attempt, a reason, a method or
+whether the customer consented first. A customer appears there only as your `subject_ref` for them, never as an identifier that
+another business could also hold. Do not build a workaround that tries to learn more (for example from timing).
+
+**Jurisdiction.** Viadere may restrict a capability by region. Your legal-entity jurisdiction (from your approved onboarding review)
+and the country that issued the customer's ID are both considered; if your legal-entity jurisdiction is not on record and a block
+rule exists for the capability, requests are refused (`403 policy_denied`) rather than allowed.
+
+**Age checks use the earliest date anywhere.** A customer is reported as meeting a threshold only once their birthday has begun in
+every time zone (UTC-12), so a result can arrive up to 12 hours after the birthday in your customer's own zone.
+
+**Wallet IDs and revocation.** An ID in Apple Wallet is verified against the issuing authority's certificates and validity dates.
+Viadere does not yet check the issuer's revocation (status list) for the credential, so a `verified` Wallet result does not prove the ID
+has not been revoked since it was issued. Do not rely on it for that.
+
+**What the customer is told.** For a name or an address the Wallet sheet says the data may be stored, because you receive it and may
+keep it under your own terms. For an age threshold or a verified-ID check only a yes or no is kept.
 
 `assurance` names how it was established (`issuer_signed_credential_device_bound`: an ID in Apple Wallet checked against the issuing
 authority; `document_and_biometric_match`: a scanned document, liveness check and face match by our provider; `sandbox_simulated`: test
