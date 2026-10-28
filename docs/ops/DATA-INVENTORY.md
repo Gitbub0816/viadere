@@ -110,3 +110,90 @@ clause `[counsel]`; the public sub-processor list must match this table (Site, W
 2. `RetentionService` covers only outbound rows, link tokens, webhook deliveries and device expiry. A `RETENTION_*` setting exists for three of these only.
 3. Export of data for a subject-access request exists only as `export-dispute` (per interaction); there is no subject-access export (LEG-PR gap).
 4. Backups retain erased data until Neon retention expires; the privacy notice must say so.
+
+## 6. Addendum (2026-10-28, WP6): tables added by WP1, WP2, WP5 and WP6, and the retention that now exists
+
+Sections 1 to 5 are unchanged (they were written before these tables existed). Same legend. Retention periods marked **[class]** are the per-data-class values of
+`RetentionClass` (section 7): platform default, hard bounds, operator-adjustable inside the bounds, legal hold where noted.
+
+### 6.1 Approve v2, key directory and E2EE (WP1)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `kd_log_entries`, `kd_tree_heads` | the business key directory: signed root/key/revoke statements (public keys only), Merkle leaf hashes, signed tree heads | PUB | | integrity (database triggers refuse UPDATE and DELETE; the log is signed by `KEY_DIRECTORY_LOG_KEY`) | **Kept** (a transparency log that forgets is not one) | public keys and key ids only; no customer data |
+| `approve_enrollments` | business, relationship, consumer, `subject_ref`, capability, code **hash**, the device's signed statement, the business confirmation | SEC | P | code H | Rows of cancelled/expired enrollments: with the relationship or account; statements are public keys and signatures | the 8-character code is a short-lived bearer secret (bounded by 10-minute life, rate limits) |
+| `approve_keys` | pairwise approval public key and HPKE public key per relationship, `kid`s, assurance, status | SEC | P | public keys | Revoked with the relationship, the device or the account; rows kept for verification of old results | no private key ever leaves the device |
+| `approve_requests` | request metadata, `subject_ref`, protection mode, hash, **sealed** details (server-visible mode only), decision, `amr`, the compact JWS result | SEC | P | `details_sealed` E; end-to-end requests hold only an opaque envelope | Deleted after **400 days** with their deliveries (`ApproveRequestService` maintenance; the capability's maximum result retention) | 400 days is a placeholder `[counsel]`; the JWS is the business's dispute evidence |
+| `approve_deliveries` | which device was offered which request | OPS | P | none | With the request | |
+| `approve_freezes` | customer-set freeze of approvals (reason code, times) | SEC | P | none | Deleted with the account | |
+
+### 6.2 Capability policy (WP2)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `business_entitlements` | tier and capability grants/revocations with actor, justification and review reference | SEC | | none | **Kept** (who allowed what, when) | no customer data |
+| `capability_switches` | operator kill switches per capability (global or business), reason | SEC | | none | Kept | |
+| `policy_rules` | jurisdiction rules per capability, reason | SEC | | none | Kept | |
+| `relationships.subject_ref` (column) | pairwise pseudonym of a customer for one business | IDA | P | H (`SUBJECT_REF_KEY`) | With the relationship | re-derived after a key change |
+
+### 6.3 Credential vault (WP5, behind `VAULT_SYNC_ENABLED`)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `vault_vaults`, `vault_members`, `vault_manifests`, `vault_blobs`, `vault_joins` | **end-to-end encrypted** blobs and manifests of a person's credentials, member device keys, join tokens | PKP/SMP | P | the server holds ciphertext only (keys never leave the devices) | Deleted with the vault or the account; expired joins removed by the vault job | anti-rollback counters are plaintext integers |
+
+### 6.4 Business platform (WP6)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `business_onboarding` | one row per business: stage facts (domain verified, legal-entity review, sensitive-category review, sandbox milestones, go-live request and decision), legal registry **number and name, jurisdiction and references to evidence** (a URL or record id; **no documents are stored**) | OPS | (P if sole trader) | none | Kept while the business exists; free text of decided applications is erased per **[applications]** | the references are what an operator checked, not the evidence |
+| `business_domains` | domain, verification token, method, result, next check | OPS | | none | Deleted with the organization | the token is public (it is published in DNS) |
+| `contract_acceptances` | which document slug and version, who accepted, when, **hash** of IP (versioned pepper) and of the user agent | SEC | P (user id) | H | **Kept** (contract evidence) `[counsel]` | the raw address and agent are never stored |
+| `business_mtls_certs` | tenant-bound client certificate fingerprints / CA key ids, label, subject, expiry | SEC | | none | Deleted with the organization | public certificate data |
+| `business_security_settings` | console IP allow-list, privileged-inactivity timeout, two-person flag, mTLS requirement, alert subscriptions, **security contacts (sealed)** | SEC | P (contacts) | contacts E | Deleted with the organization | |
+| `business_api_keys` (columns added) | non-secret key id `kid`, IP allow-list, expiry, last-used time and **hash** of the caller's address, certificate binding, rotation links, revoker and reason | SEC | | H | Kept after revocation | last-used address is a versioned-pepper hash |
+| `dashboard_sessions` (columns added) | **hash** and masked form of the address, hash and label of the user agent, country | SEC | P | H | Deleted 24 h after expiry | shown to the user in Security > Sessions |
+| `dashboard_known_contexts` | hash of the sign-in context (network, agent) per user, for suspicious-login alerts | SEC | P | H | Deleted after **400 days** unseen **[support_records]** | |
+| `pending_changes` | two-person approval requests: kind, **sealed** payload (no secret), requester, approver, status | SEC | P | payload E | Decided requests deleted per **[support_records]** (730 days) | |
+| `platform_flags` | operator switches: flag, scope, value, reason, who | SEC | | none | Kept while set; the audit trail keeps the history | the audit-export mark is stored here too |
+| `operator_notices` | operator announcements: audience, scope, text, delivery progress | OPS | | none | Finished notices deleted per **[support_records]** | no personal data in the text by policy |
+| `support_tickets` | tickets and appeals: subject, **sealed body**, status, operator note | OPS | P | body E | Closed tickets deleted per **[support_records]** | |
+| `data_requests` | tenant export / deletion requests, status, decisions; the export artifact is **sealed** and erased after 24 hours | OPS | | artifact E | Decided requests per **[support_records]**; artifact 24 h | export contains no secret and no customer-level data |
+| `consumer_exports` | consumer data export jobs: device, status, **ciphertext chunks sealed to the requesting device's key** | OPS | P | E2EE (the server cannot read it) | Bundle erased at expiry (7 days); row deleted a week later | |
+| `account_freezes` | operator freeze of a consumer account: reason (internal), operator, times | SEC | P | none | Released freezes deleted per **[support_records]** | the person is shown a generic notice, not the reason |
+| `retention_settings`, `legal_holds` | per-class retention days (platform and tenant), legal holds (scope, reason, who) | SEC | | none | Kept; holds kept after release | |
+| `audit_checkpoints` | the sequence number and hash of the last purged audit event | SEC | | | Kept | lets the remaining chain verify |
+| `interactions.content_erased`, `conversation_messages.content_erased` (columns) | marks rows whose content the retention job replaced | OPS | | | | |
+
+## 7. Retention by data class (WP6): what the code purges now
+
+Implemented in `Operations/Retention.swift` (`RetentionClass`, `RetentionPurger`), run by the job loop at most once a minute per instance, idempotent and batched. An operator moves a
+**platform** value inside the bounds (`/operator/retention`, reason required, audited `retention.platform_set`); a business may **shorten** (never lengthen) the classes
+marked tenant-adjustable for its own data (Compliance > Retention, audited `retention.tenant_set`). A **legal hold** (`/operator/holds`: global, one business or one consumer, reason
+required) suspends every holdable class for its scope until released. The deployment's `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS` and `LINK_TOKEN_RETENTION_DAYS` remain the defaults of their classes.
+
+| Class | What is purged | Default (min-max) days | Tenant may shorten | Holdable |
+|---|---|---|---|---|
+| `interaction_content` | payload text, reply and signed decision of **finished** interactions are erased; the row, ids and status stay | 400 (30-1095) | yes | yes |
+| `conversation_content` | message bodies replaced by `[expired]` | 730 (30-3650) | yes | yes |
+| `signed_decisions` | device-signed decisions deleted | 730 (365-2555) | no | yes |
+| `consent_history` | **superseded** consent versions deleted; the current consent of a relationship never | 1095 (365-3650) | no | yes |
+| `audit_events` | events older than the period **and** already covered by an exported head; a checkpoint keeps the chain verifiable; nothing is purged without an export target | 2555 (730-3650) | no | yes |
+| `business_applications` | free-text description and reviewer note of decided applications | 730 (90-3650) | no | yes |
+| `usage_records` | metering rows | 2555 (365-3650) | no | yes |
+| `webhook_deliveries` | deliveries with their attempts, including never-sent (paused) ones | 30 (1-365) | yes | yes |
+| `outbound_messages` | finished SMS and channel sends | 30 (1-365) | no | yes |
+| `link_tokens` | used or expired link tokens | 7 (1-90) | no | no |
+| `security_tokens` | expired session tokens, enrollment and interaction challenges | 30 (7-180) | no | no |
+| `channel_capability` | RCS capability cache, consumed postbacks, provider message de-duplication markers | 180 (14-730) | no | no |
+| `security_notices` | in-app notices (dismissed ones after 90 days) | 365 (30-1095) | no | no |
+| `support_records` | closed tickets and appeals, finished notices, decided approvals and data requests, released freezes, expired export bundles, old dashboard contexts | 730 (90-3650) | no | yes |
+
+**Append-only tables and the retention gate.** `audit_events`, `decisions` and `consent_grants` refuse UPDATE and DELETE at the database. The retention job deletes through
+`RetentionDeleteGate.perform`, a transaction that opens a narrow exception for DELETE on those three tables only (a transaction-local setting in PostgreSQL, a one-row gate that the
+same transaction closes in SQLite); UPDATE stays refused. A process that can run arbitrary SQL as the runtime role can open the gate too: what protects the audit log from that is the
+write-once export of signed heads, not the trigger (SECURITY.md section 2.77).
+
+**Status of the section 5 gaps.** Gap 1 (no age-based purge) closed for every table listed there, with these exceptions that stay by design: `sms_consent_events` (suppression evidence),
+`businesses`/handles/codes (never reassigned), `passkey_credentials`, `devices` and `relationships` (until account deletion), `kd_*` (public log). Gap 2 closed (14 classes). Gap 3 closed:
+`POST /v1/account/exports` is the subject-access export (section 6.4, `consumer_exports`; SECURITY.md section 2.78). Gap 4 (backups) is unchanged.
