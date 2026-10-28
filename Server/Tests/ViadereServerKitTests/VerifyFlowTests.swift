@@ -455,9 +455,13 @@ final class VerifyFlowTests: XCTestCase {
 
             // Nothing about the person's document is anywhere (requests, attempts, results, receipts, audit, webhook bodies).
             try await assertNoEvidence(h)
-            // The decision is audited with the method, label and policy version, not the data.
-            let audit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "verification.completed").first()
+            // The decision is audited with the method, label and policy version, not the data, in the platform-only trail; the business's own
+            // `completed` event carries neither (AGE-005).
+            let audit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "verification.concluded").first()
             XCTAssertTrue(audit?.metadataJSON.contains("wallet_mdoc") == true && audit?.metadataJSON.contains(VerifyPolicy.version) == true)
+            XCTAssertNil(audit?.businessId)
+            let visible = try await AuditEventRecord.query(on: h.db).filter(\.$action == "verification.completed").first()
+            XCTAssertFalse(visible?.metadataJSON.contains("wallet_mdoc") == true || visible?.metadataJSON.contains(VerifyPolicy.version) == true)
             // The provenance record names the method, issuer, assurance and policy version (VER-007) and holds no personal data.
             let provenance = try ViadereJSON.decode(VerificationProvenance.self, from: Data(try unwrap(try await VerificationResultRecord.query(on: h.db).first()?.provenance).utf8))
             XCTAssertEqual(provenance.method, .walletMdoc)
