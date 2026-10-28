@@ -326,8 +326,9 @@ public struct UnlockedVault: Sendable {
 
     /// Authenticates a server-supplied chain with **only the recovery key**. The recovery member's `binding` was computed by a genuine device
     /// while it held the key; matching it against the signer of one manifest proves that device's signing key is genuine, and the chain is
-    /// verified onward from that manifest. A server that does not know the key cannot forge the binding. It *can* serve an older (but genuine)
-    /// state: see SECURITY.md §2.40 residual risks.
+    /// verified onward from that manifest. A server that does not know the key cannot forge the binding. It *can* serve an older genuine state,
+    /// or, together with a device that was removed later, a different but validly signed continuation of the genuine prefix (integrity only,
+    /// no confidentiality loss): the restore preview and the release hold are the mitigations, see SECURITY.md §2.40 residual risks.
     public static func authenticateChain(_ chain: [SignedVaultManifest], recoveryKey: RecoveryKey) throws -> VerifiedManifest {
         guard let last = chain.last, let latest = try? VaultManifest.decode(last.manifestBytes), let current = latest.recoveryMember, let tag = current.binding else {
             throw VaultError.invalidRecoveryKey
