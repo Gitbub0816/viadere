@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -55,6 +55,7 @@ struct SettingsView: View {
                 case .recovery: RecoveryCodesSettingsView(vm: vm)
                 case .authenticator: AuthenticatorView(backTitle: "Settings")
                 case .approvals: ApproveSettingsView(controller: AppEnvironment.shared.approve, model: model)
+                case .dataExport: DataExportView(services: model.services)
                 case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
                 }
             }
@@ -158,6 +159,8 @@ struct SettingsView: View {
                 navRow("Consent history", subtitle: "What you've allowed, and when", symbol: "checklist", route: .consents)
                 ViadereHairline(inset: 50)
                 navRow("Verification history", subtitle: "Age and ID checks, and what was shared", symbol: "person.badge.shield.checkmark", route: .verifications)
+                ViadereHairline(inset: 50)
+                navRow("Download my data", subtitle: "A copy only this iPhone can open", symbol: "square.and.arrow.down", route: .dataExport)
                 if vm.sessionsAvailable {
                     ViadereHairline(inset: 50)
                     navRow("Signed-in sessions", subtitle: "\(vm.sessions.count) active", symbol: "person.crop.circle", route: .sessions)
