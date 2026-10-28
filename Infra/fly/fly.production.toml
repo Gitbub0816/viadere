@@ -19,6 +19,8 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   max_unavailable = 1
 
 [env]
+  APPROVE_V2_ENABLED = "false"   # Phase 2 gate (independent assessment of enrollment, key substitution, replay) must pass first
+  KEY_DIRECTORY_LOG_ID = "viadere.key-directory.v1"
   VERIFY_ENABLED = "false"   # Phase 3 gate (legal validation per market, privacy assessment) must pass first
   VERIFY_GATE_REFERENCE = ""
   WALLET_MERCHANT_ID = ""

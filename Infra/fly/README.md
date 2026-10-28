@@ -139,6 +139,7 @@ fly secrets set --app viadere-server NAME=...  # restarts machines one by one
 `python3 -I Infra/fly/check_env_coverage.py` is authoritative. Summary of the mapping:
 
 * **Secrets (`fly secrets`)**: `DATABASE_URL`, `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`,
+  `SUBJECT_REF_KEY`, `KEY_DIRECTORY_LOG_KEY` (Approve v2 transparency-log signing key; `KEY_DIRECTORY_LOG_ID` and `APPROVE_V2_ENABLED` are plain `[env]`),
   `EMAIL_API_KEY`, `APNS_KEY_P8`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID`,
   `RCS_PROVIDER_TOKEN`, `RCS_WEBHOOK_SECRET`, `PASS_CERTIFICATE_PEM`, `PASS_PRIVATE_KEY_PEM`, `PASS_WWDR_CERTIFICATE_PEM`,
   `EMAIL_API_AUTH_*` (only for providers that need them), `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` (upgrade only).
