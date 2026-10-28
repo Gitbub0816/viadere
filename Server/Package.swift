@@ -57,7 +57,8 @@ let package = Package(
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
                 .product(name: "X509", package: "swift-certificates"),
                 .product(name: "SwiftASN1", package: "swift-asn1"),
-            ]
+            ],
+            exclude: ["Fixtures"]  // read by path (#filePath), not bundled
         ),
     ],
     swiftLanguageModes: [.v6]
