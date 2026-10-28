@@ -71,12 +71,18 @@ final class RecordingOutboundHTTP: OutboundHTTP, @unchecked Sendable {
 }
 
 extension TestHarness {
-    /// Echoes the ownership challenge of every webhook verification request (and answers every other delivery with 200).
+    /// Answers the ownership challenge of every webhook verification request the way a correct receiver does: with the HMAC proof made from the
+    /// signing secret of the endpoint the challenge is for (and 200 for every other delivery).
     func echoWebhookChallenges() {
-        webhooks.respond { request in
+        let db = self.db
+        let ctx = self.ctx
+        webhooks.respondAsync { request in
             guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], object["type"] as? String == "webhook.verification",
-                  let challenge = object["challenge"] as? String else { return nil }
-            return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge\":\"\(challenge)\"}".utf8))
+                  let challenge = object["challenge"] as? String, let endpoint = (object["endpointId"] as? String).flatMap(UUID.init(uuidString:)),
+                  let record = try await WebhookSubscriptionRecord.find(endpoint, on: db),
+                  let secret = try? ctx.cipher.openString(record.secretCiphertext, context: "webhook_subscriptions.secret", rowId: endpoint) else { return nil }
+            let proof = WebhookSignature.verificationResponse(secret: secret, challenge: challenge)
+            return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge_response\":\"\(proof)\"}".utf8))
         }
     }
 

@@ -147,16 +147,20 @@ final class ScriptedWebhookTransport: WebhookTransport, @unchecked Sendable {
     private var statuses: [Int] = []
     private var fallback = 200
     private var scripted: (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?
+    private var scriptedAsync: (@Sendable (WebhookHTTPRequest) async throws -> WebhookHTTPResponse?)?
     var received: [WebhookHTTPRequest] { lock.withLock { requests } }
     func respond(with codes: [Int], then fallback: Int = 200) { lock.withLock { statuses = codes; self.fallback = fallback } }
     /// Answers requests with a function (for example one that echoes an ownership challenge); `nil` falls back to the scripted status codes.
-    func respond(_ handler: (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?) { lock.withLock { scripted = handler } }
+    func respond(_ handler: (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?) { lock.withLock { scripted = handler; scriptedAsync = nil } }
+    /// Like `respond`, for an endpoint that has to look something up (the signing secret of the subscription it stands for).
+    func respondAsync(_ handler: (@Sendable (WebhookHTTPRequest) async throws -> WebhookHTTPResponse?)?) { lock.withLock { scriptedAsync = handler; scripted = nil } }
     func send(_ request: WebhookHTTPRequest) async throws -> WebhookHTTPResponse {
-        let handler = lock.withLock { () -> (@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)? in
+        let (handler, asyncHandler) = lock.withLock { () -> ((@Sendable (WebhookHTTPRequest) throws -> WebhookHTTPResponse?)?, (@Sendable (WebhookHTTPRequest) async throws -> WebhookHTTPResponse?)?) in
             requests.append(request)
-            return scripted
+            return (scripted, scriptedAsync)
         }
         if let handler, let response = try handler(request) { return response }
+        if let asyncHandler, let response = try await asyncHandler(request) { return response }
         return lock.withLock {
             let code = statuses.isEmpty ? fallback : statuses.removeFirst()
             return WebhookHTTPResponse(statusCode: code)

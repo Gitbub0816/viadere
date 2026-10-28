@@ -55,4 +55,6 @@ public enum WebhookVerificationError: Error, Sendable, Equatable {
     /// `Viadere-Event-Id` / `Viadere-Event-Type` disagree with the signed body.
     case headerBodyMismatch
     case duplicateEvent
+    /// The request is not a `webhook.verification` challenge.
+    case notAVerificationRequest
 }

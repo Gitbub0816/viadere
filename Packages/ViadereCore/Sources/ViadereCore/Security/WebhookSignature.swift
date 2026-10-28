@@ -30,6 +30,15 @@ public enum WebhookSignature {
         return Hex.encode(HMAC<SHA256>.authenticationCode(for: message, using: key(for: secret)))
     }
 
+    /// The answer to the ownership challenge (`webhook.verification`): `{"challenge_response": "<this value>"}`. Hex HMAC-SHA256 keyed by the
+    /// endpoint's signing secret over `viadere.webhook.verification.v1:` + the challenge. Only someone who holds the secret can compute it, so an
+    /// endpoint that merely reflects the request (an echo server, a mirror) cannot prove it is the registrant's.
+    public static func verificationResponse(secret: String, challenge: String) -> String {
+        Hex.encode(HMAC<SHA256>.authenticationCode(for: Data((verificationContext + challenge).utf8), using: key(for: secret)))
+    }
+
+    static let verificationContext = "viadere.webhook.verification.v1:"
+
     /// Builds the header value. Pass several secrets during rotation.
     public static func header(secrets: [String], body: Data, now: Date) -> String {
         let t = ViadereDate.unixSeconds(now)

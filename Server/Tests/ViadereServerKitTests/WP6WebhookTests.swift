@@ -1,3 +1,4 @@
+@preconcurrency import Crypto
 import Fluent
 import Foundation
 import Vapor
@@ -31,6 +32,13 @@ final class WP6WebhookTests: XCTestCase {
         let response = try await s.h.apiPost(s.key, "/v1/business/webhooks", json: try ViadereJSON.encode(CreateWebhookRequest(url: URL(string: url)!, events: [.messageReceived])))
         XCTAssertEqual(response.status, .created, response.text)
         return try response.json(WebhookSecretResponse.self)
+    }
+
+    /// The wire format of the ownership proof, pinned here independently of the implementation: hex HMAC-SHA256 keyed by the endpoint's signing
+    /// secret over `viadere.webhook.verification.v1:` + the challenge.
+    private static func proof(secret: String, challenge: String) -> String {
+        let mac = HMAC<SHA256>.authenticationCode(for: Data(("viadere.webhook.verification.v1:" + challenge).utf8), using: SymmetricKey(data: Data(secret.utf8)))
+        return mac.map { String(format: "%02x", $0) }.joined()
     }
 
     private func deliveries(_ h: TestHarness, to host: String? = nil) -> [WebhookHTTPRequest] {
@@ -70,7 +78,7 @@ final class WP6WebhookTests: XCTestCase {
             h.webhooks.respond { request in
                 guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let challenge = object["challenge"] as? String else { return nil }
                 if remembered.value == nil { remembered.value = challenge; return WebhookHTTPResponse(statusCode: 200, body: Data("nope".utf8)) }
-                return WebhookHTTPResponse(statusCode: 200, body: Data(remembered.value!.utf8))
+                return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge_response\":\"\(Self.proof(secret: hook.secret, challenge: remembered.value!))\"}".utf8))
             }
             _ = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify")
             let replayed = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify").json(WebhookVerificationResult.self)
@@ -84,7 +92,7 @@ final class WP6WebhookTests: XCTestCase {
             XCTAssertNotNil(challengeRequest.headers[ViadereHeader.signature])
             XCTAssertTrue(challengeRequest.headers[ViadereHeader.keyId]?.hasPrefix("whk_") ?? false)
             XCTAssertNoThrow(try WebhookSignature.verify(header: try XCTUnwrap(challengeRequest.headers[ViadereHeader.signature]), body: challengeRequest.body, secrets: [hook.secret], now: h.clock.now()))
-            // Echo it properly, as JSON or as plain text: verified, and events flow (the earlier queued reply is delivered now).
+            // Answer with the HMAC proof: verified, and events flow (the earlier queued reply is delivered now).
             h.webhooks.respond(nil)
             h.echoWebhookChallenges()
             let proven = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify").json(WebhookVerificationResult.self)
@@ -97,7 +105,49 @@ final class WP6WebhookTests: XCTestCase {
         }
     }
 
-    func testVerificationAttemptsAreRateLimitedAndTheBareChallengeBodyWorks() async throws {
+    /// Platform gate L4 exploit: an endpoint that merely reflects the request (any echo server, or a URL that mirrors its input) used to verify.
+    func testAnEchoEndpointCannotProveOwnershipOnlyTheSigningSecretCan() async throws {
+        try await withHarness(ownership) { h in
+            let s = try await setup(h)
+            let hook = try await create(s)
+            func verify() async throws -> WebhookVerificationResult {
+                try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify").json(WebhookVerificationResult.self)
+            }
+            // A reflector: it answers with the challenge in every shape it could be echoed in (JSON member, bare body, the whole request body).
+            for shape in 0..<3 {
+                h.webhooks.respond { request in
+                    guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let challenge = object["challenge"] as? String else { return nil }
+                    switch shape {
+                    case 0: return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge\":\"\(challenge)\"}".utf8))
+                    case 1: return WebhookHTTPResponse(statusCode: 200, body: Data(challenge.utf8))
+                    default: return WebhookHTTPResponse(statusCode: 200, body: request.body)
+                    }
+                }
+                let result = try await verify()
+                XCTAssertFalse(result.verified, "echo shape \(shape)")
+                XCTAssertEqual(result.failure, "no_echo")
+                h.clock.advance(by: 700)
+            }
+            // A proof made with some other secret, or the right proof for another challenge, is no better.
+            h.webhooks.respond { request in
+                guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let challenge = object["challenge"] as? String else { return nil }
+                return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge_response\":\"\(Self.proof(secret: WebhookSignature.generateSecret(), challenge: challenge))\"}".utf8))
+            }
+            let wrongSecret = try await verify()
+            XCTAssertFalse(wrongSecret.verified)
+            let row = try await XCTUnwrapAsync(await WebhookSubscriptionRecord.find(hook.subscription.id.uuid, on: h.db))
+            XCTAssertNil(row.verifiedAt)
+            // The endpoint that holds the signing secret proves it.
+            h.webhooks.respond { request in
+                guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let challenge = object["challenge"] as? String else { return nil }
+                return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge_response\":\"\(Self.proof(secret: hook.secret, challenge: challenge))\"}".utf8))
+            }
+            let ok = try await verify()
+            XCTAssertTrue(ok.verified)
+        }
+    }
+
+    func testVerificationAttemptsAreRateLimitedAndAProofWithTrailingWhitespaceWorks() async throws {
         try await withHarness(ownership) { h in
             let s = try await setup(h)
             let hook = try await create(s)
@@ -109,7 +159,7 @@ final class WP6WebhookTests: XCTestCase {
             h.clock.advance(by: 3_700)
             h.webhooks.respond { request in
                 guard let object = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let challenge = object["challenge"] as? String else { return nil }
-                return WebhookHTTPResponse(statusCode: 200, body: Data((challenge + "\n").utf8)) // the bare value, newline and all
+                return WebhookHTTPResponse(statusCode: 200, body: Data("{\"challenge_response\": \"\(Self.proof(secret: hook.secret, challenge: challenge))\"}\n".utf8))
             }
             let ok = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify").json(WebhookVerificationResult.self)
             XCTAssertTrue(ok.verified)

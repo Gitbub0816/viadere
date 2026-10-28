@@ -18,12 +18,14 @@ extension WebhookService {
 
     struct VerificationResult: Equatable {
         var verified: Bool
-        /// `nil` when verified; otherwise `no_echo`, `http_<status>` or `unreachable`.
+        /// `nil` when verified; otherwise `no_echo` (no valid proof), `http_<status>` or `unreachable`.
         var failure: String?
     }
 
     /// Proves that whoever registered the URL controls it: we POST a random single-use challenge (signed like any delivery) and the endpoint must
-    /// answer 2xx and echo the challenge, as JSON `{"challenge": "..."}` or as the bare body. Until then it receives no events. The challenge is
+    /// answer 2xx with `{"challenge_response": HMAC-SHA256(signing secret, challenge)}` (`WebhookSignature.verificationResponse`). A plain echo
+    /// is refused: only a receiver that holds the endpoint's signing secret can answer, so a URL that merely reflects its input (an echo server,
+    /// a mirror, someone else's open endpoint) never verifies. Until then it receives no events. The challenge is
     /// stored only as a hash and expires in ten minutes; each attempt uses a fresh one, so an old response can never verify a later attempt.
     func verifyOwnership(businessId: BusinessID, id: WebhookSubscriptionID) async throws -> VerificationResult {
         guard let record = try await WebhookSubscriptionRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$businessId == businessId.uuid)
@@ -53,7 +55,7 @@ extension WebhookService {
             let response = try await ctx.webhookTransport.send(request)
             if !(200..<300).contains(response.statusCode) {
                 failure = "http_\(response.statusCode)"
-            } else if !Self.echoes(challenge: challenge, body: response.body, expectedHash: record.verificationChallengeHash ?? "") {
+            } else if secret.isEmpty || !Self.proves(challenge: challenge, secret: secret, body: response.body) {
                 failure = "no_echo"
             }
         } catch {
@@ -72,11 +74,12 @@ extension WebhookService {
         return VerificationResult(verified: failure == nil, failure: failure)
     }
 
-    /// The response must contain the challenge (bare, or as the `challenge` member of a JSON object). Compared via the stored hash, in constant time.
-    static func echoes(challenge: String, body: Data, expectedHash: String) -> Bool {
-        var candidates = [String(decoding: body, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)]
-        if let object = try? JSONDecoder().decode([String: String].self, from: body), let echoed = object["challenge"] { candidates.append(echoed) }
-        return candidates.contains { !$0.isEmpty && SecureToken.matches($0, hash: expectedHash) }
+    /// The response must be a JSON object whose `challenge_response` is the HMAC proof for this challenge and this endpoint's secret
+    /// (constant-time compare). The challenge itself, bare or in any other member, proves nothing.
+    static func proves(challenge: String, secret: String, body: Data) -> Bool {
+        guard body.count <= 4096, let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], let answer = object["challenge_response"] as? String, !answer.isEmpty else { return false }
+        let expected = WebhookSignature.verificationResponse(secret: secret, challenge: challenge)
+        return ConstantTime.equals(Data(answer.lowercased().utf8), Data(expected.utf8))
     }
 
     // MARK: Pause (G-5)

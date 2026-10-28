@@ -151,6 +151,44 @@ struct WebhookTests {
     }
 }
 
+@Suite("Webhook ownership challenge")
+struct WebhookOwnershipChallengeTests {
+    let secret = WebhookSignature.generateSecret()
+
+    private func challengeRequest(_ challenge: String = "c-123", type: String = "webhook.verification", secret: String? = nil, at: Date = Fixtures.now) throws -> ([String: String], Data) {
+        let body = Data("{\"type\":\"\(type)\",\"challenge\":\"\(challenge)\",\"endpointId\":\"e1\"}".utf8)
+        return ([ViadereHeader.signature: WebhookSignature.header(secret: secret ?? self.secret, body: body, now: at), ViadereHeader.eventType: type], body)
+    }
+
+    @Test func answersWithTheHMACProofAndNeverEchoesTheChallenge() throws {
+        let (headers, body) = try challengeRequest()
+        let answer = try WebhookVerifier(secret: secret, clock: { Fixtures.now }).verificationResponse(headers: headers, body: body)
+        let object = try #require(try JSONSerialization.jsonObject(with: answer) as? [String: String])
+        #expect(object["challenge_response"] == WebhookSignature.verificationResponse(secret: secret, challenge: "c-123"))
+        #expect(object["challenge"] == nil)
+        #expect(!String(decoding: answer, as: UTF8.self).contains("c-123"))
+    }
+
+    @Test func refusesAnythingNotSignedWithTheSecretOrNotAChallenge() throws {
+        let verifier = WebhookVerifier(secret: secret, clock: { Fixtures.now })
+        let (foreignHeaders, foreignBody) = try challengeRequest(secret: WebhookSignature.generateSecret())
+        #expect(throws: WebhookVerificationError.noMatchingSignature) { try verifier.verificationResponse(headers: foreignHeaders, body: foreignBody) }
+        let (staleHeaders, staleBody) = try challengeRequest(at: Fixtures.now.addingTimeInterval(-3_600))
+        #expect(throws: WebhookVerificationError.timestampOutsideTolerance) { try verifier.verificationResponse(headers: staleHeaders, body: staleBody) }
+        let (otherHeaders, otherBody) = try challengeRequest(type: "message.received")
+        #expect(throws: WebhookVerificationError.notAVerificationRequest) { try verifier.verificationResponse(headers: otherHeaders, body: otherBody) }
+        #expect(throws: WebhookVerificationError.missingSignatureHeader) { try verifier.verificationResponse(headers: [:], body: otherBody) }
+    }
+
+    @Test func duringARotationEitherSecretAnswersWithTheOneThatSignedTheRequest() throws {
+        let old = WebhookSignature.generateSecret()
+        let (headers, body) = try challengeRequest(secret: old)
+        let answer = try WebhookVerifier(secrets: [secret, old], clock: { Fixtures.now }).verificationResponse(headers: headers, body: body)
+        let object = try #require(try JSONSerialization.jsonObject(with: answer) as? [String: String])
+        #expect(object["challenge_response"] == WebhookSignature.verificationResponse(secret: old, challenge: "c-123"))
+    }
+}
+
 struct AnyEncodable: Encodable {
     let value: any Encodable
     init(_ value: any Encodable) { self.value = value }

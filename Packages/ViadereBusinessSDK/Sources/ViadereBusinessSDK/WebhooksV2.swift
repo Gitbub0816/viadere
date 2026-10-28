@@ -37,3 +37,42 @@ extension WebhookVerifier {
         return VerifiedEnvelope(envelope: envelope, deliveryId: header(ViadereHeader.deliveryId), keyId: header(ViadereHeader.keyId))
     }
 }
+
+extension WebhookVerifier {
+    /// Answers Viadere's endpoint-ownership challenge (`webhook.verification`). Call it for a request whose `Viadere-Event-Type` is
+    /// `webhook.verification`, and return the result as the `2xx` response body (`Content-Type: application/json`).
+    ///
+    /// The request is verified exactly like a delivery (signature over the raw bytes, timestamp window), and the answer is
+    /// `{"challenge_response": HMAC-SHA256(signing secret, challenge)}`. **Echoing the challenge does not work**: only a receiver that holds the
+    /// endpoint's signing secret can answer, which is what proves the URL belongs to the registrant.
+    ///
+    /// ```swift
+    /// if request.headers["Viadere-Event-Type"] == "webhook.verification" {
+    ///     return .ok(json: try verifier.verificationResponse(headers: request.headers, body: rawBody))
+    /// }
+    /// ```
+    public func verificationResponse(headers: [String: String], body: Data) throws -> Data {
+        func header(_ name: String) -> String? { headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value }
+        guard let signature = header(Self.signatureHeader) else { throw WebhookVerificationError.missingSignatureHeader }
+        var matched: String?
+        var failure = WebhookSignature.Error.noMatchingSignature
+        for candidate in secretList {
+            do {
+                try WebhookSignature.verify(header: signature, body: body, secrets: [candidate], now: now(), tolerance: toleranceValue)
+                matched = candidate
+                break
+            } catch let error as WebhookSignature.Error { failure = error }
+        }
+        guard let secret = matched else {
+            switch failure {
+            case .malformedHeader: throw WebhookVerificationError.malformedSignature
+            case .timestampOutsideTolerance: throw WebhookVerificationError.timestampOutsideTolerance
+            case .noMatchingSignature: throw WebhookVerificationError.noMatchingSignature
+            }
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], object["type"] as? String == "webhook.verification",
+              let challenge = object["challenge"] as? String, !challenge.isEmpty, challenge.count <= 256 else { throw WebhookVerificationError.notAVerificationRequest }
+        if let type = header(Self.eventTypeHeader), type != "webhook.verification" { throw WebhookVerificationError.headerBodyMismatch }
+        return try ViadereJSON.encode(["challenge_response": WebhookSignature.verificationResponse(secret: secret, challenge: challenge)])
+    }
+}
