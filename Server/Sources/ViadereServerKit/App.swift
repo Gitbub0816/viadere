@@ -84,7 +84,11 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         try app.databases.use(.postgres(url: url), as: .psql)
     } else {
         guard !config.isStrict else { throw ServerConfigError.missing("DATABASE_URL") }
-        app.databases.use(.sqlite(.memory), as: .sqlite)
+        // sqlite-kit backs `.memory` with a temporary file it never deletes, so every test run left one behind in /tmp (gigabytes
+        // over a full suite). Own the file instead and remove it at shutdown.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("viadere-test-\(UUID().uuidString).sqlite3").path
+        app.databases.use(.sqlite(.file(path)), as: .sqlite)
+        app.lifecycle.use(TemporaryDatabaseCleanup(path: path))
     }
     app.migrations.add(Migrations.all)
     // The serving process must not hold DDL rights: the role split is mandatory in staging and production (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
@@ -179,6 +183,14 @@ struct APNsShutdown: LifecycleHandler {
     let sender: APNSwiftSender
     func shutdown(_ application: Application) {}
     func shutdownAsync(_ application: Application) async { await sender.shutdown() }
+}
+
+/// Deletes the throwaway SQLite database (and its journal files) when the application shuts down.
+struct TemporaryDatabaseCleanup: LifecycleHandler {
+    let path: String
+    func shutdown(_ application: Application) {
+        for suffix in ["", "-wal", "-shm", "-journal"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+    }
 }
 
 /// Closes the pass-push APNs client when the application shuts down.
