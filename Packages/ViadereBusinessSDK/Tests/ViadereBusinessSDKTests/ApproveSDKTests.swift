@@ -273,62 +273,166 @@ struct ApproveClientTests {
         return members
     }
 
-    @Test func enrollmentRequestsUseTheCatalogPathsAndTheSubjectRef() async throws {
+    private static let rootKid = KeyIdentifier.make(try! SoftwareP256SigningKey().publicKey.signingKey())
+
+    private func ticket(root: String?, code: String = "ABCDEFGH", id: UUID = UUID(), secret: ApprovalEnrollmentSecret? = nil) -> ApprovalEnrollmentTicket {
+        ApprovalEnrollmentTicket(enrollmentId: id, code: code, deepLink: ApprovalEnrollmentCode.deepLink(code: code, rootKid: root, secret: secret), expiresAt: Approve.now.addingTimeInterval(600))
+    }
+
+    @Test func enrollmentRequestsUseTheCatalogPathsAndTheSdkBuildsTheLink() async throws {
         let transport = MockTransport()
-        let ticket = ApprovalEnrollmentTicket(enrollmentId: UUID(), code: "ABCDEFGH", deepLink: "https://viadere.com/a/ABCDEFGH", expiresAt: Approve.now.addingTimeInterval(600))
-        try transport.enqueue(status: 201, json: ticket)
-        let created = try await Fixtures.client(transport).createApprovalEnrollment(subject: Approve.subject, capability: .transactionApprove)
-        #expect(created == ticket)
+        try transport.enqueue(status: 201, json: ticket(root: Self.rootKid))
+        let invitation = try await Fixtures.client(transport).createApprovalEnrollment(subject: Approve.subject, capability: .transactionApprove, rootKid: Self.rootKid)
         let sent = try #require(transport.requests.first)
         #expect(sent.method == "POST" && sent.url.path == "/v1/business/approve/enrollments")
         let members = try body(sent)
         #expect(members["subject_ref"] == .string(Approve.subject.rawValue) && members["capability"] == .string("transaction.approve"))
         #expect(sent.headers["Idempotency-Key"] == nil, "an enrollment is not blindly retried")
+        // The link is the SDK's: your root key id, and the secret in the fragment (which no server receives), never anything the relay sent.
+        #expect(invitation.link == "https://viadere.com/a/ABCDEFGH?rk=\(Self.rootKid)#es=\(invitation.secret.base64URL)")
+        let linkURL = try #require(URL(string: invitation.link))
+        let parsed = try #require(ApprovalEnrollmentCode.parse(link: linkURL))
+        #expect(parsed.rootKid == Self.rootKid && parsed.secret == invitation.secret)
+        #expect(invitation.displayCode == "ABCD-EFGH" && ApprovalEnrollmentCode.canonical(invitation.checkCode) == invitation.secret.checkCode)
+        #expect(!String(decoding: try #require(sent.body), as: UTF8.self).contains(invitation.secret.base64URL), "the secret never goes to Viadere")
     }
 
-    @Test func confirmingVerifiesTheDeviceStatementBeforeAnythingIsSigned() async throws {
+    @Test func aTicketNamingAnotherRootIsRefusedAndCancelled() async throws {
+        // Gate finding F3: the relay controls the ticket, so a root key id that is not yours must never reach the customer's app as "verified".
+        let attacker = KeyIdentifier.make(try SoftwareP256SigningKey().publicKey.signingKey())
+        for relayTicket in [ticket(root: attacker), ticket(root: nil), ticket(root: Self.rootKid, code: "ABCDEFG0"), ticket(root: Self.rootKid, secret: ApprovalEnrollmentSecret())] {
+            let transport = MockTransport()
+            try transport.enqueue(status: 201, json: relayTicket)
+            try transport.enqueue(status: 200, json: ApprovalEnrollmentView(enrollmentId: relayTicket.enrollmentId, subjectRef: Approve.subject, capability: .transactionApprove, status: .cancelled,
+                                                                              expiresAt: Approve.now, createdAt: Approve.now))
+            await #expect(throws: ApprovalEnrollmentFailure.rootKeyMismatch) {
+                _ = try await Fixtures.client(transport).createApprovalEnrollment(subject: Approve.subject, capability: .transactionApprove, rootKid: Self.rootKid)
+            }
+            #expect(transport.requests.last?.url.path.hasSuffix("/cancel") == true)
+        }
+    }
+
+    // MARK: Gate finding F1
+
+    private struct Enrolling {
         let phone = Approve.Phone()
         let enrollmentId = UUID()
-        let statement = try ApprovalEnrollmentStatement(businessId: Approve.business, subject: Approve.subject, enrollmentId: enrollmentId, publicKey: phone.key.publicKey,
-                                                        hpkePublicKey: phone.hpke.publicKey, assurance: .biometric, createdAt: Approve.now)
-        let signed = try await statement.sign(with: phone.key)
-        func view(_ status: ApprovalEnrollmentStatus = .deviceCompleted, statement: SignedStatement? = signed) -> ApprovalEnrollmentView {
-            ApprovalEnrollmentView(enrollmentId: enrollmentId, subjectRef: Approve.subject, capability: .transactionApprove, status: status, expiresAt: Approve.now, createdAt: Approve.now, deviceStatement: statement, kid: phone.kid)
-        }
         let confirmationKey = SoftwareP256SigningKey()
-        // Happy path: GET the view, POST the confirmation, return what to store.
-        let transport = MockTransport()
-        try transport.enqueue(status: 200, json: view())
-        try transport.enqueue(status: 200, json: ApprovalKeyView(kid: phone.kid, subjectRef: Approve.subject, status: .active, assurance: .biometric, publicKey: phone.key.publicKey.base64URL,
-                                                                 hpkeKid: phone.hpke.publicKey.kid, hpkePublicKey: phone.hpke.publicKey.base64URL, createdAt: Approve.now, activatedAt: Approve.now,
-                                                                 revokedAt: nil, revokedBy: nil, deviceStatement: signed))
-        let confirmed = try await Fixtures.client(transport).confirmApprovalEnrollment(id: enrollmentId, businessId: Approve.business, expectedSubject: Approve.subject, confirmationKey: confirmationKey, now: Approve.now)
-        #expect(confirmed.key == phone.enrolled && confirmed.hpke == phone.hpke.publicKey && confirmed.target.kid == phone.kid)
-        let post = try #require(transport.requests.last)
-        #expect(post.url.path == "/v1/business/approve/enrollments/\(enrollmentId.uuidString.lowercased())/confirm")
-        let confirmation = try ViadereJSON.decode(ConfirmApprovalEnrollmentRequest.self, from: try #require(post.body)).confirmation
-        let parsed = try ApprovalEnrollmentConfirmation.verify(confirmation, confirmationKey: confirmationKey.publicKey)
-        #expect(throws: Never.self) { try parsed.checkMatches(statement, signed: signed) }
+        let invitation: ApprovalEnrollmentInvitation
+        init() { invitation = ApprovalEnrollmentInvitation(enrollmentId: enrollmentId, code: "ABCDEFGH", rootKid: ApproveClientTests.rootKid, secret: ApprovalEnrollmentSecret(), expiresAt: Approve.now.addingTimeInterval(600)) }
 
-        // Refusals happen before anything is sent: not ready, wrong customer, wrong business, forged statement, weak key.
-        func refuses(_ response: ApprovalEnrollmentView, subject: SubjectRef = Approve.subject, business: BusinessID = Approve.business, minimum: ApprovalAMR = .biometric, _ expected: ApprovalEnrollmentFailure) async throws {
+        func statement(for key: SoftwareP256SigningKey, hpke: SoftwareE2EEPrivateKey, subject: SubjectRef = Approve.subject, business: BusinessID = Approve.business,
+                       assurance: ApprovalAMR = .biometric) async throws -> SignedStatement {
+            try await ApprovalEnrollmentStatement(businessId: business, subject: subject, enrollmentId: enrollmentId, publicKey: key.publicKey, hpkePublicKey: hpke.publicKey,
+                                                  assurance: assurance, createdAt: Approve.now).sign(with: key)
+        }
+
+        func view(_ signed: SignedStatement?, tag: String?, status: ApprovalEnrollmentStatus = .deviceCompleted) -> ApprovalEnrollmentView {
+            ApprovalEnrollmentView(enrollmentId: enrollmentId, subjectRef: Approve.subject, capability: .transactionApprove, status: status, expiresAt: Approve.now, createdAt: Approve.now,
+                                   deviceStatement: signed, kid: phone.kid, bindingTag: tag)
+        }
+
+        func keyView(_ signed: SignedStatement) -> ApprovalKeyView {
+            ApprovalKeyView(kid: phone.kid, subjectRef: Approve.subject, status: .active, assurance: .biometric, publicKey: phone.key.publicKey.base64URL, hpkeKid: phone.hpke.publicKey.kid,
+                            hpkePublicKey: phone.hpke.publicKey.base64URL, createdAt: Approve.now, activatedAt: Approve.now, revokedAt: nil, revokedBy: nil, deviceStatement: signed)
+        }
+
+        func confirm(_ transport: MockTransport, sas: String? = nil, subject: SubjectRef = Approve.subject, business: BusinessID = Approve.business, minimum: ApprovalAMR = .biometric) async throws -> ConfirmedEnrollment {
+            try await Fixtures.client(transport).confirmApprovalEnrollment(invitation: invitation, businessId: business, expectedSubject: subject, sas: sas, confirmationKey: confirmationKey,
+                                                                           minimumAssurance: minimum, now: Approve.now)
+        }
+    }
+
+    @Test func aRelayForgedStatementIsRefusedByTheBusinessSdk() async throws {
+        // THE exploit of gate finding F1. The relay knows the enrollment id, the business id and the subject_ref, makes its own key, and signs a
+        // statement that is valid in every respect the business can check by itself. It has no enrollment secret, so it has no valid tag and no SAS.
+        let e = Enrolling()
+        let attacker = SoftwareP256SigningKey()
+        let forged = try await e.statement(for: attacker, hpke: SoftwareE2EEPrivateKey())
+        #expect(throws: Never.self) { try ApprovalEnrollmentStatement.verify(forged) }
+
+        func refused(tag: String?, sas: String?, _ expected: ApprovalEnrollmentFailure, cancelled: Bool) async throws {
+            let transport = MockTransport()
+            try transport.enqueue(status: 200, json: e.view(forged, tag: tag))
+            if cancelled { try transport.enqueue(status: 200, json: e.view(forged, tag: tag, status: .cancelled)) }
+            await #expect(throws: expected) { _ = try await e.confirm(transport, sas: sas) }
+            #expect(!transport.requests.contains { $0.url.path.hasSuffix("/confirm") }, "nothing was signed or confirmed")
+            #expect(transport.requests.contains { $0.url.path.hasSuffix("/cancel") } == cancelled)
+        }
+        // No tag, no SAS: the business asks for verification and does not confirm.
+        try await refused(tag: nil, sas: nil, .verificationRequired, cancelled: false)
+        // A tag the relay made up (it does not know `es`), including the tag of another enrollment's secret.
+        try await refused(tag: Base64URL.encode(Data(repeating: 1, count: 32)), sas: nil, .bindingTagInvalid, cancelled: true)
+        try await refused(tag: ApprovalEnrollmentSecret().bindingTag(for: forged), sas: nil, .bindingTagInvalid, cancelled: true)
+        // A SAS it guessed.
+        try await refused(tag: nil, sas: "123456", .sasMismatch, cancelled: true)
+        // A tag present but wrong cannot be rescued by a SAS (there is no downgrade from a bad tag).
+        try await refused(tag: ApprovalEnrollmentSecret().bindingTag(for: forged), sas: e.invitation.secret.expectedSAS(for: forged), .bindingTagInvalid, cancelled: true)
+    }
+
+    @Test func aStatementSwappedAfterTheRealDeviceAnsweredIsRefused() async throws {
+        // The real app answered (its tag is genuine), then the relay swapped the statement for its own key but kept the device's tag.
+        let e = Enrolling()
+        let real = try await e.statement(for: e.phone.key, hpke: e.phone.hpke)
+        let tag = e.invitation.secret.bindingTag(for: real)
+        let swapped = try await e.statement(for: SoftwareP256SigningKey(), hpke: SoftwareE2EEPrivateKey())
+        let transport = MockTransport()
+        try transport.enqueue(status: 200, json: e.view(swapped, tag: tag))
+        try transport.enqueue(status: 200, json: e.view(swapped, tag: tag, status: .cancelled))
+        await #expect(throws: ApprovalEnrollmentFailure.bindingTagInvalid) { _ = try await e.confirm(transport) }
+        #expect(!transport.requests.contains { $0.url.path.hasSuffix("/confirm") })
+    }
+
+    @Test func theGenuineDeviceIsConfirmedByTagOrBySas() async throws {
+        let e = Enrolling()
+        let real = try await e.statement(for: e.phone.key, hpke: e.phone.hpke)
+        // Link path: the app returns the binding tag.
+        let tagged = MockTransport()
+        try tagged.enqueue(status: 200, json: e.view(real, tag: e.invitation.secret.bindingTag(for: real)))
+        try tagged.enqueue(status: 200, json: e.keyView(real))
+        let viaTag = try await e.confirm(tagged)
+        #expect(viaTag.key == e.phone.enrolled && viaTag.hpke == e.phone.hpke.publicKey)
+        let post = try #require(tagged.requests.last)
+        let confirmation = try ViadereJSON.decode(ConfirmApprovalEnrollmentRequest.self, from: try #require(post.body)).confirmation
+        let parsed = try ApprovalEnrollmentConfirmation.verify(confirmation, confirmationKey: e.confirmationKey.publicKey)
+        #expect(throws: Never.self) { try parsed.checkMatches(try ApprovalEnrollmentStatement.verify(real), signed: real) }
+        // Typed path: no tag; the app computed the SAS from the check code the customer typed; the business types it in.
+        let sas = try #require(ApprovalEnrollmentSAS.compute(checkCode: e.invitation.checkCode, statement: real))
+        let typed = MockTransport()
+        try typed.enqueue(status: 200, json: e.view(real, tag: nil))
+        try typed.enqueue(status: 200, json: e.keyView(real))
+        let viaSas = try await e.confirm(typed, sas: ApprovalEnrollmentSAS.display(sas))
+        #expect(viaSas.kid == e.phone.kid)
+    }
+
+    @Test func confirmingStillVerifiesTheStatementBeforeAnythingIsSigned() async throws {
+        let e = Enrolling()
+        let real = try await e.statement(for: e.phone.key, hpke: e.phone.hpke)
+        func view(_ status: ApprovalEnrollmentStatus = .deviceCompleted, _ signed: SignedStatement? = real) -> ApprovalEnrollmentView {
+            e.view(signed, tag: signed.map { e.invitation.secret.bindingTag(for: $0) }, status: status)
+        }
+        func refuses(_ response: ApprovalEnrollmentView, subject: SubjectRef = Approve.subject, business: BusinessID = Approve.business, minimum: ApprovalAMR = .biometric,
+                     _ expected: ApprovalEnrollmentFailure) async throws {
             let t = MockTransport()
             try t.enqueue(status: 200, json: response)
-            await #expect(throws: expected) {
-                _ = try await Fixtures.client(t).confirmApprovalEnrollment(id: enrollmentId, businessId: business, expectedSubject: subject, confirmationKey: confirmationKey, minimumAssurance: minimum, now: Approve.now)
-            }
+            await #expect(throws: expected) { _ = try await e.confirm(t, subject: subject, business: business, minimum: minimum) }
             #expect(t.requests.count == 1, "only the GET was sent")
         }
-        try await refuses(view(.pending, statement: nil), .notReady)
+        try await refuses(view(.pending, nil), .notReady)
         try await refuses(view(), subject: SubjectRef("sub_" + Base64URL.encode(Data(repeating: 4, count: 32)))!, .bindingMismatch(.wrongSubject))
         try await refuses(view(), business: BusinessID(), .bindingMismatch(.wrongBusiness))
         let other = SoftwareP256SigningKey()
-        let otherStatement = try await ApprovalEnrollmentStatement(businessId: Approve.business, subject: Approve.subject, enrollmentId: enrollmentId, publicKey: other.publicKey,
-                                                                  hpkePublicKey: phone.hpke.publicKey, assurance: .biometric, createdAt: Approve.now).sign(with: other)
-        try await refuses(view(statement: SignedStatement(payload: signed.payload, signature: otherStatement.signature)), .invalidStatement(.badSignature))
-        let presence = try ApprovalEnrollmentStatement(businessId: Approve.business, subject: Approve.subject, enrollmentId: enrollmentId, publicKey: phone.key.publicKey, hpkePublicKey: phone.hpke.publicKey,
-                                                       assurance: .presence, createdAt: Approve.now)
-        try await refuses(view(statement: try await presence.sign(with: phone.key)), .assuranceTooLow)
+        let otherStatement = try await e.statement(for: other, hpke: e.phone.hpke)
+        try await refuses(view(.deviceCompleted, SignedStatement(payload: real.payload, signature: otherStatement.signature)), .invalidStatement(.badSignature))
+        let presence = try await e.statement(for: e.phone.key, hpke: e.phone.hpke, assurance: .presence)
+        try await refuses(view(.deviceCompleted, presence), .assuranceTooLow)
+    }
+
+    @Test func aFreezeReferenceIsResolvedWithTheBusinessOwnKey() async throws {
+        let transport = MockTransport()
+        try transport.enqueue(status: 200, json: FreezeStatus(subjectRef: Approve.subject, frozen: true))
+        let status = try await Fixtures.client(transport).approvalFreeze(ref: "frz_0123456789abcdefghijkl")
+        #expect(status.frozen && transport.requests.first?.url.path == "/v1/business/approve/freezes/frz_0123456789abcdefghijkl")
     }
 
     @Test func requestsResultsAndFreezesUseTheirEndpoints() async throws {

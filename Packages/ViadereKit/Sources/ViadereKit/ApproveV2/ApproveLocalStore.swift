@@ -26,9 +26,16 @@ public struct LocalApprovalKey: Codable, Sendable, Equatable, Identifiable {
     public var statement: SignedStatement
     public var status: Status
     public var createdAt: Date
+    /// When the business must have confirmed by: the enrollment's expiry plus the relay's grace. A key still unconfirmed after this is removed and
+    /// reported (a business that lost the flow, or a relay holding the key back to confirm later). `nil` for keys stored before this existed.
+    public var confirmBy: Date?
+    /// The six digits of the typed-code path, shown until the business has confirmed; cleared afterwards.
+    public var verificationCode: String?
 
     public init(enrollmentId: UUID, kid: String, hpkeKid: String, businessId: BusinessID, businessName: String, relationshipId: RelationshipID, subject: SubjectRef,
-                assurance: ApprovalAMR, statement: SignedStatement, status: Status, createdAt: Date) {
+                assurance: ApprovalAMR, statement: SignedStatement, status: Status, createdAt: Date, confirmBy: Date? = nil, verificationCode: String? = nil) {
+        self.confirmBy = confirmBy
+        self.verificationCode = verificationCode
         self.enrollmentId = enrollmentId
         self.kid = kid
         self.hpkeKid = hpkeKid
@@ -87,6 +94,15 @@ public struct ApproveLocalState: Codable, Sendable, Equatable {
     public var lastSeenHead: SeenTreeHead?
     public var decisions: [LocalDecision] = []
     public init() {}
+
+    /// Records a verified tree head **monotonically** (gate finding F4): the stored head only ever moves forward. Two refreshes can verify
+    /// concurrently, and the one that finishes last must not roll the head back to an older tree, which would let a later rollback or fork of
+    /// the log pass the consistency check. An equal size keeps the stored head (and its newer timestamp); the caller compares the roots.
+    public mutating func advanceHead(to new: SeenTreeHead) {
+        guard let current = lastSeenHead else { lastSeenHead = new; return }
+        if new.treeSize > current.treeSize { lastSeenHead = new }
+        else if new.treeSize == current.treeSize, new.rootHash == current.rootHash, new.timestamp > current.timestamp { lastSeenHead = new }
+    }
 }
 
 /// Persistence for `ApproveLocalState`. Serialized: every mutation is read-modify-write under one lock.

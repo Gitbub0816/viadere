@@ -76,6 +76,8 @@ final class ApproveEnrollmentRecord: Model, @unchecked Sendable {
     @OptionalField(key: "confirmation") var confirmation: String?
     @OptionalField(key: "confirmed_at") var confirmedAt: Date?
     @OptionalField(key: "cancelled_at") var cancelledAt: Date?
+    /// The device's binding tag (opaque to the relay: only the business, which holds the enrollment secret, can verify it).
+    @OptionalField(key: "binding_tag") var bindingTag: String?
 
     init() {}
 
@@ -187,4 +189,20 @@ final class ApproveFreezeRecord: Model, @unchecked Sendable {
     init() {}
 
     var scopeValue: ApproveFreezeScope { ApproveFreezeScope(rawValue: scope) ?? .relationship }
+}
+
+/// The opaque reference one `approve.frozen` webhook carries for one business (random, never derived from the subject or the freeze, so two
+/// businesses cannot link a customer by comparing events). `GET /v1/business/approve/freezes/{ref}` resolves it with the business's own key.
+final class ApproveFreezeEventRecord: Model, @unchecked Sendable {
+    static let schema = "approve_freeze_events"
+    @ID(key: .id) var id: UUID?
+    @Field(key: "ref") var ref: String
+    @Field(key: "business_id") var businessId: UUID
+    @Field(key: "relationship_id") var relationshipId: UUID
+    @Field(key: "created_at") var createdAt: Date
+
+    init() {}
+
+    static func newRef() -> String { "frz_" + SecureToken.generate(byteCount: 16) }
+    static func isValidRef(_ value: String) -> Bool { value.hasPrefix("frz_") && Base64URL.isValid(String(value.dropFirst(4)), minLength: 22, maxLength: 22) }
 }

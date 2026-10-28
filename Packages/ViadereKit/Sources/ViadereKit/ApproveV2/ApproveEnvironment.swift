@@ -10,6 +10,8 @@ public struct ApproveEnvironment: Sendable {
     public var enrollment: ApproveEnrollmentFlow
     public var requests: ApproveRequestHandler
     public var freeze: ApproveFreezeFlow
+    /// Fresh Face ID / Touch ID proof required before a changed business root is trusted.
+    public var rootChangeAuthorizer: any RootChangeAuthorizer
     /// False when the build pins no transparency-log key: nothing about a business's keys can then be verified, so Approve v2 stays closed.
     public var isConfigured: Bool
 
@@ -23,6 +25,7 @@ public struct ApproveEnvironment: Sendable {
         enrollment = ApproveEnrollmentFlow(api: api, vault: vault, store: store, directory: directory, clock: clock)
         requests = ApproveRequestHandler(api: api, vault: vault, store: store, directory: directory, policy: policy, clock: clock)
         freeze = ApproveFreezeFlow(api: api, keys: keys, records: records, clock: clock)
+        rootChangeAuthorizer = DeviceBiometricAuthorizer(keys: keys)
         isConfigured = !logKeys.isEmpty
     }
 

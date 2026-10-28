@@ -212,8 +212,8 @@ public final class AppModel {
             selectedTab = .messages
         case .settings:
             selectedTab = .settings
-        case .approveEnrollment(let code, let rootKid):
-            pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid)
+        case .approveEnrollment(let code, let rootKid, let secret):
+            pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid, secret: secret)
             selectedTab = .settings
         }
     }
@@ -319,8 +319,14 @@ public final class AppModel {
 public struct PendingApproveEnrollment: Sendable, Equatable {
     public var code: String
     public var rootKid: String?
-    public init(code: String, rootKid: String?) {
+    /// The enrollment secret from the link's fragment, or `nil` when the person typed the code (then `checkCode` is required).
+    public var secret: ApprovalEnrollmentSecret?
+    /// The business's second code of the typed path.
+    public var checkCode: String?
+    public init(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret? = nil, checkCode: String? = nil) {
         self.code = code
         self.rootKid = rootKid
+        self.secret = secret
+        self.checkCode = checkCode
     }
 }

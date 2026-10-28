@@ -278,6 +278,10 @@ struct ApproveRequestService {
             try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now)
                 .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
         }
+        try await ApproveEnrollmentService(db: db, ctx: ctx).expireUnconfirmed()
+        if try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).count() > 0 {
+            try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).delete()
+        }
         return count
     }
 

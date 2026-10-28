@@ -10,6 +10,13 @@ import ViadereCore
 ///    Secure Enclave key** and signs an enrollment statement with it (biometric for high and critical capabilities).
 /// 3. The business verifies the statement itself and confirms it with a signature from its directory-published confirmation key.
 ///    The key becomes active only then, and the device checks that the confirmation covers **its** key.
+///
+/// **What the relay cannot do (gate finding F1).** The relay creates the code, stores the statement and forwards it, so it could make a key
+/// of its own, sign a perfectly valid statement and hand it to the business. The server therefore *cannot* be the authority on whether a
+/// statement came from the customer's device; the **business SDK is**, using a secret (`es`) that only the business and the customer's app
+/// hold (the link/QR fragment, or the check code of the typed path). The device's `binding_tag` and the SAS typed into the business's own
+/// session are verified there, before the SDK confirms. The server stores and forwards the tag and ends enrollments the business never
+/// confirmed (`expireUnconfirmed`).
 struct ApproveEnrollmentService {
     let db: any Database
     let ctx: ServerContext
@@ -95,7 +102,8 @@ struct ApproveEnrollmentService {
         if status == .pending, record.expiresAt <= ctx.now { status = .expired }
         let confirmation = record.confirmation.flatMap { try? ViadereJSON.decode(BusinessSignedStatement.self, from: Data($0.utf8)) }
         return ApprovalEnrollmentView(enrollmentId: record.id!, subjectRef: subject, capability: Capability(rawValue: record.capability), status: status, expiresAt: record.expiresAt,
-                                      createdAt: record.createdAt, deviceStatement: record.deviceStatement, kid: record.kid, confirmation: confirmation)
+                                      createdAt: record.createdAt, deviceStatement: record.deviceStatement, kid: record.kid, confirmation: confirmation,
+                                      bindingTag: record.bindingTag)
     }
 
     func cancel(principal: BusinessPrincipal, id: UUID) async throws -> ApproveEnrollmentRecord {
@@ -175,6 +183,10 @@ struct ApproveEnrollmentService {
         let active = try await ApproveKeyRecord.query(on: db).filter(\.$relationshipId == record.relationshipId).filter(\.$status != ApprovalKeyStatus.revoked.rawValue).count()
         guard active < ctx.config.approve.maxKeysPerRelationship else { try await reject("too_many_keys", .conflict("Too many approval keys for this business.")) }
 
+        // The binding tag is opaque to the relay (it does not hold the secret); only its shape is checked.
+        if let tag = request.bindingTag, !Base64URL.isValid(tag, minLength: 43, maxLength: 43) {
+            try await reject("binding_tag_invalid", .validation("The binding tag is not valid.", details: ["binding_tag": "invalid"]))
+        }
         let key = ApproveKeyRecord()
         key.id = UUID()
         key.kid = statement.kid
@@ -195,10 +207,11 @@ struct ApproveEnrollmentService {
         do {
             try await db.transaction { tx in
                 // Compare-and-swap: one enrollment completes once, whoever races.
+                var extra: [(String, any Encodable & Sendable)] = [("statement_payload", request.statement.payload), ("statement_signature", request.statement.signature),
+                                                                   ("kid", statement.kid), ("device_completed_at", now)]
+                if let tag = request.bindingTag { extra.append(("binding_tag", tag)) }
                 let swapped = try await DB.swap(tx, table: ApproveEnrollmentRecord.schema, id: enrollmentId, column: "status", expected: ApprovalEnrollmentStatus.pending.rawValue,
-                                                newValue: ApprovalEnrollmentStatus.deviceCompleted.rawValue,
-                                                extra: [("statement_payload", request.statement.payload), ("statement_signature", request.statement.signature),
-                                                        ("kid", statement.kid), ("device_completed_at", now)])
+                                                newValue: ApprovalEnrollmentStatus.deviceCompleted.rawValue, extra: extra)
                 guard swapped else { throw APIError.conflict("This enrollment is no longer open.") }
                 try await key.create(on: tx)
             }
@@ -229,6 +242,10 @@ struct ApproveEnrollmentService {
                                         subjectId: id.uuidString.lowercased(), metadata: ["reason": reason])
             throw error
         }
+        // A key the business does not confirm within the enrollment's lifetime (plus a short grace) is ended, not left pending for a relay to use later.
+        guard record.expiresAt.addingTimeInterval(ctx.config.approve.unconfirmedGrace) > ctx.now else {
+            try await reject("confirmation_too_late", .gone("This enrollment has expired. Start a new one."))
+        }
         guard record.statusValue == .deviceCompleted, let statement = record.deviceStatement, let kid = record.kid,
               let key = try await ApproveKeyRecord.query(on: db).filter(\.$kid == kid).first() else { throw APIError.conflict("This enrollment is not waiting for confirmation.") }
         let state = try await KeyLogService(db: db, ctx: ctx).state(for: principal.businessId.uuid)
@@ -257,6 +274,36 @@ struct ApproveEnrollmentService {
         await ApproveNotifier(db: db, ctx: ctx).notice(.approvalKeyEnrolled, consumerId: record.consumerId, subjectId: kid)
         guard let active = try await ApproveKeyRecord.find(key.id!, on: db) else { throw APIError.internalError }
         return active
+    }
+
+    // MARK: Unconfirmed keys
+
+    /// Ends every enrollment the device completed but the business never confirmed (gate finding F1): the pending key is revoked, the
+    /// customer gets a notice, and the business gets `approve.key.revoked` and an audit record. A key that stays unconfirmed is either a
+    /// business that lost the flow or a relay holding a key back to confirm later, and neither is allowed to linger.
+    @discardableResult
+    func expireUnconfirmed(limit: Int = 100) async throws -> Int {
+        let cutoff = ctx.now.addingTimeInterval(-ctx.config.approve.unconfirmedGrace)
+        let overdue = try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.deviceCompleted.rawValue)
+            .filter(\.$expiresAt <= cutoff).limit(limit).all()
+        var count = 0
+        for record in overdue {
+            guard try await DB.swap(db, table: ApproveEnrollmentRecord.schema, id: record.id!, column: "status", expected: ApprovalEnrollmentStatus.deviceCompleted.rawValue,
+                                    newValue: ApprovalEnrollmentStatus.expired.rawValue) else { continue }
+            count += 1
+            var revoked: ApproveKeyRecord?
+            if let kid = record.kid {
+                try await ApproveKeyRecord.query(on: db).filter(\.$kid == kid).filter(\.$status == ApprovalKeyStatus.pending.rawValue)
+                    .set(\.$status, to: ApprovalKeyStatus.revoked.rawValue).set(\.$revokedAt, to: ctx.now).set(\.$revokedBy, to: "system").update()
+                revoked = try await ApproveKeyRecord.query(on: db).filter(\.$kid == kid).first()
+            }
+            _ = try await AuditService(db: db, ctx: ctx).record("approve.enrollment_unconfirmed", outcome: .denied, actor: AuditActor(kind: .system, id: "approve-sweep"),
+                consumerId: ConsumerID(record.consumerId), businessId: BusinessID(record.businessId), subjectType: "approve_enrollment",
+                subjectId: record.id?.uuidString.lowercased(), metadata: ["kid": record.kid ?? ""])
+            if let revoked { try await ApproveWebhooks(db: db, ctx: ctx).keyRevoked(revoked) }
+            await ApproveNotifier(db: db, ctx: ctx).notice(.approvalKeyUnconfirmed, consumerId: record.consumerId, subjectId: record.kid)
+        }
+        return count
     }
 
     // MARK: Device: the account's keys

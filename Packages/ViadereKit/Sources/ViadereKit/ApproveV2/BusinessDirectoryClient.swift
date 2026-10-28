@@ -10,6 +10,9 @@ public enum ApproveError: Error, Equatable, Sendable {
     case directoryHasNoRoot
     /// The business has not published an `approval-enrollment-confirmation` key.
     case businessNotReady
+    /// Neither the link's secret nor the business's check code is available: the business could not tell this phone's key from one the relay
+    /// made, so no key is created. Open the business's link or QR, or type its check code too.
+    case enrollmentSecretRequired
     /// The root key the log shows is not the one the business displayed in the link or QR.
     case rootMismatchWithLink
     /// A valid succession replaced the pinned root: the person must confirm the change before this business can ask for approvals.
@@ -85,18 +88,21 @@ public struct BusinessDirectoryClient: Sendable {
             let trust: RootTrust = expectedRootKid == nil ? .firstUse : .verifiedOutOfBand
             let pinned = PinnedBusinessRoot(root: PinnedRoot(from: epoch, businessId: businessId, at: now), trust: trust)
             let head = SeenTreeHead(verified.head)
-            try await store.update { $0.pins[key] = pinned; $0.lastSeenHead = head }
+            try await store.update { $0.pins[key] = pinned; $0.advanceHead(to: head) }
+            try await requireNoFork(head)
             return DirectoryCheck(state: verified.state, head: verified.head, trust: trust, rootFingerprint: KeyIdentifier.displayFingerprint(kid))
         case .unchanged:
             if let expectedRootKid, expectedRootKid != existing?.root.rootKid { throw ApproveError.rootMismatchWithLink }
             let head = SeenTreeHead(verified.head)
-            try await store.update { $0.lastSeenHead = head; $0.pendingRootChanges[key] = nil }
+            try await store.update { $0.advanceHead(to: head); $0.pendingRootChanges[key] = nil }
+            try await requireNoFork(head)
             return DirectoryCheck(state: verified.state, head: verified.head, trust: existing?.trust ?? .firstUse,
                                   rootFingerprint: KeyIdentifier.displayFingerprint(existing?.root.rootKid ?? ""))
         case .rotated(let pinnedKid, let currentKid):
             let change = PendingRootChange(businessId: businessId, pinnedKid: pinnedKid, newKid: currentKid, detectedAt: now)
             let head = SeenTreeHead(verified.head)
-            try await store.update { $0.pendingRootChanges[key] = change; $0.lastSeenHead = head }
+            try await store.update { $0.pendingRootChanges[key] = change; $0.advanceHead(to: head) }
+            try await requireNoFork(head)
             guard allowPendingRootChange else { throw ApproveError.rootChanged(businessId) }
             return DirectoryCheck(state: verified.state, head: verified.head, trust: existing?.trust ?? .firstUse, rootFingerprint: KeyIdentifier.displayFingerprint(currentKid))
         case .conflict:
@@ -105,13 +111,32 @@ public struct BusinessDirectoryClient: Sendable {
         }
     }
 
-    /// The person re-confirmed (with Face ID or Touch ID, by the caller) after being told the business's root key changed: the new root is
-    /// pinned, and the business can ask for approvals again once it has re-published its keys under the new root.
-    public func acceptRootChange(businessId: BusinessID) async throws {
+    /// Two refreshes can run at once. If the head another one stored has the same size as this one but a different root, the log showed two
+    /// trees of one size: a fork. Fail closed (the next `verify` against the stored head fails the same way until the log is consistent).
+    private func requireNoFork(_ head: SeenTreeHead) async throws {
+        if let stored = try await store.load().lastSeenHead, stored.treeSize == head.treeSize, stored.rootHash != head.rootHash { throw ApproveError.directory(.forkDetected) }
+    }
+
+    /// The person re-confirmed after being told the business's root key changed: the new root is pinned, and the business can ask for approvals
+    /// again once it has re-published its keys under the new root.
+    ///
+    /// **The caller's tap is not enough** (gate finding F5): the change needs a fresh Face ID / Touch ID proof from the device's own
+    /// biometric-protected key (`authorizer`), so a thief holding an unlocked phone cannot re-trust an attacker's root. If the proof fails or is
+    /// cancelled nothing is pinned and the change stays pending.
+    public func acceptRootChange(businessId: BusinessID, authorizer: any RootChangeAuthorizer) async throws {
         let check = try await verify(businessId: businessId, allowPendingRootChange: true)
         guard let epoch = check.state.currentRoot else { throw ApproveError.directoryHasNoRoot }
         let key = businessId.description
         let now = clock()
+        do {
+            try await authorizer.authorize(reason: "Trust the new signing key of this business")
+        } catch let error as KeyStoreError {
+            switch error {
+            case .userCancelled: throw ApproveError.userCancelled
+            case .authenticationFailed: throw ApproveError.authenticationFailed
+            default: throw ApproveError.deviceCannotSatisfy
+            }
+        }
         try await store.update {
             $0.pins[key] = PinnedBusinessRoot(root: PinnedRoot(from: epoch, businessId: businessId, at: now), trust: .firstUse)
             $0.pendingRootChanges[key] = nil
@@ -137,4 +162,25 @@ public struct BusinessDirectoryClient: Sendable {
 public enum DirectoryAlert: Sendable, Equatable {
     case rootChanged(PendingRootChange)
     case rootConflict
+}
+
+/// A fresh proof that the person is at the phone, required before a changed business root is trusted (gate finding F5).
+public protocol RootChangeAuthorizer: Sendable {
+    /// Throws `KeyStoreError.userCancelled` / `.authenticationFailed` (or anything else, which refuses) unless the person just authenticated.
+    func authorize(reason: String) async throws
+}
+
+/// Signs a random challenge with the device's biometric-protected key, which the Secure Enclave releases only after Face ID or Touch ID
+/// (`.biometryCurrentSet`), and checks the signature. The same primitive as unfreezing approvals.
+public struct DeviceBiometricAuthorizer: RootChangeAuthorizer {
+    private let keys: any DeviceKeyStore
+    public init(keys: any DeviceKeyStore) { self.keys = keys }
+
+    public func authorize(reason: String) async throws {
+        let key: any ManagedSigningKey
+        do { key = try await keys.requireKey(for: .approvalBiometric) } catch { throw KeyStoreError.keyNotFound(.approvalBiometric) }
+        let challenge = SecureToken.randomBytes(32)
+        let signature = try await PromptBoundKey(key, prompt: SigningPrompt(reason: reason)).signature(for: challenge)
+        guard let verifier = try? key.publicKey.signingKey(), verifier.isValidSignature(signature, for: challenge) else { throw KeyStoreError.authenticationFailed }
+    }
 }

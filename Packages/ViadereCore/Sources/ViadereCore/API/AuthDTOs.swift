@@ -597,6 +597,8 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     /// Approve v2: a pairwise approval key was enrolled for a business, revoked, approvals were frozen or unfrozen, or repeated requests
     /// from a business were paused (`subjectId` = the key id or relationship id).
     case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
+    /// Approve v2: a key was created but the business never confirmed it in time; Viadere removed it.
+    case approvalKeyUnconfirmed
     case unknown
 
     public init(from decoder: any Decoder) throws {

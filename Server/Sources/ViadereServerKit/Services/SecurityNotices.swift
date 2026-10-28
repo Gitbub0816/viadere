@@ -13,7 +13,7 @@ struct SecurityNotices {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
         case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
         case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
-        case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
+        case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -35,6 +35,7 @@ struct SecurityNotices {
             case .approvalsFrozen: .approvalsFrozen
             case .approvalsUnfrozen: .approvalsUnfrozen
             case .approvalRequestsPaused: .approvalRequestsPaused
+            case .approvalKeyUnconfirmed: .approvalKeyUnconfirmed
             }
         }
 
@@ -75,6 +76,8 @@ struct SecurityNotices {
             case .approvalsUnfrozen: "Approvals were unfrozen. If this wasn't you, open Viadere and freeze them again."
             case .approvalRequestsPaused:
                 "A business sent you several approval requests, so Viadere paused further requests from it for a while. If you don't recognize it, report it in Viadere."
+            case .approvalKeyUnconfirmed:
+                "An approval key you set up was never confirmed by the business, so Viadere removed it. If you didn't just set up approvals with a business, open Viadere and freeze approvals."
             case .delegationEnded:
                 "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }

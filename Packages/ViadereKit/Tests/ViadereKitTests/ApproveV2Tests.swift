@@ -31,6 +31,12 @@ actor FakeRelay: ApproveAPI {
     /// Attack switches.
     var substituteKey: SoftwareP256SigningKey?
     var serveHeadSize: Int?
+    /// What the phone sent with its statement (the relay sees this).
+    var receivedBindingTag: String?
+    /// Holds the next directory response until `release()`: lets a test interleave two refreshes.
+    var stallNextDirectory = false
+    private var stalled: CheckedContinuation<Void, Never>?
+    private var isStalled = false
 
     init(businessId: BusinessID = BusinessID(), logKey: SoftwareP256SigningKey = SoftwareP256SigningKey()) async throws {
         self.businessId = businessId
@@ -94,7 +100,8 @@ actor FakeRelay: ApproveAPI {
                                  requiredAssurance: .biometric, expiresAt: now.addingTimeInterval(600))
     }
 
-    func completeEnrollment(id: UUID, statement: SignedStatement) async throws -> ApproveKey {
+    func completeEnrollment(id: UUID, statement: SignedStatement, bindingTag: String?) async throws -> ApproveKey {
+        receivedBindingTag = bindingTag
         let honest = try ApprovalEnrollmentStatement.verify(statement)
         if let attacker = substituteKey {
             // The relay swaps in its own key (and reports the device's key id back so the device does not notice at once).
@@ -144,8 +151,17 @@ actor FakeRelay: ApproveAPI {
         let items = entries.prefix(size).enumerated().filter { $0.element.entry.businessId == businessId }.map { index, item in
             KeyLogEntryProof(index: index, entry: Base64URL.encode(item.bytes), inclusionProof: tree.inclusionProof(index: index, size: size)!.map(Hex.encode))
         }
-        return KeyDirectoryResponse(sth: head, consistencyFrom: from, consistencyProof: proof, entries: items)
+        let response = KeyDirectoryResponse(sth: head, consistencyFrom: from, consistencyProof: proof, entries: items)
+        if stallNextDirectory {
+            stallNextDirectory = false
+            isStalled = true
+            await withCheckedContinuation { stalled = $0 }
+        }
+        return response
     }
+
+    var hasStalledCall: Bool { isStalled && stalled != nil }
+    func release() { isStalled = false; stalled?.resume(); stalled = nil }
 
     // MARK: Requests
 
@@ -179,6 +195,12 @@ actor FakeRelay: ApproveAPI {
     }
 }
 
+let testSecret = ApprovalEnrollmentSecret()
+
+/// A fresh Face ID / Touch ID proof that succeeds, or fails like a cancelled prompt.
+struct AllowAuthorizer: RootChangeAuthorizer { func authorize(reason: String) async throws {} }
+struct DenyAuthorizer: RootChangeAuthorizer { func authorize(reason: String) async throws { throw KeyStoreError.userCancelled } }
+
 struct ApprovePhone {
     let relay: FakeRelay
     let vault: SoftwareApprovalKeyVault
@@ -201,7 +223,7 @@ struct ApprovePhone {
 
     /// Lookup, enroll, and let the business confirm.
     func enrolled(expectedRoot: String? = nil) async throws -> LocalApprovalKey {
-        let offer = try await enrollment.lookup(code: "ABCD2345", expectedRootKid: expectedRoot)
+        let offer = try await enrollment.lookup(code: "ABCD2345", expectedRootKid: expectedRoot, secret: testSecret)
         let key = try await enrollment.enroll(offer)
         try await relay.businessConfirms()
         _ = try await enrollment.refreshConfirmations()
@@ -220,7 +242,7 @@ struct ApproveEnrollmentDeviceTests {
     @Test func enrollmentActivatesOnlyWhenTheBusinessConfirmsTheDevicesKey() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        let offer = try await phone.enrollment.lookup(code: "ABCD-2345")
+        let offer = try await phone.enrollment.lookup(code: "ABCD-2345", secret: testSecret)
         #expect(offer.preview.business.displayName == "Harbor Bank")
         #expect(offer.trust == .firstUse)
         let key = try await phone.enrollment.enroll(offer)
@@ -238,7 +260,7 @@ struct ApproveEnrollmentDeviceTests {
         let relay = try await makeRelay()
         await relay.setSubstitute(SoftwareP256SigningKey())
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        let offer = try await phone.enrollment.lookup(code: "ABCD2345")
+        let offer = try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret)
         let key = try await phone.enrollment.enroll(offer)
         try await relay.businessConfirms() // the business confirms what it was shown: the attacker's key
         let outcomes = try await phone.enrollment.refreshConfirmations()
@@ -253,7 +275,7 @@ struct ApproveEnrollmentDeviceTests {
     @Test func aConfirmationSignedByAnUnpublishedKeyDoesNotActivate() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        let key = try await phone.enrollment.enroll(try await phone.enrollment.lookup(code: "ABCD2345"))
+        let key = try await phone.enrollment.enroll(try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret))
         // The relay forges a confirmation with a key the business never published.
         let statement = try ApprovalEnrollmentStatement.verify(key.statement)
         let forged = try await ApprovalEnrollmentConfirmation(confirming: statement, signed: key.statement, at: relay.now).sign(with: SoftwareP256SigningKey())
@@ -264,32 +286,32 @@ struct ApproveEnrollmentDeviceTests {
     @Test func aBusinessWithoutAConfirmationKeyIsNotReady() async throws {
         let relay = try await FakeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        await #expect(throws: ApproveError.businessNotReady) { try await phone.enrollment.lookup(code: "ABCD2345") }
+        await #expect(throws: ApproveError.businessNotReady) { try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret) }
     }
 
     @Test func aLinkRootThatDiffersFromTheLogIsRefused() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        await #expect(throws: ApproveError.rootMismatchWithLink) { try await phone.enrollment.lookup(code: "ABCD2345", expectedRootKid: "bk_other") }
+        await #expect(throws: ApproveError.rootMismatchWithLink) { try await phone.enrollment.lookup(code: "ABCD2345", expectedRootKid: "bk_other", secret: testSecret) }
         let kid = await relay.rootKid
-        let offer = try await phone.enrollment.lookup(code: "ABCD2345", expectedRootKid: kid)
+        let offer = try await phone.enrollment.lookup(code: "ABCD2345", expectedRootKid: kid, secret: testSecret)
         #expect(offer.trust == .verifiedOutOfBand)
     }
 
     @Test func withoutAPinnedLogKeyNothingIsVerifiedAndNothingIsEnrolled() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: nil, now: relay.now)
-        await #expect(throws: ApproveError.notConfigured) { try await phone.enrollment.lookup(code: "ABCD2345") }
+        await #expect(throws: ApproveError.notConfigured) { try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret) }
         // A log signed by some other key is not the app's log.
         let other = ApprovePhone(relay: relay, logKey: SoftwareP256SigningKey().publicKey, now: relay.now)
-        await #expect(throws: ApproveError.directory(.treeHeadSignature)) { try await other.enrollment.lookup(code: "ABCD2345") }
+        await #expect(throws: ApproveError.directory(.treeHeadSignature)) { try await other.enrollment.lookup(code: "ABCD2345", secret: testSecret) }
     }
 
     @Test func aDeviceWithoutBiometricsCannotEnrollAndCreatesNoKey() async throws {
         let relay = try await makeRelay()
         let vault = SoftwareApprovalKeyVault(unsupported: [.biometric])
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, vault: vault, now: relay.now)
-        let offer = try await phone.enrollment.lookup(code: "ABCD2345")
+        let offer = try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret)
         await #expect(throws: ApproveError.deviceCannotSatisfy) { try await phone.enrollment.enroll(offer) }
         #expect(try await phone.store.load().keys.isEmpty)
     }
@@ -320,7 +342,7 @@ struct ApproveDirectoryDeviceTests {
         let loaded = try await phone.handler.load()
         #expect(loaded.prompts.isEmpty)
         #expect(loaded.rejected.first?.reason == "root_changed")
-        try await phone.directory.acceptRootChange(businessId: key.businessId)
+        try await phone.directory.acceptRootChange(businessId: key.businessId, authorizer: AllowAuthorizer())
         #expect(try await phone.directory.alert(for: key.businessId) == nil)
     }
 
@@ -442,8 +464,8 @@ struct ApproveRequestDeviceTests {
 struct ApproveControllerTests {
     @Test func enrollmentLinksRouteWithTheRootKeyId() {
         let kid = KeyIdentifier.make(try! SoftwareP256SigningKey().publicKey.signingKey())
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)") == .approveEnrollment(code: "ABCD2345", rootKid: kid))
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345") == .approveEnrollment(code: "ABCD2345", rootKid: nil))
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)") == .approveEnrollment(code: "ABCD2345", rootKid: kid, secret: nil))
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345") == .approveEnrollment(code: "ABCD2345", rootKid: nil, secret: nil))
         // Anything else on that path is refused: extra segments, a fragment, odd query items, another host.
         #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345/x") == nil)
         #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)&x=1") == nil)
@@ -461,7 +483,7 @@ struct ApproveControllerTests {
                                              keys: SoftwareDeviceKeyStore(secrets: secrets), records: SecretDeviceRecordStore(secrets: secrets), clock: { now })
         let controller = ApproveController(environment: environment)
         #expect(controller.isAvailable)
-        await controller.lookup(code: "ABCD2345", expectedRootKid: nil)
+        await controller.lookup(code: "ABCD2345", expectedRootKid: nil, secret: testSecret)
         #expect(controller.offer?.preview.business.displayName == "Harbor Bank")
         #expect(await controller.confirmEnrollment())
         try await relay.businessConfirms()
@@ -483,9 +505,147 @@ struct ApproveControllerTests {
                                              keys: SoftwareDeviceKeyStore(secrets: secrets), records: SecretDeviceRecordStore(secrets: secrets))
         let controller = ApproveController(environment: environment)
         #expect(!controller.isAvailable)
-        await controller.lookup(code: "ABCD2345", expectedRootKid: nil)
+        await controller.lookup(code: "ABCD2345", expectedRootKid: nil, secret: testSecret)
         #expect(controller.offer == nil)
         #expect(controller.message == ApproveText.notAvailable)
+    }
+}
+
+@Suite("Approve v2 on the device: gate fixes")
+struct ApproveGateDeviceTests {
+    @Test func withoutTheLinkSecretOrTheCheckCodeNoKeyIsCreated() async throws {
+        // F1: the business could not tell this phone's key from one the relay made, so the phone makes none.
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        await #expect(throws: ApproveError.enrollmentSecretRequired) { try await phone.enrollment.lookup(code: "ABCD2345") }
+        await #expect(throws: ApproveError.enrollmentSecretRequired) { try await phone.enrollment.lookup(code: "ABCD2345", checkCode: "short") }
+        // An offer assembled without either (a relay-supplied preview) cannot be enrolled either.
+        let offer = EnrollmentOffer(preview: ApproveEnrollmentPreview(enrollmentId: UUID(), business: relay.summary, relationshipId: RelationshipID(), subjectRef: relay.subject,
+                                                                       capability: .transactionApprove, requiredAssurance: .biometric, expiresAt: relay.now.addingTimeInterval(600)),
+                                    rootFingerprint: "x", trust: .firstUse, expectedRootKid: nil)
+        await #expect(throws: ApproveError.enrollmentSecretRequired) { try await phone.enrollment.enroll(offer) }
+        #expect(try await phone.store.load().keys.isEmpty)
+    }
+
+    @Test func theLinkPathSendsATagOnlyTheSecretHolderCanCheck() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let secret = ApprovalEnrollmentSecret()
+        let key = try await phone.enrollment.enroll(try await phone.enrollment.lookup(code: "ABCD2345", secret: secret))
+        let tag = try #require(await relay.receivedBindingTag)
+        #expect(secret.verifyBindingTag(tag, for: key.statement))
+        #expect(!ApprovalEnrollmentSecret().verifyBindingTag(tag, for: key.statement), "the relay, without the secret, cannot produce or move it")
+        #expect(key.verificationCode == nil)
+    }
+
+    @Test func theTypedPathShowsASixDigitNumberTheBusinessCanRecomputeAndSendsNothingSecret() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let secret = ApprovalEnrollmentSecret()
+        let offer = try await phone.enrollment.lookup(code: "ABCD2345", checkCode: ApprovalEnrollmentCode.display(secret.checkCode).lowercased())
+        let key = try await phone.enrollment.enroll(offer)
+        #expect(await relay.receivedBindingTag == nil)
+        let sas = try #require(key.verificationCode)
+        #expect(secret.verifySAS(sas, for: key.statement), "the business, holding `es`, derives the same digits")
+        // The number is shown only until the business has confirmed.
+        try await relay.businessConfirms()
+        _ = try await phone.enrollment.refreshConfirmations()
+        #expect(try await phone.store.load().keys.first?.verificationCode == nil)
+    }
+
+    @Test func aKeyTheBusinessNeverConfirmsIsRemovedAndReported() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let key = try await phone.enrollment.enroll(try await phone.enrollment.lookup(code: "ABCD2345", secret: testSecret))
+        #expect(try await phone.enrollment.refreshConfirmations() == [.stillWaiting(kid: key.kid)])
+        // Later than the enrollment's expiry plus the relay's grace: a relay holding the key back for later is not waited for.
+        let later = relay.now.addingTimeInterval(600 + 300 + 10)
+        let lated = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, store: phone.store, vault: phone.vault, now: later)
+        #expect(try await lated.enrollment.refreshConfirmations() == [.unconfirmedExpired(kid: key.kid)])
+        #expect(try await phone.store.load().keys.first?.status == .revoked)
+        #expect(try await phone.vault.approvalKey(enrollment: key.enrollmentId) == nil)
+        #expect(await relay.keyRevoked)
+    }
+
+    @Test func theDeepLinkCarriesTheSecretFromTheFragment() throws {
+        let secret = ApprovalEnrollmentSecret()
+        let link = "https://viadere.com/a/ABCD2345#es=\(secret.base64URL)"
+        #expect(DeepLinkRouter.route(link) == .approveEnrollment(code: "ABCD2345", rootKid: nil, secret: secret))
+        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345#es=short") == nil)
+    }
+
+    // MARK: F4
+
+    @Test func theSeenHeadOnlyMovesForward() {
+        func head(_ size: Int, _ root: String, _ t: Int64 = 1) -> SeenTreeHead { SeenTreeHead(treeSize: size, rootHash: root, timestamp: t) }
+        var state = ApproveLocalState()
+        state.advanceHead(to: head(5, "aa"))
+        state.advanceHead(to: head(3, "bb"))
+        #expect(state.lastSeenHead == head(5, "aa"), "an older tree never replaces a newer one")
+        state.advanceHead(to: head(5, "aa", 9))
+        #expect(state.lastSeenHead == head(5, "aa", 9), "the same tree refreshes its timestamp")
+        state.advanceHead(to: head(5, "cc", 99))
+        #expect(state.lastSeenHead == head(5, "aa", 9), "an equal size with another root never replaces it")
+        state.advanceHead(to: head(8, "dd"))
+        #expect(state.lastSeenHead == head(8, "dd"))
+    }
+
+    @Test func aSlowerRefreshCannotRollTheHeadBack() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let business = await relay.businessId
+        _ = try await phone.directory.verify(businessId: business)
+        let first = try #require(try await phone.store.load().lastSeenHead)
+        // Refresh A reads the log, then stalls; the log grows and refresh B completes; then A finishes with its older tree.
+        await relay.stallNext()
+        let slow = Task { try await phone.directory.verify(businessId: business) }
+        while !(await relay.hasStalledCall) { await Task.yield() }
+        try await relay.publish(.hpkeEncryption, SoftwareE2EEPrivateKey().publicKey.x963)
+        _ = try await phone.directory.verify(businessId: business)
+        let advanced = try #require(try await phone.store.load().lastSeenHead)
+        #expect(advanced.treeSize > first.treeSize)
+        await relay.release()
+        _ = try await slow.value
+        #expect(try await phone.store.load().lastSeenHead == advanced, "the late, older refresh did not overwrite the newer head")
+    }
+
+    @Test func twoRefreshesThatSawDifferentTreesOfOneSizeAreAForkAndFailClosed() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let business = await relay.businessId
+        _ = try await phone.directory.verify(businessId: business)
+        let seen = try #require(try await phone.store.load().lastSeenHead)
+        await relay.stallNext()
+        let slow = Task { try await phone.directory.verify(businessId: business) }
+        while !(await relay.hasStalledCall) { await Task.yield() }
+        // Meanwhile another refresh stored a different tree of the same size.
+        try await phone.store.update { $0.lastSeenHead = SeenTreeHead(treeSize: seen.treeSize, rootHash: String(repeating: "ab", count: 32), timestamp: seen.timestamp) }
+        await relay.release()
+        await #expect(throws: ApproveError.directory(.forkDetected)) { _ = try await slow.value }
+    }
+
+    // MARK: F5
+
+    @Test func aChangedRootNeedsAFreshBiometricProofBeforeItIsTrusted() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let key = try await phone.enrolled()
+        try await relay.rotateRoot()
+        await #expect(throws: ApproveError.rootChanged(key.businessId)) { try await phone.directory.verify(businessId: key.businessId) }
+        // A tap alone (a thief on an unlocked phone) is not enough: the proof is cancelled or fails, nothing is pinned.
+        await #expect(throws: ApproveError.userCancelled) { try await phone.directory.acceptRootChange(businessId: key.businessId, authorizer: DenyAuthorizer()) }
+        guard case .rootChanged? = try await phone.directory.alert(for: key.businessId) else { Issue.record("the change must still be pending"); return }
+        await #expect(throws: ApproveError.rootChanged(key.businessId)) { try await phone.directory.verify(businessId: key.businessId) }
+        try await phone.directory.acceptRootChange(businessId: key.businessId, authorizer: AllowAuthorizer())
+        #expect(try await phone.directory.alert(for: key.businessId) == nil)
+    }
+
+    @Test func theDeviceAuthorizerSignsAChallengeWithTheBiometricKey() async throws {
+        let secrets = InMemorySecretStore()
+        let keys = SoftwareDeviceKeyStore(secrets: secrets)
+        _ = try await keys.createKey(for: .approvalBiometric)
+        try await DeviceBiometricAuthorizer(keys: keys).authorize(reason: "test")
+        await #expect(throws: KeyStoreError.self) { try await DeviceBiometricAuthorizer(keys: SoftwareDeviceKeyStore(secrets: InMemorySecretStore())).authorize(reason: "test") }
     }
 }
 
@@ -493,6 +653,7 @@ extension FakeRelay {
     func setSubstitute(_ key: SoftwareP256SigningKey?) { substituteKey = key }
     func setConfirmation(_ value: BusinessSignedStatement?) { confirmation = value }
     func setServeHead(_ size: Int?) { serveHeadSize = size }
+    func stallNext() { stallNextDirectory = true }
 }
 
 #endif

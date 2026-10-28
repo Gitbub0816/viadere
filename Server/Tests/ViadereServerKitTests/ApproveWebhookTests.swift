@@ -155,6 +155,43 @@ final class ApproveWebhookTests: XCTestCase {
             for delivery in h.webhooks.received { XCTAssertFalse(String(decoding: delivery.body, as: UTF8.self).contains(phone.kid), "no key id in the envelope") }
         }
     }
+
+    /// Gate finding F5: the opaque event used to put the customer's `subject_ref` in `request_id`.
+    func testTheFrozenEventCarriesAnOpaquePerBusinessReferenceNotTheSubject() async throws {
+        try await withHarness { h in
+            let f1 = try await h.approveFixture(name: "Northwind Bank", handle: "northwindbank")
+            let b2 = try await h.makeBusiness(name: "Contoso", handle: "contoso")
+            let keys2 = try await h.publishDirectory(b2)
+            let consumer = f1.phone.consumer
+            _ = try await h.connect(consumer, to: b2)
+            _ = try await h.enrollApproval(consumer, business: b2, keys: keys2)
+            _ = try await subscribe(h, f1.business, events: [.approveFrozen], version: WebhookEnvelopeV2.version)
+            _ = try await subscribe(h, b2, events: [.approveFrozen], version: WebhookEnvelopeV2.version)
+            aeq(try await h.signedPost(consumer, "/v1/approve/freeze", ApproveFreezeRequest(scope: .account, frozen: true)).status, .ok)
+            try await h.runJobs()
+            let envelopes = try h.webhooks.received.map { try ViadereJSON.decode(WebhookEnvelopeV2.self, from: $0.body) }
+            aeq(envelopes.count, 2)
+            let refs = envelopes.map(\.requestId)
+            aeq(Set(refs).count, 2, "two businesses never see the same reference for one customer")
+            for delivery in h.webhooks.received {
+                let body = String(decoding: delivery.body, as: UTF8.self)
+                atrue(!body.contains(f1.subject.rawValue), "no subject_ref in the opaque envelope")
+                atrue(!body.contains(h.subjectRef(b2, consumer).rawValue))
+            }
+            for ref in refs { atrue(ApproveFreezeEventRecord.isValidRef(ref), ref) }
+            // The business resolves the reference with its own key; another business cannot.
+            let ref1 = refs[0]
+            let mine = try await h.business(f1.business, .GET, "/v1/business/approve/freezes/\(ref1)")
+            let theirs = try await h.business(b2, .GET, "/v1/business/approve/freezes/\(ref1)")
+            let resolvedFirst = mine.status == .ok ? mine : theirs
+            let other = mine.status == .ok ? theirs : mine
+            aeq(resolvedFirst.status, .ok, resolvedFirst.text)
+            aeq(other.status, .notFound)
+            let status = try resolvedFirst.json(FreezeStatus.self)
+            atrue(status.frozen)
+            aeq(try await h.business(f1.business, .GET, "/v1/business/approve/freezes/frz_notarealreferencevalue1").status, .notFound)
+        }
+    }
 }
 
 private extension Array where Element: Hashable {

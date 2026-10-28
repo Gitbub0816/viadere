@@ -18,6 +18,8 @@ public struct ApproveSettings: Sendable {
     public var treeHeadRefreshInterval: TimeInterval = 3600
     public var prompt = ApprovalPromptPolicy.standard
     public var enrollmentLifetime: TimeInterval = 600
+    /// How long after the enrollment's expiry the business may still confirm a completed enrollment; after that the pending key is revoked and alerted.
+    public var unconfirmedGrace: TimeInterval = 300
     public var maxKeysPerRelationship = 8
     public var maxOpenEnrollmentsPerRelationship = 3
     /// Wrong-code lookups per consumer.

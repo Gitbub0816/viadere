@@ -47,6 +47,9 @@ public final class ApproveController {
             if case .substitutionDetected = outcome {
                 message = "A business confirmed a different key than the one on this phone, so we removed it. Nothing was approved."
             }
+            if case .unconfirmedExpired = outcome {
+                message = "A business never confirmed the key you just set up, so we removed it. If you didn't just set up approvals, freeze them."
+            }
         }
         do {
             let loaded = try await env.requests.load()
@@ -67,14 +70,18 @@ public final class ApproveController {
 
     // MARK: Enrollment
 
-    public func lookup(code: String, expectedRootKid: String?) async {
+    public func lookup(code: String, expectedRootKid: String?, secret: ApprovalEnrollmentSecret? = nil, checkCode: String? = nil) async {
         guard let env = environment, env.isConfigured else { message = ApproveText.notAvailable; return }
         phase = .working
         defer { phase = .idle }
-        do { offer = try await env.enrollment.lookup(code: code, expectedRootKid: expectedRootKid) } catch { offer = nil; report(error) }
+        enrollmentVerificationCode = nil
+        do { offer = try await env.enrollment.lookup(code: code, expectedRootKid: expectedRootKid, secret: secret, checkCode: checkCode) } catch { offer = nil; report(error) }
     }
 
-    public func cancelOffer() { offer = nil }
+    public func cancelOffer() { offer = nil; enrollmentVerificationCode = nil }
+
+    /// The six digits to type into the business's own page (typed path only), shown after the key was created and until the person is done.
+    public private(set) var enrollmentVerificationCode: String?
 
     @discardableResult
     public func confirmEnrollment() async -> Bool {
@@ -82,7 +89,8 @@ public final class ApproveController {
         phase = .working
         defer { phase = .idle }
         do {
-            _ = try await env.enrollment.enroll(offer)
+            let created = try await env.enrollment.enroll(offer)
+            enrollmentVerificationCode = created.verificationCode.map { ApprovalEnrollmentSAS.display($0) }
             self.offer = nil
             await refresh()
             return true
@@ -132,7 +140,7 @@ public final class ApproveController {
 
     public func acceptRootChange(businessId: BusinessID) async {
         guard let env = environment else { return }
-        do { try await env.directory.acceptRootChange(businessId: businessId); await refresh() } catch { report(error) }
+        do { try await env.directory.acceptRootChange(businessId: businessId, authorizer: env.rootChangeAuthorizer); await refresh() } catch { report(error) }
     }
 
     public func acknowledgeConflict(businessId: BusinessID) async {
@@ -177,6 +185,7 @@ public enum ApproveText {
         case .notConfigured: return notAvailable
         case .api(let api): return api.userMessage
         case .directory, .directoryHasNoRoot: return "We couldn't verify this business's keys, so we didn't continue."
+        case .enrollmentSecretRequired: return "To set up approvals, open the business's link or QR, or enter both codes it shows."
         case .businessNotReady: return "This business isn't ready to set up approvals yet. Ask them to try again."
         case .rootMismatchWithLink: return "The business key doesn't match the one in the link or code you used. Don't continue, and tell the business."
         case .rootChanged: return "This business changed its signing key. Review the change before approving anything for it."

@@ -301,7 +301,9 @@ final class ApproveEnrollmentTests: XCTestCase {
             try await ApproveKeyRecord.query(on: h.db).filter(\.$id == key.id!).set(\.$kid, to: attackerStatement.kid).set(\.$publicKey, to: attackerKey.publicKey.base64URL)
                 .set(\.$statementPayload, to: attackerSigned.payload).set(\.$statementSignature, to: attackerSigned.signature).update()
 
-            // The business verifies what it was handed (it is a valid, self-consistent statement) and confirms it: it cannot tell.
+            // The relay holds the attacker's key and cannot tell the business apart from the customer. WHAT STOPS THIS IS NOT ON THE SERVER: the
+            // business SDK refuses any statement that lacks a binding tag (or SAS) made with the enrollment secret the relay never sees
+            // (`ApproveSDKTests.aRelayForgedStatementIsRefusedByTheBusinessSdk`). The server, which cannot know the secret, still confirms what it is told.
             let view = try await h.business(b, .GET, "/v1/business/approve/enrollments/\(record.id!.uuidString.lowercased())").json(ApprovalEnrollmentView.self)
             let handed = try XCTUnwrap(view.deviceStatement)
             let verified = try ApprovalEnrollmentStatement.verify(handed)
@@ -506,5 +508,65 @@ extension TestHarness {
                                                         hpkePublicKey: SoftwareE2EEPrivateKey().publicKey, assurance: .biometric, createdAt: clock.now())
         return try await signedPost(consumer, "/v1/approve/enrollments/\(preview.enrollmentId.uuidString.lowercased())/complete",
                                     CompleteApproveEnrollmentRequest(statement: try await statement.sign(with: reuse.approvalKey)))
+    }
+
+    // MARK: Gate finding F1: the binding tag travels through the relay, and a key the business never confirms is ended
+
+    func testTheBindingTagIsStoredAndHandedToTheBusinessAndOnlyItsShapeIsChecked() async throws {
+        try await withHarness { h in
+            let b = try await h.makeBusiness(name: "Northwind Bank", handle: "northwindbank")
+            let keys = try await h.publishDirectory(b)
+            let consumer = try await h.readyConsumer()
+            _ = try await h.connect(consumer, to: b)
+            let secret = ApprovalEnrollmentSecret()
+            let phone = try await h.enrollApproval(consumer, business: b, keys: keys, confirm: false, bindingSecret: secret)
+            let record = try unwrap(try await ApproveEnrollmentRecord.query(on: h.db).first())
+            let view = try await h.business(b, .GET, "/v1/business/approve/enrollments/\(record.id!.uuidString.lowercased())").json(ApprovalEnrollmentView.self)
+            let statement = try unwrap(view.deviceStatement)
+            aeq(view.bindingTag, secret.bindingTag(for: statement))
+            atrue(secret.verifyBindingTag(try unwrap(view.bindingTag), for: statement))
+            // A malformed tag is refused by the device endpoint.
+            let other = try await h.makeBusiness(name: "Contoso", handle: "contoso")
+            let otherKeys = try await h.publishDirectory(other)
+            let rel = try await h.connect(consumer, to: other)
+            _ = rel
+            let subject = h.subjectRef(other, consumer)
+            let ticket = try await h.businessPost(other, "/v1/business/approve/enrollments", CreateApprovalEnrollmentRequest(subjectRef: subject, capability: .transactionApprove)).json(ApprovalEnrollmentTicket.self)
+            let preview = try await h.signedPost(consumer, APIRoutes.approveEnrollmentLookup.template, ApproveEnrollmentLookupRequest(code: ticket.code)).json(ApproveEnrollmentPreview.self)
+            let key = SoftwareP256SigningKey()
+            let signed = try await ApprovalEnrollmentStatement(businessId: other.id, subject: subject, enrollmentId: preview.enrollmentId, publicKey: key.publicKey,
+                                                              hpkePublicKey: SoftwareE2EEPrivateKey().publicKey, assurance: .biometric, createdAt: h.clock.now()).sign(with: key)
+            let bad = try await h.signedPost(consumer, "/v1/approve/enrollments/\(preview.enrollmentId.uuidString.lowercased())/complete", CompleteApproveEnrollmentRequest(statement: signed, bindingTag: "short"))
+            aeq(bad.status, .badRequest, bad.text)
+            _ = (phone, otherKeys)
+        }
+    }
+
+    func testAKeyTheBusinessNeverConfirmsIsEndedAlertedAndCannotBeConfirmedLater() async throws {
+        try await withHarness { h in
+            let b = try await h.makeBusiness(name: "Northwind Bank", handle: "northwindbank")
+            let keys = try await h.publishDirectory(b)
+            let consumer = try await h.readyConsumer()
+            _ = try await h.connect(consumer, to: b)
+            let phone = try await h.enrollApproval(consumer, business: b, keys: keys, confirm: false)
+            let record = try unwrap(try await ApproveEnrollmentRecord.query(on: h.db).first())
+            let service = ApproveEnrollmentService(db: h.db, ctx: h.ctx)
+            aeq(try await service.expireUnconfirmed(), 0, "still inside the enrollment lifetime")
+            // A relay that holds the confirmation back until later cannot revive the key: past expiry + grace the business cannot confirm...
+            h.clock.advance(by: 600 + 300 + 5)
+            let path = "/v1/business/approve/enrollments/\(record.id!.uuidString.lowercased())"
+            let view = try await h.business(b, .GET, path).json(ApprovalEnrollmentView.self)
+            let handed = try unwrap(view.deviceStatement)
+            let confirmation = try await ApprovalEnrollmentConfirmation(confirming: try ApprovalEnrollmentStatement.verify(handed), signed: handed, at: h.clock.now()).sign(with: keys.confirmation)
+            aeq(try await h.businessPost(b, path + "/confirm", ConfirmApprovalEnrollmentRequest(confirmation: confirmation)).status, .gone)
+            // ...and the sweep ends it: key revoked, enrollment expired, customer told, business alerted.
+            aeq(try await service.expireUnconfirmed(), 1)
+            aeq(try await ApproveKeyRecord.query(on: h.db).filter(\.$kid == phone.kid).first()?.status, "revoked")
+            aeq(try await ApproveEnrollmentRecord.find(record.id!, on: h.db)?.status, "expired")
+            aeq(try await h.approvalAudit("approve.enrollment_unconfirmed").count, 1)
+            aeq(try await SecurityNoticeRecord.query(on: h.db).filter(\.$kind == "approvalKeyUnconfirmed").count(), 1)
+            aeq(try await service.expireUnconfirmed(), 0, "once")
+            aeq(try await h.businessPost(b, path + "/confirm", ConfirmApprovalEnrollmentRequest(confirmation: confirmation)).status, .gone)
+        }
     }
 }

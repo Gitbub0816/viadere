@@ -8,6 +8,9 @@ struct ApproveEnrollmentSheet: View {
     @Bindable var controller: ApproveController
     let code: String
     let rootKid: String?
+    /// From the link's fragment; `nil` when the person typed the code (then `checkCode` is the business's second code).
+    let secret: ApprovalEnrollmentSecret?
+    let checkCode: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -16,7 +19,7 @@ struct ApproveEnrollmentSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     Text("Set up approvals").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
-                    if let offer = controller.offer { offerContent(offer) } else if controller.phase == .working { ViadereLoading() } else { failure }
+                    if let digits = controller.enrollmentVerificationCode { verification(digits) } else if let offer = controller.offer { offerContent(offer) } else if controller.phase == .working { ViadereLoading() } else { failure }
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.top, ViadereSpace.m)
@@ -25,7 +28,7 @@ struct ApproveEnrollmentSheet: View {
             .scrollIndicators(.hidden)
         }
         .background(ViadereColor.background)
-        .task { await controller.lookup(code: code, expectedRootKid: rootKid) }
+        .task { await controller.lookup(code: code, expectedRootKid: rootKid, secret: secret, checkCode: checkCode) }
         .onDisappear { controller.cancelOffer() }
     }
 
@@ -52,11 +55,20 @@ struct ApproveEnrollmentSheet: View {
         if let message = controller.message { ViadereNotice(message, kind: .danger) }
         VStack(spacing: ViadereSpace.xs) {
             Button(offer.preview.requiredAssurance == .biometric ? "Set up with Face ID" : "Set up") {
-                Task { if await controller.confirmEnrollment() { dismiss() } }
+                Task { if await controller.confirmEnrollment(), controller.enrollmentVerificationCode == nil { dismiss() } }
             }
             .buttonStyle(.viadere(.primary))
             .disabled(controller.phase == .working)
             Button("Not now") { dismiss() }.buttonStyle(.viadere(.quiet))
+        }
+    }
+
+    /// Typed path: the business can tell this phone's key from a forged one only by these six digits, which only this phone and the business can compute.
+    private func verification(_ digits: String) -> some View {
+        VStack(alignment: .leading, spacing: ViadereSpace.m) {
+            ViadereNotice("Type this number into the business's own page, where you're signed in. Don't read it to anyone who calls or messages you.", kind: .info)
+            Text(digits).font(ViadereType.display).monospacedDigit().foregroundStyle(ViadereColor.textPrimary).accessibilityLabel("Verification number \(digits)")
+            Button("Done") { dismiss() }.buttonStyle(.viadere(.primary))
         }
     }
 

@@ -75,7 +75,7 @@ extension TestHarness {
     /// Runs the whole business-authorized enrollment and returns the phone. `confirm: false` stops before the business confirms.
     func enrollApproval(_ consumer: TestConsumer, business: TestBusiness, keys: TestBusinessKeys, capability: Capability = .transactionApprove,
                         assurance: ApprovalAMR = .biometric, confirm: Bool = true, hpke: SoftwareE2EEPrivateKey = SoftwareE2EEPrivateKey(),
-                        approvalKey: SoftwareP256SigningKey = SoftwareP256SigningKey()) async throws -> TestApprovalDevice {
+                        approvalKey: SoftwareP256SigningKey = SoftwareP256SigningKey(), bindingSecret: ApprovalEnrollmentSecret? = ApprovalEnrollmentSecret()) async throws -> TestApprovalDevice {
         let subject = subjectRef(business, consumer)
         let created = try await businessPost(business, APIRoutes.businessApproveEnrollmentCreate.template, CreateApprovalEnrollmentRequest(subjectRef: subject, capability: capability))
         XCTAssertEqual(created.status, .created, created.text)
@@ -86,7 +86,7 @@ extension TestHarness {
         let statement = try ApprovalEnrollmentStatement(businessId: business.id, subject: preview.subjectRef, enrollmentId: preview.enrollmentId, publicKey: approvalKey.publicKey,
                                                         hpkePublicKey: hpke.publicKey, assurance: assurance, createdAt: clock.now())
         let signed = try await statement.sign(with: approvalKey)
-        let completed = try await signedPost(consumer, "/v1/approve/enrollments/\(preview.enrollmentId.uuidString.lowercased())/complete", CompleteApproveEnrollmentRequest(statement: signed))
+        let completed = try await signedPost(consumer, "/v1/approve/enrollments/\(preview.enrollmentId.uuidString.lowercased())/complete", CompleteApproveEnrollmentRequest(statement: signed, bindingTag: bindingSecret?.bindingTag(for: signed)))
         XCTAssertEqual(completed.status, .created, completed.text)
         if confirm {
             let view = try await self.business(business, .GET, "/v1/business/approve/enrollments/\(preview.enrollmentId.uuidString.lowercased())").json(ApprovalEnrollmentView.self)

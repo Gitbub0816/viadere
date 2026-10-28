@@ -115,6 +115,17 @@ enum ApproveRoutes {
             let frozen = try await ApproveFreezeService(db: req.db, ctx: req.ctx).businessFreeze(principal: principal, relationship: relationship, frozen: body.frozen, reason: body.reason)
             return try req.jsonResponse(FreezeStatus(subjectRef: body.subjectRef, frozen: frozen))
         }
+        routes.api(APIRoutes.businessApproveFreezeGet, scope: Scope.approvalsManage) { req in
+            try ApproveGate.require(req.ctx)
+            try await req.requireApprovalCapability()
+            let principal = try req.business
+            guard let ref = req.parameters.get("freezeRef"), ApproveFreezeEventRecord.isValidRef(ref),
+                  let event = try await ApproveFreezeEventRecord.query(on: req.db).filter(\.$ref == ref).filter(\.$businessId == principal.businessId.uuid).first(),
+                  let relationship = try await RelationshipRecord.find(event.relationshipId, on: req.db), let subject = relationship.subjectRef.flatMap({ SubjectRef($0) }),
+                  try await Sandbox(db: req.db).matches(consumerId: relationship.consumerId, livemode: principal.livemode) else { throw APIError.notFound }
+            let frozenBy = try await ApproveFreezeService(db: req.db, ctx: req.ctx).frozenBy(consumerId: relationship.consumerId, relationshipId: relationship.id!)
+            return try req.jsonResponse(FreezeStatus(subjectRef: subject, frozen: frozenBy != nil))
+        }
 
         // MARK: Devices
         routes.api(APIRoutes.approveEnrollmentLookup) { req in

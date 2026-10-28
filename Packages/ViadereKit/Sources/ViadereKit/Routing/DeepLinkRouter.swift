@@ -16,8 +16,9 @@ public enum DeepLink: Sendable, Equatable {
     /// `viadere://m/{sessionId}`
     case conversation(SessionID)
     case settings
-    /// `https://viadere.com/a/{CODE}?rk={root key id}` (QR or button the business shows in its own session): start an Approve enrollment.
-    case approveEnrollment(code: String, rootKid: String?)
+    /// `https://viadere.com/a/{CODE}?rk={root key id}#es={secret}` (QR or button the business shows in its own session): start an Approve enrollment.
+    /// The fragment never reaches a server; log nothing of this link.
+    case approveEnrollment(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret?)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -51,9 +52,10 @@ public enum DeepLinkRouter {
             return .connect(code: link.code, link: link)
         }
         if components.path.hasPrefix("/a/") {
-            guard components.user == nil, components.password == nil, components.fragment == nil, components.port == nil || components.port == 443,
+            // The fragment (`#es=`, the enrollment secret) is parsed strictly by `ApprovalEnrollmentCode.parse`; anything else in it is refused.
+            guard components.user == nil, components.password == nil, components.port == nil || components.port == 443,
                   let parsed = ApprovalEnrollmentCode.parse(link: url) else { return nil }
-            return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid)
+            return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid, secret: parsed.secret)
         }
         guard components.user == nil, components.password == nil, components.fragment == nil,
               components.query == nil, components.port == nil || components.port == 443 else { return nil }

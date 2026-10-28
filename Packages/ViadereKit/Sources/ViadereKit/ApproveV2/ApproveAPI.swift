@@ -5,7 +5,7 @@ import ViadereCore
 /// never hold approval keys, build without any of it.
 public protocol ApproveAPI: Sendable {
     func lookupEnrollment(code: String) async throws -> ApproveEnrollmentPreview
-    func completeEnrollment(id: UUID, statement: SignedStatement) async throws -> ApproveKey
+    func completeEnrollment(id: UUID, statement: SignedStatement, bindingTag: String?) async throws -> ApproveKey
     func keys() async throws -> [ApproveKey]
     func revokeKey(kid: String) async throws -> ApproveKey
     func requests() async throws -> [ApproveDeviceRequest]
@@ -25,7 +25,7 @@ public struct LiveApproveAPI: ApproveAPI {
     public func lookupEnrollment(code: String) async throws -> ApproveEnrollmentPreview {
         try await client.call(APIRoutes.approveEnrollmentLookup, body: ApproveEnrollmentLookupRequest(code: code))
     }
-    public func completeEnrollment(id: UUID, statement: SignedStatement) async throws -> ApproveKey {
+    public func completeEnrollment(id: UUID, statement: SignedStatement, bindingTag: String?) async throws -> ApproveKey {
         try await client.call(APIRoutes.approveEnrollmentComplete, params: ["enrollmentId": id.uuidString.lowercased()], body: CompleteApproveEnrollmentRequest(statement: statement))
     }
     public func keys() async throws -> [ApproveKey] { try await client.call(APIRoutes.approveKeys) }

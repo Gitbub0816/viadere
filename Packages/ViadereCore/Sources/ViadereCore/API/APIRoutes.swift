@@ -326,6 +326,9 @@ public enum APIRoutes {
         "business.approve.results.get", .GET, "/v1/business/approve/results/{resultRef}", auth: .businessAPIKey)
     public static let businessApproveFreeze = Endpoint<BusinessFreezeRequest, FreezeStatus>(
         "business.approve.freeze", .POST, "/v1/business/approve/freeze", auth: .businessAPIKey)
+    /// Resolves the opaque `request_id` of an `approve.frozen` webhook (`frz_...`) to the customer and whether approvals are frozen now.
+    public static let businessApproveFreezeGet = Endpoint<EmptyBody, FreezeStatus>(
+        "business.approve.freezes.get", .GET, "/v1/business/approve/freezes/{freezeRef}", auth: .businessAPIKey)
     /// Publishes one signed key-directory entry (root registration, succession, operational key, revocation).
     public static let businessKeyDirectoryPublish = Endpoint<PublishKeyEntryRequest, PublishKeyEntryResponse>(
         "business.keyDirectory.publish", .POST, "/v1/business/key-directory/entries", auth: .businessAPIKey)
@@ -413,7 +416,7 @@ public enum APIRoutes {
         vaultJoinRequest.descriptor, vaultJoinCancel.descriptor,
         businessApproveEnrollmentCreate.descriptor, businessApproveEnrollmentGet.descriptor, businessApproveEnrollmentConfirm.descriptor,
         businessApproveEnrollmentCancel.descriptor, businessApproveKeys.descriptor, businessApproveKeyRevoke.descriptor, businessApproveRequestCreate.descriptor,
-        businessApproveRequestGet.descriptor, businessApproveRequestCancel.descriptor, businessApproveResult.descriptor, businessApproveFreeze.descriptor,
+        businessApproveRequestGet.descriptor, businessApproveRequestCancel.descriptor, businessApproveResult.descriptor, businessApproveFreeze.descriptor, businessApproveFreezeGet.descriptor,
         businessKeyDirectoryPublish.descriptor, businessKeyDirectoryEntries.descriptor,
         approveEnrollmentLookup.descriptor, approveEnrollmentComplete.descriptor, approveKeys.descriptor, approveKeyRevoke.descriptor, approveRequests.descriptor,
         approveRequestGet.descriptor, approveRequestResult.descriptor, approveFreezeGet.descriptor, approveFreezeSet.descriptor,

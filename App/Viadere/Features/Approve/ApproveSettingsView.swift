@@ -10,6 +10,7 @@ struct ApproveSettingsView: View {
     @State private var confirmingChange: PendingRootChange?
     @State private var enterCode = false
     @State private var typedCode = ""
+    @State private var typedCheckCode = ""
     @State private var enrollment: PendingApproveEnrollment?
     @Environment(\.dismiss) private var dismiss
 
@@ -42,8 +43,8 @@ struct ApproveSettingsView: View {
         .onChange(of: model.pendingApproveEnrollment) { _, pending in
             if let pending { enrollment = pending; model.pendingApproveEnrollment = nil }
         }
-        .sheet(item: Binding(get: { enrollment.map { EnrollmentItem(code: $0.code, rootKid: $0.rootKid) } }, set: { if $0 == nil { enrollment = nil } })) { item in
-            ApproveEnrollmentSheet(controller: controller, code: item.code, rootKid: item.rootKid)
+        .sheet(item: Binding(get: { enrollment.map { EnrollmentItem(code: $0.code, rootKid: $0.rootKid, secret: $0.secret, checkCode: $0.checkCode) } }, set: { if $0 == nil { enrollment = nil } })) { item in
+            ApproveEnrollmentSheet(controller: controller, code: item.code, rootKid: item.rootKid, secret: item.secret, checkCode: item.checkCode)
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
@@ -90,7 +91,7 @@ struct ApproveSettingsView: View {
                             ViadereHairline()
                             ViadereValueRow("Now", KeyIdentifier.displayFingerprint(change.newKid), emphasized: true)
                         }
-                        Button("I checked. Trust the new key") { Task { await controller.acceptRootChange(businessId: id) } }
+                        Button("I checked. Trust the new key with Face ID") { Task { await controller.acceptRootChange(businessId: id) } }
                             .buttonStyle(.viadere(.secondary))
                     case .rootConflict:
                         ViadereNotice("What \(businesses[id] ?? "this business") shows now does not match its history on this phone. Approvals with it are blocked. Do not continue; tell the business and Viadere.", kind: .danger)
@@ -154,9 +155,14 @@ struct ApproveSettingsView: View {
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
             ViadereSectionHeader("Set up a business")
             ViadereEntryField(placeholder: "Setup code from the business", text: $typedCode, status: .none, hint: "Eight letters and numbers", monospaced: true)
-            Button("Continue") { enrollment = PendingApproveEnrollment(code: typedCode, rootKid: nil); typedCode = "" }
-                .buttonStyle(.viadere(.secondary))
-                .disabled(typedCode.filter { $0.isLetter || $0.isNumber }.count < 8)
+            ViadereEntryField(placeholder: "Check code from the business", text: $typedCheckCode, status: .none, hint: "The second code, also eight letters and numbers", monospaced: true)
+            Button("Continue") {
+                enrollment = PendingApproveEnrollment(code: typedCode, rootKid: nil, checkCode: typedCheckCode)
+                typedCode = ""
+                typedCheckCode = ""
+            }
+            .buttonStyle(.viadere(.secondary))
+            .disabled(typedCode.filter { $0.isLetter || $0.isNumber }.count < 8 || typedCheckCode.filter { $0.isLetter || $0.isNumber }.count < 8)
         }
     }
 }
@@ -164,6 +170,8 @@ struct ApproveSettingsView: View {
 private struct EnrollmentItem: Identifiable, Equatable {
     var code: String
     var rootKid: String?
+    var secret: ApprovalEnrollmentSecret?
+    var checkCode: String?
     var id: String { code + (rootKid ?? "") }
 }
 

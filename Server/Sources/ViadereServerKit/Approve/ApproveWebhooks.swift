@@ -50,8 +50,18 @@ struct ApproveWebhooks {
                        payload: ApproveEventPayload(requestId: request.requestId, resultRef: nil, subjectRef: request.subjectRef, kid: nil))
     }
 
+    /// The event carries an **opaque, random, per-business reference** in `request_id`, never the customer's `subject_ref` (gate finding F5):
+    /// the business resolves it with `GET /v1/business/approve/freezes/{ref}` using its own credentials. (A v1 subscription keeps its
+    /// separate `subject_ref` member, which the business already knows for its own customer.)
     func frozen(relationship: RelationshipRecord, by: String) async throws {
-        let subject = relationship.subjectRef ?? ""
-        try await send(.approveFrozen, businessId: relationship.businessId, payload: ApproveEventPayload(requestId: subject, resultRef: nil, subjectRef: subject, kid: nil))
+        let event = ApproveFreezeEventRecord()
+        event.id = UUID()
+        event.ref = ApproveFreezeEventRecord.newRef()
+        event.businessId = relationship.businessId
+        event.relationshipId = relationship.id!
+        event.createdAt = ctx.now
+        try await event.create(on: db)
+        try await send(.approveFrozen, businessId: relationship.businessId,
+                       payload: ApproveEventPayload(requestId: event.ref, resultRef: nil, subjectRef: relationship.subjectRef, kid: nil))
     }
 }

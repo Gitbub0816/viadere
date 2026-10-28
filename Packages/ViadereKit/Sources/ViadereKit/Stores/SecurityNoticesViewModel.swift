@@ -147,6 +147,7 @@ public final class SecurityNoticesViewModel {
         case .approvalsFrozen: return "Approvals were frozen \(when)."
         case .approvalsUnfrozen: return "Approvals were unfrozen \(when)."
         case .approvalRequestsPaused: return "A business sent you several approval requests, so Viadere paused it \(when)."
+        case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
@@ -168,6 +169,7 @@ public final class SecurityNoticesViewModel {
         case .approvalKeyEnrolled: return "Not you? Open Approvals, remove the key and freeze approvals."
         case .approvalsUnfrozen: return "Not you? Open Approvals and freeze them again."
         case .approvalRequestsPaused: return "Don't recognize it? Open Approvals and report the business."
+        case .approvalKeyUnconfirmed: return "Didn't just set up approvals? Open Approvals and freeze them."
         default: return Self.prompt
         }
     }
