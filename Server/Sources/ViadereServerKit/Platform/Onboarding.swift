@@ -334,7 +334,7 @@ struct OnboardingService {
         guard !refs.isEmpty, refs.count <= 5 else {
             throw APIError.validation("List one to five references to your registration evidence (a registry URL or record id). Do not upload documents.", details: ["evidence": "invalid"])
         }
-        try await apply(.legalSubmitted, businessId: businessId, actor: AuditActor(kind: .business, id: userId.uuidString.lowercased())) { row, now in
+        do { try await apply(.legalSubmitted, businessId: businessId, actor: AuditActor(kind: .business, id: userId.uuidString.lowercased())) { row, now in
             row.legalStatus = OnboardingReview.submitted.rawValue
             row.legalRegistryNumber = number
             row.legalRegistryName = name
@@ -344,17 +344,21 @@ struct OnboardingService {
             row.legalReviewedBy = nil
             row.legalReviewedAt = nil
             row.legalNote = nil
-        }
+        } } catch let error as OnboardingError { throw Self.apiError(error) }
     }
 
     func reviewLegalEntity(businessId: UUID, approve: Bool, note rawNote: String?, operatorId: UUID) async throws {
         let note = rawNote.map { String($0.prefix(500)) }
-        try await apply(approve ? .legalApproved : .legalRejected, businessId: businessId,
-                        actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, now in
-            row.legalStatus = (approve ? OnboardingReview.approved : .rejected).rawValue
-            row.legalReviewedBy = operatorId.uuidString.lowercased()
-            row.legalReviewedAt = now
-            row.legalNote = note
+        do {
+            try await apply(approve ? .legalApproved : .legalRejected, businessId: businessId,
+                            actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, now in
+                row.legalStatus = (approve ? OnboardingReview.approved : .rejected).rawValue
+                row.legalReviewedBy = operatorId.uuidString.lowercased()
+                row.legalReviewedAt = now
+                row.legalNote = note
+            }
+        } catch let error as OnboardingError {
+            throw Self.apiError(error)
         }
     }
 
@@ -363,18 +367,22 @@ struct OnboardingService {
         let reference = rawReference.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (4...120).contains(reference.count) else { throw APIError.validation("Record the reference of the review.", details: ["reference": "required"]) }
         let current = try await state(businessId: businessId)
-        // A business outside the sensitive categories can still be put under review by an operator.
-        if current.enhanced == .notRequired {
-            try await apply(.enhancedRequired, businessId: businessId, actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, _ in
-                row.enhancedStatus = OnboardingEnhanced.pending.rawValue
+        do {
+            // A business outside the sensitive categories can still be put under review by an operator, and a rejected review can be redone.
+            if current.enhanced == .notRequired || current.enhanced == .rejected {
+                try await apply(.enhancedRequired, businessId: businessId, actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, _ in
+                    row.enhancedStatus = OnboardingEnhanced.pending.rawValue
+                }
             }
-        }
-        try await apply(approve ? .enhancedApproved : .enhancedRejected, businessId: businessId,
-                        actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, now in
-            row.enhancedStatus = (approve ? OnboardingEnhanced.approved : .rejected).rawValue
-            row.enhancedReference = reference
-            row.enhancedReviewedBy = operatorId.uuidString.lowercased()
-            row.enhancedReviewedAt = now
+            try await apply(approve ? .enhancedApproved : .enhancedRejected, businessId: businessId,
+                            actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())) { row, now in
+                row.enhancedStatus = (approve ? OnboardingEnhanced.approved : .rejected).rawValue
+                row.enhancedReference = reference
+                row.enhancedReviewedBy = operatorId.uuidString.lowercased()
+                row.enhancedReviewedAt = now
+            }
+        } catch let error as OnboardingError {
+            throw Self.apiError(error)
         }
     }
 

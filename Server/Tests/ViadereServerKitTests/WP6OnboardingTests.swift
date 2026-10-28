@@ -309,4 +309,40 @@ final class WP6OnboardingTests: XCTestCase {
             XCTAssertEqual(refused.status, .forbidden)
         }
     }
+
+    /// A sensitive category adds a review that must pass before a go-live request (spec 8.1 step 2); the category alone never grants or denies access.
+    func testASensitiveCategoryNeedsTheAdditionalReviewBeforeGoLive() async throws {
+        try await withHarness { h in
+            let (op, _) = try await h.makeOperator()
+            let (owner, account, businessId) = try await h.pendingOwner(email: "bank@example.com", org: "Harbor Bank", handle: "harborbank", category: "banking")
+            let path = "/operator/businesses/\(businessId.uuidString.lowercased())"
+            var state = try await h.onboardingState(businessId)
+            XCTAssertEqual(state.enhanced, .pending)
+            try await h.verifyDomain(owner, businessId: businessId)
+            _ = try await h.formPost("/dashboard/organization/legal-entity", owner, [("registryNumber", "B-1234"), ("jurisdiction", "US"), ("registryName", "Harbor Bank NA"), ("evidence", "https://registry.example/b-1234")])
+            _ = try await h.formPost("\(path)/legal-entity", op, [("decision", "approve"), ("note", "ok")])
+            state = try await h.onboardingState(businessId)
+            XCTAssertTrue(state.domainVerified && state.legalEntity == .approved)
+            XCTAssertFalse(state.controlComplete, "control is not complete until the additional review passes")
+            XCTAssertEqual(state.stage, .control)
+            XCTAssertTrue(state.requestBlockers.contains(.enhancedReview))
+            // The review needs a recorded reference; with one it passes, and a rejection blocks again.
+            let noReference = try await h.formPost("\(path)/enhanced-review", op, [("decision", "approve")])
+            XCTAssertNotEqual(noReference.status, .seeOther)
+            let rejected = try await h.formPost("\(path)/enhanced-review", op, [("decision", "reject"), ("reference", "REV-2027-001")])
+            XCTAssertEqual(rejected.status, .seeOther, rejected.text)
+            state = try await h.onboardingState(businessId)
+            XCTAssertEqual(state.enhanced, .rejected)
+            XCTAssertFalse(state.controlComplete)
+            // Another, ordinary business can also be put under review by an operator; a rejected review can be redone.
+            let approved = try await h.formPost("\(path)/enhanced-review", op, [("decision", "approve"), ("reference", "REV-2027-002")])
+            XCTAssertEqual(approved.status, .seeOther, approved.text)
+            state = try await h.onboardingState(businessId)
+            XCTAssertEqual(state.enhanced, .approved)
+            XCTAssertTrue(state.controlComplete)
+            let audit = try await h.auditActions(businessId)
+            XCTAssertTrue(audit.contains("onboarding.enhancedApproved") && audit.contains("onboarding.enhancedRejected"))
+            _ = account
+        }
+    }
 }

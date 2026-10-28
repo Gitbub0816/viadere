@@ -253,4 +253,32 @@ final class WP6WebhookTests: XCTestCase {
             XCTAssertEqual(done.attempts, 3)
         }
     }
+
+    /// Approve's opaque v2 envelope shares the same ownership, test and pause machinery: nothing here duplicates it.
+    func testTheOpaqueV2EnvelopeEndpointUsesTheSameVerificationAndTestEvents() async throws {
+        try await withHarness(ownership) { h in
+            h.echoWebhookChallenges()
+            let s = try await setup(h)
+            let created = try await h.apiPost(s.key, "/v1/business/webhooks", json: try ViadereJSON.encode(
+                CreateWebhookRequest(url: URL(string: "https://hooks.acme.example/v2")!, events: [.approveRequestDecided], envelopeVersion: WebhookEnvelopeV2.version)))
+            XCTAssertEqual(created.status, .created, created.text)
+            let hook = try created.json(WebhookSecretResponse.self)
+            XCTAssertEqual(hook.subscription.envelopeVersion, WebhookEnvelopeV2.version)
+            let refused = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/test")
+            XCTAssertEqual(refused.status, .conflict, "unverified")
+            let verified = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/verify").json(WebhookVerificationResult.self)
+            XCTAssertTrue(verified.verified)
+            let challenge = try XCTUnwrap(deliveries(h).last)
+            XCTAssertEqual(challenge.headers[ViadereHeader.webhookVersion], WebhookEnvelopeV2.version)
+            _ = try await h.apiPost(s.key, "/v1/business/webhooks/\(hook.subscription.id)/test")
+            _ = try await WebhookService(db: h.db, ctx: h.ctx).deliverDue()
+            let test = try XCTUnwrap(deliveries(h).last { $0.headers[ViadereHeader.eventType] == "webhook.test" })
+            let envelope = try ViadereJSON.decode(WebhookEnvelopeV2.self, from: test.body)
+            XCTAssertEqual(envelope.type, "webhook.test")
+            XCTAssertNil(envelope.resultRef)
+            XCTAssertNotNil(test.headers[ViadereHeader.deliveryId])
+            XCTAssertFalse(String(decoding: test.body, as: UTF8.self).contains("customer"), "the opaque envelope carries ids only")
+            XCTAssertNoThrow(try WebhookSignature.verify(header: try XCTUnwrap(test.headers[ViadereHeader.signature]), body: test.body, secrets: [hook.secret], now: h.clock.now()))
+        }
+    }
 }
