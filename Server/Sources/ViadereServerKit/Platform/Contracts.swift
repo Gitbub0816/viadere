@@ -26,14 +26,14 @@ struct LegalDocument: Sendable, Equatable {
 
 enum LegalCatalog {
     static let documents: [LegalDocument] = [
-        LegalDocument(slug: "business-services-agreement", title: "Business Services Agreement", version: "0.1.0", materialSince: "0.1.0", requirement: .always),
-        LegalDocument(slug: "data-processing-addendum", title: "Data Processing Addendum", version: "0.1.0", materialSince: "0.1.0", requirement: .always),
-        LegalDocument(slug: "acceptable-use-policy", title: "Acceptable Use Policy", version: "0.1.0", materialSince: "0.1.0", requirement: .always),
-        LegalDocument(slug: "messaging-consent-content-policy-addendum", title: "Messaging Consent and Content Policy Addendum", version: "0.1.0",
-                      materialSince: "0.1.0", requirement: .always),
-        LegalDocument(slug: "mfa-approval-services-addendum", title: "MFA and Approval Services Addendum", version: "0.1.0", materialSince: "0.1.0",
+        LegalDocument(slug: "business-services-agreement", title: "Business Services Agreement", version: "0.2.0", materialSince: "0.2.0", requirement: .always),
+        LegalDocument(slug: "data-processing-addendum", title: "Data Processing Addendum", version: "0.2.0", materialSince: "0.2.0", requirement: .always),
+        LegalDocument(slug: "acceptable-use-policy", title: "Acceptable Use Policy", version: "0.2.0", materialSince: "0.2.0", requirement: .always),
+        LegalDocument(slug: "messaging-consent-content-policy-addendum", title: "Messaging Consent and Content Policy Addendum", version: "0.2.0",
+                      materialSince: "0.2.0", requirement: .always),
+        LegalDocument(slug: "mfa-approval-services-addendum", title: "MFA and Approval Services Addendum", version: "0.2.0", materialSince: "0.2.0",
                       requirement: .tier(.a)),
-        LegalDocument(slug: "verification-services-addendum", title: "Verification Services Addendum", version: "0.1.0", materialSince: "0.1.0",
+        LegalDocument(slug: "verification-services-addendum", title: "Verification Services Addendum", version: "0.2.0", materialSince: "0.2.0",
                       requirement: .tier(.v)),
     ]
 

@@ -104,13 +104,13 @@ final class WP6OnboardingTests: XCTestCase {
             // 4. Versioned contract acceptance: only the catalog's current version can be accepted.
             let stale = try await h.formPost("/dashboard/compliance/accept", owner, [("slug", "business-services-agreement"), ("version", "0.0.1"), ("confirm", "1")])
             XCTAssertEqual(stale.status, .conflict, stale.text)
-            let unconfirmed = try await h.formPost("/dashboard/compliance/accept", owner, [("slug", "business-services-agreement"), ("version", "0.1.0")])
+            let unconfirmed = try await h.formPost("/dashboard/compliance/accept", owner, [("slug", "business-services-agreement"), ("version", "0.2.0")])
             XCTAssertNotEqual(unconfirmed.status, .seeOther)
             try await h.acceptAllContracts(owner, businessId: businessId)
             let acceptances = try await ContractAcceptanceRecord.query(on: h.db).filter(\.$businessId == businessId).all()
             XCTAssertEqual(Set(acceptances.map(\.slug)), Set(LegalCatalog.documents.filter { $0.requirement == .always }.map(\.slug)))
             for acceptance in acceptances {
-                XCTAssertEqual(acceptance.version, "0.1.0")
+                XCTAssertEqual(acceptance.version, "0.2.0")
                 XCTAssertEqual(acceptance.acceptedBy, account.userId)
                 XCTAssertFalse(acceptance.ipHash.isEmpty)
                 XCTAssertFalse(acceptance.uaHash.isEmpty)
@@ -297,15 +297,15 @@ final class WP6OnboardingTests: XCTestCase {
             let state = try await h.onboardingState(businessId)
             XCTAssertFalse(state.contractsCurrent)
             // Re-accepting the current version records a new row (the history is kept) and clears the requirement.
-            let again = try await h.formPost("/dashboard/compliance/accept", owner, [("slug", "data-processing-addendum"), ("version", "0.1.0"), ("confirm", "1")])
+            let again = try await h.formPost("/dashboard/compliance/accept", owner, [("slug", "data-processing-addendum"), ("version", "0.2.0"), ("confirm", "1")])
             XCTAssertEqual(again.status, .seeOther, again.text)
             outstanding = try await service.outstanding(businessId: businessId)
             XCTAssertEqual(outstanding, [])
             let history = try await service.history(businessId: businessId).filter { $0.slug == "data-processing-addendum" }
-            XCTAssertEqual(Set(history.map(\.version)), ["0.0.9", "0.1.0"])
+            XCTAssertEqual(Set(history.map(\.version)), ["0.0.9", "0.2.0"])
             // Only a member with the right may accept: an analyst's attempt is refused.
             let analyst = try await h.addMember(owner: owner, role: .analyst, email: "analyst@example.com").session
-            let refused = try await h.formPost("/dashboard/compliance/accept", analyst, [("slug", "acceptable-use-policy"), ("version", "0.1.0"), ("confirm", "1")])
+            let refused = try await h.formPost("/dashboard/compliance/accept", analyst, [("slug", "acceptable-use-policy"), ("version", "0.2.0"), ("confirm", "1")])
             XCTAssertEqual(refused.status, .forbidden)
         }
     }
