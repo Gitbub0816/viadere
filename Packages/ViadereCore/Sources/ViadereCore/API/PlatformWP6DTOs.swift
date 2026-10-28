@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Webhook endpoint ownership, pause and test (WP6, SEC-API-006)
 
 /// The outcome of `POST /v1/business/webhooks/{webhookId}/verify`: Viadere POSTs a single-use challenge to the endpoint, which must answer
-/// 2xx and echo it (as `{"challenge": "..."}` or as the bare body). Until it does, the endpoint receives no events.
+/// 2xx with the HMAC proof `{"challenge_response": "..."}` (`WebhookSignature.verificationResponse`; a plain echo is refused). Until it does, the endpoint receives no events.
 public struct WebhookVerificationResult: Codable, Sendable, Hashable {
     public var verified: Bool
     /// `no_echo`, `http_<status>` or `unreachable` when not verified.

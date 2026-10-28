@@ -162,7 +162,7 @@ Viadere-Webhook-Version: v1                   (v1 = full body, v2 = opaque envel
 ### 3a. Endpoint verification, test events and pausing
 
 A new endpoint receives **nothing** until it proves it controls the URL. Press *Verify* in the console (or call `POST /v1/business/webhooks/{id}/verify`, `client.verifyWebhook(id:)` in the Swift SDK): we POST a signed
-`webhook.verification` request with a single-use `challenge`; answer `2xx` and echo it, as `{"challenge": "…"}` or as the plain response body. A wrong or missing echo reports `no_echo`, a non-2xx reports `http_<status>`,
+`webhook.verification` request with a single-use `challenge`; answer `2xx` with `{"challenge_response": "<hex HMAC-SHA256 keyed by your signing secret over \"viadere.webhook.verification.v1:\" + challenge>"}`. In the Swift SDK: `return try verifier.verificationResponse(headers: headers, body: rawBody)` (it verifies the signature first). **Echoing the challenge does not work** (only a receiver holding the signing secret can answer). A missing or wrong proof reports `no_echo`, a non-2xx reports `http_<status>`,
 no connection reports `unreachable`; each attempt uses a new challenge (6 attempts per endpoint per hour). Configure the signing secret on your server first, then verify.
 
 * **Test events:** *Send test event* (or `POST …/test`, `client.testWebhook(id:)`) delivers a signed `webhook.test` event through the real pipeline, with real headers, retries and delivery log.

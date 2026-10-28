@@ -323,7 +323,7 @@ enum ConsoleDevelopers {
         let body = """
         <div class="card"><h2>\(DashboardUI.esc(heading))</h2><p>This signing secret is shown once. Verify the <code>Viadere-Signature</code> header with it.</p>\
         <div class="secret mono" tabindex="0">\(DashboardUI.esc(response.secret))</div><p class="mu sm">Endpoint: <code>\(DashboardUI.esc(response.subscription.url.absoluteString))</code> · Key id: <code>whk_…_v\(response.subscription.secretVersion ?? 1)</code></p>\
-        <p class="mu sm">Configure the secret on your server first, then verify: the check posts a challenge your endpoint must echo (<code>{"challenge": "…"}</code>).</p>\(next)\
+        <p class="mu sm">Configure the secret on your server first, then verify: the check posts a challenge your endpoint must answer with an HMAC proof made from the signing secret (<code>{"challenge_response": "…"}</code>; the SDK's <code>verificationResponse</code> does it). Echoing the challenge is refused.</p>\(next)\
         <p><a class="btn s" href="/dashboard/webhooks">Done</a></p></div>
         """
         return DashboardUI.businessPage(p, title: "Webhook secret", active: "/dashboard/webhooks", body: body)
@@ -342,7 +342,7 @@ enum ConsoleDevelopers {
         if result.verified { return DashboardResponses.redirect("/dashboard/webhooks?m=verified") }
         let reason: String
         switch result.failure ?? "" {
-        case "no_echo": reason = "The endpoint answered, but did not echo the challenge. Return the challenge value from the request body, as JSON {\"challenge\": \"…\"} or as plain text."
+        case "no_echo": reason = "The endpoint answered, but without a valid proof. Return {\"challenge_response\": HMAC-SHA256(signing secret, challenge)}; echoing the challenge is not accepted."
         case "unreachable": reason = "We could not reach the endpoint. Check that it is public, uses https and answers within ten seconds."
         default: reason = "The endpoint answered with an error status (\(DashboardUI.esc(result.failure ?? ""))). It must answer 2xx."
         }

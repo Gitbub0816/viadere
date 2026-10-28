@@ -753,8 +753,8 @@ paths:
       summary: Prove you control a webhook endpoint
       description: |
         Requires scope `webhooks:manage`. Until an endpoint is verified it receives **no events**, not even test events. Viadere POSTs a signed `webhook.verification` request
-        (same headers as every delivery) whose JSON body holds a single-use `challenge`, valid for ten minutes; the endpoint must answer 2xx and echo the challenge, either as
-        `{"challenge": "…"}` or as the bare response body. Each call uses a fresh challenge, so an old response never verifies a later attempt. At most 6 calls per endpoint per hour (`429`).
+        (same headers as every delivery) whose JSON body holds a single-use `challenge`, valid for ten minutes; the endpoint must answer 2xx with
+        `{"challenge_response": "<hex HMAC-SHA256 keyed by the endpoint signing secret over viadere.webhook.verification.v1: + challenge>"}`. A plain echo is refused. Each call uses a fresh challenge, so an old response never verifies a later attempt. At most 6 calls per endpoint per hour (`429`).
         Verifying an already verified endpoint returns `verified: true`. A failed check is a `200` with `verified: false` and a `failure` of `no_echo`, `http_<status>` or `unreachable`.
       parameters:
         - $ref: "#/components/parameters/WebhookId"
@@ -2209,7 +2209,7 @@ components:
       required: [verified]
       properties:
         verified: { type: boolean }
-        failure: { type: string, description: "Present when not verified: `no_echo` (answered 2xx without the challenge), `http_<status>` (e.g. `http_503`) or `unreachable`.", pattern: "^(no_echo|unreachable|http_[0-9]{3})$" }
+        failure: { type: string, description: "Present when not verified: `no_echo` (answered 2xx without a valid proof), `http_<status>` (e.g. `http_503`) or `unreachable`.", pattern: "^(no_echo|unreachable|http_[0-9]{3})$" }
     PauseWebhookRequest:
       type: object
       properties:

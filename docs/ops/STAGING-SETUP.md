@@ -255,7 +255,7 @@ Twilio Console > Phone Numbers > your number > Messaging > "A message comes in":
    It prints a one-time link (1 hour) such as `https://api-staging.viadere.com/operator/enroll/<token>`. **Replace the host with `https://staging.viadere.com`** before opening it: the passkey is bound to `RP_ORIGIN` (`https://staging.viadere.com`), and the server checks that origin (`DashboardSessions.swift`). Create the passkey (Touch ID / iCloud Keychain).
 2. **Business sign-up.** Open `https://staging.viadere.com/dashboard/signup`, register with an email you control and a passkey, enter the 6-digit code that arrives by email, then sign in at `/dashboard/login`. This creates a pending organisation and application.
 3. **Verify the business.** Open `https://staging.viadere.com/operator/login`, sign in, open the application under `/operator`, and verify it (this issues the handle and permanent code).
-4. **API key.** In the dashboard create an API key (a `vdk_test_...` sandbox key if offered) and a webhook endpoint if needed (webhook ownership verification is `required`: the endpoint must echo the challenge; `ALLOW_INSECURE_WEBHOOKS=false`, so https only).
+4. **API key.** In the dashboard create an API key (a `vdk_test_...` sandbox key if offered) and a webhook endpoint if needed (webhook ownership verification is `required`: the endpoint must answer the challenge with the HMAC proof, see BUSINESS-INTEGRATION 3a; `ALLOW_INSECURE_WEBHOOKS=false`, so https only).
 5. Connect the phone app to the business with its code or `/c/<code>` page, then send an interaction from the dashboard or with `POST /v1/business/interactions` (`Server/README.md`).
 
 If the emailed code never arrives: Resend dashboard > Logs, then `fly logs`.

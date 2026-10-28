@@ -49,7 +49,7 @@ Useful audit queries (run with the `viadere_readonly` role, from the Neon SQL ed
 2. **Contain.** Business deletes the endpoint (`webhook.deleted`) or rotates its secret (`webhook.rotated`; the previous secret is accepted only for the overlap window). If the business cannot act, OPS **pauses delivery** for that business (`/operator/switches` -> Webhooks, G-5; queued deliveries stay queued and go out after the resume, or expire with the retention period) or, platform-wide, for everybody. Suspend (E-1) only if the business itself is the threat.
 3. Stop leaking queued data: delivery bodies are encrypted at rest and contain redacted decisions (no `signedDecision`); delete queued deliveries for the endpoint only through the business action or accept they will expire (retention 30 days).
 4. **Assess.** Which events were delivered to the attacker's URL: `webhook_delivery_attempts` joined to deliveries by subscription and time; event types determine exposed data (message text, interaction outcomes, pseudonymous ids).
-5. **Recover.** New endpoint (it receives nothing until it echoes the ownership challenge: console Verify, or `POST /v1/business/webhooks/{id}/verify`), new secret via the dashboard (passkey re-auth, shown once), business updates its verifier. Inform affected consumers if message text was exposed.
+5. **Recover.** New endpoint (it receives nothing until it answers the ownership challenge with the HMAC proof: console Verify, or `POST /v1/business/webhooks/{id}/verify`), new secret via the dashboard (passkey re-auth, shown once), business updates its verifier. Inform affected consumers if message text was exposed.
 
 ## RB-4 Relay compromise (the Viadere server, edge or a provider account is attacker-controlled)
 
