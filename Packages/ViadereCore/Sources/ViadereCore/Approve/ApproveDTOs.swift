@@ -81,8 +81,9 @@ public struct ApprovalEnrollmentTicket: Codable, Sendable, Hashable {
     public var enrollmentId: UUID
     /// Eight characters of the unambiguous alphabet, single use, shown as `ABCD-EFGH`.
     public var code: String
-    /// `https://viadere.com/a/{CODE}?rk={root kid}`: opens the app (universal link / QR). `rk` is the business's root key id, so the app
-    /// can check the directory against what the business displayed, not against what the relay says.
+    /// The relay's suggestion, `https://viadere.com/a/{CODE}?rk={root kid}`. **Do not show it**: it comes from the relay, carries no enrollment
+    /// secret and its `rk` is not authenticated. The business SDK builds the link it shows (`ApprovalEnrollmentInvitation.link`) with its own
+    /// root key id and the secret in the fragment, and refuses a ticket whose `rk` is not its own.
     public var deepLink: String
     public var expiresAt: Date
 
@@ -111,9 +112,12 @@ public struct ApprovalEnrollmentView: Codable, Sendable, Hashable {
     /// The key id from the statement (convenience; trust only what `verify` returns).
     public var kid: String?
     public var confirmation: BusinessSignedStatement?
+    /// The device's binding tag over its statement (`ApprovalEnrollmentSecret.bindingTag`), when it opened a link that carried the secret.
+    /// The business must verify it with its own secret; the relay only carries it.
+    public var bindingTag: String?
 
     public init(enrollmentId: UUID, subjectRef: SubjectRef, capability: Capability, status: ApprovalEnrollmentStatus, expiresAt: Date, createdAt: Date,
-                deviceStatement: SignedStatement? = nil, kid: String? = nil, confirmation: BusinessSignedStatement? = nil) {
+                deviceStatement: SignedStatement? = nil, kid: String? = nil, confirmation: BusinessSignedStatement? = nil, bindingTag: String? = nil) {
         self.enrollmentId = enrollmentId
         self.subjectRef = subjectRef
         self.capability = capability
@@ -123,11 +127,12 @@ public struct ApprovalEnrollmentView: Codable, Sendable, Hashable {
         self.deviceStatement = deviceStatement
         self.kid = kid
         self.confirmation = confirmation
+        self.bindingTag = bindingTag
     }
 
     enum CodingKeys: String, CodingKey {
         case enrollmentId = "enrollment_id", subjectRef = "subject_ref", capability, status, expiresAt = "expires_at", createdAt = "created_at"
-        case deviceStatement = "device_statement", kid, confirmation
+        case deviceStatement = "device_statement", kid, confirmation, bindingTag = "binding_tag"
     }
 }
 
@@ -381,7 +386,14 @@ public struct ApproveEnrollmentPreview: Codable, Sendable, Hashable {
 public struct CompleteApproveEnrollmentRequest: Codable, Sendable, Hashable {
     /// `ApprovalEnrollmentStatement` signed by the new approval key.
     public var statement: SignedStatement
-    public init(statement: SignedStatement) { self.statement = statement }
+    /// `ApprovalEnrollmentSecret.bindingTag(for:)`, present when the person opened a link that carried the enrollment secret. Opaque to the relay.
+    public var bindingTag: String?
+    public init(statement: SignedStatement, bindingTag: String? = nil) {
+        self.statement = statement
+        self.bindingTag = bindingTag
+    }
+
+    enum CodingKeys: String, CodingKey { case statement, bindingTag = "binding_tag" }
 }
 
 /// A key enrolled by this account, as the app sees it.
