@@ -7,7 +7,9 @@ import ViadereCore
 /// approve it says yes (the approver is checked against the same role rules as the requester), and expires after 24 hours otherwise.
 ///
 /// A key request is *completed by the requester* after approval (the requester alone sees the new secret, and the approver never handles it).
-/// A role grant is executed when the approver approves it. The payload is sealed at rest and holds no secret.
+/// A role grant, a member removal or the switching-off of two-person approval itself is executed when the approver approves it; the approver must
+/// be able to manage **both** the member's current role and the target role, and a change whose member role moved since the request is void.
+/// The payload is sealed at rest and holds no secret.
 struct PendingChanges {
     let db: any Database
     let ctx: ServerContext
@@ -20,6 +22,8 @@ struct PendingChanges {
         case apiKey = "api_key"
         case apiKeyRotation = "api_key_rotation"
         case roleGrant = "role_grant"
+        /// A change that weakens a security control (turning two-person approval off). Approved by someone who may manage security.
+        case securitySetting = "security_setting"
     }
 
     /// What was asked for. Fields that do not apply to the kind are `nil`.
@@ -36,10 +40,12 @@ struct PendingChanges {
         var keyId: String?
         var overlapSeconds: Int?
         // Role grant
-        var operation: String?   // invite | change
+        var operation: String?   // invite | change | remove | disable_two_person
         var email: String?
         var role: String?
         var membershipId: String?
+        /// The member's role when the change was requested. If it differs at approval time the request is void (platform gate M3).
+        var currentRole: String?
         /// Whether executing this widens scope (Security Admin or Owner must approve).
         var elevates: Bool?
     }
@@ -77,7 +83,7 @@ struct PendingChanges {
             businessId: BusinessID(businessId), subjectType: "pending_change", subjectId: record.id?.uuidString.lowercased(), metadata: ["kind": kind.rawValue])
         await Notifier(db: db, ctx: ctx).notifyBusiness(businessId, roles: [.owner, .securityAdmin, .orgAdmin], includeSecurityContacts: false, topic: .roleChanges,
             subject: "A change is waiting for your approval",
-            text: "A team member asked for a \(kind == .roleGrant ? "role change" : "credential change") that needs a second person's approval. Review it in the console under Security.",
+            text: "A team member asked for a \(kind == .roleGrant ? "team change" : kind == .securitySetting ? "security setting change" : "credential change") that needs a second person's approval. Review it in the console under Security.",
             kind: "approval-requested")
         return record
     }
@@ -118,8 +124,29 @@ struct PendingChanges {
                 throw APIError(.forbidden, .forbidden, "This request widens a key's scope: a Security Admin or an Owner has to approve it.")
             }
         case .roleGrant:
-            guard let raw = payload.role, let role = OrgRole(rawValue: raw), let actor = approver.role, RoleGrantPolicy.mayManage(actor: actor, role: role) else {
-                throw APIError(.forbidden, .forbidden, "You cannot grant that role.")
+            guard let actor = approver.role else { throw APIError.forbidden }
+            if let raw = payload.role {
+                guard let target = OrgRole(rawValue: raw), RoleGrantPolicy.mayManage(actor: actor, role: target) else {
+                    throw APIError(.forbidden, .forbidden, "You cannot grant that role.")
+                }
+            }
+            if payload.operation == "change" || payload.operation == "remove" {
+                // The member's role now must still be the one the requester saw, and the approver must be able to manage it too.
+                guard let raw = payload.membershipId, let memberId = UUID(uuidString: raw),
+                      let member = try await OrgMembershipRecord.query(on: db).filter(\.$id == memberId).filter(\.$businessId == businessId).filter(\.$removedAt == nil).first(),
+                      member.role == payload.currentRole, let current = OrgRole(rawValue: member.role) else {
+                    _ = try await DB.swap(db, table: PendingChangeRecord.schema, id: id, column: "status", expected: "pending", newValue: "void")
+                    _ = try await AuditService(db: db, ctx: ctx).record("approval.voided", outcome: .denied, actor: AuditActor(kind: .business, id: approverId.uuidString.lowercased()),
+                        businessId: BusinessID(businessId), subjectType: "pending_change", subjectId: id.uuidString.lowercased(), metadata: ["kind": change.kind])
+                    throw APIError.conflict("The member changed since this was requested, so the request is void. Ask again.")
+                }
+                guard RoleGrantPolicy.mayManage(actor: actor, role: current) else {
+                    throw APIError(.forbidden, .forbidden, "You cannot change or remove a member with that role.")
+                }
+            }
+        case .securitySetting:
+            guard approver.can(.manageSecurity) else {
+                throw APIError(.forbidden, .forbidden, "A Security Admin or an Owner has to approve a change to a security setting.")
             }
         case nil: throw APIError.internalError
         }
@@ -129,7 +156,7 @@ struct PendingChanges {
         }
         _ = try await AuditService(db: db, ctx: ctx).record("approval.approved", actor: AuditActor(kind: .business, id: approverId.uuidString.lowercased()),
             businessId: BusinessID(businessId), subjectType: "pending_change", subjectId: id.uuidString.lowercased(), metadata: ["kind": change.kind])
-        if change.kind == Kind.roleGrant.rawValue {
+        if change.kind == Kind.roleGrant.rawValue || change.kind == Kind.securitySetting.rawValue {
             try await executeRoleGrant(payload, change.requestedBy)
             _ = try await DB.swap(db, table: PendingChangeRecord.schema, id: id, column: "status", expected: "approved", newValue: "executed", extra: [("executed_at", ctx.now)])
         }

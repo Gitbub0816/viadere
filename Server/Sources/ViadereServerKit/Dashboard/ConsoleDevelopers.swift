@@ -201,7 +201,7 @@ enum ConsoleDevelopers {
                 form = "<div class=\"notice\">Keys unlock when you have verified a domain you control. Open <a href=\"/dashboard/organization/domains\">Organization &gt; Domains</a>.</div>"
             }
             // Requests of mine that a second person approved are completed here (I alone see the new secret).
-            let mine = try await PendingChanges(db: req.db, ctx: req.ctx).open(businessId: businessId).filter { $0.requestedBy == p.user.id && $0.status == "approved" && $0.kind != PendingChanges.Kind.roleGrant.rawValue }
+            let mine = try await PendingChanges(db: req.db, ctx: req.ctx).open(businessId: businessId).filter { $0.requestedBy == p.user.id && $0.status == "approved" && $0.kind != PendingChanges.Kind.roleGrant.rawValue && $0.kind != PendingChanges.Kind.securitySetting.rawValue }
             if !mine.isEmpty {
                 let items = mine.map { change in
                     "<form method=\"post\" action=\"/dashboard/api-keys/approved/\(change.id?.uuidString.lowercased() ?? "")\">\(DashboardUI.csrf(p))<p>Approved: \(DashboardUI.esc(change.kind == PendingChanges.Kind.apiKey.rawValue ? "create a key" : "rotate a key")) <button class=\"btn sm\" type=\"submit\">Complete</button></p></form>"

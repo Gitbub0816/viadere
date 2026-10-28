@@ -384,12 +384,15 @@ struct DashboardActions {
 
     /// Separation of duties: nobody grants themselves anything, only an Owner creates, changes or removes Owners, Organization Admins and Security
     /// Admins, and the Organization Admin's reach stops below those (`RoleGrantPolicy`). The three highest roles need a fresh passkey assertion.
-    private func authorize(roleChangeTo target: OrgRole?, current: OrgRole?) async throws {
+    /// `stepUp`: every invitation, role change and removal asks for a fresh passkey assertion (platform gate M2), whatever the role involved:
+    /// a stolen console cookie must not be able to add any member (and through them an unalerted API key). Revoking an invitation is protective
+    /// and keeps the old rule (a passkey only for the three highest roles).
+    private func authorize(roleChangeTo target: OrgRole?, current: OrgRole?, stepUp: Bool = true) async throws {
         guard let actorRole = principal.role else { throw APIError.forbidden }
         for role in [target, current].compactMap({ $0 }) {
             guard RoleGrantPolicy.mayManage(actor: actorRole, role: role) else { throw APIError.forbidden }
         }
-        if [target, current].compactMap({ $0 }).contains(where: { [.owner, .orgAdmin, .securityAdmin].contains($0) }) { try await requireReauth(next: "/dashboard/team") }
+        if stepUp || [target, current].compactMap({ $0 }).contains(where: { [.owner, .orgAdmin, .securityAdmin].contains($0) }) { try await requireReauth(next: "/dashboard/team") }
     }
 
     /// What a role change or invitation turned into.
@@ -466,7 +469,7 @@ struct DashboardActions {
     func revokeInvite(id: UUID) async throws {
         try require(.manageTeam)
         guard let invite = try await OrgInviteRecord.query(on: db).filter(\.$id == id).filter(\.$businessId == businessId).first() else { throw APIError.notFound }
-        if let role = OrgRole(rawValue: invite.role) { try await authorize(roleChangeTo: nil, current: role) }
+        if let role = OrgRole(rawValue: invite.role) { try await authorize(roleChangeTo: nil, current: role, stepUp: false) }
         _ = try await DB.swap(db, table: OrgInviteRecord.schema, id: id, column: "state", expected: "open", newValue: "revoked")
         try await audit("team.invite_revoked", subjectType: "invite", subjectId: id.uuidString.lowercased())
     }
@@ -483,7 +486,7 @@ struct DashboardActions {
         }
         if try await twoPersonRequired() {
             let change = try await PendingChanges(db: db, ctx: ctx).request(businessId: businessId, kind: .roleGrant, by: principal.user.id!,
-                payload: PendingChanges.Payload(operation: "change", role: newRole.rawValue, membershipId: membershipId.uuidString.lowercased()))
+                payload: PendingChanges.Payload(operation: "change", role: newRole.rawValue, membershipId: membershipId.uuidString.lowercased(), currentRole: member.role))
             return .awaitingApproval(change.id!)
         }
         try await applyRoleChange(member, to: newRole, by: principal.user.id!)
@@ -501,13 +504,26 @@ struct DashboardActions {
         await alert(.roleChanges, subject: "A team role changed", text: "A team member's role in your organization changed to \(newRole.title).")
     }
 
-    func removeMember(membershipId: UUID) async throws {
+    @discardableResult
+    func removeMember(membershipId: UUID) async throws -> TeamChange {
         try require(.manageTeam)
         let member = try await membership(membershipId)
         let current = OrgRole(rawValue: member.role)
         guard member.userId != principal.user.id else { throw APIError.conflict("Ask another owner or admin to remove you.") }
         try await authorize(roleChangeTo: nil, current: current ?? .analyst)
         if current == .owner, try await ownerCount(excluding: membershipId) == 0 { throw APIError.conflict("An organization needs at least one owner.") }
+        // Removing a person is a team change like granting a role: with two-person approval on, it waits for a second person (platform gate M3c).
+        if try await twoPersonRequired() {
+            let change = try await PendingChanges(db: db, ctx: ctx).request(businessId: businessId, kind: .roleGrant, by: principal.user.id!,
+                payload: PendingChanges.Payload(operation: "remove", membershipId: membershipId.uuidString.lowercased(), currentRole: member.role))
+            return .awaitingApproval(change.id!)
+        }
+        try await applyRemoval(member)
+        return .done
+    }
+
+    func applyRemoval(_ member: OrgMembershipRecord) async throws {
+        let current = OrgRole(rawValue: member.role)
         member.removedAt = ctx.now
         try await member.update(on: db)
         // Sessions acting for this organization end now.
@@ -519,15 +535,29 @@ struct DashboardActions {
 
     /// Executes an approved role grant (called by the approver's request, on behalf of the requester).
     func executeRoleGrant(_ payload: PendingChanges.Payload, requester: UUID) async throws {
-        guard let raw = payload.role, let role = OrgRole(rawValue: raw) else { throw APIError.internalError }
-        if payload.operation == "invite", let email = payload.email {
-            try await createInvite(email: email, role: role, invitedBy: requester)
-        } else if payload.operation == "change", let raw = payload.membershipId, let id = UUID(uuidString: raw) {
+        switch payload.operation {
+        case "disable_two_person":
+            try await settingsService.setTwoPerson(businessId: businessId, required: false, by: requester)
+            await alert(.roleChanges, subject: "Two-person approval changed", text: "Two-person approval for keys and team changes was turned off after a second person approved it.")
+        case "remove":
+            guard let raw = payload.membershipId, let id = UUID(uuidString: raw) else { throw APIError.internalError }
             let member = try await membership(id)
+            guard member.role == payload.currentRole else { throw APIError.conflict("The member changed since this was requested.") }
+            if OrgRole(rawValue: member.role) == .owner, try await ownerCount(excluding: id) == 0 { throw APIError.conflict("An organization needs at least one owner.") }
+            try await applyRemoval(member)
+        case "invite":
+            guard let raw = payload.role, let role = OrgRole(rawValue: raw), let email = payload.email else { throw APIError.internalError }
+            try await createInvite(email: email, role: role, invitedBy: requester)
+        case "change":
+            guard let raw = payload.role, let role = OrgRole(rawValue: raw), let rawId = payload.membershipId, let id = UUID(uuidString: rawId) else { throw APIError.internalError }
+            let member = try await membership(id)
+            guard member.role == payload.currentRole else { throw APIError.conflict("The member's role changed since this was requested.") }
             if let current = OrgRole(rawValue: member.role), current == .owner, role != .owner, try await ownerCount(excluding: id) == 0 {
                 throw APIError.conflict("An organization needs at least one owner.")
             }
             try await applyRoleChange(member, to: role, by: requester)
+        default:
+            throw APIError.internalError
         }
     }
 

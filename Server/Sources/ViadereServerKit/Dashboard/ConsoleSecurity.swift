@@ -81,7 +81,8 @@ enum ConsoleSecurity {
         pages.post("dashboard", "security", "approvals", "two-person") { req -> Response in
             let (p, _) = try req.businessDashboard
             let form = try req.content.decode(ToggleForm.self)
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).setTwoPerson(form.enabled == "1")
+            let change = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).setTwoPerson(form.enabled == "1")
+            if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/security/approvals?m=pending") }
             return DashboardResponses.redirect("/dashboard/security/approvals?m=saved")
         }
         for (verb, approve) in [("approve", true), ("reject", false)] {
@@ -245,7 +246,14 @@ enum ConsoleSecurity {
             switch PendingChanges.Kind(rawValue: change.kind) {
             case .apiKey: what = "Create a \(payload.live == true ? "live" : "test") key “\(DashboardUI.esc(payload.name ?? ""))” (\(DashboardUI.esc((payload.scopes ?? []).joined(separator: " "))))\(payload.elevates == true ? " " + DashboardFormat.badge("widens scope", "dg") : "")"
             case .apiKeyRotation: what = "Rotate a key (overlap \(payload.overlapSeconds ?? 0) s)"
-            case .roleGrant: what = "\(payload.operation == "invite" ? "Invite" : "Change a member to") role \(DashboardUI.esc(OrgRole(rawValue: payload.role ?? "")?.title ?? ""))"
+            case .roleGrant:
+                let title = DashboardUI.esc(OrgRole(rawValue: payload.role ?? "")?.title ?? "")
+                switch payload.operation {
+                case "invite": what = "Invite with role \(title)"
+                case "remove": what = "Remove a \(DashboardUI.esc(OrgRole(rawValue: payload.currentRole ?? "")?.title ?? "")) from the team"
+                default: what = "Change a member from \(DashboardUI.esc(OrgRole(rawValue: payload.currentRole ?? "")?.title ?? "")) to \(title)"
+                }
+            case .securitySetting: what = "Turn off two-person approval"
             case nil: what = DashboardUI.esc(change.kind)
             }
             var action = ""

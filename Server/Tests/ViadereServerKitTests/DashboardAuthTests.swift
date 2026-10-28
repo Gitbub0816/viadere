@@ -264,10 +264,12 @@ final class DashboardAuthTests: XCTestCase {
             let ownerInvite = try await h.formPost("/dashboard/team/invite", session, [("email", "co@example.com"), ("role", "owner")])
             XCTAssertEqual(ownerInvite.status, .forbidden)
             XCTAssertTrue(ownerInvite.text.contains("Confirm with passkey"))
-            // A non-owner invite does not need it.
+            // Every invite needs it (platform gate M2), not only invites to the highest roles.
+            let analystDenied = try await h.formPost("/dashboard/team/invite", session, [("email", "an@example.com"), ("role", "analyst")])
+            XCTAssertEqual(analystDenied.status, .forbidden)
+            try await h.dashReauth(session, account)
             let analyst = try await h.formPost("/dashboard/team/invite", session, [("email", "an@example.com"), ("role", "analyst")])
             XCTAssertEqual(analyst.status, .ok)
-            try await h.dashReauth(session, account)
             let rotate = try await h.formPost("/dashboard/webhooks", session, [("url", "https://hooks.example.com/a"), ("events[]", "interaction.decided")])
             XCTAssertEqual(rotate.status, .ok, rotate.text)
             let subscription = try await WebhookSubscriptionRecord.query(on: h.db).first()!

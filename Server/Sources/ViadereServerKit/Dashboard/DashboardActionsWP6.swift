@@ -63,11 +63,20 @@ extension DashboardActions {
         try await settingsService.setPrivilegedInactivity(businessId: businessId, seconds: seconds, by: userId)
     }
 
-    func setTwoPerson(_ required: Bool) async throws {
+    /// Turning two-person approval **on** takes effect at once (it only adds a control). Turning it **off** is a pending change that a second
+    /// person who may manage security has to approve, so one Security Admin (or one stolen session) cannot remove the control alone.
+    @discardableResult
+    func setTwoPerson(_ required: Bool) async throws -> TeamChange {
         try require(.manageSecurity)
         try await requireReauth(next: "/dashboard/security/approvals")
+        if !required, try await twoPersonRequired() {
+            let change = try await PendingChanges(db: db, ctx: ctx).request(businessId: businessId, kind: .securitySetting, by: userId,
+                payload: PendingChanges.Payload(operation: "disable_two_person"))
+            return .awaitingApproval(change.id!)
+        }
         try await settingsService.setTwoPerson(businessId: businessId, required: required, by: userId)
-        await alert(.roleChanges, subject: "Two-person approval changed", text: "Two-person approval for keys and role grants was turned \(required ? "on" : "off").")
+        await alert(.roleChanges, subject: "Two-person approval changed", text: "Two-person approval for keys and team changes was turned \(required ? "on" : "off").")
+        return .done
     }
 
     func setMTLSRequired(_ required: Bool) async throws {
@@ -76,10 +85,24 @@ extension DashboardActions {
         try await settingsService.setMTLSRequired(businessId: businessId, required: required, by: userId)
     }
 
+    /// Needs a fresh passkey assertion (a stolen cookie must not silence alerts or add a contact) and always tells the owners, security admins and
+    /// organization admins when the subscriptions or contacts changed, whatever the new subscriptions are (platform gate M2). The notice carries
+    /// no contact address.
     func setAlerts(topics: Set<SecurityAlertTopic>, contacts: [String]) async throws {
         try require(.manageSecurity)
+        try await requireReauth(next: "/dashboard/security/alerts")
+        let topicsBefore = try await settingsService.subscriptions(businessId: businessId)
+        let contactsBefore = try await settingsService.contacts(businessId: businessId)
         try await settingsService.setSubscriptions(businessId: businessId, topics: topics, by: userId)
         try await settingsService.setContacts(businessId: businessId, emails: contacts, by: userId)
+        let topicsAfter = try await settingsService.subscriptions(businessId: businessId)
+        let contactsAfter = try await settingsService.contacts(businessId: businessId)
+        if topicsBefore != topicsAfter || Set(contactsBefore) != Set(contactsAfter) {
+            await Notifier(db: db, ctx: ctx).notifyBusiness(businessId, roles: [.owner, .securityAdmin, .orgAdmin], includeSecurityContacts: false, topic: nil,
+                subject: "Your organization's security alert settings changed",
+                text: "A team member changed which security alerts are emailed (\(topicsAfter.count) of \(SecurityAlertTopic.allCases.count) topics are on) or the security contacts (\(contactsAfter.count) now). If this was not expected, review Security > Alerts and contacts and your team's sessions.",
+                kind: "security-alert")
+        }
         // A security contact completes an onboarding fact; nothing else changes.
         if !contacts.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).isEmpty {
             _ = try await onboarding.apply(.securityContactSet, businessId: businessId, actor: actor) { _, _ in }

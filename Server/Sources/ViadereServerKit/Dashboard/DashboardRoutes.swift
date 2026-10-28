@@ -235,7 +235,8 @@ enum DashboardRoutes {
         }
         pages.post("dashboard", "team", "members", ":id", "remove") { req -> Response in
             let (p, _) = try req.businessDashboard
-            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).removeMember(membershipId: try req.uuid("id"))
+            let change = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).removeMember(membershipId: try req.uuid("id"))
+            if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/team?m=pending") }
             return DashboardResponses.redirect("/dashboard/team?m=removed")
         }
         pages.post("dashboard", "invite", ":token", "accept") { req -> Response in
