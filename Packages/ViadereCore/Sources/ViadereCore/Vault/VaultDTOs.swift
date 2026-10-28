@@ -92,9 +92,12 @@ public struct VaultStatus: Codable, Sendable, Equatable {
     public var memberId: String?
     public var deviceCount: Int
     public var recoveryConfigured: Bool
+    /// The account's open recovery-envelope release (a hold, or the 24 h window after it), if any (see `VaultRecoveryRelease`).
+    public var recoveryRelease: VaultRecoveryRelease?
 
     public init(exists: Bool, vaultId: UUID? = nil, version: UInt64 = 0, epoch: UInt64 = 0, bound: Bool = false, memberId: String? = nil,
-                deviceCount: Int = 0, recoveryConfigured: Bool = false) {
+                deviceCount: Int = 0, recoveryConfigured: Bool = false, recoveryRelease: VaultRecoveryRelease? = nil) {
+        self.recoveryRelease = recoveryRelease
         self.exists = exists
         self.vaultId = vaultId
         self.version = version
@@ -183,5 +186,48 @@ public struct VaultJoinState: Codable, Sendable, Equatable {
         self.request = request
         self.approval = approval
         self.approvedMemberId = approvedMemberId
+    }
+}
+
+
+/// A request to release the vault's recovery envelope (`POST /v1/vault/recovery-release`). Account access plus the recovery key would
+/// otherwise decrypt the vault silently, so the envelope is withheld for a **72 hour hold** during which every vault device and every other
+/// account device is told ("Not you? Cancel"); after the hold it is released for 24 hours to the requesting device only (gate review M2).
+public struct VaultRecoveryRelease: Codable, Sendable, Equatable {
+    public enum State: String, Codable, Sendable {
+        /// The hold is running; nothing is released yet.
+        case holding
+        /// The hold passed without cancellation: the requesting device may read the recovery envelope (and ciphertext) until `expiresAt`.
+        case released
+        case cancelled, expired
+        /// The restore was completed.
+        case consumed
+        case unknown
+
+        public init(from decoder: any Decoder) throws {
+            self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    public static let holdSeconds: TimeInterval = 72 * 3600
+    public static let windowSeconds: TimeInterval = 24 * 3600
+
+    public var releaseId: UUID
+    public var state: State
+    public var requestedAt: Date
+    /// When the hold ends and the envelope becomes readable.
+    public var releaseAt: Date
+    /// When the 24 hour window closes.
+    public var expiresAt: Date
+    /// The calling device is the one that asked (only it can read what is released).
+    public var requestedByThisDevice: Bool
+
+    public init(releaseId: UUID, state: State, requestedAt: Date, releaseAt: Date, expiresAt: Date, requestedByThisDevice: Bool) {
+        self.releaseId = releaseId
+        self.state = state
+        self.requestedAt = requestedAt
+        self.releaseAt = releaseAt
+        self.expiresAt = expiresAt
+        self.requestedByThisDevice = requestedByThisDevice
     }
 }

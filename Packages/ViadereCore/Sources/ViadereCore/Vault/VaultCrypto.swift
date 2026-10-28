@@ -46,6 +46,22 @@ public enum VaultFormat {
     public static let maxItemBlobBytes = 32 * 1024
     public static let maxManifestBytes = 256 * 1024
     public static let maxLabelBytes = 64
+    /// Total ciphertext of all item blobs one vault may hold. A key rotation (device removal, recovery restore) re-uploads **every** blob in
+    /// one atomic request, and re-encryption keeps each blob's size (items are padded to buckets and the plaintext does not change), so this
+    /// cap, not the number of items, is what guarantees a rotation always fits in `maxRotationRequestBytes`.
+    public static let maxTotalBlobBytes = 2 * 1024 * 1024
+    /// A user or display name stored with a passkey is cut to this many UTF-8 bytes (WebAuthn §4.4.3 allows truncating to 64 bytes), so a
+    /// hostile relying party cannot make one item as large as the item limit.
+    public static let maxUserNameBytes = 64
+    /// The largest `PUT /v1/vault` body a rotation can need: every blob (base64 plus its JSON wrapper), a maximum-size manifest, every
+    /// envelope. The server's request ceiling for `/v1/vault` routes must be at least this (checked by a test).
+    public static let maxRotationRequestBytes: Int = {
+        func base64(_ n: Int) -> Int { (n + 2) / 3 * 4 }
+        let blobs = base64(maxTotalBlobBytes) + maxItems * 96
+        let manifest = base64(maxManifestBytes) + 256
+        let envelopes = (maxDevices + 1) * (base64(envelopeLength) + 128)
+        return blobs + manifest + envelopes + 4096
+    }()
 
     /// HKDF `info` labels. Every derived key has its own label (key separation); none is ever used for two purposes.
     enum Label {

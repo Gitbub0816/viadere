@@ -120,6 +120,20 @@ public enum WebAuthnAuthenticator {
         return labels.count > 1 || rpId == "localhost"
     }
 
+    /// `string` cut to at most `maxBytes` UTF-8 bytes without splitting a character.
+    static func truncatedUTF8(_ string: String, maxBytes: Int) -> String {
+        guard string.utf8.count > maxBytes else { return string }
+        var result = ""
+        var used = 0
+        for character in string {
+            let size = String(character).utf8.count
+            if used + size > maxBytes { break }
+            result.append(character)
+            used += size
+        }
+        return result
+    }
+
     public static func rpIdHash(_ rpId: String) -> Data { Data(SHA256.hash(data: Data(rpId.utf8))) }
 
     // MARK: Registration
@@ -140,6 +154,10 @@ public enum WebAuthnAuthenticator {
         if requireUserVerification && !userVerified { throw WebAuthnError.userVerificationRequired }
         if excludedCredentialIds.contains(where: { existingCredentialIds.contains($0) }) { throw WebAuthnError.credentialExcluded }
 
+        // The relying party chooses these strings. WebAuthn lets an authenticator truncate them to 64 bytes (on a character boundary), which
+        // keeps one hostile registration from making an item as large as the item limit (gate review M3).
+        let userName = truncatedUTF8(userName, maxBytes: VaultFormat.maxUserNameBytes)
+        let displayName = displayName.map { truncatedUTF8($0, maxBytes: VaultFormat.maxUserNameBytes) }
         let privateKey = P256.Signing.PrivateKey()
         var credentialId = SecureToken.randomBytes(credentialIdLength)
         while existingCredentialIds.contains(credentialId) { credentialId = SecureToken.randomBytes(credentialIdLength) }

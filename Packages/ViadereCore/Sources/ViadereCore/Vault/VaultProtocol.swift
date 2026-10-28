@@ -89,6 +89,12 @@ public struct UnlockedVault: Sendable {
 
     // MARK: Creating and opening
 
+    /// A vault holds at most `VaultFormat.maxTotalBlobBytes` of item ciphertext, so that a key rotation (which re-uploads every blob in one
+    /// atomic request) always fits. The error is `limitExceeded("vault size")`: the app shows it as "Your vault is full".
+    static func requireRoom(_ blobs: some Collection<Data>) throws {
+        guard blobs.reduce(0, { $0 + $1.count }) <= VaultFormat.maxTotalBlobBytes else { throw VaultError.limitExceeded("vault size") }
+    }
+
     /// A new vault with this device as its only device. `recoveryKey` (optional) adds the recovery member.
     public static func create(identity: VaultDeviceIdentity, label: String, recoveryKey: RecoveryKey? = nil, items: [VaultItemPayload] = [],
                               now: Date) async throws -> VaultMutation {
@@ -116,6 +122,7 @@ public struct UnlockedVault: Sendable {
             refs.append(VaultItemRef(itemId: item.id, revision: 1, blobHash: Data(SHA256.hash(data: blob))))
             blobs[item.id] = blob
         }
+        try requireRoom(blobs.values)
         let manifest = VaultManifest(vaultId: vaultId, version: 1, previousHash: VaultManifest.genesisPreviousHash, epoch: epoch, keyCheck: key.keyCheck(epoch: epoch),
                                      members: members, items: refs, signerId: me, createdAt: at)
         let signed = try await SignedVaultManifest.sign(manifest, with: identity.signingKey)
@@ -174,6 +181,7 @@ public struct UnlockedVault: Sendable {
             changed[payload.id] = blob
         }
         guard refs.count <= VaultFormat.maxItems else { throw VaultError.limitExceeded("items") }
+        try Self.requireRoom(blobs.filter { refs[$0.key] != nil }.values)
         let next = try await successor(members: manifest.members, items: Array(refs.values), epoch: manifest.epoch, keyCheck: manifest.keyCheck, now: now)
         let removed = deletes.filter { id in manifest.items.contains { $0.itemId == id } }
         let snap = VaultSnapshot(verified: next.verified, blobs: blobs.filter { refs[$0.key] != nil }, envelopes: snapshot.envelopes)

@@ -283,6 +283,12 @@ public enum APIRoutes {
     /// The recovery member's envelope (useless without the vault recovery key). Needs a trusted device, tightly rate-limited.
     public static let vaultRecoveryEnvelope = Endpoint<EmptyBody, VaultEnvelopeResponse>(
         "vault.recovery.envelope", .GET, "/v1/vault/recovery-envelope", auth: .deviceSignedBearer)
+    /// Starts the 72 h hold before the recovery envelope is released (to this device only, for 24 h). Needs a trusted device.
+    public static let vaultRecoveryReleaseRequest = Endpoint<EmptyBody, VaultRecoveryRelease>(
+        "vault.recovery.release.request", .POST, "/v1/vault/recovery-release", auth: .deviceSignedBearer)
+    /// "Not you? Cancel": a vault device or any trusted account device ends the hold or the window.
+    public static let vaultRecoveryReleaseCancel = Endpoint<EmptyBody, VaultRecoveryRelease>(
+        "vault.recovery.release.cancel", .POST, "/v1/vault/recovery-release/{releaseId}/cancel", auth: .deviceSignedBearer)
     public static let vaultDevices = Endpoint<EmptyBody, [VaultDeviceInfo]>(
         "vault.devices.list", .GET, "/v1/vault/devices", auth: .deviceSignedBearer)
     /// Ends a vault device's server access. The client then publishes a rotation manifest (`removingDevice`).
@@ -412,7 +418,7 @@ public enum APIRoutes {
         businessSandboxRelationship.descriptor, businessCapabilities.descriptor,
         providerSMSInbound.descriptor, providerSMSStatus.descriptor, providerRCSInbound.descriptor,
         vaultStatus.descriptor, vaultPut.descriptor, vaultDelete.descriptor, vaultManifests.descriptor, vaultBlobs.descriptor, vaultEnvelope.descriptor,
-        vaultRecoveryEnvelope.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,
+        vaultRecoveryEnvelope.descriptor, vaultRecoveryReleaseRequest.descriptor, vaultRecoveryReleaseCancel.descriptor, vaultDevices.descriptor, vaultDeviceRemove.descriptor, vaultJoinCreate.descriptor, vaultJoinGet.descriptor,
         vaultJoinRequest.descriptor, vaultJoinCancel.descriptor,
         businessApproveEnrollmentCreate.descriptor, businessApproveEnrollmentGet.descriptor, businessApproveEnrollmentConfirm.descriptor,
         businessApproveEnrollmentCancel.descriptor, businessApproveKeys.descriptor, businessApproveKeyRevoke.descriptor, businessApproveRequestCreate.descriptor,

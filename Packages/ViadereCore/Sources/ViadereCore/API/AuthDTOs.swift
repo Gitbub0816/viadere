@@ -594,6 +594,9 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case delegationEnded
     /// A device was added to (or removed from) the account's synced credential vault, or the synced vault was deleted.
     case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
+    /// Recovery-key access to the vault: a release was requested (`action == .cancelVaultRecovery`, `subjectId` = the release id), cancelled,
+    /// the recovery envelope was released and read, or the vault was restored on a new device with the recovery key.
+    case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRestored
     /// Approve v2: a pairwise approval key was enrolled for a business, revoked, approvals were frozen or unfrozen, or repeated requests
     /// from a business were paused (`subjectId` = the key id or relationship id).
     case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
@@ -612,6 +615,8 @@ public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
     case cancelRecovery
     /// `POST /v1/devices/{subjectId}/cancel-replacement`: revokes the NEW device; the old one keeps working.
     case cancelDeviceReplacement
+    /// `POST /v1/vault/recovery-release/{subjectId}/cancel` (a vault device or a trusted device).
+    case cancelVaultRecovery
     case unknown
 
     public init(from decoder: any Decoder) throws {

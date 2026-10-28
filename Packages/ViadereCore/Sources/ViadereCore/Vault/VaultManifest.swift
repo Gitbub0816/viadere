@@ -263,6 +263,10 @@ public enum VaultChainVerifier {
 
         if recoveryRestore { guard rotated else { throw VaultError.invalidChain("a recovery restore must replace the vault key") } }
 
+        // A device that disappears from the member list must lose the key: otherwise its envelope still opens the current vault key and
+        // "removal" would only be cosmetic (gate review L4).
+        if !rotated, p.devices.contains(where: { m.member($0.id) == nil }) { throw VaultError.invalidChain("a removed device requires a key rotation") }
+
         // Members: at most one device added per version; existing members keep their keys; envelopes change exactly when the epoch does.
         let added = m.devices.filter { p.member($0.id) == nil }
         guard added.count <= 1 else { throw VaultError.invalidChain("more than one device added") }
