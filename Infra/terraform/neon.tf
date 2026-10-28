@@ -34,8 +34,11 @@ resource "neon_project" "viadere" {
 }
 
 # Application database and roles. neon_role generates a password (kept in sensitive state: protect the state backend).
-# viadere_migrator owns the schema and runs migrations (fly release command); viadere_app is the runtime role (DML only is
-# granted by the first migration / `ALTER DEFAULT PRIVILEGES`, see docs/ops/RUNBOOKS.md "Database role bootstrap").
+# viadere_migrator owns the schema and runs migrations (fly release command; its URL is the Fly secret DATABASE_MIGRATION_URL, host =
+# `neon_database_host`, user `viadere_migrator`). viadere_app is the runtime role (DATABASE_URL, DATABASE_APP_ROLE=viadere_app): it owns nothing
+# and has no DDL. The `RuntimeRoleGrants` migration gives it SELECT/INSERT/UPDATE/DELETE and sequence usage on every table, sets default
+# privileges for tables the migrator creates later and revokes CREATE on the public schema; the server refuses to start in staging/production
+# when DATABASE_MIGRATION_URL is set and the runtime role could still change the schema (docs/ops/RUNBOOKS.md "Database role bootstrap").
 resource "neon_role" "migrator" {
   project_id = neon_project.viadere.id
   branch_id  = neon_project.viadere.default_branch_id
@@ -48,6 +51,7 @@ resource "neon_role" "app" {
   name       = "viadere_app"
 }
 
+# The two role passwords are in sensitive state: compose the two URLs outside Terraform and set them with `fly secrets set`.
 resource "neon_database" "viadere" {
   project_id = neon_project.viadere.id
   branch_id  = neon_project.viadere.default_branch_id

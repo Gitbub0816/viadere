@@ -27,6 +27,8 @@ struct GrantRuntimeRolePrivileges: AsyncMigration {
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \(role)",
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \(role)",
             "REVOKE CREATE ON SCHEMA public FROM \(role)",
+            // The audit log is append-only for the application: rows are never updated (the retention purge is the only delete, after the head export).
+            "REVOKE UPDATE ON audit_events FROM \(role)",
         ] {
             try await sql.raw(SQLQueryString(statement)).run()
         }

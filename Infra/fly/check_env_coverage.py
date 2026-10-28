@@ -22,7 +22,7 @@ EXEMPT = {
     "WALLET_ENCRYPTION_KEY_PATHS": "development only; refused in staging/production (use WALLET_ENCRYPTION_KEY_WRAPPED)",
 }
 # Names the server reads that are not in .env.example (documented in Server/README.md).
-EXTRA_KNOWN = {"AUDIT_CHAIN_LEGACY_THROUGH_SEQ", "EDGE_TOKEN", "PASS_CERTIFICATE_PEM", "PASS_PRIVATE_KEY_PEM", "PASS_WWDR_CERTIFICATE_PEM",
+EXTRA_KNOWN = {"AUDIT_CHAIN_LEGACY_THROUGH_SEQ", "PASS_CERTIFICATE_PEM", "PASS_PRIVATE_KEY_PEM", "PASS_WWDR_CERTIFICATE_PEM",
                "BIND_HOST", "EMAIL_API_AUTH_HEADER", "EMAIL_API_AUTH_SCHEME"}
 
 example = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]{2,})=", (root / "Server/.env.example").read_text(), re.M))
