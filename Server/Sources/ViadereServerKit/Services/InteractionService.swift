@@ -480,7 +480,7 @@ struct InteractionService {
     func push(record: InteractionRecord, interaction: Interaction) async {
         guard interaction.allowedChannels.contains(.nativePush) else { return }
         // Emergency messaging restriction (G-6): a restricted push is skipped; the interaction stays available in the app.
-        guard await MessagingGate(db: db, ctx: ctx).decide(businessId: record.businessId, channel: .push, purpose: record.purpose) == .allow else { return }
+        guard await MessagingGate(db: db, ctx: ctx).decide(businessId: record.businessId, channel: .push, purpose: record.purpose, kind: InteractionKind(rawValue: record.kind)) == .allow else { return }
         do {
             guard let business = try await BusinessRecord.find(record.businessId, on: db),
                   let summary = try await DirectoryService(db: db).summary(for: business) else { return }

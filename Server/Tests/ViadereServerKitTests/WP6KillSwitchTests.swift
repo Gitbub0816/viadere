@@ -228,8 +228,13 @@ final class WP6KillSwitchTests: XCTestCase {
             XCTAssertEqual(pushStillOK, .allow)
             XCTAssertEqual(otherOK, .allow)
             // Security traffic (sign-in and payment approvals) is never covered.
-            let security = await gate.decide(businessId: business.record.id!, channel: .sms, purpose: "security")
+            let security = await gate.decide(businessId: business.record.id!, channel: .sms, purpose: "security", kind: .authorize)
             XCTAssertEqual(security, .allow)
+            // Platform gate M1: a message that merely declares the security purpose is not exempt; only the server-known kind is.
+            let mislabelled = await gate.decide(businessId: business.record.id!, channel: .sms, purpose: "security", kind: .message)
+            XCTAssertEqual(mislabelled, .block, "a marketing blast labelled security must still be restricted")
+            let unlabelled = await gate.decide(businessId: business.record.id!, channel: .sms, purpose: "security")
+            XCTAssertEqual(unlabelled, .block)
             // A global clamp bounds what any tenant can send per minute; purposes can narrow a restriction.
             try await flags.clear(.messagingRestrict, businessId: business.record.id!, reason: "Wave over, lifting", actor: actor)
             try await flags.set(.messagingRestrict, value: #"{"mode":"clamp","channels":["sms"],"perMinute":2,"purposes":["marketing"]}"#, reason: "Provider asked us to slow down", actor: actor)
@@ -249,6 +254,19 @@ final class WP6KillSwitchTests: XCTestCase {
         }
     }
 
+    /// Platform gate M1 exploit: a marketing message labelled "security" skipped consent and the emergency restriction.
+    func testAMessageLabelledSecurityIsRefusedAtIssue() async throws {
+        try await withHarness { h in
+            let business = try await h.makeBusiness(name: "Blast Co", handle: "blastco")
+            let consumer = try await h.readyConsumer()
+            let relationship = try await h.connect(consumer, to: business)
+            let blast = try await h.issue(business, relationship: relationship, payload: .message(MessagePayload(text: "Flash sale today")), purpose: .security, key: "blast-1")
+            XCTAssertEqual(blast.status, .unprocessableEntity, blast.text)
+            let honest = try await h.issue(business, relationship: relationship, payload: .message(MessagePayload(text: "Flash sale today")), purpose: .support, key: "blast-2")
+            XCTAssertEqual(honest.status, .created, honest.text)
+        }
+    }
+
     func testARestrictedBusinessSendsNoTextsButItsSecurityTrafficStillGoes() async throws {
         try await withHarness { h in
             let business = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
@@ -257,8 +275,11 @@ final class WP6KillSwitchTests: XCTestCase {
             let relationship = try await h.connect(consumer, to: business)
             let channels: [DeliveryChannel] = [.nativePush, .inApp, .sms]
             func issue(purpose: InteractionPurpose) async throws {
-                let r = try await h.issue(business, relationship: relationship, payload: .confirm(ConfirmPayload(title: "Confirm seat 14C", details: "Flight 482", reference: "BK\(UUID().uuidString.prefix(6))")),
-                                          purpose: purpose, key: UUID().uuidString, ttl: 3600, channels: channels)
+                // A security-purpose request is a real approval (authorize); a confirmation labelled security is not exempt (gate M1).
+                let payload: InteractionPayload = purpose == .security ? .authorize(.sample(amount: "10.00"))
+                    : .confirm(ConfirmPayload(title: "Confirm seat 14C", details: "Flight 482", reference: "BK\(UUID().uuidString.prefix(6))"))
+                let r = try await h.issue(business, relationship: relationship, payload: payload,
+                                          purpose: purpose, key: UUID().uuidString, ttl: purpose == .security ? 300 : 3600, channels: channels)
                 XCTAssertEqual(r.status, .created, r.text)
             }
             let router = ChannelRouter(db: h.db, ctx: h.ctx)

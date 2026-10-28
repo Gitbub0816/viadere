@@ -269,9 +269,10 @@ struct MessagingGate {
     let db: any Database
     let ctx: ServerContext
 
-    /// Decides one outbound business message. Security-purpose traffic is always allowed here.
-    func decide(businessId: UUID, channel: Channel, purpose: String) async -> Decision {
-        guard purpose != InteractionPurpose.security.rawValue else { return .allow }
+    /// Decides one outbound business message. Sign-in and payment approvals are always allowed here, decided by the **server-known
+    /// kind** of the interaction: the purpose a business declares never exempts anything by itself (platform gate M1).
+    func decide(businessId: UUID, channel: Channel, purpose: String, kind: InteractionKind? = nil) async -> Decision {
+        if purpose == InteractionPurpose.security.rawValue, kind?.isRestrictionExempt == true { return .allow }
         let flags = PlatformFlags(db: db, ctx: ctx)
         var decision = Decision.allow
         for restriction in await flags.restrictions(businessId: businessId) where restriction.channels.contains(channel.rawValue) {

@@ -155,21 +155,21 @@ struct ChannelRouter {
             return
         }
         if row.channel == "rcs" {
-            if try await restricted(row, channel: .rcs, purpose: interactionRecord.purpose) { return }
+            if try await restricted(row, channel: .rcs, purpose: interactionRecord.purpose, kind: interactionRecord.kind) { return }
             switch try await sendRCS(row, interaction: interaction, summary: summary, phone: phone) {
             case .sent: return
             case .retry: return
             case .fallback(let reason): row.fallbackReason = reason
             }
         }
-        if try await restricted(row, channel: .sms, purpose: interactionRecord.purpose) { return }
+        if try await restricted(row, channel: .sms, purpose: interactionRecord.purpose, kind: interactionRecord.kind) { return }
         try await sendSMS(row, interaction: interaction, summary: summary, phone: phone, audit: audit)
     }
 
     /// Emergency messaging restriction (ops gap G-6). A blocked message is cancelled and audited; over a clamp it waits for the next window.
-    /// Security-purpose traffic is never restricted here. Returns true when the row was handled (blocked or deferred).
-    private func restricted(_ row: ChannelOutboundRecord, channel: MessagingGate.Channel, purpose: String) async throws -> Bool {
-        switch await MessagingGate(db: db, ctx: ctx).decide(businessId: row.businessId, channel: channel, purpose: purpose) {
+    /// Sign-in and payment approvals (by kind, not by declared purpose) are never restricted here. Returns true when the row was handled (blocked or deferred).
+    private func restricted(_ row: ChannelOutboundRecord, channel: MessagingGate.Channel, purpose: String, kind: String) async throws -> Bool {
+        switch await MessagingGate(db: db, ctx: ctx).decide(businessId: row.businessId, channel: channel, purpose: purpose, kind: InteractionKind(rawValue: kind)) {
         case .allow:
             return false
         case .block:

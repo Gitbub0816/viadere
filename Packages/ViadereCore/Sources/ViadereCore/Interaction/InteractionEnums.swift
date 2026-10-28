@@ -43,6 +43,24 @@ public enum InteractionKind: Hashable, Sendable, Codable, CustomStringConvertibl
         }
     }
 
+    /// Kinds that may claim the non-revocable `security` purpose (no consent check). Anything else (a message, a status, a reward...)
+    /// labelled `security` would bypass consent, so validation refuses it (platform gate M1).
+    public var mayCarrySecurityPurpose: Bool {
+        switch self {
+        case .authenticate, .authorize, .confirm: true
+        default: false
+        }
+    }
+
+    /// Kinds whose delivery the emergency messaging restriction (ops gap G-6) never covers: sign-in and payment approvals only.
+    /// Keyed on the server-known kind, never on the purpose the business declared.
+    public var isRestrictionExempt: Bool {
+        switch self {
+        case .authenticate, .authorize: true
+        default: false
+        }
+    }
+
     public init(from decoder: any Decoder) throws {
         self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
     }

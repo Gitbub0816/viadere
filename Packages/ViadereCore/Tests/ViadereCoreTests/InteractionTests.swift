@@ -71,6 +71,18 @@ struct InteractionTests {
         i = Fixtures.interaction(.authorize(Fixtures.mesaAuthorize), purpose: .marketing)
         #expect(InteractionValidation.issues(in: i, now: Fixtures.now).contains { $0.code == .purposeMismatch })
 
+        // Platform gate M1: the non-revocable security purpose (no consent, no emergency restriction) is for approvals only.
+        for payload in [InteractionPayload.message(MessagePayload(text: "Big sale")), .status(StatusPayload(title: "Order", body: "Shipped")), .acknowledge(AcknowledgePayload(title: "Hi", body: "x"))] {
+            i = Fixtures.interaction(payload, purpose: .security)
+            #expect(InteractionValidation.issues(in: i, now: Fixtures.now).contains { $0.code == .purposeMismatch }, "\(i.kind) must not claim the security purpose")
+        }
+        for payload in [InteractionPayload.authorize(Fixtures.mesaAuthorize), .confirm(ConfirmPayload(title: "Seat", details: "x", reference: "BK1"))] {
+            i = Fixtures.interaction(payload, purpose: .security)
+            #expect(!InteractionValidation.issues(in: i, now: Fixtures.now).contains { $0.code == .purposeMismatch })
+        }
+        #expect(InteractionKind.authenticate.isRestrictionExempt && InteractionKind.authorize.isRestrictionExempt)
+        #expect(!InteractionKind.confirm.isRestrictionExempt && !InteractionKind.message.isRestrictionExempt && !InteractionKind.unknown("x").isRestrictionExempt)
+
         i = Fixtures.interaction(.choose(ChoosePayload(prompt: "p", options: [ChoiceOption(id: "a", label: "A"), ChoiceOption(id: "a", label: "B")])))
         #expect(InteractionValidation.issues(in: i, now: Fixtures.now).contains { $0.code == .duplicate })
 

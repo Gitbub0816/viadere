@@ -118,6 +118,10 @@ public enum InteractionValidation {
         if interaction.kind.isSecuritySensitive, interaction.purpose == .marketing || interaction.purpose == .rewards {
             issues.append(Issue(.purposeMismatch, "purpose"))
         }
+        // The security purpose is non-revocable (consent never applies) and exempt from the emergency restriction: approvals only.
+        if interaction.purpose == .security, !interaction.kind.mayCarrySecurityPurpose {
+            issues.append(Issue(.purposeMismatch, "purpose"))
+        }
 
         switch interaction.payload {
         case .authenticate(let p):
