@@ -143,7 +143,7 @@ Confirm one fact, such as “over 21”, without handing over a date of birth, n
 
 {{ generate: mockup verify }}
 
-[Read the Verify intent](/products/verify/)
+[Read the Verify intent](/products/verify/){.more}
 :::
 ::: card
 {badge:planned}
@@ -154,7 +154,7 @@ A vault for your passkeys and one-time codes, synced between your devices, with 
 
 {{ generate: mockup authenticator }}
 
-[Read the Authenticator intent](/products/authenticator/)
+[Read the Authenticator intent](/products/authenticator/){.more}
 :::
 :::
 :::

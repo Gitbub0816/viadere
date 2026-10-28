@@ -7,7 +7,7 @@ import Foundation
 /// and by `hero_art: NAME` in front matter.
 public enum Showcase {
     public static let names = ["signin", "payment", "conversation", "wallet", "verify", "authenticator", "lineup", "contrast", "flow",
-                               "privacy", "signed-result", "stage", "pillars", "channels"]
+                               "privacy", "signed-result", "stage", "pillars", "channels", "curl"]
 
     public static func render(_ name: String) -> String? {
         switch name {
@@ -25,6 +25,7 @@ public enum Showcase {
         case "stage": return stage
         case "pillars": return pillars
         case "channels": return channels
+        case "curl": return Markdown.codeWindow(info: "bash POST /v1/business/interactions", code: curlSample)
         default: return nil
         }
     }
@@ -217,6 +218,23 @@ public enum Showcase {
     <div class="chan-c"><span class="chan-ic">\(Icons.svg("message"))</span><b>RCS</b><span class="chan-tag">Text with suggested replies</span><span class="chan-txt">Good for confirmations and support. A tap is an unauthenticated reply, so it never approves anything sensitive.</span></div>
     <div class="chan-c"><span class="chan-ic">\(Icons.svg("sms"))</span><b>SMS</b><span class="chan-tag">Plain text and secure links</span><span class="chan-txt">Reaches every phone. Ordinary SMS is not end-to-end encrypted, so sensitive requests become a secure link to the app.</span></div>
     </div>
+    """
+
+    static let curlSample = """
+    curl -X POST https://viadere.com/v1/business/interactions \\
+      -H "Authorization: Bearer $VIADERE_TEST_KEY" \\
+      -H "Idempotency-Key: order-1042-confirm" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "relationshipId": "1111…5555",
+        "kind": "confirm",
+        "purpose": "transactional",
+        "payload": { "title": "Confirm pickup" },
+        "sensitivity": "standard",
+        "allowedChannels": ["nativePush", "inApp"],
+        "ttlSeconds": 3600,
+        "idempotencyKey": "order-1042-confirm"
+      }'
     """
 
     /// A decorative QR-like pattern (not a scannable code): three finder squares plus deterministic noise.

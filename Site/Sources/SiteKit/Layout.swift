@@ -235,7 +235,7 @@ public struct Layout {
         if isHome {
             main = homeHero(p) + body
         } else if isMarketing(p) {
-            main = pageHead(p) + subnav(p) + "<div class=\"mk-body\">\(body)</div>"
+            main = subnav(p) + pageHead(p) + "<div class=\"mk-body\">\(body)</div>"
         } else {
             let side = sidebar(p)
             let wide = (p.front["wide"]?.bool ?? (p.section == "developers")) ? " wide" : ""

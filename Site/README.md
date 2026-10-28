@@ -11,6 +11,7 @@ Site/
   content/                   Markdown + front matter, one file per page (URL = path)
   static/assets/site.css     hand-written CSS (tokens match Design/README.md, light + dark)
   static/assets/fonts/       Outfit woff2 (OFL) from Design/tools/fonts
+  static/assets/media/       mark reveal animation (Design/motion) and its final frame, rendered in Chromium
   static/brand/              brand SVGs copied from Design/svg (a test fails if they drift)
   legal-lock.json            optional: hashes of legal versions that took effect
   deploy/upload.py           Cloudflare direct-upload deploy (Python stdlib)
@@ -70,11 +71,25 @@ Create `content/<section>/<page>.md` (or `<dir>/index.md`); the URL follows the 
 | `sms_fallback: true` | force the SMS rule (it is also detected from the text) |
 | `layout: home`, `noindex`, `path`, `wide`, `toc` | layout switches |
 
-Markdown subset: headings, lists, tables, fenced code, blockquotes, links, bold/italic, `{badge:beta}`, and containers
-(`::: card` ... `:::`, nestable: `grid grid-3`, `steps`, `callout`, `disclosure`, `band`, `wrap`). Raw HTML is escaped.
+Markdown subset: headings (`{#id}` sets an explicit id), lists (`- [ ]` task items), tables, fenced code, blockquotes,
+links, bold/italic, `{badge:beta}`, `{icon:name}` (line icons from `Icons.swift`), link classes (`[Go](/x/){.btn .secondary}`,
+`{.more}`), and containers (`::: card` ... `:::`, nestable: `grid grid-3`, `steps`, `callout`, `disclosure`, `band`, `wrap`,
+`feature` / `feature flip` with `feature-copy` and `feature-art`, `section-head`, `kicker`, `statement`, `devsplit`,
+`prose`). `::: section [classes]` renders a full-width band with a centred wrap (`alt`, `dark`, `cta`, `tight`). Fenced
+code takes `lang [title]` (```` ```swift Approve.swift ````) and is rendered as a code window with a dependency-free
+highlighter (Swift, JSON, shell, Python, HTTP). Raw HTML is escaped.
+
 Generated blocks: `{{ generate: product-cards }}`, `api-index`, `api-tag <Tag>`, `webhook-events`, `api-errors`,
-`schemas`, `info-section <OpenAPI info heading>`, `status-components`, `status-notices`, `legal-index`;
-`{{api-version}}` inserts the contract version. API tag pages (`/developers/api/<tag>/`) come from `openapi.yaml`.
+`schemas`, `info-section <OpenAPI info heading>`, `status-components`, `status-notices`, `legal-index`, and
+`mockup <name>` (CSS-drawn product illustrations from `Showcase.swift`: `signin`, `payment`, `conversation`, `wallet`,
+`verify`, `authenticator`, `lineup`, `contrast`, `flow`, `privacy`, `signed-result`, `stage`, `pillars`, `channels`,
+`curl`). Every device mockup uses fictional businesses and is captioned as an illustration; its text is linted with the
+page. `{{api-version}}` inserts the contract version. API tag pages (`/developers/api/<tag>/`) come from `openapi.yaml`.
+
+Layouts: `layout: home` (the dark hero with `static/assets/media/viadere-mark-reveal.webp`, screen-blended on black,
+and `viadere-mark-final.webp` for `prefers-reduced-motion`), `layout: marketing` (page hero, section sub-navigation,
+full-width body built from `::: section` bands; front matter `headline` with `*emphasis*`, `hero_art: <mockup>`,
+`actions`, `subnav: false`), and the default docs layout with sidebar and table of contents.
 
 ## Marketing integrity lint (spec 10.2, acceptance 10)
 
