@@ -155,5 +155,5 @@ final class ConversationMessageRecord: Model, @unchecked Sendable {
     @OptionalField(key: "client_message_id") var clientMessageId: String?
     @OptionalField(key: "provider_message_id") var providerMessageId: String?
 
-    init() {}
+    init() { contentErased = false }
 }
