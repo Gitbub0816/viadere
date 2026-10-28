@@ -307,7 +307,7 @@ struct RetentionPurger {
             if !heldBusinesses.isEmpty { q = q.filter(\.$businessId !~ heldBusinesses) }
             if !heldConsumers.isEmpty { q = q.filter(\.$consumerId !~ heldConsumers) }
             let ids = try await q.limit(Self.batch).all().compactMap(\.id)
-            if !ids.isEmpty { try await DecisionRecord.query(on: db).filter(\.$id ~~ ids).delete() }
+            if !ids.isEmpty { try await RetentionDeleteGate.perform(on: db) { tx in try await DecisionRecord.query(on: tx).filter(\.$id ~~ ids).delete() } }
             removed += ids.count
         case .consentHistory:
             var q = ConsentGrantRecord.query(on: db).filter(\.$createdAt < platformCutoff)
@@ -317,7 +317,10 @@ struct RetentionPurger {
                 // Only a version that a newer one superseded: the current consent of a relationship is the evidence that matters.
                 let newer = try await ConsentGrantRecord.query(on: db).filter(\.$relationshipId == row.relationshipId).filter(\.$purpose == row.purpose)
                     .filter(\.$version > row.version).count()
-                if newer > 0, let id = row.id { try await ConsentGrantRecord.query(on: db).filter(\.$id == id).delete(); removed += 1 }
+                if newer > 0, let id = row.id {
+                    try await RetentionDeleteGate.perform(on: db) { tx in try await ConsentGrantRecord.query(on: tx).filter(\.$id == id).delete() }
+                    removed += 1
+                }
             }
         case .auditEvents:
             removed += try await AuditRetention(db: db, ctx: ctx).purge(before: platformCutoff, report: &report)
@@ -442,16 +445,20 @@ struct AuditRetention {
               let head = try await AuditEventRecord.query(on: db).sort(\.$seq, .descending).first(), last.seq < head.seq else { return 0 }
         let removed = try await AuditEventRecord.query(on: db).filter(\.$seq <= last.seq).count()
         guard removed > 0 else { return 0 }
-        try await db.transaction { tx in
+        let lastSeq = last.seq
+        let lastHash = last.hash
+        let lastEpoch = last.keyEpoch
+        let now = ctx.now
+        try await RetentionDeleteGate.perform(on: db) { tx in
             let checkpoint = AuditCheckpointRecord()
             checkpoint.id = UUID()
-            checkpoint.seq = last.seq
-            checkpoint.hash = last.hash
-            checkpoint.keyEpoch = last.keyEpoch
+            checkpoint.seq = lastSeq
+            checkpoint.hash = lastHash
+            checkpoint.keyEpoch = lastEpoch
             checkpoint.removed = removed
-            checkpoint.createdAt = ctx.now
+            checkpoint.createdAt = now
             try await checkpoint.create(on: tx)
-            try await AuditEventRecord.query(on: tx).filter(\.$seq <= last.seq).delete()
+            try await AuditEventRecord.query(on: tx).filter(\.$seq <= lastSeq).delete()
         }
         return removed
     }

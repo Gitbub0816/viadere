@@ -36,7 +36,7 @@ final class WP6KillSwitchTests: XCTestCase {
             // Business users cannot reach the operator console at all.
             let denied = try await h.formPost("/operator/switches/maintenance", owner, [("action", "off"), ("reason", "I would like to turn it off")])
             XCTAssertTrue([.forbidden, .seeOther, .unauthorized].contains(denied.status))
-            let still = try await PlatformFlags(db: h.db, ctx: h.ctx).maintenance()
+            let still = await PlatformFlags(db: h.db, ctx: h.ctx).maintenance()
             XCTAssertEqual(still, "Back soon")
         }
     }

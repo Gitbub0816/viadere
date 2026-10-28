@@ -51,3 +51,66 @@ enum DatabaseRoles {
         return (row?.create ?? false) || (row?.owns ?? false)
     }
 }
+
+/// The append-only tables (`audit_events`, `decisions`, `consent_grants`) refuse every UPDATE and DELETE at the database. Retention (LEG-PR-006) has
+/// to delete rows past their documented minimum, so the DELETE trigger gets one narrow exception: it passes only inside a transaction that opened the
+/// retention gate (`RetentionDeleteGate.perform`). PostgreSQL uses a transaction-local setting that vanishes at commit or rollback; SQLite (tests
+/// and development) uses a one-row table that the same transaction closes again, so a failure rolls it back. UPDATE stays refused everywhere, and
+/// the other append-only tables (consent SMS events, the key-directory log) get no exception at all.
+///
+/// Honest limit: a process that can run SQL as the runtime role can open the gate too. What protects the audit log from that is the write-once
+/// export of signed heads (`AuditHeadExporter`), not this trigger; the trigger stops accidents and ordinary code paths.
+struct CreateRetentionDeleteGate: AsyncMigration {
+    var name: String { "CreateRetentionDeleteGate.v1" }
+
+    static let gatedTables = ["audit_events", "decisions", "consent_grants"]
+
+    func prepare(on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase else { return }
+        if sql.dialect.name == "postgresql" {
+            try await sql.raw("""
+                CREATE OR REPLACE FUNCTION viadere_append_only() RETURNS trigger AS $$
+                BEGIN
+                    IF TG_OP = 'DELETE' AND TG_TABLE_NAME IN ('audit_events', 'decisions', 'consent_grants')
+                       AND current_setting('viadere.retention', true) = 'on' THEN
+                        RETURN OLD;
+                    END IF;
+                    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+                END;
+                $$ LANGUAGE plpgsql
+                """).run()
+        } else {
+            try await sql.raw("CREATE TABLE IF NOT EXISTS retention_gate (open INTEGER NOT NULL)").run()
+            try await sql.raw("INSERT INTO retention_gate (open) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM retention_gate)").run()
+            for table in Self.gatedTables {
+                try await sql.raw(SQLQueryString("DROP TRIGGER IF EXISTS \(unsafeRaw: table)_no_delete")).run()
+                try await sql.raw(SQLQueryString("""
+                    CREATE TRIGGER \(unsafeRaw: table)_no_delete BEFORE DELETE ON \(unsafeRaw: table)
+                    WHEN (SELECT open FROM retention_gate LIMIT 1) = 0
+                    BEGIN SELECT RAISE(ABORT, 'append-only table'); END
+                    """)).run()
+            }
+        }
+    }
+
+    func revert(on db: any Database) async throws {}
+}
+
+enum RetentionDeleteGate {
+    /// Runs `body` in a transaction in which the gated tables accept DELETE. Only the retention job calls this.
+    static func perform<T: Sendable>(on db: any Database, _ body: @escaping @Sendable (any Database) async throws -> T) async throws -> T {
+        try await db.transaction { tx in
+            if let sql = tx as? any SQLDatabase {
+                if sql.dialect.name == "postgresql" { try await sql.raw("SET LOCAL viadere.retention = 'on'").run() } else { try await sql.raw("UPDATE retention_gate SET open = 1").run() }
+            }
+            do {
+                let result = try await body(tx)
+                if let sql = tx as? any SQLDatabase, sql.dialect.name != "postgresql" { try await sql.raw("UPDATE retention_gate SET open = 0").run() }
+                return result
+            } catch {
+                if let sql = tx as? any SQLDatabase, sql.dialect.name != "postgresql" { _ = try? await sql.raw("UPDATE retention_gate SET open = 0").run() }
+                throw error
+            }
+        }
+    }
+}
