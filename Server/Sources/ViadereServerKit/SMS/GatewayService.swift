@@ -93,6 +93,8 @@ struct GatewayService {
     /// session; otherwise it stays in history. Returns true when an SMS was queued.
     @discardableResult
     func deliverBusinessMessage(businessId: BusinessID, sessionId: SessionID, text: String, messageId: UUID?, livemode: Bool = true) async throws -> Bool {
+        // Emergency messaging restriction (G-6): the reply stays in the conversation history, it is not texted.
+        guard await MessagingGate(db: db, ctx: ctx).decide(businessId: businessId.uuid, channel: .sms, purpose: InteractionPurpose.accountService.rawValue) == .allow else { return false }
         for _ in 0..<Self.maxConflictRetries {
             do {
                 return try await db.transaction { tx in

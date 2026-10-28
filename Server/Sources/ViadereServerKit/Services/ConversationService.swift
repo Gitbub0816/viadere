@@ -241,6 +241,7 @@ struct ConversationService {
     }
 
     private func pushMessageNotice(consumerId: UUID, businessId: BusinessID) async {
+        guard await MessagingGate(db: db, ctx: ctx).decide(businessId: businessId.uuid, channel: .push, purpose: InteractionPurpose.accountService.rawValue) == .allow else { return }
         do {
             guard let business = try await BusinessRecord.find(businessId.uuid, on: db),
                   let summary = try await DirectoryService(db: db).summary(for: business) else { return }

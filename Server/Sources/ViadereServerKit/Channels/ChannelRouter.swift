@@ -155,13 +155,36 @@ struct ChannelRouter {
             return
         }
         if row.channel == "rcs" {
+            if try await restricted(row, channel: .rcs, purpose: interactionRecord.purpose) { return }
             switch try await sendRCS(row, interaction: interaction, summary: summary, phone: phone) {
             case .sent: return
             case .retry: return
             case .fallback(let reason): row.fallbackReason = reason
             }
         }
+        if try await restricted(row, channel: .sms, purpose: interactionRecord.purpose) { return }
         try await sendSMS(row, interaction: interaction, summary: summary, phone: phone, audit: audit)
+    }
+
+    /// Emergency messaging restriction (ops gap G-6). A blocked message is cancelled and audited; over a clamp it waits for the next window.
+    /// Security-purpose traffic is never restricted here. Returns true when the row was handled (blocked or deferred).
+    private func restricted(_ row: ChannelOutboundRecord, channel: MessagingGate.Channel, purpose: String) async throws -> Bool {
+        switch await MessagingGate(db: db, ctx: ctx).decide(businessId: row.businessId, channel: channel, purpose: purpose) {
+        case .allow:
+            return false
+        case .block:
+            try await finish(row, status: "cancelled", error: "restricted")
+            _ = try await AuditService(db: db, ctx: ctx).record("channel.restricted", outcome: .denied, actor: AuditActor(kind: .system), consumerId: ConsumerID(row.consumerId),
+                businessId: BusinessID(row.businessId), subjectType: "interaction", subjectId: row.interactionId.uuidString.lowercased(),
+                metadata: ["channel": channel.rawValue, "purpose": purpose])
+            return true
+        case .delay(let seconds):
+            row.status = "queued"
+            row.nextAttemptAt = ctx.now.addingTimeInterval(seconds)
+            row.errorCode = "restricted"
+            try await row.update(on: db)
+            return true
+        }
     }
 
     // MARK: RCS
