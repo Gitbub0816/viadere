@@ -150,4 +150,34 @@ final class PlatformGateOpsTests: XCTestCase {
             XCTAssertEqual(again, 0)
         }
     }
+
+    // MARK: L6
+
+    /// Platform gate L6: the household/reward code patterns (`XXXX-XXXX`) are case-sensitive over an alphabet that includes every digit and A-F, so
+    /// any UUID whose adjacent middle groups were digit-only (lowercase) or any uppercase UUID had its groups masked: an audit decision then no
+    /// longer named its receipt (a flake in PolicyWP2Tests, about one run in fourteen).
+    func testTheRedactorNeverAltersAUUIDOrAnOpaqueIdentifier() {
+        let fixed = ["12345678-1234-5678-1234-567812345678", "00000000-0000-4000-8000-000000000001", "0A1B2C3D-4E5F-6789-ABCD-EF0123456789"]
+        for id in fixed {
+            XCTAssertEqual(LogRedactor.redact(id), id)
+            XCTAssertEqual(LogRedactor.redact(id.lowercased()), id.lowercased())
+            XCTAssertEqual(LogRedactor.redact("receipt \(id) used"), "receipt \(id) used")
+            XCTAssertEqual(AuditRedactor.redact(["receiptId": id]), ["receiptId": id])
+        }
+        for _ in 0..<3_000 {
+            let id = UUID().uuidString
+            XCTAssertEqual(LogRedactor.redact(id), id)
+            XCTAssertEqual(LogRedactor.redact(id.lowercased()), id.lowercased())
+        }
+        for opaque in ["ten_0123456789abcdef0123456789abcdef", "req_8f14e45fceea167a5a36dedd4bea2543", "evt_00000000-0000-4000-8000-0000000000e1"] {
+            XCTAssertEqual(LogRedactor.redact(opaque), opaque)
+        }
+        // What must still be masked, including next to an identifier.
+        XCTAssertEqual(LogRedactor.redact("call +14155550123 now"), "call [phone] now")
+        XCTAssertEqual(LogRedactor.redact("code: 482913"), "code=[redacted]")
+        XCTAssertEqual(LogRedactor.redact("otp=482913 for 12345678-1234-5678-1234-567812345678"), "otp=[redacted] for 12345678-1234-5678-1234-567812345678")
+        XCTAssertEqual(LogRedactor.redact("redeemed K7M2Q-9XPT4 ok"), "redeemed [redacted-code] ok")
+        XCTAssertEqual(LogRedactor.redact("invite K7M2-9QXP now"), "invite [redacted-code] now")
+        XCTAssertEqual(LogRedactor.redact("token=12345678-1234-5678-1234-567812345678"), "token=[redacted]")
+    }
 }

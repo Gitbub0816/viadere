@@ -27,11 +27,24 @@ public enum LogRedactor {
         return specs.compactMap { spec in (try? NSRegularExpression(pattern: spec.0)).map { ($0, spec.1) } }
     }()
 
+    /// A well-formed UUID (either case). Identifiers are not secrets, and the code patterns above (`XXXX-XXXX`, whose alphabet contains every digit
+    /// and A-F) would otherwise mask any two adjacent digit-only groups of a UUID, or every group of an uppercase one (platform gate L6).
+    private static let uuid = try! NSRegularExpression(pattern: #"(?<![0-9A-Za-z-])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Za-z-])"#)
+
     public static func redact(_ text: String) -> String {
+        // Set well-formed UUIDs aside so no pattern can alter them, then put them back. A UUID that a pattern consumes whole (`token=<uuid>`)
+        // is masked with it and its placeholder disappears with the value.
+        var kept: [String] = []
         var out = text
+        for match in uuid.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let range = Range(match.range, in: out) else { continue }
+            kept.append(String(out[range]))
+            out.replaceSubrange(range, with: "\u{1}UUID\(kept.count - 1)\u{1}")
+        }
         for (regex, template) in patterns {
             out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }
+        for (index, original) in kept.enumerated() { out = out.replacingOccurrences(of: "\u{1}UUID\(index)\u{1}", with: original) }
         return out
     }
 }
