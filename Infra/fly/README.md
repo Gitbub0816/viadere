@@ -75,7 +75,7 @@ run the release; the startup check names the variable that is wrong.
 ### 1b. Metrics, audit export
 
 `METRICS_TOKEN` protects `GET /metrics` (counters and gauges, no personal data; add the header `Authorization: Bearer <token>` in the scraper; the edge token is required as for everything else, so scrape through
-Cloudflare or set `METRICS_PORT` and scrape the private address). `AUDIT_HEAD_EXPORT=gcs` with `AUDIT_HEAD_EXPORT_TARGET=$(tofu output -raw audit_head_bucket)`, `AUDIT_HEAD_KMS_KEY=<audit_head_kms_key output>/cryptoKeyVersions/1`
+Cloudflare or set `METRICS_PORT` and scrape the machine's private 6PN address: the internal listener binds to `FLY_PRIVATE_IP` when Fly sets it, else to loopback, never to `0.0.0.0`, and it requires the same bearer token; the server refuses to start with `METRICS_PORT` and no `METRICS_TOKEN`). `AUDIT_HEAD_EXPORT=gcs` with `AUDIT_HEAD_EXPORT_TARGET=$(tofu output -raw audit_head_bucket)`, `AUDIT_HEAD_KMS_KEY=<audit_head_kms_key output>/cryptoKeyVersions/1`
 and the three `GCP_*` workload-identity values writes a signed head every `AUDIT_HEAD_EXPORT_INTERVAL_HOURS` to the locked bucket (`Infra/terraform/audit_bucket.tf`); `AUDIT_HEAD_EXPORT=r2` is the Cloudflare
 alternative (bucket with Object Lock, `AUDIT_HEAD_EXPORT_ENDPOINT=https://<account>.r2.cloudflarestorage.com`, an access key limited to PutObject on that bucket). Alert when `viadere_audit_head_export_age_seconds` exceeds twice the interval.
 
