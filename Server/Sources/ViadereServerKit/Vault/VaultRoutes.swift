@@ -13,7 +13,7 @@ enum VaultRoutes {
 
     static func register(_ routes: any RoutesBuilder) {
         // A key rotation re-uploads every item, so these routes may carry more than the global body limit (only while sync is enabled).
-        let big: ByteCount = "1mb"
+        let big: ByteCount = "4mb"  // VaultSyncSettings.maxRequestBytes
         routes.api(APIRoutes.vaultStatus) { req in
             try req.jsonResponse(try await Self.service(req).status(try req.consumer))
         }
@@ -41,6 +41,14 @@ enum VaultRoutes {
         }
         routes.api(APIRoutes.vaultRecoveryEnvelope) { req in
             try req.jsonResponse(try await Self.service(req).recoveryEnvelope(try req.consumer))
+        }
+        routes.api(APIRoutes.vaultRecoveryReleaseRequest) { req in
+            try req.jsonResponse(try await Self.service(req).requestRecoveryRelease(try req.consumer))
+        }
+        routes.api(APIRoutes.vaultRecoveryReleaseCancel) { req in
+            let svc = try Self.service(req)
+            guard let id = req.parameters.get("releaseId").flatMap(UUID.init(uuidString:)) else { throw APIError.notFound }
+            return try req.jsonResponse(try await svc.cancelRecoveryRelease(try req.consumer, releaseId: id))
         }
         routes.api(APIRoutes.vaultDevices) { req in
             try req.jsonResponse(try await Self.service(req).devices(try req.consumer))

@@ -94,9 +94,9 @@ final class VaultSyncTests: XCTestCase {
             let member = Base64URL.encode(SecureToken.randomBytes(32))
             let consumer = try await h.readyConsumer()
             let vaultRoutes = APIRoutes.all.filter { $0.template.hasPrefix("/v1/vault") }
-            XCTAssertGreaterThanOrEqual(vaultRoutes.count, 13)
+            XCTAssertGreaterThanOrEqual(vaultRoutes.count, 15)
             for endpoint in vaultRoutes {
-                let path = endpoint.template.replacingOccurrences(of: "{joinId}", with: id).replacingOccurrences(of: "{memberId}", with: member)
+                let path = endpoint.template.replacingOccurrences(of: "{joinId}", with: id).replacingOccurrences(of: "{memberId}", with: member).replacingOccurrences(of: "{releaseId}", with: UUID().uuidString.lowercased())
                 let method = NIOHTTP1.HTTPMethod(rawValue: endpoint.method.rawValue)
                 let body: Data? = endpoint.method == .GET || endpoint.method == .DELETE ? nil : Data("{}".utf8)
                 let anonymous = try await h.request(method, path, body: body)
@@ -121,8 +121,9 @@ final class VaultSyncTests: XCTestCase {
         var config = ServerConfig.testing()
         XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vault"), 64 * 1024)
         config.vaultSync.enabled = true
-        XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vault"), 1_048_576)
-        XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vault/joins/x"), 1_048_576)
+        XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vault"), 4 * 1_048_576)
+        XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vault/joins/x"), 4 * 1_048_576)
+        XCTAssertGreaterThanOrEqual(config.vaultSync.maxRequestBytes, VaultFormat.maxRotationRequestBytes, "a full rotation must fit the request ceiling")
         XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/vaulty"), 64 * 1024)
         XCTAssertEqual(config.maxBodyBytes(forPath: "/v1/devices"), 64 * 1024)
     }
@@ -257,7 +258,7 @@ final class VaultSyncTests: XCTestCase {
     func testBodyLimitAppliesWhileEnabledAndOversizedRequestsAreRefused() async throws {
         try await withHarness(Self.enabled) { h in
             let f = try await fixture(h)
-            let huge = Data(repeating: 0x61, count: 1_048_576 + 10)
+            let huge = Data(repeating: 0x61, count: 4 * 1_048_576 + 10)
             let response = try await h.signed(f.a, .PUT, "/v1/vault", body: huge)
             XCTAssertEqual(response.status, .payloadTooLarge)
         }
@@ -291,7 +292,11 @@ final class VaultSyncTests: XCTestCase {
             // Claiming a join that nobody approved binds nothing.
             let joinId = Base64URL.encode(SecureToken.randomBytes(16))
             try await eq(try await call(h, attacker, APIRoutes.vaultJoinRequest, params: ["joinId": joinId], body: VaultJoinRequestBody(request: Base64URL.encode(SecureToken.randomBytes(80)))).status, .notFound)
-            // Can read only what is public: the signed history, and ciphertext. Not enough to open anything.
+            // Reads nothing at all until a recovery release has held for 72 hours (see VaultGateTests); then only ciphertext and public keys.
+            try await eq(try await get(h, attacker, APIRoutes.vaultManifests).status, .forbidden)
+            try await eq(try await call(h, attacker, APIRoutes.vaultBlobs, body: VaultBlobsRequest(itemIds: f.vault.manifest.items.map(\.itemId))).status, .forbidden)
+            try await eq(try await get(h, attacker, APIRoutes.vaultRecoveryEnvelope).status, .forbidden)
+            try await openWindow(h, attacker)
             let chain = try await get(h, attacker, APIRoutes.vaultManifests).json(VaultManifestsResponse.self)
             XCTAssertEqual(chain.manifests.count, 1)
             let blobs = try await call(h, attacker, APIRoutes.vaultBlobs, body: VaultBlobsRequest(itemIds: f.vault.manifest.items.map(\.itemId))).json(VaultBlobsResponse.self)
@@ -473,6 +478,7 @@ final class VaultSyncTests: XCTestCase {
             let f = try await fixture(h, items: [item, totp()])
             // The account is recovered: a brand-new device, trusted after its cool-down. It can read all the server holds.
             let recovered = try await trustedSecondDevice(h, f.a)
+            try await openWindow(h, recovered)
             let chainResponse = try await get(h, recovered, APIRoutes.vaultManifests).json(VaultManifestsResponse.self)
             let chain = chainResponse.manifests.compactMap(\.signed)
             let recoveryEnvelope = try await get(h, recovered, APIRoutes.vaultRecoveryEnvelope).json(VaultEnvelopeResponse.self)
@@ -515,9 +521,11 @@ final class VaultSyncTests: XCTestCase {
     func testRecoveryEnvelopeFetchesAreRateLimited() async throws {
         try await withHarness({ $0.vaultSync.enabled = true; $0.vaultSync.recoveryRate = .perHour(2, burst: 2) }) { h in
             let f = try await fixture(h)
-            try await eq(try await get(h, f.a, APIRoutes.vaultRecoveryEnvelope).status, .ok)
-            try await eq(try await get(h, f.a, APIRoutes.vaultRecoveryEnvelope).status, .ok)
-            let limited = try await get(h, f.a, APIRoutes.vaultRecoveryEnvelope)
+            let requester = try await trustedSecondDevice(h, f.a)
+            try await openWindow(h, requester)
+            try await eq(try await get(h, requester, APIRoutes.vaultRecoveryEnvelope).status, .ok)
+            try await eq(try await get(h, requester, APIRoutes.vaultRecoveryEnvelope).status, .ok)
+            let limited = try await get(h, requester, APIRoutes.vaultRecoveryEnvelope)
             XCTAssertEqual(limited.status, .tooManyRequests)
             XCTAssertNotNil(limited.headers.first(name: "Retry-After"))
         }

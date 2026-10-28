@@ -44,8 +44,74 @@ struct VaultService {
         return (vault, member)
     }
 
+    /// Rate-limit buckets are keyed by account **and device**, so one account device cannot use up what the others need (gate review L5).
+    private func bucketKey(_ principal: ConsumerPrincipal) -> String {
+        "\(principal.consumerId.description)/\(principal.deviceId.map { $0.uuid.uuidString.lowercased() } ?? "-")"
+    }
+
     private func throttle(_ name: String, _ principal: ConsumerPrincipal, rule: RateRule) async throws {
-        try await ctx.limiter.enforce(name, key: principal.consumerId.description, rule: rule)
+        try await ctx.limiter.enforce(name, key: bucketKey(principal), rule: rule)
+    }
+
+    /// Reads draw on the bound-device bucket only when the caller is bound; every other caller has its own, smaller bucket.
+    private func throttleRead(_ principal: ConsumerPrincipal, bound: Bool) async throws {
+        if bound {
+            try await throttle("vault-read", principal, rule: settings.readRate)
+        } else {
+            try await throttle("vault-unbound", principal, rule: settings.unboundReadRate)
+        }
+    }
+
+    // MARK: Recovery-envelope release (gate review M2)
+
+    private func releaseState(_ record: VaultRecoveryReleaseRecord) -> VaultRecoveryRelease.State {
+        switch record.state {
+        case "cancelled": return .cancelled
+        case "consumed": return .consumed
+        default: return ctx.now < record.releaseAt ? .holding : (ctx.now < record.expiresAt ? .released : .expired)
+        }
+    }
+
+    private func releaseDTO(_ record: VaultRecoveryReleaseRecord, _ principal: ConsumerPrincipal) -> VaultRecoveryRelease {
+        VaultRecoveryRelease(releaseId: record.id ?? UUID(), state: releaseState(record), requestedAt: record.requestedAt, releaseAt: record.releaseAt,
+                             expiresAt: record.expiresAt, requestedByThisDevice: record.requesterDeviceId == principal.deviceId?.uuid)
+    }
+
+    /// Releases that can still matter: not cancelled or consumed, and not past their window.
+    private func openReleases(_ vaultId: UUID) async throws -> [VaultRecoveryReleaseRecord] {
+        let now = ctx.now
+        return try await VaultRecoveryReleaseRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$state == "pending").filter(\.$expiresAt > now)
+            .sort(\.$requestedAt, .descending).all()
+    }
+
+    /// The first time anyone sees a window open, the account is told (nothing runs at the 72 h mark by itself).
+    private func announceOpening(_ record: VaultRecoveryReleaseRecord) async {
+        guard let id = record.id, record.releaseAt <= ctx.now, record.openedNotifiedAt == nil,
+              (try? await DB.swapFromNull(db, table: VaultRecoveryReleaseRecord.schema, id: id, column: "opened_notified_at", newValue: ctx.now)) == true else { return }
+        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: record.consumerId, except: record.requesterDeviceId, notice: .vaultRecoveryReleased, subjectId: id.uuidString.lowercased())
+    }
+
+    /// The release that is open **for this device** right now: its hold has passed, its 24 h window has not, and it was this device that asked.
+    private func activeWindow(_ principal: ConsumerPrincipal, vault: VaultRecord) async throws -> VaultRecoveryReleaseRecord? {
+        guard let device = principal.deviceId, let vaultId = vault.id else { return nil }
+        guard let window = try await openReleases(vaultId).first(where: { $0.requesterDeviceId == device.uuid && $0.releaseAt <= ctx.now }) else { return nil }
+        await announceOpening(window)
+        return window
+    }
+
+    private func requireWindow(_ principal: ConsumerPrincipal, vault: VaultRecord) async throws -> VaultRecoveryReleaseRecord {
+        guard let window = try await activeWindow(principal, vault: vault) else {
+            throw APIError(.forbidden, .forbidden, "This device is not part of the synced vault. To restore with the recovery key, ask for a release in Viadere: it takes effect after a 72-hour wait that your other devices can cancel.")
+        }
+        return window
+    }
+
+    /// An account device that once acted for a vault member that was since removed never gets back in (gate review L4).
+    private func requireNotFormerMember(_ principal: ConsumerPrincipal, vault: VaultRecord) async throws {
+        guard let device = principal.deviceId, let vaultId = vault.id else { return }
+        if try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$formerDeviceId == device.uuid).count() > 0 {
+            throw APIError(.forbidden, .forbidden, "This device was removed from the synced vault. Set it up again as a new device.")
+        }
     }
 
     static func hex(_ data: Data) -> String { Hex.encode(data) }
@@ -74,13 +140,18 @@ struct VaultService {
     // MARK: Status
 
     func status(_ principal: ConsumerPrincipal) async throws -> VaultStatus {
-        try await throttle("vault-read", principal, rule: settings.readRate)
-        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else { return VaultStatus(exists: false) }
+        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else {
+            try await throttleRead(principal, bound: false)
+            return VaultStatus(exists: false)
+        }
         let members = try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$removedAt == nil).all()
         let bound = try await boundMember(principal, in: vault)
+        try await throttleRead(principal, bound: bound != nil)
+        let open = try await openReleases(vaultId).first
+        if let open { await announceOpening(open) }
         return VaultStatus(exists: true, vaultId: vaultId, version: UInt64(vault.version), epoch: UInt64(vault.epoch), bound: bound != nil,
                            memberId: bound?.memberId, deviceCount: members.filter { $0.role == "device" }.count,
-                           recoveryConfigured: members.contains { $0.role == "recovery" })
+                           recoveryConfigured: members.contains { $0.role == "recovery" }, recoveryRelease: open.map { releaseDTO($0, principal) })
     }
 
     // MARK: Write
@@ -112,6 +183,7 @@ struct VaultService {
         var previous: VerifiedManifest?
         let genesis = request.expectedVersion == 0
         var recoveryRestore = false
+        var restoreWindow: VaultRecoveryReleaseRecord?
         if genesis {
             guard existing == nil else { throw conflict(currentVersion: existing?.version ?? 0) }
             // Creating a vault takes a trusted device: a device enrolled minutes ago with a stolen passkey cannot claim the account's vault.
@@ -131,7 +203,10 @@ struct VaultService {
                 // Restoring with the recovery key: a trusted device that is not yet a member signs with its own new key (authorized by the
                 // recovery member, which `verify` checked) and binds itself.
                 try await DeviceTrust.require(principal, db: db, now: ctx.now)
-                try await ctx.limiter.enforce("vault-recovery-put", key: consumer.uuidString, rule: settings.recoveryRate)
+                try await requireNotFormerMember(principal, vault: existing)
+                // Only the device whose release window is open may restore (M2); the window is spent by the restore.
+                restoreWindow = try await requireWindow(principal, vault: existing)
+                try await throttle("vault-recovery-put", principal, rule: settings.recoveryRate)
                 guard request.bindMemberId == verified.manifest.signerId, request.joinId == nil else { throw APIError.validation("The restoring device must bind to itself.") }
             } else {
                 guard let bound = try await boundMember(principal, in: existing), bound.memberId == verified.manifest.signerId else {
@@ -173,7 +248,8 @@ struct VaultService {
         }
         guard Set(newEnvelopes.keys).isSubset(of: Set(m.members.map(\.id))) else { throw APIError.validation("An envelope names no member.") }
 
-        let totalBytes = m.items.reduce(0) { $0 + (newBlobs[$1.itemId]?.count ?? storedById[$1.itemId]?.blob.count ?? 0) } + signed.manifestBytes.count
+        // Item ciphertext only: re-encryption keeps blob sizes, so a vault inside this cap can always upload a full rotation (gate review M3).
+        let totalBytes = m.items.reduce(0) { $0 + (newBlobs[$1.itemId]?.count ?? storedById[$1.itemId]?.blob.count ?? 0) }
         guard totalBytes <= settings.maxVaultBytes else { throw APIError.validation("The vault is too large.") }
 
         // Membership changes.
@@ -188,6 +264,9 @@ struct VaultService {
                   let record = try await VaultJoinRecord.query(on: db).filter(\.$joinId == joinId).filter(\.$consumerId == consumer).first(),
                   record.vaultId == vaultId, record.expiresAt > ctx.now, record.request != nil, record.approval == nil, record.requesterDeviceId != nil else {
                 throw APIError.validation("The join is not valid.")
+            }
+            if let requester = record.requesterDeviceId, try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$formerDeviceId == requester).count() > 0 {
+                throw APIError.validation("That device was removed from the vault before.")
             }
             // The requesting device must not already act as another member: one account device, one vault member.
             if let requester = record.requesterDeviceId, try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId)
@@ -204,7 +283,7 @@ struct VaultService {
 
         let now = ctx.now
         let hash = Self.hex(verified.hash)
-        let blobUploads = newBlobs, envelopeUploads = newEnvelopes, isRestore = recoveryRestore, joinRecord = join
+        let blobUploads = newBlobs, envelopeUploads = newEnvelopes, isRestore = recoveryRestore, joinRecord = join, window = restoreWindow
         do {
             try await db.transaction { tx in
                 if genesis {
@@ -251,8 +330,13 @@ struct VaultService {
                     }
                 }
                 for gone in removed {
+                    let former = storedMembers.first { $0.memberId == gone.id }.flatMap { $0.accountDeviceId ?? $0.formerDeviceId }
                     try await VaultMemberRecord.query(on: tx).filter(\.$vaultId == vaultId).filter(\.$memberId == gone.id)
-                        .set(\.$removedAt, to: now).set(\.$envelope, to: nil).set(\.$accountDeviceId, to: nil).update()
+                        .set(\.$removedAt, to: now).set(\.$envelope, to: nil).set(\.$accountDeviceId, to: nil).set(\.$formerDeviceId, to: former).update()
+                }
+                if let window {
+                    guard try await DB.swap(tx, table: VaultRecoveryReleaseRecord.schema, id: window.id!, column: "state", expected: "pending", newValue: "consumed",
+                                            extra: [("closed_at", now)]) else { throw ConcurrencyConflict() }
                 }
                 if let joinRecord, let approval = request.joinApproval.flatMap(Base64URL.decode) {
                     try await VaultJoinRecord.query(on: tx).filter(\.$id == joinRecord.id!).set(\.$approval, to: approval).set(\.$approvedMemberId, to: request.joinMemberId)
@@ -276,6 +360,9 @@ struct VaultService {
         if let gone = removed.first(where: { $0.role == .device }) {
             await notices.notifyOtherDevices(of: consumer, except: principal.deviceId?.uuid, notice: .vaultDeviceRemoved, subjectId: gone.id)
         }
+        if recoveryRestore {
+            await notices.notifyOtherDevices(of: consumer, except: principal.deviceId?.uuid, notice: .vaultRestored, subjectId: vaultId.uuidString.lowercased())
+        }
         return try await status(principal)
     }
 
@@ -284,12 +371,14 @@ struct VaultService {
     func manifests(_ principal: ConsumerPrincipal, after: UInt64, limit: Int) async throws -> VaultManifestsResponse {
         guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else { throw APIError.notFound }
         if try await boundMember(principal, in: vault) != nil {
-            try await throttle("vault-read", principal, rule: settings.readRate)
+            try await throttleRead(principal, bound: true)
         } else {
-            // A trusted device that is not a member (restoring with the recovery key) may read the signed history, which holds only public
-            // keys, hashes and sealed labels; it is not enough to read an item or open the vault.
+            // A device that is not a member may read the signed history only inside its own released-envelope window (restoring with the
+            // recovery key); account access alone reads nothing (gate review M2/L4).
             try await DeviceTrust.require(principal, db: db, now: ctx.now)
-            try await ctx.limiter.enforce("vault-history", key: principal.consumerId.description, rule: .perHour(60, burst: 20))
+            try await requireNotFormerMember(principal, vault: vault)
+            try await throttleRead(principal, bound: false)
+            _ = try await requireWindow(principal, vault: vault)
         }
         let rows = try await VaultManifestRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$version > Int(clamping: after))
             .sort(\.$version, .ascending).limit(min(max(limit, 1), 100)).all()
@@ -301,38 +390,104 @@ struct VaultService {
         guard ids.count <= 100 else { throw APIError.validation("Too many items requested.") }
         guard let vault = try await vault(of: principal.consumerId.uuid) else { throw APIError.notFound }
         if try await boundMember(principal, in: vault) != nil {
-            try await throttle("vault-read", principal, rule: settings.readRate)
+            try await throttleRead(principal, bound: true)
         } else {
-            // A trusted device restoring with the recovery key reads the ciphertext it must re-encrypt; ciphertext alone opens nothing.
+            // The device restoring with the recovery key reads the ciphertext it must re-encrypt, only inside its own window.
             try await DeviceTrust.require(principal, db: db, now: ctx.now)
-            try await ctx.limiter.enforce("vault-history", key: principal.consumerId.description, rule: .perHour(60, burst: 20))
+            try await requireNotFormerMember(principal, vault: vault)
+            try await throttleRead(principal, bound: false)
+            _ = try await requireWindow(principal, vault: vault)
         }
         let rows = ids.isEmpty ? [] : try await VaultBlobRecord.query(on: db).filter(\.$vaultId == vault.id!).filter(\.$itemId ~~ ids).all()
         return VaultBlobsResponse(blobs: rows.map { VaultBlobDTO(itemId: $0.itemId, blob: Base64URL.encode($0.blob)) })
     }
 
     func envelope(_ principal: ConsumerPrincipal) async throws -> VaultEnvelopeResponse {
-        try await throttle("vault-read", principal, rule: settings.readRate)
         let (_, member) = try await requireBound(principal)
+        try await throttleRead(principal, bound: true)
         guard let envelope = member.envelope else { throw APIError.notFound }
         return VaultEnvelopeResponse(memberId: member.memberId, envelope: Base64URL.encode(envelope))
     }
 
-    /// The recovery member's envelope: ciphertext only the recovery key opens. Needs a trusted device and is rate-limited hard; every fetch is audited.
+    /// The recovery member's envelope: ciphertext only the recovery key opens. Released only to the device that asked for it, after the 72 h hold
+    /// and for 24 h; rate-limited per device, audited, and announced to every other device on each fetch.
     func recoveryEnvelope(_ principal: ConsumerPrincipal) async throws -> VaultEnvelopeResponse {
         try await DeviceTrust.require(principal, db: db, now: ctx.now)
-        try await ctx.limiter.enforce("vault-recovery", key: principal.consumerId.description, rule: settings.recoveryRate)
-        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id,
-              let member = try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$role == "recovery").filter(\.$removedAt == nil).first(),
+        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else { throw APIError.notFound }
+        try await requireNotFormerMember(principal, vault: vault)
+        _ = try await requireWindow(principal, vault: vault)
+        try await throttle("vault-recovery", principal, rule: settings.recoveryRate)
+        guard let member = try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$role == "recovery").filter(\.$removedAt == nil).first(),
               let envelope = member.envelope else { throw APIError.notFound }
         _ = try await AuditService(db: db, ctx: ctx).record("vault.recovery_envelope_fetched", principal: principal, subjectType: "vault", subjectId: vaultId.uuidString.lowercased())
+        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .vaultRecoveryFetched, subjectId: vaultId.uuidString.lowercased())
         return VaultEnvelopeResponse(memberId: member.memberId, envelope: Base64URL.encode(envelope))
     }
 
-    func devices(_ principal: ConsumerPrincipal) async throws -> [VaultDeviceInfo] {
-        try await throttle("vault-read", principal, rule: settings.readRate)
-        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else { throw APIError.notFound }
+    /// Asks for the recovery envelope. Nothing is released for `recoveryHold` (72 h): every other device is told at once, with a "Not you? Cancel"
+    /// action, and a vault device or any trusted account device can cancel. The notice is stored in the same transaction as the hold, so a
+    /// hold nobody could be told about never starts.
+    func requestRecoveryRelease(_ principal: ConsumerPrincipal) async throws -> VaultRecoveryRelease {
+        let caller = try await DeviceTrust.require(principal, db: db, now: ctx.now)
+        guard let device = caller.id else { throw APIError.signatureInvalid }
+        try await throttle("vault-recovery-request", principal, rule: settings.recoveryRate)
+        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id,
+              try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$role == "recovery").filter(\.$removedAt == nil).count() > 0
+        else { throw APIError.notFound }
+        try await requireNotFormerMember(principal, vault: vault)
+        if try await boundMember(principal, in: vault) != nil { throw APIError.conflict("This device already belongs to the vault.") }
+        let open = try await openReleases(vaultId)
+        if let mine = open.first(where: { $0.requesterDeviceId == device }) { return releaseDTO(mine, principal) }
+        guard open.isEmpty else { throw APIError.conflict("A recovery key release is already pending for this vault. Cancel it first if it wasn't you.") }
+        let now = ctx.now
+        let record = VaultRecoveryReleaseRecord(vaultId: vaultId, consumerId: principal.consumerId.uuid, requesterDeviceId: device, now: now,
+                                                releaseAt: now.addingTimeInterval(settings.recoveryHold), expiresAt: now.addingTimeInterval(settings.recoveryHold + settings.recoveryWindow))
+        let consumer = principal.consumerId.uuid
+        try await db.transaction { tx in
+            try await record.create(on: tx)
+            try await SecurityNotices(db: tx, ctx: ctx).store(of: consumer, except: device, notice: .vaultRecoveryRequested, subjectId: record.id!.uuidString.lowercased())
+            _ = try await AuditService(db: tx, ctx: ctx).record("vault.recovery_release_requested", principal: principal, subjectType: "vault", subjectId: vaultId.uuidString.lowercased(),
+                                                                 metadata: ["releases_at": ViadereDate.format(record.releaseAt)])
+        }
+        await SecurityNotices(db: db, ctx: ctx).push(to: consumer, except: device, notice: .vaultRecoveryRequested)
+        return releaseDTO(record, principal)
+    }
+
+    /// "Not you? Cancel": a vault device, or any trusted account device. Closes every open release of the vault.
+    func cancelRecoveryRelease(_ principal: ConsumerPrincipal, releaseId: UUID) async throws -> VaultRecoveryRelease {
+        try await ctx.limiter.enforce("vault-recovery-cancel", key: bucketKey(principal), rule: .perHour(30, burst: 10))
+        guard let record = try await VaultRecoveryReleaseRecord.find(releaseId, on: db), record.consumerId == principal.consumerId.uuid,
+              let vault = try await VaultRecord.find(record.vaultId, on: db), let vaultId = vault.id else { throw APIError.notFound }
         if try await boundMember(principal, in: vault) == nil { try await DeviceTrust.require(principal, db: db, now: ctx.now) }
+        switch record.state {
+        case "cancelled": return releaseDTO(record, principal)
+        case "pending": break
+        default: throw APIError.conflict("This release can no longer be cancelled.")
+        }
+        let now = ctx.now
+        let cancelled: Bool = try await db.transaction { tx in
+            guard try await DB.swap(tx, table: VaultRecoveryReleaseRecord.schema, id: releaseId, column: "state", expected: "pending", newValue: "cancelled",
+                                    extra: [("closed_at", now)]) else { return false }
+            try await VaultRecoveryReleaseRecord.query(on: tx).filter(\.$vaultId == vaultId).filter(\.$state == "pending").set(\.$state, to: "cancelled").set(\.$closedAt, to: now).update()
+            _ = try await AuditService(db: tx, ctx: ctx).record("vault.recovery_release_cancelled", principal: principal, subjectType: "vault", subjectId: vaultId.uuidString.lowercased())
+            return true
+        }
+        guard cancelled else { throw APIError.conflict("This release can no longer be cancelled.") }
+        await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .vaultRecoveryCancelled, subjectId: releaseId.uuidString.lowercased())
+        guard let fresh = try await VaultRecoveryReleaseRecord.find(releaseId, on: db) else { throw APIError.notFound }
+        return releaseDTO(fresh, principal)
+    }
+
+    func devices(_ principal: ConsumerPrincipal) async throws -> [VaultDeviceInfo] {
+        guard let vault = try await vault(of: principal.consumerId.uuid), let vaultId = vault.id else { throw APIError.notFound }
+        if try await boundMember(principal, in: vault) == nil {
+            try await DeviceTrust.require(principal, db: db, now: ctx.now)
+            try await requireNotFormerMember(principal, vault: vault)
+            try await throttleRead(principal, bound: false)
+            _ = try await requireWindow(principal, vault: vault)
+        } else {
+            try await throttleRead(principal, bound: true)
+        }
         let rows = try await VaultMemberRecord.query(on: db).filter(\.$vaultId == vaultId).filter(\.$removedAt == nil).sort(\.$addedAt, .ascending).all()
         let deviceIds = rows.compactMap(\.accountDeviceId)
         let active = deviceIds.isEmpty ? [] : try await DeviceRecord.query(on: db).filter(\.$id ~~ deviceIds).filter(\.$revokedAt == nil).all().compactMap(\.id)
@@ -351,7 +506,8 @@ struct VaultService {
             .filter(\.$removedAt == nil).first(), target.role == "device" else { throw APIError.notFound }
         let now = ctx.now
         try await db.transaction { tx in
-            try await VaultMemberRecord.query(on: tx).filter(\.$id == target.id!).set(\.$removedAt, to: now).set(\.$envelope, to: nil).set(\.$accountDeviceId, to: nil).update()
+            try await VaultMemberRecord.query(on: tx).filter(\.$id == target.id!).set(\.$removedAt, to: now).set(\.$envelope, to: nil).set(\.$accountDeviceId, to: nil)
+                .set(\.$formerDeviceId, to: target.accountDeviceId ?? target.formerDeviceId).update()
             _ = try await AuditService(db: tx, ctx: ctx).record("vault.device_removed", principal: principal, subjectType: "vault", subjectId: vault.id!.uuidString.lowercased(),
                                                                  metadata: ["member": memberId])
         }
@@ -374,6 +530,7 @@ struct VaultService {
     /// runs it whether or not sync is enabled.
     static func wipe(consumer: UUID, on database: any Database) async throws {
         guard let vault = try await VaultRecord.query(on: database).filter(\.$consumerId == consumer).first(), let id = vault.id else { return }
+        try await VaultRecoveryReleaseRecord.query(on: database).filter(\.$vaultId == id).delete()
         try await VaultJoinRecord.query(on: database).filter(\.$vaultId == id).delete()
         try await VaultMemberRecord.query(on: database).filter(\.$vaultId == id).delete()
         try await VaultBlobRecord.query(on: database).filter(\.$vaultId == id).delete()
@@ -427,6 +584,7 @@ struct VaultService {
             throw APIError.validation("The request is malformed.")
         }
         let record = try await liveJoin(joinId, consumer: principal.consumerId.uuid)
+        if let vault = try await VaultRecord.find(record.vaultId, on: db) { try await requireNotFormerMember(principal, vault: vault) }
         guard record.request == nil, try await DB.swapFromNull(db, table: VaultJoinRecord.schema, id: record.id!, column: "requester_device_id", newValue: device.uuid) else {
             throw APIError.conflict("A device already asked to join with this pairing code.")
         }

@@ -89,3 +89,32 @@ struct CreateVaultWP5Schema: AsyncMigration {
         }
     }
 }
+
+/// Phase 4 gate review: the recovery-envelope release hold (M2) and the memory of which account device acted for a removed member (L4).
+struct CreateVaultGateSchema: AsyncMigration {
+    var name: String { "CreateVaultGateSchema.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema("vault_members").field("former_device_id", .uuid).update()
+        try await db.schema("vault_recovery_releases")
+            .id()
+            .field("vault_id", .uuid, .required, .references("vault_vaults", "id", onDelete: .cascade))
+            .field("consumer_id", .uuid, .required)
+            .field("requester_device_id", .uuid, .required)
+            .field("state", .string, .required)
+            .field("requested_at", .datetime, .required)
+            .field("release_at", .datetime, .required)
+            .field("expires_at", .datetime, .required)
+            .field("opened_notified_at", .datetime)
+            .field("closed_at", .datetime)
+            .create()
+        guard let sql = db as? any SQLDatabase else { return }
+        try await sql.raw(SQLQueryString("CREATE INDEX IF NOT EXISTS idx_vault_recovery_releases_vault ON vault_recovery_releases (vault_id, state)")).run()
+        try await sql.raw(SQLQueryString("CREATE INDEX IF NOT EXISTS idx_vault_members_former_device ON vault_members (former_device_id)")).run()
+    }
+
+    func revert(on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase else { return }
+        try await sql.raw(SQLQueryString("DROP TABLE IF EXISTS vault_recovery_releases")).run()
+    }
+}

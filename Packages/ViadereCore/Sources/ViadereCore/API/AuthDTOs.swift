@@ -596,7 +596,7 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
     /// Recovery-key access to the vault: a release was requested (`action == .cancelVaultRecovery`, `subjectId` = the release id), cancelled,
     /// the recovery envelope was released and read, or the vault was restored on a new device with the recovery key.
-    case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRestored
+    case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRecoveryFetched, vaultRestored
     /// Approve v2: a pairwise approval key was enrolled for a business, revoked, approvals were frozen or unfrozen, or repeated requests
     /// from a business were paused (`subjectId` = the key id or relationship id).
     case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused

@@ -13,6 +13,7 @@ struct SecurityNotices {
         case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
         case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
         case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
+        case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRecoveryFetched, vaultRestored
         case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
 
         var kind: SecurityNoticeTopic {
@@ -30,6 +31,11 @@ struct SecurityNotices {
             case .vaultDeviceAdded: .vaultDeviceAdded
             case .vaultDeviceRemoved: .vaultDeviceRemoved
             case .vaultDeleted: .vaultDeleted
+            case .vaultRecoveryRequested: .vaultRecoveryRequested
+            case .vaultRecoveryCancelled: .vaultRecoveryCancelled
+            case .vaultRecoveryReleased: .vaultRecoveryReleased
+            case .vaultRecoveryFetched: .vaultRecoveryFetched
+            case .vaultRestored: .vaultRestored
             case .approvalKeyEnrolled: .approvalKeyEnrolled
             case .approvalKeyRevoked: .approvalKeyRevoked
             case .approvalsFrozen: .approvalsFrozen
@@ -44,6 +50,7 @@ struct SecurityNotices {
             switch self {
             case .devicePendingReplacement: .cancelDeviceReplacement
             case .recoveryStarted: .cancelRecovery
+            case .vaultRecoveryRequested, .vaultRecoveryReleased: .cancelVaultRecovery
             default: nil
             }
         }
@@ -69,6 +76,15 @@ struct SecurityNotices {
                 "A device was added to your synced Viadere credential vault. If this wasn't you, open Viadere, remove it and change the passwords and passkeys you keep there."
             case .vaultDeviceRemoved: "A device was removed from your synced Viadere credential vault."
             case .vaultDeleted: "Your synced Viadere credential vault was deleted from Viadere's servers. Your devices keep their own copies."
+            case .vaultRecoveryRequested:
+                "Someone asked to release the recovery key envelope of your synced Viadere credential vault. Not you? Open Viadere and cancel it now. Nothing is released for 72 hours."
+            case .vaultRecoveryCancelled: "A request to release your vault's recovery key envelope was cancelled."
+            case .vaultRecoveryReleased:
+                "The 72-hour wait ended: your vault's recovery key envelope is now available to the device that asked for it for 24 hours. Not you? Open Viadere and cancel it."
+            case .vaultRecoveryFetched:
+                "The recovery key envelope of your synced Viadere credential vault was downloaded. Without your recovery key it opens nothing. If this wasn't you, open Viadere and replace your recovery key."
+            case .vaultRestored:
+                "Your synced Viadere credential vault was restored on a new device with the recovery key, and the vault key was replaced. If this wasn't you, open Viadere and change the passwords and passkeys you keep there."
             case .approvalKeyEnrolled:
                 "A business can now ask you to approve requests with a new approval key. If you didn't set this up, open Viadere, remove the key and freeze approvals."
             case .approvalKeyRevoked: "An approval key was removed, so that business can no longer ask you to approve requests with it."

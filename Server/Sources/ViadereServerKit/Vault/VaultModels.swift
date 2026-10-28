@@ -93,6 +93,9 @@ final class VaultMemberRecord: Model, @unchecked Sendable {
     @OptionalField(key: "account_device_id") var accountDeviceId: UUID?
     @Field(key: "added_at") var addedAt: Date
     @OptionalField(key: "removed_at") var removedAt: Date?
+    /// The account device that acted as this member when it was removed. That account device may never act for the vault again (it could
+    /// have copied what it saw; coming back through the recovery window or a new join would hand it the rotated key).
+    @OptionalField(key: "former_device_id") var formerDeviceId: UUID?
 
     init() {}
 
@@ -133,6 +136,36 @@ final class VaultJoinRecord: Model, @unchecked Sendable {
         self.consumerId = consumerId
         self.vaultId = vaultId
         createdAt = now
+        self.expiresAt = expiresAt
+    }
+}
+
+
+/// A request to release the vault's recovery envelope (SECURITY.md §2.40, gate review M2). `state` is `pending`, `cancelled` or `consumed`;
+/// whether a pending release is still holding, open (released) or expired follows from the clock (`releaseAt`, `expiresAt`).
+final class VaultRecoveryReleaseRecord: Model, @unchecked Sendable {
+    static let schema = "vault_recovery_releases"
+    @ID(key: .id) var id: UUID?
+    @Field(key: "vault_id") var vaultId: UUID
+    @Field(key: "consumer_id") var consumerId: UUID
+    @Field(key: "requester_device_id") var requesterDeviceId: UUID
+    @Field(key: "state") var state: String
+    @Field(key: "requested_at") var requestedAt: Date
+    @Field(key: "release_at") var releaseAt: Date
+    @Field(key: "expires_at") var expiresAt: Date
+    @OptionalField(key: "opened_notified_at") var openedNotifiedAt: Date?
+    @OptionalField(key: "closed_at") var closedAt: Date?
+
+    init() {}
+
+    init(vaultId: UUID, consumerId: UUID, requesterDeviceId: UUID, now: Date, releaseAt: Date, expiresAt: Date) {
+        id = UUID()
+        self.vaultId = vaultId
+        self.consumerId = consumerId
+        self.requesterDeviceId = requesterDeviceId
+        state = "pending"
+        requestedAt = now
+        self.releaseAt = releaseAt
         self.expiresAt = expiresAt
     }
 }
