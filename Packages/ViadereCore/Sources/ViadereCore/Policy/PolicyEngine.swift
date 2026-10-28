@@ -53,14 +53,26 @@ public struct PolicyRule: Sendable, Codable, Hashable, Identifiable {
 
     /// Whether this rule denies a request for `jurisdiction`.
     func blocks(_ jurisdiction: String?) -> Bool {
-        let code = jurisdiction?.uppercased()
+        blocks(known: jurisdiction.map { [$0] } ?? [], incomplete: false, failClosedWhenUnknown: false)
+    }
+
+    /// Whether this rule denies a request that involves `known` jurisdictions (the business's legal entity, the document's issuer, ...).
+    ///
+    /// - `jurisdictionBlock`: denies when **any** known jurisdiction is listed. When nothing is known (or `incomplete`: a jurisdiction the
+    ///   request involves could not be determined) it denies only if `failClosedWhenUnknown`, which the engine sets for high-sensitivity
+    ///   capabilities: a block rule must not be bypassed by a request whose jurisdiction cannot be established.
+    /// - `jurisdictionAllowOnly`: denies when nothing is known, when incomplete, or when **any** known jurisdiction is not listed.
+    func blocks(known: [String], incomplete: Bool, failClosedWhenUnknown: Bool) -> Bool {
+        func listed(_ raw: String) -> Bool {
+            let code = raw.uppercased()
+            return jurisdictions.contains(code) || jurisdictions.contains(String(code.prefix { $0 != "-" }))
+        }
         switch kind {
         case .jurisdictionBlock:
-            guard let code else { return false }
-            return jurisdictions.contains(code) || jurisdictions.contains(String(code.prefix { $0 != "-" }))
+            if known.contains(where: listed) { return true }
+            return failClosedWhenUnknown && (known.isEmpty || incomplete)
         case .jurisdictionAllowOnly:
-            guard let code else { return true }
-            return !(jurisdictions.contains(code) || jurisdictions.contains(String(code.prefix { $0 != "-" })))
+            return known.isEmpty || incomplete || !known.allSatisfy(listed)
         }
     }
 }
@@ -91,13 +103,18 @@ public struct PolicyRequest: Sendable {
     public var purpose: String?
     /// ISO 3166 region the rules are evaluated for, when the endpoint knows it.
     public var jurisdiction: String?
+    /// Further regions the request involves (e.g. the business's legal-entity jurisdiction and the document issuer's country). A rule
+    /// applies if it applies to any of them.
+    public var additionalJurisdictions: [String]
+    /// A jurisdiction the request involves could not be determined. Block rules on high-sensitivity capabilities then fail closed.
+    public var jurisdictionIncomplete: Bool
     /// The identifier of this request (verification request id): what a per-request receipt is bound to.
     public var requestId: String?
     public var now: Date
 
     public init(capability: Capability, businessId: BusinessID, environment: PolicyEnvironment, subjectRef: SubjectRef? = nil,
                 parameters: [String: JSONValue]? = nil, purpose: String? = nil, jurisdiction: String? = nil, requestId: String? = nil,
-                now: Date) {
+                additionalJurisdictions: [String] = [], jurisdictionIncomplete: Bool = false, now: Date) {
         self.capability = capability
         self.businessId = businessId
         self.environment = environment
@@ -105,6 +122,8 @@ public struct PolicyRequest: Sendable {
         self.parameters = parameters
         self.purpose = purpose
         self.jurisdiction = jurisdiction
+        self.additionalJurisdictions = additionalJurisdictions
+        self.jurisdictionIncomplete = jurisdictionIncomplete
         self.requestId = requestId
         self.now = now
     }
@@ -231,7 +250,10 @@ public enum PolicyEngine {
             if let purpose = request.purpose, isValidPurpose(purpose) { details["purpose"] = purpose } else { reasons.append(.purposeRequired) }
         }
         // 4. Law / policy rules.
-        for rule in business.rules where rule.capability == request.capability && rule.blocks(request.jurisdiction) {
+        let known = ([request.jurisdiction] + request.additionalJurisdictions.map { Optional($0) }).compactMap { $0 }
+        let failClosed = definition.sensitivity >= .high
+        for rule in business.rules where rule.capability == request.capability
+            && rule.blocks(known: known, incomplete: request.jurisdictionIncomplete, failClosedWhenUnknown: failClosed) {
             reasons.append(.jurisdictionBlocked)
             details["rule"] = rule.id.uuidString.lowercased()
             break

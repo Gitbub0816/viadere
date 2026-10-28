@@ -185,6 +185,36 @@ struct PolicyEngineTests {
         #expect(PolicyRule(capability: .ageMinimum, kind: .jurisdictionBlock, jurisdictions: ["XX"], reason: "x").blocks(nil) == false)
     }
 
+    /// Gate F4 exploit: with only a block rule, a request whose jurisdiction was never passed used to sail through.
+    @Test func blockRulesFailClosedForHighSensitivityCapabilitiesWhenTheJurisdictionIsUnknown() {
+        let block = PolicyRule(capability: .ageMinimum, kind: .jurisdictionBlock, jurisdictions: ["XX"], reason: "test")
+        let verify = facts(entitled: [.ageMinimum], scopes: [.ageMinimum], tiers: [.m, .v], rules: [block])
+        func decide(_ j: String?, extra: [String] = [], incomplete: Bool = false) -> PolicyDecision {
+            var r = request(.ageMinimum, parameters: ["years": .integer(18)], purpose: "age_restricted_access", jurisdiction: j)
+            r.additionalJurisdictions = extra
+            r.jurisdictionIncomplete = incomplete
+            return PolicyEngine.evaluate(r, business: verify, stage: .business)
+        }
+        #expect(PolicyCatalogProbe.sensitivity(.ageMinimum) >= .high)
+        #expect(decide(nil).primaryReason == .jurisdictionBlocked, "unknown jurisdiction: a block rule on a high-sensitivity capability fails closed")
+        #expect(decide("US").allowed, "a known, unlisted jurisdiction is fine")
+        #expect(decide("US", extra: ["XX"]).primaryReason == .jurisdictionBlocked, "any involved jurisdiction can block")
+        #expect(decide(nil, extra: ["US"]).allowed)
+        #expect(decide("US", incomplete: true).primaryReason == .jurisdictionBlocked, "a jurisdiction that could not be determined")
+        // A low-sensitivity capability keeps the old behavior: an unknown jurisdiction does not trip a block rule.
+        let lowBlock = PolicyRule(capability: .interactionNotice, kind: .jurisdictionBlock, jurisdictions: ["XX"], reason: "test")
+        let low = facts(entitled: [.interactionNotice], scopes: [.interactionNotice], tiers: [.m], rules: [lowBlock])
+        #expect(PolicyCatalogProbe.sensitivity(.interactionNotice) < .high)
+        #expect(PolicyEngine.evaluate(request(.interactionNotice), business: low, stage: .business).allowed)
+        // Allow-only needs every involved jurisdiction to be listed.
+        let only = PolicyRule(capability: .ageMinimum, kind: .jurisdictionAllowOnly, jurisdictions: ["US"], reason: "pilot")
+        let pilot = facts(entitled: [.ageMinimum], scopes: [.ageMinimum], tiers: [.m, .v], rules: [only])
+        var both = request(.ageMinimum, parameters: ["years": .integer(18)], purpose: "age_restricted_access", jurisdiction: "US")
+        #expect(PolicyEngine.evaluate(both, business: pilot, stage: .business).allowed)
+        both.additionalJurisdictions = ["DE"]
+        #expect(PolicyEngine.evaluate(both, business: pilot, stage: .business).primaryReason == .jurisdictionBlocked)
+    }
+
     @Test func parametersAndPurposeAreRequiredForVerification() {
         let verify = facts(entitled: [.ageMinimum], scopes: [.ageMinimum], tiers: [.m, .v])
         #expect(PolicyEngine.evaluate(request(.ageMinimum, parameters: ["years": .integer(17)], purpose: "age_restricted_access"), business: verify, stage: .business).reasons == [.invalidParameters])
@@ -346,4 +376,8 @@ struct CatalogDocumentationTests {
             #expect(!age.contains("`\(forbidden)`"))
         }
     }
+}
+
+enum PolicyCatalogProbe {
+    static func sensitivity(_ capability: Capability) -> Sensitivity { capability.definition?.sensitivity ?? .low }
 }
