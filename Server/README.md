@@ -344,6 +344,41 @@ verified on the server) or **Didit** (SDK in the app, session from the server), 
 * **Not configured is not broken**: without Wallet or Didit settings the methods are simply not offered. Test-mode keys complete requests
   with a simulated result (`sandbox_simulated`) and never reach a real person.
 
+### Business platform and operations (WP6)
+
+The business console is organized as the ten sections of the spec (Dashboard, Organization, Developers, Messaging, Verify, Approve, Security, Compliance, Billing, Support; `Dashboard/Console*.swift`),
+with nine roles (`docs/ops/CONSOLE-ROLES.md`, generated from `DashboardPermission`), step-up re-authentication, optional two-person approval and per-organization security settings. The operator console
+(`/operator`) gains switches, consumers, notices, data and retention, support and the per-business onboarding reviews. Everything is server-rendered, dependency-free and tested for WCAG 2.2 AA structure.
+
+| Area | Code | Where it is documented |
+|---|---|---|
+| Onboarding state machine, domain control, assurance, contracts | `Platform/Onboarding.swift`, `DomainControl.swift`, `Assurance.swift`, `Contracts.swift` | SECURITY.md 2.70, 2.71; BUSINESS-INTEGRATION.md 1a |
+| API keys: id + 256-bit secret, expiry, IP allow-lists, overlap rotation, operator revoke | `Security/Tokens.swift`, `APIKeyLifecycle.swift`, `Operations/IPNetwork.swift` | SECURITY.md 2.72; BUSINESS-INTEGRATION.md 1b |
+| Webhook ownership, test, pause, schema preview, retry simulation | `Services/WebhookOwnership.swift`, `Routes/BusinessRoutes.swift` | SECURITY.md 2.73; openapi.yaml |
+| Origin lock (`EDGE_TOKEN`), Tier E client certificates | `Operations/EdgeLock.swift`, `Security/MTLS.swift` | SECURITY.md 2.74; Infra/fly/README.md |
+| Switches, notices, consumer freeze, metrics | `Operations/PlatformFlags.swift`, `OperatorNotices.swift`, `ConsumerFreeze.swift`, `Metrics.swift` | docs/ops/KILL-SWITCHES.md |
+| Retention, holds, tenant/consumer rights, audit-head export | `Operations/Retention.swift`, `TenantRights.swift`, `ConsumerExport.swift`, `AuditExport.swift` | DATA-INVENTORY.md 6-7; SECURITY.md 2.77, 2.78 |
+| Key rotation | `Operations/KeyRotation.swift` | docs/ops/KEY-ROTATION.md |
+| Database roles | `Migrations/RuntimeRoleGrants.swift`, `App.swift` | Infra/fly/README.md 1a; RUNBOOKS.md RB-10 |
+
+**New configuration** (all in `.env.example`, mapped to Fly by `Infra/fly/check_env_coverage.py`): `EDGE_TOKEN` (required in staging/production), `EDGE_TOKEN_PREVIOUS`, `METRICS_TOKEN`, `METRICS_PORT`,
+`WEBHOOK_OWNERSHIP_VERIFICATION` (default required, cannot be `off` in staging/production), `API_KEY_MAX_OVERLAP_DAYS`, `DOMAIN_RECHECK_DAYS`, `ASSURANCE_GRACE_DAYS`, `SUPPORT_NOTIFY_EMAIL`, the key-rotation set
+(`DATA_ENCRYPTION_KEY_ID`/`_KEYS_PREVIOUS`, `SERVER_PEPPER_ID`/`SERVER_PEPPERS_PREVIOUS`, `AUDIT_CHAIN_KEY_EPOCH`/`AUDIT_CHAIN_KEYS_PREVIOUS`, `CONNECT_LINK_SIGNING_KEY_ID`/`_KEYS_PREVIOUS`),
+`DATABASE_MIGRATION_URL` and `DATABASE_APP_ROLE`, and the audit-head export (`AUDIT_HEAD_EXPORT`, `_TARGET`, `_PREFIX`, `_INTERVAL_HOURS`, `_ENDPOINT`, `AUDIT_HEAD_KMS_KEY`, `GCP_WORKLOAD_IDENTITY_AUDIENCE`,
+`GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_SUBJECT_TOKEN_FILE`, R2 keys). Invalid or inconsistent values stop the server at start and name the variable, never the value.
+
+**Migrations (`CreatePlatformWP6Schema`, `CreateRetentionDeleteGate`, `GrantRuntimeRolePrivileges`).** Run `ViadereServer migrate` before rolling out (the release command does). Existing `admin`/`support` members become
+`org_admin`/`messaging_operator`; every existing business gets an onboarding row marked grandfathered (verified businesses keep production keys and have 60 days to accept the current agreements); existing API keys keep
+working without a key id. With `DATABASE_APP_ROLE` set (PostgreSQL) the migration grants the runtime role data privileges only.
+
+**Commands.** `ViadereServer rotate-data-key`, `verify-data-key [--require-current]` (docs/ops/KEY-ROTATION.md); `audit-export [--force]` writes a signed audit head to the configured write-once storage now; the job loop does it on
+the schedule. `audit-head`, `audit-verify [--head file]` are unchanged and understand key epochs and retention checkpoints.
+
+**Targeted tests** (do not run the whole suite for a console change): `swift test --filter 'WP6'` runs the WP6 suites: `WP6OnboardingTests` (state machine, the section 9.4 acceptance flow, domain control, assurance,
+re-acceptance, catalog vs. Site), `WP6RolesTests` (matrix = document, separation of duties, role migration, step-up, two-person), `WP6KeyTests`, `WP6EdgeTests` (origin lock, spoofed headers, mTLS binding), `WP6WebhookTests`,
+`WP6KillSwitchTests` (maintenance, sign-up stops, pause, messaging restriction, freeze, notices, metrics), `WP6RetentionTests` (every class, holds, the append-only gate, audit purge), `WP6RightsTests`,
+`WP6AuditExportTests`, `WP6RotationTests`, `WP6ConsoleTests` (IA, WCAG structure and contrast, secret redaction, the incident procedures end to end). The PostgreSQL pass is `TEST_DATABASE_URL=… TEST_RATE_LIMIT_STORE=database swift test`.
+
 ### "Connect with Viadere" button
 
 `Public/connect-button/v1/` holds a dependency-free web component (`<viadere-connect code="AF2345">`) and a plain CSS variant, brand-styled
@@ -406,8 +441,9 @@ Errors are always `{"error":{"code","message","requestId"}}` (`APIErrorResponse`
 
 Wallet pass signing (P3), Live Activity push, rewards and redemption, delegated access endpoints, a real Apple Messages for Business adapter
 (blocked on Apple's written policy approval), vendor-specific RCS adapters (the shipped one is a generic RBM-style REST + HMAC webhook contract;
-rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they fall back to a handoff link), encryption-key rotation tooling,
+rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they fall back to a handoff link),
 DNS-pinned webhook connections (the destination is re-resolved and checked immediately before sending but is not pinned to the connection).
+WP6: `SERVER_PEPPER` rotation orphans the single-valued lookup hashes (docs/ops/KEY-ROTATION.md section 3); the Cloudflare to origin certificate leg (G-11) is open; the Terraform for the audit bucket and the mTLS hostname is not validated in CI yet; the consumer export has no web fallback (the app is required, by design).
 Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview
 only), no business-profile editing after verification, no operator-assisted recovery for a business user who loses every passkey (consumers have recovery codes),
 and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale).
@@ -428,6 +464,8 @@ Approve v2 (WP1): the log key is an environment secret until KMS (ADR-03); the M
 | `ViadereServer audit-verify [--head file.json]` | recomputes the keyed chain (honouring `AUDIT_CHAIN_LEGACY_THROUGH_SEQ`) and optionally checks an exported head |
 | `ViadereServer reencrypt-fields` | rewrites legacy column-bound ciphertexts (and plaintext webhook bodies) as row-bound ones; idempotent |
 | `ViadereServer export-dispute --interaction <id>` | prints the signed decision, global device id and device public keys for a dispute (businesses only get a pseudonym and an attestation); audited |
+| `ViadereServer audit-export [--force]` | writes the signed audit head to the configured write-once storage (also scheduled by the job loop) |
+| `ViadereServer rotate-data-key` / `verify-data-key [--require-current]` | re-encrypts every sealed column under the current `DATA_ENCRYPTION_KEY` / proves nothing is left under another key (docs/ops/KEY-ROTATION.md) |
 
 Notes for operators:
 * **Upgrading.** Set `ENVIRONMENT` and `AUDIT_CHAIN_KEY`; set `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` to the highest existing `audit_events.seq`; run `reencrypt-fields` once. Existing sessions keep working (they bind to their device the first time it signs).
