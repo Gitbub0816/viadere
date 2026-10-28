@@ -112,7 +112,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     try Routes.register(app)
 
     if let port = config.operations.metricsPort {
-        app.lifecycle.use(InternalMetricsServer(port: port) { [app] in await MetricsService(db: app.db, ctx: app.ctx).render() })
+        app.lifecycle.use(InternalMetricsServer(host: config.operations.metricsHost, port: port, token: config.operations.metricsToken) { [app] in await MetricsService(db: app.db, ctx: app.ctx).render() })
     }
     if config.runBackgroundJobs { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
 }

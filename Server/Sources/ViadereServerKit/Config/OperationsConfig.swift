@@ -41,6 +41,9 @@ public struct OperationsSettings: Sendable {
     public var metricsToken: Data?
     /// A separate internal listener (not routed by Fly's proxy); `nil` = only the token-protected route on the main port.
     public var metricsPort: Int?
+    /// Where the internal listener binds: the machine's private (6PN) address `FLY_PRIVATE_IP` when it is set, else loopback. Never the HTTP host
+    /// (`0.0.0.0` in production), which would expose it on every interface the machine has.
+    public var metricsHost = "127.0.0.1"
 
     // MARK: Webhooks, keys
     /// `required` (the default in staging and production): an endpoint receives events only after it echoed our challenge.
@@ -93,6 +96,12 @@ extension ServerConfig {
         if let raw = env["METRICS_PORT"], !raw.isEmpty {
             guard let port = Int(raw), (1024...65535).contains(port) else { throw ServerConfigError.invalid("METRICS_PORT (1024-65535)") }
             ops.metricsPort = port
+            // The listener always demands the bearer token as well: the private network is not a credential (platform gate L3).
+            guard ops.metricsToken != nil else { throw ServerConfigError.missing("METRICS_TOKEN (required when METRICS_PORT is set)") }
+            if let ip = env["FLY_PRIVATE_IP"], !ip.isEmpty {
+                guard IPNetwork(ip) != nil, !ip.contains("/"), ip != "0.0.0.0", ip != "::" else { throw ServerConfigError.invalid("FLY_PRIVATE_IP (an IP address)") }
+                ops.metricsHost = ip
+            }
         }
         // Webhook ownership verification cannot be switched off where the server is internet-facing.
         switch (env["WEBHOOK_OWNERSHIP_VERIFICATION"] ?? "").lowercased() {

@@ -174,30 +174,48 @@ enum MetricsRoutes {
     }
 }
 
-/// A second, minimal HTTP listener for Prometheus on `METRICS_PORT` (bind to the machine's private address only; Fly's proxy never routes it
-/// because the port is not in any `[[services]]` or `[http_service]`). `GET /metrics` only; no authentication because nothing outside the
-/// private network can reach it, which is why it carries nothing but the same PII-free counters.
+/// What the internal listener answers (a pure function so the rules are tested without a socket): `GET /metrics` only, and only with the
+/// bearer token (constant-time compare). No token configured means nothing is served.
+enum InternalMetricsResponder {
+    static func respond(method: HTTPMethod, uri: String, authorization: String?, token: Data?, render: @Sendable () async -> String) async -> (HTTPResponseStatus, String) {
+        guard let token, method == .GET, uri.split(separator: "?").first == "/metrics" else { return (.notFound, "not found\n") }
+        let prefix = "Bearer "
+        guard let authorization, authorization.hasPrefix(prefix), ConstantTime.equals(Data(authorization.dropFirst(prefix.count).utf8), token) else {
+            return (.unauthorized, "unauthorized\n")
+        }
+        return (.ok, await render())
+    }
+}
+
+/// A second, minimal HTTP listener for Prometheus on `METRICS_PORT`. It binds to the machine's private 6PN address (`FLY_PRIVATE_IP`) or loopback,
+/// never to the public HTTP host, and Fly's proxy never routes it because the port is not in any `[[services]]` or `[http_service]`. Defence in
+/// depth: it **also** requires `METRICS_TOKEN` as a bearer token, so another workload on the private network learns nothing without the secret.
 final class InternalMetricsServer: LifecycleHandler, @unchecked Sendable {
+    private let host: String
     private let port: Int
+    private let token: Data?
     private let render: @Sendable () async -> String
     private let lock = NSLock()
     private var channel: (any Channel)?
 
-    init(port: Int, render: @escaping @Sendable () async -> String) {
+    init(host: String, port: Int, token: Data?, render: @escaping @Sendable () async -> String) {
+        self.host = host
         self.port = port
+        self.token = token
         self.render = render
     }
 
     func didBootAsync(_ application: Application) async throws {
         let render = self.render
+        let token = self.token
         let bootstrap = ServerBootstrap(group: application.eventLoopGroup)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.pipeline.configureHTTPServerPipeline().flatMap {
-                    channel.pipeline.addHandler(MetricsHTTPHandler(render: render))
+                    channel.pipeline.addHandler(MetricsHTTPHandler(token: token, render: render))
                 }
             }
-        let bound = try await bootstrap.bind(host: application.http.server.configuration.hostname, port: port).get()
+        let bound = try await bootstrap.bind(host: host, port: port).get()
         lock.withLock { channel = bound }
     }
 
@@ -217,10 +235,14 @@ private final class MetricsHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
+    private let token: Data?
     private let render: @Sendable () async -> String
     private var head: HTTPRequestHead?
 
-    init(render: @escaping @Sendable () async -> String) { self.render = render }
+    init(token: Data?, render: @escaping @Sendable () async -> String) {
+        self.token = token
+        self.render = render
+    }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
@@ -229,15 +251,18 @@ private final class MetricsHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         case .end:
             guard let request = head else { return }
             head = nil
-            let ok = request.method == .GET && request.uri.split(separator: "?").first == "/metrics"
+            let method = request.method
+            let uri = request.uri
+            let authorization = request.headers.first(name: "Authorization")
+            let token = self.token
             let render = self.render
             let loop = context.eventLoop
             let handler = NIOLoopBound(self, eventLoop: loop)
             let ctx = NIOLoopBound(context, eventLoop: loop)
             Task {
-                let body = ok ? await render() : "not found\n"
+                let (status, body) = await InternalMetricsResponder.respond(method: method, uri: uri, authorization: authorization, token: token, render: render)
                 loop.execute {
-                    handler.value.write(ctx.value, status: ok ? .ok : .notFound, body: body)
+                    handler.value.write(ctx.value, status: status, body: body)
                 }
             }
         }

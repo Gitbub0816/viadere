@@ -64,4 +64,39 @@ final class PlatformGateOpsTests: XCTestCase {
             XCTAssertEqual(still.displayName, "Deleted business")
         }
     }
+
+    // MARK: L3
+
+    func testTheInternalMetricsListenerBindsPrivatelyAndAlwaysNeedsTheToken() async throws {
+        let token = SecureToken.generate()
+        var env = ["ENVIRONMENT": "development", "METRICS_PORT": "9091", "METRICS_TOKEN": token]
+        // Without a private address the listener is loopback only; with the machine's 6PN address it binds there; never the public HTTP host.
+        XCTAssertEqual(try ServerConfig.fromEnvironment(env).operations.metricsHost, "127.0.0.1")
+        env["FLY_PRIVATE_IP"] = "fdaa:0:1234:a7b:1:2:3:2"
+        XCTAssertEqual(try ServerConfig.fromEnvironment(env).operations.metricsHost, "fdaa:0:1234:a7b:1:2:3:2")
+        for bad in ["0.0.0.0", "::", "not-an-ip", "10.0.0.1/8"] {
+            env["FLY_PRIVATE_IP"] = bad
+            XCTAssertThrowsError(try ServerConfig.fromEnvironment(env), bad)
+        }
+        // A port without a token would serve metrics to anything on the private network: the server does not start.
+        var noToken = ["ENVIRONMENT": "development", "METRICS_PORT": "9091"]
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(noToken))
+        noToken["METRICS_PORT"] = nil
+        XCTAssertNil(try ServerConfig.fromEnvironment(noToken).operations.metricsPort)
+
+        // The listener's answers: the token is required on the private port too.
+        let secret = Data(token.utf8)
+        let render: @Sendable () async -> String = { "viadere_up 1\n" }
+        let none = await InternalMetricsResponder.respond(method: .GET, uri: "/metrics", authorization: nil, token: secret, render: render)
+        XCTAssertEqual(none.0, .unauthorized)
+        let wrong = await InternalMetricsResponder.respond(method: .GET, uri: "/metrics", authorization: "Bearer " + SecureToken.generate(), token: secret, render: render)
+        XCTAssertEqual(wrong.0, .unauthorized)
+        let ok = await InternalMetricsResponder.respond(method: .GET, uri: "/metrics?x=1", authorization: "Bearer " + token, token: secret, render: render)
+        XCTAssertEqual(ok.0, .ok)
+        XCTAssertEqual(ok.1, "viadere_up 1\n")
+        let post = await InternalMetricsResponder.respond(method: .POST, uri: "/metrics", authorization: "Bearer " + token, token: secret, render: render)
+        XCTAssertEqual(post.0, .notFound)
+        let noneConfigured = await InternalMetricsResponder.respond(method: .GET, uri: "/metrics", authorization: "Bearer anything", token: nil, render: render)
+        XCTAssertEqual(noneConfigured.0, .notFound, "no token configured: nothing is served")
+    }
 }
