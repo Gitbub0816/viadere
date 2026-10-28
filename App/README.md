@@ -43,6 +43,10 @@ Release, reported to the server as `hardwareBacked: false`).
 Previews: every screen has `#Preview`s backed by `MockViadereAPI` (in-memory server that verifies enrollment proofs and
 signed decisions with ViadereCore's real verifiers).
 
+### Staging build
+
+The `Staging` configuration (`Configs/Staging.xcconfig`, scheme **Staging**) is Release-grade (no DEBUG, strict ATS) and points at `https://api.staging.viadere.com` with the passkey domain `staging.viadere.com`, the same bundle IDs, APNs sandbox and App Attest `development`. Fill `VIADERE_PIN_PRIMARY` / `VIADERE_PIN_BACKUP` first (`python3 -I Scripts/compute-spki-pins.py api.staging.viadere.com`); `Scripts/check-release-pins.sh` fails a Staging archive while they are placeholders. Full guide, including TestFlight: [`docs/ops/STAGING-SETUP.md`](../docs/ops/STAGING-SETUP.md).
+
 ### Local server
 
 Debug uses `http://localhost:8080` (`Configs/Debug.xcconfig`). Plain HTTP is allowed **only** there:
@@ -59,7 +63,7 @@ Override the server with `VIADERE_API_BASE_URL` in `Configs/Local.xcconfig`.
 | What | Where |
 |---|---|
 | Team id | `Configs/Local.xcconfig` (`DEVELOPMENT_TEAM`) |
-| Server URL | `VIADERE_API_BASE_URL` in `Configs/*.xcconfig` (read from Info.plist key `ViadereAPIBaseURL`) |
+| Server URL | `VIADERE_API_BASE_URL` in `Configs/*.xcconfig` (read from Info.plist key `ViadereAPIBaseURL`). Staging also sets `VIADERE_RP_DOMAIN`, `VIADERE_WEB_DOMAIN` (associated domains), `VIADERE_API_PINS` (Info.plist `ViadereAPIPins`) and `VIADERE_APNS_ENVIRONMENT` (`ViadereAPNsEnvironment`), honoured only for a non-production host |
 | **Certificate pins** (build-checked) | `ViadereConfiguration.productionPinning` in `Packages/ViadereKit/.../ViadereConfiguration.swift`. **TODO before release:** replace the two `REPLACE_ME_*` placeholders with the SPKI SHA-256 of the current key and a backup key (command in `PinningConfiguration`). Until then Release builds fail closed, and `Scripts/check-release-pins.sh` (a pre-build phase of the app and the clip) **fails a Release archive** while the placeholders are present. |
 | Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.CredentialProvider`, `.Widgets`, `.Clip`, `.watchkitapp` |
 | App group | `group.com.viadere.shared` (app + notification service) |

@@ -9,6 +9,7 @@ The Vapor server runs on Fly.io machines, always on, behind Cloudflare. Cloudfla
 | `fly.production.toml` | app `viadere-server`: 2+ machines, auto-stop off, `/healthz` + `/readyz` checks, release command `migrate --yes` |
 | `fly.staging.toml` | app `viadere-server-staging`: same shape, production rules (`ENVIRONMENT=staging`), 1 machine, sandbox providers |
 | `secrets.txt` | the names that must be set with `fly secrets set` |
+| `generate_secrets.py` | generates the server-owned secrets in the exact formats the server checks (`python3 -I Infra/fly/generate_secrets.py --check`); staging walk-through: [`docs/ops/STAGING-SETUP.md`](../../docs/ops/STAGING-SETUP.md) |
 | `check_env_coverage.py` | CI/dev check: every variable in `Server/.env.example` is a `[env]` key, a secret, or an exempt alias |
 
 ## Design notes
@@ -30,6 +31,8 @@ The Vapor server runs on Fly.io machines, always on, behind Cloudflare. Cloudfla
   to GHCR and deployed **by digest**. Staging deploys first and production requires the `production` environment approval.
 
 ## One-time setup
+
+**First staging deployment from a laptop, from zero (accounts, Neon, Cloudflare, secrets, app build): follow [`docs/ops/STAGING-SETUP.md`](../../docs/ops/STAGING-SETUP.md).** The laptop deploy (`fly deploy --config Infra/fly/fly.staging.toml --dockerfile Server/Dockerfile --remote-only`) is for staging only; production deploys go through CI.
 
 ```bash
 # Install flyctl (a Go binary, no Node): https://fly.io/docs/flyctl/install/   (CI uses a checksum-pinned release)

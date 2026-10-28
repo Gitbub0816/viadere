@@ -1,0 +1,40 @@
+#include "Shared.xcconfig"
+
+// STAGING: a Release-grade build (optimized, no DEBUG flag, strict ATS, no local-dev exception, pinning fail-closed) pointed at the
+// staging server (Infra/fly/fly.staging.toml). Setup guide: docs/ops/STAGING-SETUP.md.
+// Same bundle ID as production (com.viadere.app): the APNs topic, App Attest app ID and the AASA file stay identical, so staging needs no
+// extra Apple identifiers. Consequence: a staging build REPLACES a production install on the same device.
+
+// Per-developer overrides are read FIRST (Shared.xcconfig includes Local.xcconfig), so they can never reach the security settings below.
+// The only overridable staging values are the three push/attest switches (see "TestFlight" below) through the VIADERE_STAGING_* names.
+
+// ---- server, domains ---------------------------------------------------------------------------------------------
+VIADERE_API_BASE_URL = https:/$()/api.staging.viadere.com
+// Passkey relying party and associated domains: the staging web origin (server RP_ID / RP_ORIGIN). This host must reach the Fly origin so
+// /.well-known/apple-app-site-association is served for it (docs/ops/STAGING-SETUP.md, Cloudflare DNS).
+VIADERE_WEB_DOMAIN = staging.viadere.com
+VIADERE_RP_DOMAIN = staging.viadere.com
+VIADERE_DISPLAY_NAME = Viadere Staging
+
+// ---- ATS: strict, no exceptions (Debug alone defines VIADERE_LOCAL_DEV) -------------------------------------------------
+VIADERE_PLIST_DEFS =
+
+// ---- certificate pins for api.staging.viadere.com (SPKI SHA-256, base64) -----------------------------------------------------
+// MUST be filled before use: a Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
+// Compute them with App/Scripts/compute-spki-pins.py (docs/ops/STAGING-SETUP.md). Pin the CA intermediate(s) of the Cloudflare edge chain, not
+// the leaf: Cloudflare renews the edge certificate (and may switch CAs) without notice. Primary and backup must differ.
+// If a pin contains two slashes in a row, write one of them as $() so xcconfig does not read it as a comment.
+VIADERE_PIN_PRIMARY = REPLACE_ME_STAGING_PRIMARY_SPKI_SHA256_BASE64
+VIADERE_PIN_BACKUP = REPLACE_ME_STAGING_BACKUP_SPKI_SHA256_BASE64
+VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP)
+
+// ---- push and App Attest ---------------------------------------------------------------------------------------------
+// Defaults match fly.staging.toml (APNS_ENVIRONMENT = sandbox, APP_ATTEST_ENVIRONMENT = development): builds run from Xcode on a device.
+// TestFlight builds are signed for distribution; Apple issues them PRODUCTION push tokens, so for a TestFlight round put these in
+// Local.xcconfig and change the server the same way (docs/ops/STAGING-SETUP.md, "TestFlight"):
+//   VIADERE_STAGING_APNS_ENVIRONMENT = production      (server APNS_ENVIRONMENT = "production")
+//   VIADERE_STAGING_APS_ENVIRONMENT = production
+//   VIADERE_STAGING_APP_ATTEST_ENVIRONMENT = production  (server APP_ATTEST_ENVIRONMENT = "production")
+VIADERE_APNS_ENVIRONMENT = $(VIADERE_STAGING_APNS_ENVIRONMENT:default=sandbox)
+APS_ENVIRONMENT = $(VIADERE_STAGING_APS_ENVIRONMENT:default=development)
+APP_ATTEST_ENVIRONMENT = $(VIADERE_STAGING_APP_ATTEST_ENVIRONMENT:default=development)

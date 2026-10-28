@@ -65,7 +65,8 @@ public struct ViadereConfiguration: Sendable {
                              apnsEnvironment: .sandbox, failClosedPinning: false)
     }
 
-    /// Reads `ViadereAPIBaseURL` and `ViadereKeychainAccessGroup` from the Info.plist dictionary.
+    /// Reads `ViadereAPIBaseURL` and `ViadereKeychainAccessGroup` from the Info.plist dictionary. For a host other than production (the Staging
+    /// build configuration) it also reads `ViadereAPIPins`, `ViadereAPNsEnvironment` (`sandbox` | `production`) and `ViadereRelyingPartyID`.
     ///
     /// Safety rules: release builds only accept `https` URLs (anything else falls back to production);
     /// plain `http` is accepted only when `allowLocalHTTP` is true **and** the host is a loopback / `.local` name.
@@ -78,8 +79,15 @@ public struct ViadereConfiguration: Sendable {
             } else {
                 config.apiBaseURL = url
                 if let host = url.host?.lowercased(), host != productionHost {
-                    // Staging etc.: pins for a different host are the integrator's responsibility.
-                    config.pinning = PinningConfiguration(host: host, pins: productionPinning.pins)
+                    // Staging etc.: the pins come from the build (Info.plist `ViadereAPIPins`, filled from the xcconfig). Without valid
+                    // pins the host gets placeholders and a fail-closed build cannot connect (the Staging archive is also stopped by
+                    // Scripts/check-release-pins.sh). The production pins are never reused for another host.
+                    config.pinning = PinningConfiguration(host: host, pins: pins(from: info) ?? placeholderPins)
+                    // A non-production host may attest and register for pushes in the sandbox (development-signed builds).
+                    if let raw = info["ViadereAPNsEnvironment"] as? String, let env = APNsTokenRegistration.Environment(rawValue: raw.lowercased()) {
+                        config.apnsEnvironment = env
+                    }
+                    if let rp = info["ViadereRelyingPartyID"] as? String, isDomainName(rp) { config.relyingPartyID = rp.lowercased() }
                 }
             }
         }
@@ -101,6 +109,25 @@ public struct ViadereConfiguration: Sendable {
         config.apnsEnvironment = .sandbox
         #endif
         return config
+    }
+
+    /// Placeholder pins for a non-production host whose build supplied none (never valid: the connection is refused when fail-closed).
+    static let placeholderPins = ["\(PinningConfiguration.placeholderPrefix)_PRIMARY_PIN_NOT_SET", "\(PinningConfiguration.placeholderPrefix)_BACKUP_PIN_NOT_SET"]
+
+    /// `ViadereAPIPins`: comma-separated base64 SHA-256 SPKI hashes. All-or-nothing: one malformed or placeholder entry rejects the lot
+    /// (a half-configured pin set must not look configured), as do duplicates and fewer than two pins (current + backup).
+    static func pins(from info: [String: Any]) -> [String]? {
+        guard let raw = info["ViadereAPIPins"] as? String else { return nil }
+        let pins = raw.split(separator: ",", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard pins.count >= 2, pins.allSatisfy(PinningConfiguration.isValidPin), Set(pins).count == pins.count else { return nil }
+        return pins
+    }
+
+    /// A plain DNS name (letters, digits, dashes, dots), as a relying-party ID is. Rejects unexpanded `$(...)` variables.
+    static func isDomainName(_ text: String) -> Bool {
+        let name = text.lowercased()
+        return name.contains(".") && name.count <= 253 && !name.hasPrefix(".") && !name.hasSuffix(".") && !name.contains("..")
+            && name.unicodeScalars.allSatisfy { ($0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains($0))) || $0 == "-" || $0 == "." }
     }
 
     /// Validates a configured base URL: no credentials, query, fragment or trailing path.

@@ -30,6 +30,12 @@
 	<false/>
 	<key>ViadereAPIBaseURL</key>
 	<string>$(VIADERE_API_BASE_URL)</string>
+	<key>ViadereAPIPins</key>
+	<string>$(VIADERE_API_PINS)</string>
+	<key>ViadereAPNsEnvironment</key>
+	<string>$(VIADERE_APNS_ENVIRONMENT)</string>
+	<key>ViadereRelyingPartyID</key>
+	<string>$(VIADERE_RP_DOMAIN)</string>
 	<key>ViadereKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
 	<key>NSAppTransportSecurity</key>

@@ -22,12 +22,15 @@ options:
   generateEmptyDirectories: false
   minimumXcodeGenVersion: "2.40.0"
 
+# Staging is a Release-grade configuration (optimized, no DEBUG, strict ATS) for the staging server and TestFlight; see Configs/Staging.xcconfig.
 configs:
   Debug: debug
+  Staging: release
   Release: release
 
 configFiles:
   Debug: Configs/Debug.xcconfig
+  Staging: Configs/Staging.xcconfig
   Release: Configs/Release.xcconfig
 
 settings:
@@ -45,10 +48,11 @@ settings:
     Debug:
       SWIFT_OPTIMIZATION_LEVEL: "-Onone"
       ONLY_ACTIVE_ARCH: YES
-    Release:
+    Release: &releaseSettings
       SWIFT_COMPILATION_MODE: wholemodule
       STRIP_INSTALLED_PRODUCT: YES
       ENABLE_TESTABILITY: NO
+    Staging: *releaseSettings
 
 packages:
   ViadereCore:
@@ -102,13 +106,14 @@ targets:
       path: Viadere/Viadere.entitlements
       properties:
         aps-environment: $(APS_ENVIRONMENT)
-        # App Attest: vouches for the keys enrolled at device enrollment. `development` in Debug, `production` in Release
+        # App Attest: vouches for the keys enrolled at device enrollment. `development` in Debug and Staging, `production` in Release
         # (Configs/*.xcconfig); the server's APP_ATTEST_ENVIRONMENT must match.
+        # Associated domains come from VIADERE_WEB_DOMAIN: viadere.com, or staging.viadere.com in Staging (Configs/*.xcconfig).
         com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
         com.apple.developer.associated-domains:
-          - applinks:viadere.com
-          - webcredentials:viadere.com
-          - appclips:viadere.com
+          - applinks:$(VIADERE_WEB_DOMAIN)
+          - webcredentials:$(VIADERE_WEB_DOMAIN)
+          - appclips:$(VIADERE_WEB_DOMAIN)
         com.apple.security.application-groups:
           - group.com.viadere.shared
         # Shared with the notification extensions: the request key and the access token only.
@@ -128,7 +133,7 @@ targets:
         # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement. The pass-type-identifiers
         # entitlement is only needed to read passes this app did not add, so it is deliberately not requested:
         #   com.apple.developer.pass-type-identifiers: [$(TeamIdentifierPrefix)pass.com.viadere.*]
-    # Fails an archive (Release) while the certificate pins are placeholders. Debug is never checked.
+    # Fails an archive (Release, Staging) while the certificate pins are placeholders. Debug is never checked.
     preBuildScripts:
       - name: Check release certificate pins
         script: '"${SRCROOT}/Scripts/check-release-pins.sh"'
@@ -293,10 +298,10 @@ targets:
         # The Clip attests with its own App Attest key (its own app id).
         com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
         com.apple.developer.associated-domains:
-          - appclips:viadere.com
-          - applinks:viadere.com
-          - webcredentials:viadere.com
-    # Fails an archive (Release) while the certificate pins are placeholders. Debug is never checked.
+          - appclips:$(VIADERE_WEB_DOMAIN)
+          - applinks:$(VIADERE_WEB_DOMAIN)
+          - webcredentials:$(VIADERE_WEB_DOMAIN)
+    # Fails an archive (Release, Staging) while the certificate pins are placeholders. Debug is never checked.
     preBuildScripts:
       - name: Check release certificate pins
         script: '"${SRCROOT}/Scripts/check-release-pins.sh"'
@@ -344,3 +349,16 @@ schemes:
       config: Debug
     archive:
       config: Release
+  # Staging server + TestFlight: Product > Archive with this scheme. Fill the pins in Configs/Staging.xcconfig first (docs/ops/STAGING-SETUP.md).
+  Staging:
+    build:
+      targets:
+        Viadere: all
+    run:
+      config: Staging
+    profile:
+      config: Staging
+    analyze:
+      config: Staging
+    archive:
+      config: Staging

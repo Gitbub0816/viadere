@@ -7,6 +7,17 @@ CURRENT_PROJECT_VERSION = 1
 // Production API. Pins for this host live in ViadereConfiguration.productionPinning (TODO before release).
 VIADERE_API_BASE_URL = https:/$()/api.viadere.com
 
+// Web domain the app is associated with (entitlements `applinks:` / `webcredentials:` / `appclips:`) and the passkey relying-party ID.
+// Staging.xcconfig points both at staging.viadere.com. The server's RP_ID / RP_ORIGIN must be the same domain.
+VIADERE_WEB_DOMAIN = viadere.com
+VIADERE_RP_DOMAIN = $(VIADERE_WEB_DOMAIN)
+// Which APNs environment the app registers its push token for (`sandbox` | `production`; read from Info.plist `ViadereAPNsEnvironment`).
+// It must equal the server's APNS_ENVIRONMENT. ViadereConfiguration honours `sandbox` only for a host other than the production API.
+VIADERE_APNS_ENVIRONMENT = production
+// Comma-separated SPKI pins for a non-production API host (Staging only). Production pins are compiled into ViadereConfiguration.productionPinning.
+VIADERE_API_PINS =
+VIADERE_DISPLAY_NAME = Viadere
+
 // Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
 DEVELOPMENT_TEAM =
 

@@ -9,5 +9,6 @@
 // These assignments come after the include on purpose and are not overridable.
 VIADERE_PLIST_DEFS =
 APS_ENVIRONMENT = production
+VIADERE_APNS_ENVIRONMENT = production
 // App Attest environment (the entitlement; the server's APP_ATTEST_ENVIRONMENT must match the AAGUID these builds attest with).
 APP_ATTEST_ENVIRONMENT = production

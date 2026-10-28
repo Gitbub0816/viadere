@@ -1,3 +1,8 @@
 // Copy to Local.xcconfig (git-ignored) and edit.
 DEVELOPMENT_TEAM = ABCDE12345
-// VIADERE_API_BASE_URL = https:/$()/staging-api.viadere.com
+// To test against a local server from Release-like builds use the Debug configuration; staging has its own configuration (Staging.xcconfig).
+
+// Staging for TestFlight (see Configs/Staging.xcconfig and docs/ops/STAGING-SETUP.md): the server must be switched to match.
+// VIADERE_STAGING_APNS_ENVIRONMENT = production
+// VIADERE_STAGING_APS_ENVIRONMENT = production
+// VIADERE_STAGING_APP_ATTEST_ENVIRONMENT = production
