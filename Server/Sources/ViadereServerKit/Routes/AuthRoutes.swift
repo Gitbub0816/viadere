@@ -8,11 +8,12 @@ enum AuthRoutes {
         let ceremony = IPRateLimitMiddleware(name: "auth-ceremony") { $0.rateLimits.authCeremony }
         let refresh = IPRateLimitMiddleware(name: "auth-refresh") { $0.rateLimits.refresh }
 
-        routes.api(APIRoutes.registerBegin, limiter: ceremony) { req in
+        let signup = routes.grouped(SignupGateMiddleware(flag: .signupConsumer))
+        signup.api(APIRoutes.registerBegin, limiter: ceremony) { req in
             let body: PasskeyRegistrationBeginRequest = try req.decodeBody()
             return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).registerBegin(body))
         }
-        routes.api(APIRoutes.registerFinish, limiter: ceremony) { req in
+        signup.api(APIRoutes.registerFinish, limiter: ceremony) { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
             return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).registerFinish(body), status: .created)
         }

@@ -319,18 +319,15 @@ struct MaintenanceMiddleware: AsyncMiddleware {
 }
 
 /// G-15: refuses new sign-ups while the matching switch is on. Sign-in of existing accounts is untouched.
+///
+/// Attached as **route-group middleware** on the routes it guards (`AuthRoutes`, `DashboardRoutes`), not matched against the request path: the
+/// router ignores empty segments, so a trailing or doubled slash reached the handler while a path comparison missed it (platform gate L1).
+/// Whatever the router serves for these routes passes through here.
 struct SignupGateMiddleware: AsyncMiddleware {
-    static let consumerPaths: Set<String> = ["/v1/auth/register/begin", "/v1/auth/register/finish"]
-    static let businessPaths: Set<String> = ["/dashboard/auth/signup/begin", "/dashboard/auth/signup/finish"]
+    let flag: PlatformFlag
 
     func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
-        guard request.method == .POST else { return try await next.respond(to: request) }
-        let path = request.url.path
-        var flag: PlatformFlag?
-        if Self.consumerPaths.contains(path) { flag = .signupConsumer }
-        else if Self.businessPaths.contains(path) { flag = .signupBusiness }
-        else if path == "/dashboard/team/invite" || path.hasPrefix("/dashboard/auth/invite/") || (path.hasPrefix("/dashboard/invite/") && path.hasSuffix("/accept")) { flag = .inviteDashboard }
-        if let flag, await PlatformFlags(db: request.db, ctx: request.ctx).isStopped(flag) {
+        if await PlatformFlags(db: request.db, ctx: request.ctx).isStopped(flag) {
             request.ctx.metrics.count(.signupStopped)
             throw APIError(.serviceUnavailable, .unavailable, "New sign-ups are paused for now. Existing accounts are not affected.", headers: ["Retry-After": "3600"])
         }

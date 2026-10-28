@@ -127,12 +127,14 @@ enum DashboardRoutes {
             response.cookies[realm.cookieName] = DashboardSessionStore(db: req.db, ctx: req.ctx).cookie(for: created, realm: realm)
             return response
         }
-        ceremonies.post("dashboard", "auth", "signup", "begin") { req in
+        let businessSignup = ceremonies.grouped(SignupGateMiddleware(flag: .signupBusiness))
+        let inviteCeremonies = ceremonies.grouped(SignupGateMiddleware(flag: .inviteDashboard))
+        businessSignup.post("dashboard", "auth", "signup", "begin") { req in
             let body: SignupBeginBody = try req.decodeBody()
             let ip = ClientIP.resolve(req, trustedProxies: req.ctx.config.trustedProxyCount)
             return try req.jsonResponse(try await DashboardAuthService(db: req.db, ctx: req.ctx).signupBegin(body, ip: ip))
         }
-        ceremonies.post("dashboard", "auth", "signup", "finish") { req in
+        businessSignup.post("dashboard", "auth", "signup", "finish") { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
             // No session yet: the account is unverified until the emailed code is entered.
             try await DashboardAuthService(db: req.db, ctx: req.ctx).signupFinish(body, previousCookie: req.requireCookie(.business))
@@ -179,11 +181,11 @@ enum DashboardRoutes {
             let created = try await DashboardAuthService(db: req.db, ctx: req.ctx).loginFinish(realm: .business, body, previousCookie: req.requireCookie(.business))
             return try await sessionResponse(created, req: req, realm: .business)
         }
-        ceremonies.post("dashboard", "auth", "invite", "begin") { req in
+        inviteCeremonies.post("dashboard", "auth", "invite", "begin") { req in
             let body: InviteBeginBody = try req.decodeBody()
             return try req.jsonResponse(try await DashboardAuthService(db: req.db, ctx: req.ctx).inviteBegin(body))
         }
-        ceremonies.post("dashboard", "auth", "invite", "finish") { req in
+        inviteCeremonies.post("dashboard", "auth", "invite", "finish") { req in
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
             let created = try await DashboardAuthService(db: req.db, ctx: req.ctx).inviteFinish(body, previousCookie: req.requireCookie(.business))
             return try await sessionResponse(created, req: req, realm: .business)
@@ -219,7 +221,8 @@ enum DashboardRoutes {
         pages.get("dashboard", "consent") { req in try await consentPage(req) }
         pages.get("dashboard", "audit") { req in try await auditPage(req) }
         pages.get("dashboard", "team") { req in try await teamPage(req) }
-        pages.post("dashboard", "team", "invite") { req in try await invite(req) }
+        let inviteGate = pages.grouped(SignupGateMiddleware(flag: .inviteDashboard))
+        inviteGate.post("dashboard", "team", "invite") { req in try await invite(req) }
         pages.post("dashboard", "team", "invites", ":id", "revoke") { req -> Response in
             let (p, _) = try req.businessDashboard
             try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).revokeInvite(id: try req.uuid("id"))
@@ -239,7 +242,7 @@ enum DashboardRoutes {
             if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/team?m=pending") }
             return DashboardResponses.redirect("/dashboard/team?m=removed")
         }
-        pages.post("dashboard", "invite", ":token", "accept") { req -> Response in
+        inviteGate.post("dashboard", "invite", ":token", "accept") { req -> Response in
             let p = try req.dashboard
             let token = req.parameters.get("token") ?? ""
             let businessId = try await DashboardActions.acceptInvite(token: token, principal: p, db: req.db, ctx: req.ctx)

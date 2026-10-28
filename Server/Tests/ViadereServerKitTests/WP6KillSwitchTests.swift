@@ -128,6 +128,34 @@ final class WP6KillSwitchTests: XCTestCase {
         }
     }
 
+    /// Platform gate L1 exploit: the stop matched exact paths, but the router ignores empty segments, so `//` and a trailing slash walked around it.
+    func testSignupStopsHoldForPathVariantsTheRouterStillServes() async throws {
+        try await withHarness { h in
+            let (op, _) = try await h.makeOperator()
+            let (owner, _, _) = try await h.verifiedOwner()
+            for scope in ["signup.consumer", "signup.business", "invite.dashboard"] {
+                let r = try await h.formPost("/operator/switches/signup", op, [("scope", scope), ("action", "on"), ("reason", "Sign-up abuse wave INC-9")])
+                XCTAssertEqual(r.status, .seeOther, r.text)
+            }
+            for path in ["/v1/auth/register/begin/", "/v1//auth/register/begin", "//v1/auth/register/begin", "/v1/auth/register//begin/"] {
+                let r = try await h.post(path, PasskeyRegistrationBeginRequest(displayName: "New"))
+                XCTAssertTrue([.serviceUnavailable, .notFound].contains(r.status), "\(path): \(r.status)")
+            }
+            let signup = SignupBeginBody(email: "new@example.com", displayName: "New", organizationName: "New Co", category: "retail",
+                                         legalName: "New Co", website: nil, requestedHandle: nil, description: nil)
+            for path in ["/dashboard/auth/signup/begin/", "/dashboard//auth/signup/begin", "/dashboard/auth/signup//begin/"] {
+                let r = try await h.jsonPost(path, signup)
+                XCTAssertTrue([.serviceUnavailable, .notFound].contains(r.status), "\(path): \(r.status)")
+            }
+            for path in ["/dashboard/team/invite/", "/dashboard//team/invite"] {
+                let r = try await h.formPost(path, owner, [("email", "teammate@example.com"), ("role", "analyst")])
+                XCTAssertTrue([.serviceUnavailable, .notFound].contains(r.status), "\(path): \(r.status)")
+            }
+            let invites = try await OrgInviteRecord.query(on: h.db).count()
+            XCTAssertEqual(invites, 0)
+        }
+    }
+
     // MARK: G-5 webhook pause
 
     func testWebhookPausePerEndpointPerBusinessAndGloballyKeepsDeliveriesQueued() async throws {

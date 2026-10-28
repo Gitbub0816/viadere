@@ -104,9 +104,8 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     // Origin lock (G-10): before routing, authentication and any database access. It answers 421 itself, so it sits outside the error mapper.
     app.middleware.use(EdgeLockMiddleware())
     app.middleware.use(APIErrorMiddleware())
-    // Operator switches: read-only mode (G-1) and sign-up stops (G-15).
+    // Operator switches: read-only mode (G-1). The sign-up stops (G-15) are route-group middleware on the sign-up and invitation routes.
     app.middleware.use(MaintenanceMiddleware())
-    app.middleware.use(SignupGateMiddleware())
     app.middleware.use(CORSLockdownMiddleware())
     app.middleware.use(GlobalRateLimitMiddleware())
     app.middleware.use(RequestGuardMiddleware())
