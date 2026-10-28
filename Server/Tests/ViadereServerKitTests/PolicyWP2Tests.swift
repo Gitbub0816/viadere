@@ -758,11 +758,15 @@ final class PolicyWP2Tests: XCTestCase {
             XCTAssertEqual(Set(rows.map(\.businessId)), [approver.record.id!])
             XCTAssertEqual(Set(rows.map(\.value)), ["A", "auth.challenge", "transaction.approve"])
             XCTAssertTrue(rows.allSatisfy { $0.grantedBy == CreatePolicyWP2Schema.migrationActor && $0.justification.contains("Grandfathered") })
-            // And what it could do before it still can.
-            try await eq(try await h.issue(approver, relationship: relA, payload: authorize(), key: "after").status, .created)
+            // Approvals through Approve v2 are as before. The legacy `authorize` path (decided on relay status alone) is closed until an operator grants the
+            // explicit, expiring legacy entitlement: grandfathering a capability is not that grant (gate finding F2).
+            try await eq(try await h.issue(approver, relationship: relA, payload: authorize(), key: "after").status, .forbidden)
+            try await EntitlementService(db: h.db, ctx: h.ctx).grantLegacyApproval(businessId: approver.record.id!, actor: .system("test"),
+                                                                                  justification: "Test fixture: migrating to Approve v2 by Q2.", expiresAt: h.clock.now().addingTimeInterval(86_400))
+            try await eq(try await h.issue(approver, relationship: relA, payload: authorize(), key: "after-granted").status, .created)
             // Idempotent.
             try await CreatePolicyWP2Schema.grandfatherExistingKeys(on: h.db, now: h.clock.now())
-            try await eq(try await BusinessEntitlementRecord.query(on: h.db).count(), 3)
+            try await eq(try await BusinessEntitlementRecord.query(on: h.db).count(), 4, "three grandfathered rows plus the explicit legacy grant")
         }
     }
 

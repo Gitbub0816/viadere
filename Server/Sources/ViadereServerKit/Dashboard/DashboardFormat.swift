@@ -50,7 +50,7 @@ enum DashboardFormat {
         "approved-change": "Approved.", "rejected-change": "Rejected.", "cancelled": "Cancelled.", "ticket": "Ticket received.", "requested": "Request received.",
         "cert": "Certificate saved.", "cert-removed": "Certificate removed.", "switch": "Switch updated.", "frozen": "Account frozen and signed out.",
         "unfrozen": "Account unfrozen.", "notice": "Notice queued for delivery.", "revoked-all": "Keys revoked.", "hold": "Legal hold recorded.",
-        "golive-approved": "Production access approved.", "golive-rejected": "Request declined.", "reviewed": "Review recorded.",
+        "root-authorized": "Root key change authorized for 15 minutes. Publish the signed entry from your tooling now.", "golive-approved": "Production access approved.", "golive-rejected": "Request declined.", "reviewed": "Review recorded.",
     ]
 
     static func flash(_ request: Request) -> String? { request.query[String.self, at: "m"].flatMap { flash[$0] } }

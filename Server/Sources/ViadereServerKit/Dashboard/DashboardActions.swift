@@ -60,6 +60,16 @@ struct DashboardActions {
         await Notifier(db: db, ctx: ctx).notifyBusiness(businessId, roles: [.owner, .securityAdmin, .orgAdmin], topic: topic, subject: subject, text: text, kind: "security-alert")
     }
 
+    // MARK: Root key (Approve)
+
+    /// Authorizes one root-key registration or succession for 15 minutes. Needs `manageSecurity`, a fresh passkey step-up and a verified domain.
+    func authorizeRootKey(kid: String) async throws {
+        try require(.manageSecurity)
+        try await requireReauth(next: "/dashboard/approve")
+        guard let user = principal.user.id else { throw APIError.forbidden }
+        _ = try await RootAuthorization(db: db, ctx: ctx).authorize(businessId: businessId, user: user, rootKid: kid)
+    }
+
     // MARK: API keys
 
     static let maxActiveKeys = 25

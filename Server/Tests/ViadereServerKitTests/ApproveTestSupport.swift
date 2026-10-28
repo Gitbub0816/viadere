@@ -40,8 +40,38 @@ struct ApproveFixture {
 extension TestHarness {
     // MARK: Business side
 
-    func publishEntry(_ business: TestBusiness, _ entry: KeyLogEntry, key: String? = nil) async throws -> HTTPResult {
-        try await businessPost(business, APIRoutes.businessKeyDirectoryPublish.template, PublishKeyEntryRequest(entry: Base64URL.encode(try entry.leafData())), key: key)
+    /// A verified domain for a business that has no dashboard in the test (condition 4 needs one before a root can be registered).
+    func ensureVerifiedDomain(_ businessId: UUID) async throws {
+        guard try await BusinessDomainRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$status == "verified").count() == 0 else { return }
+        let record = BusinessDomainRecord()
+        record.id = UUID()
+        record.businessId = businessId
+        let domain = "d" + businessId.uuidString.lowercased().prefix(12) + ".example.com"
+        record.domain = domain
+        record.token = SecureToken.generate(byteCount: 16)
+        record.status = "verified"
+        record.method = "dns"
+        record.verifiedDomain = domain
+        record.createdBy = "test"
+        record.createdAt = clock.now()
+        record.verifiedAt = clock.now()
+        record.failures = 0
+        try await record.create(on: db)
+    }
+
+    /// What the dashboard does after a passkey step-up: authorizes exactly this root key id once.
+    func authorizeRoot(_ business: TestBusiness, kid: String, kind: String? = nil) async throws {
+        try await ensureVerifiedDomain(business.id.uuid)
+        try await RootAuthorization(db: db, ctx: ctx).authorize(businessId: business.id.uuid, user: UUID(), rootKid: kid, kind: kind)
+    }
+
+    /// Publishes an entry the way a business's tooling does. A root registration or succession is first authorized in the dashboard (condition 4); pass
+    /// `authorized: false` to publish it as a bare API key would.
+    func publishEntry(_ business: TestBusiness, _ entry: KeyLogEntry, key: String? = nil, authorized: Bool = true) async throws -> HTTPResult {
+        if authorized, let statement = try? entry.decodeStatement(), let (kind, kid) = RootAuthorization.kind(of: statement) {
+            try? await authorizeRoot(business, kid: kid, kind: kind)
+        }
+        return try await businessPost(business, APIRoutes.businessKeyDirectoryPublish.template, PublishKeyEntryRequest(entry: Base64URL.encode(try entry.leafData())), key: key)
     }
 
     /// Registers the root and publishes the confirmation, request-signing and HPKE keys, as the business's tooling would.

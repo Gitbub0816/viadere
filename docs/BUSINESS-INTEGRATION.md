@@ -63,8 +63,8 @@ Scopes say which **routes** a key may call. Each key also carries **capabilities
 | `message.send` | M (default) | messages, statuses, and every interaction kind except the two below; reading or cancelling those |
 | `contact.reachable` | M (default) | checking that an existing connection can receive messages |
 | `consent.request` | M (default) | asking a customer to grant a purpose |
-| `auth.challenge` | A (granted) | interactions of kind `authenticate` |
-| `transaction.approve` | A (granted) | interactions of kind `authorize` |
+| `auth.challenge` | A (granted) | Approve v2 sign-in approvals; legacy `authenticate` interactions |
+| `transaction.approve` | A (granted) | Approve v2 transaction approvals; legacy `authorize` interactions (legacy approvals also need the temporary entitlement, below) |
 | `age.minimum`, `identity.name`, `identity.address`, `identity.verified` | V (granted) | Verify (not yet generally available); each disclosure needs a per-request customer receipt |
 
 * **Every verified business starts with the three messaging capabilities and nothing else.** Approval and verification capabilities are granted by a Viadere operator after review, with a recorded purpose; your category, plan or verified badge never grants them. Ask your Viadere contact.
@@ -90,7 +90,9 @@ let client = try ViadereBusinessClient(apiKey: ProcessInfo.processInfo.environme
 
 Keep the key on your server. Never ship it in an app or a web page.
 
-### Issue an authorize request
+### Issue an authorize request (legacy path, closed by default)
+
+> **This path is not independently verifiable.** The `verification` you receive is the relay's attestation; you never see the device's signature. While Approve v2 is available (see "Approve" below) `authorize` and `authenticate` at `high` or `critical` sensitivity are refused for live traffic with `403 legacy_approval_not_entitled` unless Viadere granted your business the temporary legacy entitlement (justified, audited, at most 180 days, ending no later than 2027-06-30). The sandbox is unaffected. New integrations use Approve v2.
 
 ```swift
 let request = IssueInteractionRequest(
@@ -408,7 +410,7 @@ let directory = try await client.verifiedKeyDirectory(businessId: business, logK
 print(directory.currentRootKid, directory.nextSerial)                                                  // show the root key id on your own screens
 ```
 
-Show your **root key id** in your own signed-in pages and print it on the QR you hand out (the link carries it as `rk=`): customers' phones compare it with the log, which catches a relay that tries to substitute a root. Each key is valid for at most 400 days (30 to 90 is a good rotation period). Rotate by publishing a new key, switching, then revoking the old one with `authority.revocationEntry(kid:serial:)`. To replace the root itself, `authority.successionEntry(to:)` (both roots sign); customers are alerted and must re-confirm.
+Show your **root key id** in your own signed-in pages. The SDK puts it in the QR/link it builds (`rk=`, from `authority.rootKid`): customers' phones compare it with the log, which catches a relay that tries to substitute a root. Each key is valid for at most 400 days (30 to 90 is a good rotation period). Rotate by publishing a new key, switching, then revoking the old one with `authority.revocationEntry(kid:serial:)`. To replace the root itself, `authority.successionEntry(to:)` (both roots sign); customers are alerted and must re-confirm.
 
 **Run the log monitor** so you notice a key you did not publish (a stolen API key, or a relay that appended something):
 
@@ -423,17 +425,36 @@ Exit code `0` is fine; `2` is an incident (an entry you did not expect, or a log
 You can only enroll a customer you already have a relationship with (`subject_ref`, section "Customer references"). Do this inside your own signed-in session for that customer, never over SMS or email.
 
 ```swift
-let ticket = try await client.createApprovalEnrollment(subject: subject, capability: .transactionApprove)   // scope approvals:manage
-// Show ticket.code (ABCD-EFGH) and a QR of ticket.deepLink (it already carries your root key id).
+// scope approvals:manage. The SDK builds the link and the secret; the relay's own `deep_link` is never shown.
+let invitation = try await client.createApprovalEnrollment(subject: subject, capability: .transactionApprove, authority: authority)
+try await enrollmentStore.save(invitation)     // YOUR database, keyed by invitation.enrollmentId: it holds the enrollment secret. Never log it.
 
-// Poll or wait for the webhook `approve.enrollment.device_completed`, then:
+// Show invitation.link as a QR or button. For a customer who types instead: invitation.displayCode (ABCD-EFGH) AND invitation.checkCode (a second ABCD-EFGH).
+
+// Wait for the webhook `approve.enrollment.device_completed`, then:
 let enrolled = try await client.confirmApprovalEnrollment(
-    id: ticket.enrollmentId, businessId: business, expectedSubject: subject,
+    invitation: try await enrollmentStore.load(enrollmentId),
+    businessId: business, expectedSubject: subject,
+    sas: typedSixDigits,                       // typed path only: the six digits the customer's app shows, typed into YOUR signed-in page
     confirmationKey: confirmation, minimumAssurance: .biometric)
-await keyStore.add(enrolled)            // YOUR store: this is what every later result is verified against
+await keyStore.add(enrolled)                   // YOUR store: this is what every later result is verified against
 ```
 
-`confirmApprovalEnrollment` verifies the device's statement (signature by its own key, your business id, the customer you started it for, the enrollment id, assurance) **before** it signs a confirmation. The phone activates the key only if your confirmation names the exact statement it signed, so a relay that swapped the key is detected on the phone. Persist `enrolled` (its `key` holds the kid, public key, subject and assurance) durably; implement `ApprovalKeyStore` over your database (the SDK ships `InMemoryApprovalKeyStore` for tests).
+**A statement that verifies proves nothing about who sent it.** Viadere (the relay) creates the code, stores the customer's statement and hands it to you, and it knows every id in it: a compromised relay could make a key of its own, sign a perfectly valid statement and give it to you. `confirmApprovalEnrollment` therefore refuses to sign a confirmation until the statement is authenticated with the secret only you and the customer's app hold:
+
+* **Link or QR** (`https://viadere.com/a/CODE?rk=<your root key id>#es=<secret>`): the app returns a *binding tag* (an HMAC of its statement under the secret). The SDK verifies it in constant time. The secret sits in the URL **fragment**, which is never sent to Viadere; do not put it anywhere a server could read it (no redirect through your own tracking page, no logging of the full URL, no analytics on the QR image).
+* **Typed code**: the customer enters the code *and* the check code in the app; the app shows six digits; you type them into `sas`. The check code never goes to Viadere, so Viadere cannot compute those digits for a forged statement.
+* A forged or swapped statement, a wrong tag or a wrong SAS throws `bindingTagInvalid` / `sasMismatch`, **cancels the enrollment** and revokes the pending key: start a new one (one SAS guess per enrollment). `verificationRequired` means no proof arrived yet; nothing was changed.
+* The SDK also refuses a ticket whose root key id is not yours (`rootKeyMismatch`): the `rk` the customer's phone treats as "verified out of band" is your own, not the relay's.
+* If you do not confirm within the enrollment's lifetime plus five minutes, Viadere revokes the pending key and sends you `approve.key.revoked`; the customer's phone removes it too and tells them.
+
+`confirmApprovalEnrollment` also verifies the statement itself (signature by its own key, your business id, the customer you started it for, the enrollment id, assurance) **before** it signs. The phone activates the key only if your confirmation names the exact statement it signed, so a relay that swapped the key is detected on the phone. Persist `enrolled` (its `key` holds the kid, public key, subject and assurance) durably; implement `ApprovalKeyStore` over your database (the SDK ships `InMemoryApprovalKeyStore` for tests).
+
+**Registering or changing the root key** is not possible with an API key alone: sign in to the dashboard (Approve > Root key) as a Security Admin or Owner, complete the passkey prompt and authorize the root key id (it must belong to a business with a verified domain); then publish the signed entry within 15 minutes. Each authorization covers one key id once.
+
+**Freeze notifications.** The `approve.frozen` webhook's `request_id` is an opaque `frz_...` reference. Resolve it with `client.approvalFreeze(ref:)` (it returns the `subject_ref` and whether approvals are frozen now).
+
+**The legacy `authorize` / `authenticate` interactions are not an approval path.** Their status is the relay's word; you cannot verify it. While Approve v2 is available they are refused for live traffic (`403 legacy_approval_not_entitled`; high and critical `authenticate` too) unless Viadere granted your business a time-limited legacy entitlement during migration (at most 180 days, ending no later than 2027-06-30). The sandbox is unaffected. Use Approve v2 for sign-in approvals and transaction authorization.
 
 ### Step 3: ask for approval
 

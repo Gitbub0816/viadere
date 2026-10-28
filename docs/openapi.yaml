@@ -285,10 +285,13 @@ paths:
       summary: Start enrolling a customer's pairwise approval key
       description: |
         Requires scope `approvals:manage` and the capability `auth.challenge` or `transaction.approve`; live keys only. The customer must be
-        connected to your business. Show the returned `code` (`ABCD-EFGH`) or a QR of `deep_link` (it carries your root key id as `rk`) in your
-        **own signed-in session**; never send it by SMS or email. Single use; lifetime 10 minutes by default, at most 15; at most 3 open
-        enrollments per relationship. Then wait for `approve.enrollment.device_completed`, fetch the enrollment, verify the device statement
-        yourself and confirm (see SECURITY.md 2.53).
+        connected to your business. Do not show the returned `deep_link`: use the BusinessSDK's `createApprovalEnrollment`, which builds the link with your
+        own root key id and a 256-bit enrollment secret in the URL fragment (`#es=`, never sent to Viadere) and refuses a ticket naming another root.
+        Show the link or QR in your **own signed-in session**; never send it by SMS or email. Single use; lifetime 10 minutes by default, at most 15; at
+        most 3 open enrollments per relationship. Then wait for `approve.enrollment.device_completed`, fetch the enrollment and **authenticate the
+        statement with your secret** (the `binding_tag`, or the SAS the customer types in) before verifying and confirming it (SECURITY.md 2.53). A
+        statement that verifies proves only possession of its key, not who sent it. A completed enrollment you do not confirm within its lifetime plus
+        5 minutes is ended and the pending key revoked.
       requestBody:
         required: true
         content:
@@ -534,6 +537,28 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/freezes/{freezeRef}:
+    get:
+      tags: [Approve]
+      operationId: getApprovalFreeze
+      summary: Resolve the opaque reference of an `approve.frozen` webhook
+      description: |
+        Requires scope `approvals:manage`. The `approve.frozen` event carries a random, per-business `frz_...` reference in `request_id`, never the
+        customer's `subject_ref`; this call returns the customer it stands for and whether approvals are frozen now. Another business's reference is a 404.
+      parameters:
+        - name: freezeRef
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The customer and the current state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FreezeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/business/key-directory/entries:
     post:
       tags: [KeyDirectory]
@@ -1344,7 +1369,7 @@ components:
       properties:
         enrollment_id: { $ref: "#/components/schemas/Uuid" }
         code: { type: string, description: "Eight characters, no separator." }
-        deep_link: { type: string, description: "https://viadere.com/a/{CODE}?rk={root key id}" }
+        deep_link: { type: string, description: "The relay's suggestion (https://viadere.com/a/{CODE}?rk={root key id}). Do not show it: it carries no enrollment secret and its rk is not authenticated. The SDK builds the link you show, with your own root key id and the secret in the fragment (#es=)." }
         expires_at: { type: string, format: date-time }
     ApprovalEnrollmentView:
       type: object
@@ -1359,6 +1384,9 @@ components:
         device_statement: { $ref: "#/components/schemas/SignedStatement" }
         kid: { type: string }
         confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        binding_tag:
+          type: string
+          description: "base64url HMAC-SHA256(es, \"VIADERE-ENROLL-BIND-V1\\n\" || statement payload), made by the customer's app when it opened a link carrying the enrollment secret. Verify it with your own secret before confirming; the relay cannot."
     ConfirmApprovalEnrollmentRequest:
       type: object
       additionalProperties: false

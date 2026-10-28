@@ -287,6 +287,27 @@ final class ApprovalResultTests: XCTestCase {
         XCTAssertEqual(MoneyFormatting.display(minor: 500, currency: "JPY"), "500 JPY")
     }
 
+    /// Gate finding F5: `[A-Z]{3}` accepted "XYZ", "ZZZ" and withdrawn codes, whose amount a person would then be asked to approve.
+    func testOnlyRealIso4217CurrenciesAreAcceptedWithTheirMinorUnits() {
+        func check(_ code: String) -> Bool { (try? ApprovalSubject.transaction(TransactionDetails(currency: code, amountMinor: 100, payeeDisplay: "Cafe Rio", transactionReference: "ref-1")).validate()) != nil }
+        for code in ["XYZ", "ZZZ", "AAA", "XXX", "XTS", "XAU", "XDR", "USN", "CHE", "BGN", "HRK", "ZWL", "VEF", "SLL", "CUC", "LVL"] { XCTAssertFalse(check(code), code) }
+        for code in ["USD", "EUR", "GBP", "JPY", "KWD", "CLF", "CHF", "INR", "BRL", "XOF"] { XCTAssertTrue(check(code), code) }
+        // Exponents: JPY/KRW/etc 0, BHD/KWD/OMR/TND/JOD/IQD/LYD 3, CLF 4, everything else 2.
+        for code in ["JPY", "KRW", "VND", "ISK", "CLP", "UGX", "XAF", "XOF", "XPF", "PYG", "RWF", "VUV", "BIF", "DJF", "GNF", "KMF"] { XCTAssertEqual(ISO4217.exponent(of: code), 0, code) }
+        for code in ["BHD", "KWD", "OMR", "TND", "JOD", "IQD", "LYD"] { XCTAssertEqual(ISO4217.exponent(of: code), 3, code) }
+        XCTAssertEqual(ISO4217.exponent(of: "CLF"), 4)
+        for code in ["USD", "EUR", "GBP", "CHF", "MXN", "ZAR"] { XCTAssertEqual(ISO4217.exponent(of: code), 2, code) }
+        XCTAssertNil(ISO4217.exponent(of: "usd"))
+        XCTAssertEqual(MoneyFormatting.display(minor: 12_345, currency: "KWD"), "12.345 KWD")
+        XCTAssertEqual(MoneyFormatting.display(minor: 12_345, currency: "CLF"), "1.2345 CLF")
+        XCTAssertEqual(MoneyFormatting.display(minor: 7, currency: "KWD"), "0.007 KWD")
+        // The three sets are disjoint (a code has exactly one exponent).
+        XCTAssertTrue(ISO4217.zero.isDisjoint(with: ISO4217.two) && ISO4217.three.isDisjoint(with: ISO4217.two) && ISO4217.four.isDisjoint(with: ISO4217.two))
+        // A request naming an unknown currency does not even build a digest.
+        let bogus = ApprovalSubject.transaction(TransactionDetails(currency: "XYZ", amountMinor: 100, payeeDisplay: "Cafe Rio", transactionReference: "ref-1"))
+        XCTAssertThrowsError(try bogus.digest())
+    }
+
     // MARK: Business-signed request
 
     func testBusinessSignedRequestAuthenticatesTheBusiness() async throws {

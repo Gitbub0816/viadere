@@ -55,6 +55,14 @@ enum DB {
         return rows.count == 1
     }
 
+    /// `SELECT id FROM table WHERE id = ? FOR UPDATE` inside a transaction: serializes concurrent transactions that need a consistent view of
+    /// the rows around this one (for example the requests of one relationship). PostgreSQL takes the row lock; SQLite has no row locks and
+    /// serializes writers anyway, so the dialect renders no clause.
+    static func lockForUpdate(_ db: any Database, table: String, id: UUID) async throws {
+        guard let sql = db as? any SQLDatabase else { throw APIError.internalError }
+        _ = try await sql.select().column("id").from(table).where("id", .equal, id).for(.update).all()
+    }
+
     /// Like `swap` but the expected value is SQL NULL (e.g. `consumed_at IS NULL`).
     static func swapFromNull(_ db: any Database, table: String, id: UUID, column: String, newValue: some Encodable & Sendable,
                              extra: [(String, any Encodable & Sendable)] = []) async throws -> Bool {

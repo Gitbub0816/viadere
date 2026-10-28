@@ -106,7 +106,9 @@ public enum ApprovalSubject: Sendable, Hashable {
     public func validate() throws {
         switch self {
         case .transaction(let value):
-            guard value.currency.utf8.count == 3, value.currency.utf8.allSatisfy({ $0 >= 0x41 && $0 <= 0x5A }) else { throw ApprovalTransactionError.invalid(field: "currency") }
+            guard value.currency.utf8.count == 3, value.currency.utf8.allSatisfy({ $0 >= 0x41 && $0 <= 0x5A }), ISO4217.isKnown(value.currency) else {
+                throw ApprovalTransactionError.invalid(field: "currency")
+            }
             guard (1...999_999_999_999).contains(value.amountMinor) else { throw ApprovalTransactionError.invalid(field: "amount_minor") }
             guard Self.isValidDisplay(value.payeeDisplay, max: 80) else { throw ApprovalTransactionError.invalid(field: "payee_display") }
             guard Self.isPrintableASCII(value.transactionReference, max: 64) else { throw ApprovalTransactionError.invalid(field: "transaction_reference") }
@@ -171,13 +173,44 @@ public enum ApprovalSubject: Sendable, Hashable {
     }
 }
 
-/// Formats a minor-unit amount for display (`2500.00 USD`). Currencies are shown with two decimals except the zero-decimal ones.
-public enum MoneyFormatting {
-    static let zeroDecimal: Set<String> = ["JPY", "KRW", "VND", "CLP", "ISK", "UGX", "XAF", "XOF", "XPF", "PYG", "RWF", "VUV"]
-    static let threeDecimal: Set<String> = ["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]
+/// The ISO 4217 currencies a transaction approval may name, with their minor-unit exponents (gate finding F5). Any other code, including a
+/// well-formed three-letter one that is not a currency, is refused: an approval's amount is shown to a person and signed, so "what 250000
+/// minor units of `XYZ` means" must never be a guess. Funds codes (`USN`, `CHE`...), metals and testing codes are not payable currencies and are
+/// absent. Reviewed against the ISO 4217 list as of 2026-10 (BGN is withdrawn since the euro replaced it on 2026-01-01).
+public enum ISO4217 {
+    /// 0 minor-unit digits.
+    static let zero: Set<String> = ["BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"]
+    /// 3 minor-unit digits.
+    static let three: Set<String> = ["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]
+    /// 4 minor-unit digits.
+    static let four: Set<String> = ["CLF"]
+    /// 2 minor-unit digits.
+    static let two: Set<String> = [
+        "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BMD", "BND", "BOB", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD",
+        "CAD", "CDF", "CHF", "CNY", "COP", "CRC", "CUP", "CVE", "CZK", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP",
+        "GMD", "GTQ", "GYD", "HKD", "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IRR", "JMD", "KES", "KGS", "KHR", "KPW", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD",
+        "LSL", "MAD", "MDL", "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "PAB",
+        "PEN", "PGK", "PHP", "PKR", "PLN", "QAR", "RON", "RSD", "RUB", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP", "STN", "SVC",
+        "SYP", "SZL", "THB", "TJS", "TMT", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "USD", "UYU", "UZS", "VED", "VES", "WST", "XCD", "YER", "ZAR", "ZMW", "ZWG",
+    ]
 
+    /// The number of minor-unit digits, or `nil` for a code that is not a payable ISO 4217 currency.
+    public static func exponent(of code: String) -> Int? {
+        if two.contains(code) { return 2 }
+        if zero.contains(code) { return 0 }
+        if three.contains(code) { return 3 }
+        if four.contains(code) { return 4 }
+        return nil
+    }
+
+    public static func isKnown(_ code: String) -> Bool { exponent(of: code) != nil }
+}
+
+/// Formats a minor-unit amount for display (`2500.00 USD`) using the currency's ISO 4217 exponent (JPY 0, KWD 3, CLF 4...).
+public enum MoneyFormatting {
     public static func display(minor: Int64, currency: String) -> String {
-        let digits = zeroDecimal.contains(currency) ? 0 : (threeDecimal.contains(currency) ? 3 : 2)
+        // An unknown code never reaches a prompt (validation refuses it); two digits is the fallback for display-only callers.
+        let digits = ISO4217.exponent(of: currency) ?? 2
         guard digits > 0 else { return "\(minor) \(currency)" }
         var scale: Int64 = 1
         for _ in 0..<digits { scale *= 10 }

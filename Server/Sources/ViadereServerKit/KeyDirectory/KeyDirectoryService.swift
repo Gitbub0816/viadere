@@ -42,6 +42,8 @@ struct KeyDirectoryService {
                     // One writer at a time: the entry is validated against the business's history *inside* the lock, so two racing publishes cannot
                     // both be valid against the same state and then break it together.
                     if DB.isPostgres(tx), let sql = tx as? any SQLDatabase { try await sql.raw("SELECT pg_advisory_xact_lock(746175)").run() }
+                    // Condition 4: a root key is registered or replaced only after a dashboard passkey step-up for a business with a verified domain.
+                    try await RootAuthorization(db: db, ctx: ctx).consume(businessId: principal.businessId.uuid, statement: statement, on: tx)
                     let txLog = KeyLogService(db: tx, ctx: ctx)
                     var state = try await txLog.state(for: principal.businessId.uuid)
                     guard try await txLog.count(for: principal.businessId.uuid) < KeyLogService.maxEntriesPerBusiness else {
@@ -54,6 +56,10 @@ struct KeyDirectoryService {
                     return next
                 }
             }
+        } catch let refused as RootAuthorization.Refused {
+            _ = try? await AuditService(db: db, ctx: ctx).record("keydirectory.root_refused", outcome: .denied, actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                                                                 businessId: principal.businessId, subjectType: "key_log", metadata: ["kind": refused.kind, "kid": refused.kid, "reason": refused.reason])
+            throw refused.apiError
         } catch let error as KeyDirectoryError {
             _ = try? await AuditService(db: db, ctx: ctx).record("keydirectory.entry_rejected", outcome: .denied, actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
                                                                  businessId: principal.businessId, metadata: ["type": entry.type, "reason": String(describing: error).prefix(60).description])

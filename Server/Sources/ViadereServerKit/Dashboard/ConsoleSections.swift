@@ -3,6 +3,10 @@ import Foundation
 import Vapor
 import ViadereCore
 
+private struct RootAuthorizationForm: Content {
+    var rootKid: String
+}
+
 private struct TicketForm: Content {
     var subject: String
     var body: String
@@ -47,6 +51,15 @@ enum ConsoleSections {
         pages.get("dashboard", "messaging") { req in try await messaging(req) }
         pages.get("dashboard", "verification") { req in try await verify(req) }
         pages.get("dashboard", "approve") { req in try await approve(req) }
+        pages.post("dashboard", "approve", "root-authorizations") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            let form = try req.content.decode(RootAuthorizationForm.self)
+            let actions = DashboardActions(db: req.db, ctx: req.ctx, principal: p)
+            try actions.require(.manageSecurity)
+            try await actions.requireReauth(next: "/dashboard/approve")
+            try await actions.authorizeRootKey(kid: form.rootKid.trimmingCharacters(in: .whitespacesAndNewlines))
+            return DashboardResponses.redirect("/dashboard/approve?m=root-authorized")
+        }
         pages.get("dashboard", "support") { req in try await support(req) }
         pages.post("dashboard", "support", "tickets") { req -> Response in
             let (p, _) = try req.businessDashboard
@@ -128,7 +141,29 @@ enum ConsoleSections {
         Create approval keys under <a href="/dashboard/api-keys">API keys</a> (a Security Admin or Owner issues them).</p></div>
         """
         let extra = await ConsoleCards.shared.html(for: .approve, req: req, principal: p, businessId: businessId)
-        return DashboardUI.businessPage(p, title: "Approve", active: "/dashboard/approve", subtitle: "Settings and aggregate metrics. No payloads.", body: enabled + settings + extra)
+        let root = try await rootKeyCard(req, principal: p, businessId: businessId)
+        return DashboardUI.businessPage(p, title: "Approve", active: "/dashboard/approve", subtitle: "Settings and aggregate metrics. No payloads.", flash: DashboardFormat.flash(req),
+                                        body: enabled + settings + root + extra)
+    }
+
+    /// The root key card (condition 4): who may register or change it, and the passkey-gated authorization.
+    private static func rootKeyCard(_ req: Request, principal p: DashboardPrincipal, businessId: UUID) async throws -> String {
+        let service = RootAuthorization(db: req.db, ctx: req.ctx)
+        let state = try await KeyLogService(db: req.db, ctx: req.ctx).state(for: businessId)
+        let verified = try await service.hasVerifiedDomain(businessId: businessId)
+        let current = state.currentRoot.map { "<code>\(DashboardUI.esc($0.kid))</code>" } ?? "none registered"
+        var body = "<div class=\"card\"><h2>Root key</h2><p>Current root key: \(current)</p>"
+            + "<p class=\"mu sm\">Your root key signs every key your customers' phones trust you with. Registering or replacing it is never possible with an API key alone: a person with the Security Admin or Owner role authorizes the exact key id here with a passkey, then publishes the signed entry from your tooling within 15 minutes. Every customer's phone alerts its owner when the root changes.</p>"
+        if !verified {
+            body += "<p>\(DashboardFormat.badge("Domain not verified", "dg")) Verify a domain you control under Organization before registering a root key.</p>"
+        } else if p.can(.manageSecurity) {
+            body += "<form method=\"post\" action=\"/dashboard/approve/root-authorizations\">\(DashboardUI.csrf(p))"
+                + "<label for=\"rk\">Key id of the \(state.currentRoot == nil ? "root key to register" : "new root key")</label><input id=\"rk\" name=\"rootKid\" type=\"text\" maxlength=\"64\" required spellcheck=\"false\" autocomplete=\"off\">"
+                + "<button class=\"btn\" type=\"submit\">Authorize with passkey</button></form>"
+        } else {
+            body += "<p class=\"mu sm\">Ask a Security Admin or Owner to authorize a root key change.</p>"
+        }
+        return body + "</div>"
     }
 
     // MARK: Support

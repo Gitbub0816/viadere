@@ -206,3 +206,26 @@ final class ApproveFreezeEventRecord: Model, @unchecked Sendable {
     static func newRef() -> String { "frz_" + SecureToken.generate(byteCount: 16) }
     static func isValidRef(_ value: String) -> Bool { value.hasPrefix("frz_") && Base64URL.isValid(String(value.dropFirst(4)), minLength: 22, maxLength: 22) }
 }
+
+/// A dashboard passkey step-up that lets **one** root-key registration or succession through the API (condition 4): the root decides who may
+/// speak for the business to every customer's phone, so an API key with `keydirectory:manage` alone must never be able to set or replace it.
+/// Bound to the root key id, single use, 15 minutes, only for a business with a verified domain.
+final class KeyRootAuthorizationRecord: Model, @unchecked Sendable {
+    static let schema = "kd_root_authorizations"
+    static let registerKind = "register"
+    static let successionKind = "succession"
+    static let lifetime: TimeInterval = 900
+
+    @ID(key: .id) var id: UUID?
+    @Field(key: "business_id") var businessId: UUID
+    @Field(key: "kind") var kind: String
+    /// The key id of the root being registered, or of the **new** root of a succession.
+    @Field(key: "root_kid") var rootKid: String
+    /// The dashboard user (lowercase UUID) who completed the passkey step-up.
+    @Field(key: "authorized_by") var authorizedBy: String
+    @Field(key: "created_at") var createdAt: Date
+    @Field(key: "expires_at") var expiresAt: Date
+    @OptionalField(key: "consumed_at") var consumedAt: Date?
+
+    init() {}
+}

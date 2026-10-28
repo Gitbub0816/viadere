@@ -319,8 +319,9 @@ Pairwise per-business approval keys with business-authorized enrollment, signed 
 | `GET /v1/approve/requests` · `GET .../{id}` · `POST .../{id}/result` | device | the relay verifies the JWS with the stored key and rejects a frozen, expired, replayed or cool-down request |
 | `GET /v1/business/approve/results/{resultRef}` | API key | recipient-bound; the signed JWS. The `status` of a request is never sufficient |
 | `GET/POST /v1/approve/freeze` · `POST /v1/business/approve/freeze` | device / API key | customer freeze (account or relationship): freezing is one signed request, lifting needs a trusted device and a fresh biometric proof; a business lifts only its own |
+| `GET /v1/business/approve/freezes/{freezeRef}` | API key | resolves the opaque `frz_...` reference of an `approve.frozen` webhook to the customer and the current state |
 | `GET /v1/key-directory/sth` · `/consistency` · `/businesses/{id}` | none (rate limited per IP) | public; clients verify everything |
-| `POST/GET /v1/business/key-directory/entries` | API key `keydirectory:manage` | publish a signed entry; read your own with proofs |
+| `POST/GET /v1/business/key-directory/entries` | API key `keydirectory:manage` | publish a signed entry; read your own with proofs. A `root` or `root-succession` entry also needs a dashboard passkey authorization (`POST /dashboard/approve/root-authorizations`) and a verified domain |
 
 Storage: `kd_log_entries` and `kd_tree_heads` are append-only (database triggers refuse `UPDATE`/`DELETE`); the log is appended under a database advisory lock and the tree is cached in memory per process (rebuilt from the table; a scaling item). Displayed details and challenges are cleared when a request reaches a terminal state and requests are purged after 400 days. Webhook subscriptions can opt into the opaque v2 envelope (`envelopeVersion: "2026-10-27"`): ids only, with `Viadere-Delivery-Id` and a versioned `Viadere-Key-Id`. Background jobs expire due requests and enrollments. Security notices: freeze, key revoked, root change, enrollment completed, substitution suspected.
 

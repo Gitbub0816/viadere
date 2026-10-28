@@ -95,16 +95,12 @@ struct ApproveRequestService {
             throw APIError(.conflict, .conflict, "The customer has no active approval key for your business. Enroll one first.", details: ["reason": "no_active_key"])
         }
 
-        // Prompt-fatigue protection (SEC-DEV-008), before anything is stored or pushed.
+        // Prompt-fatigue protection (SEC-DEV-008), before anything is stored or pushed. This early look only avoids work: the authoritative check runs
+        // again inside the transaction that inserts the request, under a per-relationship lock (gate finding F5), so concurrent requests cannot all
+        // pass a count that none of them has yet changed.
         let now = ctx.now
-        let verdict = try await promptVerdict(relationshipId: relationship.id!, now: now)
-        var autoDenied = false
-        switch verdict {
-        case .rateLimited(let retry):
-            throw APIError(.tooManyRequests, .rateLimited, "Too many approval requests for this customer.", headers: ["Retry-After": String(Int(retry.rounded(.up)))])
-        case .autoDeny: autoDenied = true
-        case .allow: break
-        }
+        let early = try await promptVerdict(relationshipId: relationship.id!, now: now)
+        if case .rateLimited(let retry) = early { throw Self.rateLimited(retry) }
 
         // Targets.
         var deliveries: [(key: ApproveKeyRecord, device: DeviceRecord, envelope: E2EEEnvelope?)] = []
@@ -142,17 +138,28 @@ struct ApproveRequestService {
             _ = details
             record.detailsSealed = try ctx.cipher.seal(try ViadereJSON.encode(stored), context: Self.sealContext, rowId: record.id!)
         }
-        record.status = autoDenied ? ApprovalRequestStatus.denied.rawValue : ApprovalRequestStatus.pending.rawValue
-        record.reason = autoDenied ? "auto_denied" : nil
         record.createdAt = now
         record.expiresAt = now.addingTimeInterval(TimeInterval(lifetime))
-        record.delivered = autoDenied ? 0 : deliveries.count
-        if autoDenied { record.decidedAt = now }
         let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
-        let isAutoDenied = autoDenied
         let targets = deliveries
+        let service = self
         do {
-            try await db.transaction { tx in
+            try await DB.retryingTransient { try await db.transaction { tx in
+                // Serialize requests per relationship (`SELECT ... FOR UPDATE` on PostgreSQL; SQLite serializes writers), then decide on the history
+                // as it is now, including every request that committed while this one waited.
+                try await DB.lockForUpdate(tx, table: RelationshipRecord.schema, id: relationship.id!)
+                let verdict = try await ApproveRequestService(db: tx, ctx: service.ctx).promptVerdict(relationshipId: relationship.id!, now: now)
+                var denied = false
+                switch verdict {
+                case .rateLimited(let retry): throw Self.rateLimited(retry)
+                case .autoDeny: denied = true
+                case .allow: break
+                }
+                record.status = denied ? ApprovalRequestStatus.denied.rawValue : ApprovalRequestStatus.pending.rawValue
+                record.reason = denied ? "auto_denied" : nil
+                record.delivered = denied ? 0 : targets.count
+                if denied { record.decidedAt = now }
+                let isAutoDenied = denied
                 try await record.create(on: tx)
                 if !isAutoDenied {
                     for target in targets {
@@ -171,7 +178,7 @@ struct ApproveRequestService {
                 _ = try await AuditService(db: tx, ctx: ctx).record(isAutoDenied ? "approve.request_auto_denied" : "approve.request_created", actor: actor,
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "approve_request", subjectId: record.id?.uuidString.lowercased(),
                     correlationId: body.requestId, metadata: ["capability": body.capability.rawValue, "protection": record.protection, "devices": String(record.delivered)])
-            }
+            } }
         } catch {
             // A concurrent request with the same id won the race: replay it.
             if error.isConstraintViolation, let existing = try await ApproveRequestRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid)
@@ -180,7 +187,7 @@ struct ApproveRequestService {
             }
             throw error
         }
-        if autoDenied {
+        if record.reason == "auto_denied" {
             await pauseNotice(relationship: relationship)
         } else {
             await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: Array(Set(deliveries.compactMap(\.device.id))))
@@ -189,6 +196,10 @@ struct ApproveRequestService {
     }
 
     // MARK: Prompt fatigue
+
+    static func rateLimited(_ retry: TimeInterval) -> APIError {
+        APIError(.tooManyRequests, .rateLimited, "Too many approval requests for this customer.", headers: ["Retry-After": String(Int(retry.rounded(.up)))])
+    }
 
     func promptVerdict(relationshipId: UUID, now: Date) async throws -> ApprovalPromptPolicy.Verdict {
         let policy = ctx.config.approve.prompt

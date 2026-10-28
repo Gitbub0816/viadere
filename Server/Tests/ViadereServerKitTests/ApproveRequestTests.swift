@@ -447,6 +447,25 @@ final class ApproveRequestTests: XCTestCase {
 
     // MARK: Prompt fatigue (SEC-DEV-008)
 
+    /// Gate finding F5: the count was read before the insert, so a burst of concurrent requests all passed the same count.
+    func testAConcurrentBurstCannotExceedThePendingLimit() async throws {
+        try await withHarness { h in
+            let f = try await h.approveFixture()
+            let limit = h.ctx.config.approve.prompt.maxPending
+            let burst = limit * 4
+            let statuses = try await withThrowingTaskGroup(of: HTTPStatus.self) { group -> [HTTPStatus] in
+                for _ in 0..<burst { group.addTask { try await h.createRequest(f).0.status } }
+                var out: [HTTPStatus] = []
+                for try await status in group { out.append(status) }
+                return out
+            }
+            aeq(statuses.filter { $0 == .created }.count, limit, "exactly the limit was accepted: \(statuses)")
+            aeq(statuses.filter { $0 == .tooManyRequests }.count, burst - limit, "statuses: \(statuses)")
+            aeq(try await ApproveRequestRecord.query(on: h.db).filter(\.$status == ApprovalRequestStatus.pending.rawValue).count(), limit)
+            aeq(try await ApproveDeliveryRecord.query(on: h.db).count(), limit)
+        }
+    }
+
     func testRepeatedDenialsAutoDenyAndTooManyRequestsAreRateLimited() async throws {
         try await withHarness { h in
             let f = try await h.approveFixture()
