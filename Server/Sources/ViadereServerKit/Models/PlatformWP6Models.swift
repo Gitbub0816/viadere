@@ -226,6 +226,10 @@ final class OperatorNoticeRecord: Model, @unchecked Sendable {
     @Field(key: "status") var status: String
     @OptionalField(key: "cursor") var cursor: String?
     @Field(key: "delivered") var delivered: Int
+    /// The runner that is delivering the current batch (compare-and-swap claim, platform gate L5) and when its lease ends (Unix seconds).
+    /// A runner that dies mid-batch loses the claim at expiry and another picks the batch up.
+    @OptionalField(key: "claim_token") var claimToken: String?
+    @OptionalField(key: "claim_expires_at") var claimExpiresAt: Int?
 
     init() {}
 }

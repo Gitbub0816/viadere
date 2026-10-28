@@ -110,14 +110,49 @@ struct OperatorNotices {
         return record
     }
 
-    /// Delivers the next batch of every open notice. Returns the recipients reached.
+    /// How long a runner may hold a notice's batch before another may take it over (a batch of 200 takes seconds; this only matters after a crash).
+    static let claimLease: TimeInterval = 120
+
+    /// Delivers the next batch of every open notice. Returns the recipients reached. Safe to run on every instance at once: a batch is delivered
+    /// only by the runner that wins the compare-and-swap claim on the notice (platform gate L5), so the same recipient is never mailed twice.
     @discardableResult
     func deliverDue() async throws -> Int {
         var reached = 0
-        for notice in try await OperatorNoticeRecord.query(on: db).filter(\.$status != "done").sort(\.$createdAt, .ascending).limit(5).all() {
-            reached += try await deliver(notice)
+        for candidate in try await OperatorNoticeRecord.query(on: db).filter(\.$status != "done").sort(\.$createdAt, .ascending).limit(5).all() {
+            guard let id = candidate.id, let token = try await claim(candidate) else { continue }
+            // Re-read after winning: another runner may have finished a batch (and released) since this one listed the notice.
+            guard let notice = try await OperatorNoticeRecord.find(id, on: db), notice.status != "done" else {
+                try await release(id, token: token)
+                continue
+            }
+            do { reached += try await deliver(notice) } catch {
+                try? await release(id, token: token)
+                throw error
+            }
         }
         return reached
+    }
+
+    private var nowSeconds: Int { Int(ctx.now.timeIntervalSince1970) }
+
+    /// Claims a notice for one batch: a compare-and-swap of `claim_token` from what was read to a fresh token. Returns the token, or `nil` when
+    /// another runner holds an unexpired claim or won the swap.
+    private func claim(_ candidate: OperatorNoticeRecord) async throws -> String? {
+        guard let id = candidate.id else { return nil }
+        if candidate.claimToken != nil, let expires = candidate.claimExpiresAt, expires > nowSeconds { return nil }
+        let token = SecureToken.generate(byteCount: 16)
+        let extra: [(String, any Encodable & Sendable)] = [("claim_expires_at", nowSeconds + Int(Self.claimLease))]
+        let won: Bool
+        if let previous = candidate.claimToken {
+            won = try await DB.swap(db, table: OperatorNoticeRecord.schema, id: id, column: "claim_token", expected: previous, newValue: token, extra: extra)
+        } else {
+            won = try await DB.swapFromNull(db, table: OperatorNoticeRecord.schema, id: id, column: "claim_token", newValue: token, extra: extra)
+        }
+        return won ? token : nil
+    }
+
+    private func release(_ id: UUID, token: String) async throws {
+        try await OperatorNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$claimToken == token).set(\.$claimToken, to: nil).set(\.$claimExpiresAt, to: nil).update()
     }
 
     private func deliver(_ notice: OperatorNoticeRecord) async throws -> Int {
@@ -160,11 +195,16 @@ struct OperatorNotices {
             if count == Self.batchSize { notice.cursor = lastId?.uuidString.lowercased() } else { notice.cursor = nil }
         case nil:
             notice.status = "done"
+            notice.claimToken = nil
+            notice.claimExpiresAt = nil
             try await notice.update(on: db)
             return 0
         }
         notice.delivered += count
         notice.status = notice.cursor == nil ? "done" : "sending"
+        // Persisting the batch's progress and releasing the claim are one write.
+        notice.claimToken = nil
+        notice.claimExpiresAt = nil
         try await notice.update(on: db)
         if notice.status == "done" {
             _ = try await AuditService(db: db, ctx: ctx).record("operator.notice_delivered", actor: AuditActor(kind: .system), businessId: notice.businessId.map(BusinessID.init),

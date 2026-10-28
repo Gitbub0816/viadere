@@ -369,3 +369,18 @@ struct CreateMTLSIssuerBinding: AsyncMigration {
         try await db.schema("business_mtls_certs").deleteField("issuer_ski").update()
     }
 }
+
+/// Platform gate L5: a claim on the batch an operator notice is being delivered in, so two instances running the job never deliver it twice.
+struct CreateOperatorNoticeClaim: AsyncMigration {
+    var name: String { "CreateOperatorNoticeClaim.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema("operator_notices").field("claim_token", .string).update()
+        try await db.schema("operator_notices").field("claim_expires_at", .int).update()
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema("operator_notices").deleteField("claim_token").update()
+        try await db.schema("operator_notices").deleteField("claim_expires_at").update()
+    }
+}

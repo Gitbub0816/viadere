@@ -99,4 +99,55 @@ final class PlatformGateOpsTests: XCTestCase {
         let noneConfigured = await InternalMetricsResponder.respond(method: .GET, uri: "/metrics", authorization: "Bearer anything", token: nil, render: render)
         XCTAssertEqual(noneConfigured.0, .notFound, "no token configured: nothing is served")
     }
+
+    // MARK: L5
+
+    /// Platform gate L5: every instance ran `deliverDue` each tick with no claim, so two runners both read the same open notice and both mailed it.
+    func testTwoRunnersDeliverAnOperatorNoticeOnce() async throws {
+        try await withHarness { h in
+            let (op, _) = try await h.makeOperator()
+            _ = try await h.verifiedOwner()
+            let created = try await h.formPost("/operator/notices", op, [("scope", "all_businesses"), ("severity", "important"), ("title", "Rotate your API keys"),
+                                                                       ("body", "A third-party leak may affect keys created before Monday. Rotate them in the console.")])
+            XCTAssertEqual(created.status, .seeOther, created.text)
+            let before = h.emails.sent.count
+            let db = h.db, ctx = h.ctx
+            _ = try await withThrowingTaskGroup(of: Int.self) { group in
+                for _ in 0..<4 { group.addTask { try await OperatorNotices(db: db, ctx: ctx).deliverDue() } }
+                var total = 0
+                for try await n in group { total += n }
+                return total
+            }
+            let mails = h.emails.sent.dropFirst(before).filter { $0.to == "owner@example.com" && $0.subject == "Rotate your API keys" }
+            XCTAssertEqual(mails.count, 1, "four concurrent runners must produce one delivery")
+            let notice = try await XCTUnwrapAsync(await OperatorNoticeRecord.query(on: h.db).first())
+            XCTAssertEqual(notice.status, "done")
+            XCTAssertEqual(notice.delivered, 1)
+            XCTAssertNil(notice.claimToken, "the claim is released when the batch is done")
+        }
+    }
+
+    func testAHeldClaimBlocksOtherRunnersUntilItsLeaseExpires() async throws {
+        try await withHarness { h in
+            let (op, _) = try await h.makeOperator()
+            _ = try await h.verifiedOwner()
+            _ = try await h.formPost("/operator/notices", op, [("scope", "all_businesses"), ("severity", "info"), ("title", "Planned maintenance"),
+                                                             ("body", "We will be read-only for ten minutes on Sunday at 03:00 UTC.")])
+            let notice = try await XCTUnwrapAsync(await OperatorNoticeRecord.query(on: h.db).first())
+            // Another runner holds the claim (as if it is mid-batch).
+            notice.claimToken = "other-runner"
+            notice.claimExpiresAt = Int(h.clock.now().timeIntervalSince1970) + 120
+            try await notice.update(on: h.db)
+            let before = h.emails.sent.count
+            let blocked = try await OperatorNotices(db: h.db, ctx: h.ctx).deliverDue()
+            XCTAssertEqual(blocked, 0)
+            XCTAssertEqual(h.emails.sent.count, before)
+            // The holder died: after the lease the batch is picked up exactly once.
+            h.clock.advance(by: 180)
+            let reclaimed = try await OperatorNotices(db: h.db, ctx: h.ctx).deliverDue()
+            XCTAssertEqual(reclaimed, 1)
+            let again = try await OperatorNotices(db: h.db, ctx: h.ctx).deliverDue()
+            XCTAssertEqual(again, 0)
+        }
+    }
 }
