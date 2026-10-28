@@ -95,6 +95,9 @@ public struct SiteBuilder {
             case "status-components": raw(statusComponents(page))
             case "status-notices": raw(statusNotices(page))
             case "legal-index": raw(legalIndex(pages))
+            case "mockup":
+                guard let html = Showcase.render(arg) else { throw SiteError("\(page.sourcePath): unknown mockup \"\(arg)\" (known: \(Showcase.names.joined(separator: ", ")))") }
+                raw(html)
             default: throw SiteError("\(page.sourcePath): unknown generate directive \"\(name)\"")
             }
         }
@@ -108,12 +111,13 @@ public struct SiteBuilder {
 
     func productCards(_ pages: [Page], _ md: Markdown) -> String {
         let products = pages.filter { $0.isProductPage }.sorted { ($0.order, $0.title) < ($1.order, $1.title) }
-        var out = "<div class=\"grid grid-2\">\n"
+        var out = "<div class=\"pcards\">\n"
         for p in products {
             let s = p.status
-            out += "<div class=\"card\">" + (s.map { "<span class=\"badge badge-\($0.rawValue)\">\($0.label)</span>" } ?? "")
+            out += "<div class=\"pcard\(s == .planned ? " is-planned" : "")\"><div class=\"pcard-top\"><span class=\"pcard-ic\">\(Icons.svg(Showcase.productIcon(p.url)))</span>"
+                + (s.map { "<span class=\"badge badge-\($0.rawValue)\">\($0.label)</span>" } ?? "") + "</div>"
                 + "<h3><a href=\"\(p.url)\">\(HTML.escape(p.title))</a></h3><p>\(HTML.escape(p.front["tagline"]?.string ?? p.description))</p>"
-                + "<a class=\"more\" href=\"\(p.url)\">Learn more<span class=\"visually-hidden\"> about \(HTML.escape(p.title))</span></a></div>\n"
+                + "<span class=\"more\" aria-hidden=\"true\">Learn more\(Icons.svg("arrow"))</span></div>\n"
         }
         return out + "</div>"
     }
@@ -176,6 +180,7 @@ public struct SiteBuilder {
         var assembled = expanded
         for (k, v) in md.rawBlocks where expanded.contains("{{raw:\(k)}}") { assembled += "\n" + stripTags(v) }
         for key in ["headline", "lede", "tagline"] { if let v = p.front[key]?.string { assembled += "\n" + v } }
+        if let art = p.front["hero_art"]?.string, let html = Showcase.render(art) { assembled += "\n" + stripTags(html) }
         for a in p.front["components"]?.array ?? [] { assembled += "\n" + (a["description"]?.string ?? "") }
         return assembled
     }
@@ -224,6 +229,7 @@ public struct SiteBuilder {
         try write(cssSource, to: "assets/\(cssName)")
         try copyTree(staticDir.appendingPathComponent("assets/fonts"), to: "assets/fonts")
         try copyTree(staticDir.appendingPathComponent("brand"), to: "brand")
+        if fm.fileExists(atPath: staticDir.appendingPathComponent("assets/media").path) { try copyTree(staticDir.appendingPathComponent("assets/media"), to: "assets/media") }
         try fm.copyItem(at: staticDir.appendingPathComponent("brand/app-icon-light.svg"), to: options.outDir.appendingPathComponent("favicon.svg"))
         let sprite = try Brand.sprite(brandDir: staticDir.appendingPathComponent("brand"))
 

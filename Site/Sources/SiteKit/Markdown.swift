@@ -54,13 +54,12 @@ public struct Markdown {
             }
             // Fenced code
             if t.hasPrefix("```") {
-                let lang = String(t.dropFirst(3)).trimmed
+                let info = String(t.dropFirst(3)).trimmed
                 var body: [String] = []
                 i += 1
                 while i < lines.count, !lines[i].trimmed.hasPrefix("```") { body.append(lines[i]); i += 1 }
                 i += 1
-                let cls = lang.isEmpty ? "" : " class=\"language-\(HTML.escape(slugify(lang)))\""
-                out += "<pre tabindex=\"0\"><code\(cls)>\(HTML.escape(body.joined(separator: "\n")))</code></pre>\n"
+                out += Self.codeWindow(info: info, code: body.joined(separator: "\n"))
                 continue
             }
             // Container ::: name ... :::
@@ -78,6 +77,12 @@ public struct Markdown {
                 i += 1
                 let classes = name.split(separator: " ").map { slugify(String($0)) }.joined(separator: " ")
                 let first = name.split(separator: " ").first.map { slugify(String($0)) } ?? ""
+                if first == "section" {
+                    // `::: section [classes]` is a full-width band with a centred wrap: the building block of marketing pages.
+                    let rest = classes.split(separator: " ").dropFirst().joined(separator: " ")
+                    out += "<section class=\"band\(rest.isEmpty ? "" : " " + rest)\"><div class=\"wrap\">\n\(blocks(inner, &ctx))</div></section>\n"
+                    continue
+                }
                 let role = (first == "callout" || first == "draft-notice" || first == "note") ? " role=\"note\"" : ""
                 out += "<div class=\"\(classes)\"\(role)>\n\(blocks(inner, &ctx))</div>\n"
                 continue
@@ -155,6 +160,22 @@ public struct Markdown {
         return out
     }
 
+    /// A fenced block as a code window. The info string is `lang [title]`, e.g. ```` ```swift Approve.swift ````.
+    static func codeWindow(info: String, code: String) -> String {
+        let parts = info.split(separator: " ", maxSplits: 1).map(String.init)
+        let lang = parts.first ?? ""
+        let title = parts.count > 1 ? parts[1].trimmed : ""
+        let label = ["swift": "Swift", "json": "JSON", "bash": "Shell", "sh": "Shell", "python": "Python", "http": "HTTP", "yaml": "YAML"][lang.lowercased()] ?? lang
+        let cls = lang.isEmpty ? "" : " class=\"language-\(HTML.escape(slugify(lang)))\""
+        var bar = ""
+        if !title.isEmpty {
+            bar = "<div class=\"code-bar\"><span class=\"dots\" aria-hidden=\"true\"><span></span><span></span><span></span></span><span class=\"code-title\">\(HTML.escape(title))</span><span class=\"code-lang\">\(HTML.escape(label))</span></div>"
+        } else if !lang.isEmpty {
+            bar = "<div class=\"code-bar slim\"><span class=\"code-lang\">\(HTML.escape(label))</span></div>"
+        }
+        return "<div class=\"code-window\(title.isEmpty ? "" : " titled")\">\(bar)<pre tabindex=\"0\"><code\(cls)>\(Highlighter.highlight(code, language: lang))</code></pre></div>\n"
+    }
+
     static func listMarker(_ line: String) -> (indent: Int, ordered: Bool, content: String)? {
         let indent = line.prefix { $0 == " " }.count
         let rest = line.dropFirst(indent)
@@ -198,7 +219,13 @@ public struct Markdown {
                 let inner = blocks(itemLines, &ctx).replacingOccurrences(of: "<p>", with: "").replacingOccurrences(of: "</p>\n", with: "\n")
                 out += "<li>\(inner.trimmed)</li>\n"
             } else {
-                out += "<li>\(inline(itemLines.map { $0.trimmed }.joined(separator: " ")))</li>\n"
+                let text = itemLines.map { $0.trimmed }.joined(separator: " ")
+                if text.hasPrefix("[ ] ") || text.hasPrefix("[x] ") {
+                    let done = text.hasPrefix("[x]")
+                    out += "<li class=\"task\(done ? " done" : "")\"><span class=\"tick\" aria-hidden=\"true\"></span>\(inline(String(text.dropFirst(4))))</li>\n"
+                } else {
+                    out += "<li>\(inline(text))</li>\n"
+                }
             }
         }
         out += "</\(tag)>\n"
@@ -236,7 +263,7 @@ public struct Markdown {
         var t = s
         t = t.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]*\\)", with: "$1", options: .regularExpression)
         t = t.replacingOccurrences(of: "[`*]", with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: "\\{badge:[a-z]+\\}", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "\\{(badge|icon):[a-z-]+\\}", with: "", options: .regularExpression)
         return t.trimmed
     }
 
@@ -280,8 +307,19 @@ public struct Markdown {
         for (name, label) in [("live", "Live"), ("beta", "Beta"), ("planned", "Planned")] {
             s = s.replacingOccurrences(of: "badge badge-\(name)\">\(name)</span>", with: "badge badge-\(name)\">\(label)</span>")
         }
+        // Icons {icon:name}
+        if s.contains("{icon:"), let re = try? NSRegularExpression(pattern: "\\{icon:([a-z-]+)\\}") {
+            let ns = s as NSString
+            var result = ""
+            var last = 0
+            for m in re.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+                result += ns.substring(with: NSRange(location: last, length: m.range.location - last)) + Icons.svg(ns.substring(with: m.range(at: 1)))
+                last = m.range.location + m.range.length
+            }
+            s = result + ns.substring(from: last)
+        }
         // Links [text](url "title")
-        if let re = try? NSRegularExpression(pattern: "\\[([^\\]]+)\\]\\(([^)\\s]+)(?:\\s+&quot;([^&]*?)&quot;)?\\)") {
+        if let re = try? NSRegularExpression(pattern: "\\[([^\\]]+)\\]\\(([^)\\s]+)(?:\\s+&quot;([^&]*?)&quot;)?\\)(?:\\{((?:\\.[a-z][a-z0-9-]*\\s*)+)\\})?") {
             let ns = s as NSString
             var result = ""
             var last = 0
@@ -289,8 +327,13 @@ public struct Markdown {
                 result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
                 let text = ns.substring(with: m.range(at: 1))
                 let rawURL = ns.substring(with: m.range(at: 2)).replacingOccurrences(of: "&amp;", with: "&")
+                var cls = ""
+                if m.range(at: 4).location != NSNotFound {
+                    let names = ns.substring(with: m.range(at: 4)).split(whereSeparator: { $0 == "." || $0 == " " }).map { slugify(String($0)) }
+                    cls = " class=\"\(names.joined(separator: " "))\""
+                }
                 if let url = Self.safeURL(rawURL) {
-                    result += "<a href=\"\(HTML.escape(url))\">\(text)</a>"
+                    result += "<a href=\"\(HTML.escape(url))\"\(cls)>\(text)</a>"
                 } else { result += text }
                 last = m.range.location + m.range.length
             }

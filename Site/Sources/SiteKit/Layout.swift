@@ -45,6 +45,13 @@ public struct Layout {
             + "<svg class=\"lockup-dark \(cls)\" viewBox=\"0 0 892.39 228\" role=\"img\" aria-label=\"Viadere\"><use href=\"#lockup-dark\"/></svg>"
     }
 
+    func lockupOnDark(_ cls: String = "") -> String {
+        "<svg class=\"lockup-fixed \(cls)\" viewBox=\"0 0 892.39 228\" role=\"img\" aria-label=\"Viadere\"><use href=\"#lockup-dark\"/></svg>"
+    }
+
+    /// Marketing pages render their body full width (authored with `::: section` bands) under a page hero.
+    func isMarketing(_ p: Page) -> Bool { p.layout == "marketing" }
+
     func sectionPages(_ section: String) -> [Page] {
         pages.filter { $0.section == section && !$0.legalIsArchive && !$0.legalPermalink }
             .sorted { ($0.order, $0.title) < ($1.order, $1.title) }
@@ -56,8 +63,9 @@ public struct Layout {
             return "<li><a href=\"\(t.path)\"\(active ? " aria-current=\"page\"" : "")>\(e(t.title))</a></li>"
         }
         let items = config.nav.map(item).joined()
-        return "<nav aria-label=\"Primary\"><ul class=\"nav-list\">\(items)</ul>"
-            + "<details class=\"nav-mobile\"><summary>Menu<span class=\"visually-hidden\"> (site sections)</span></summary><ul>\(items)</ul></details></nav>"
+        let cta = "<a class=\"btn btn-sm nav-cta\" href=\"/businesses/onboarding/\">Get started</a>"
+        return "<nav class=\"primary\" aria-label=\"Primary\"><ul class=\"nav-list\">\(items)</ul>\(cta)"
+            + "<details class=\"nav-mobile\"><summary><span class=\"burger\" aria-hidden=\"true\"></span>Menu<span class=\"visually-hidden\"> (site sections)</span></summary><ul>\(items)<li class=\"nm-cta\"><a href=\"/businesses/onboarding/\">Get started</a></li></ul></details></nav>"
     }
 
     func breadcrumbs(_ p: Page) -> String {
@@ -99,60 +107,78 @@ public struct Layout {
 
     func footer() -> String {
         func col(_ title: String, _ links: [(String, String)]) -> String {
-            "<div><h2>\(e(title))</h2><ul>" + links.map { "<li><a href=\"\($0.1)\">\(e($0.0))</a></li>" }.joined() + "</ul></div>"
+            "<div class=\"foot-col\"><h2>\(e(title))</h2><ul>" + links.map { "<li><a href=\"\($0.1)\">\(e($0.0))</a></li>" }.joined() + "</ul></div>"
         }
         return """
-        <footer class="site-footer"><div class="wrap">
+        <footer class="site-footer dark"><div class="wrap">
         <div class="foot-grid">
-        <div class="foot-brand"><a href="/" aria-label="Viadere, home">\(lockup())</a><p>\(e(config.tagline)) Verified, privacy-conscious connections between businesses and the people they serve.</p></div>
-        \(col("Products", [("Messaging", "/products/messaging/"), ("Approve", "/products/approve/"), ("Verify", "/products/verify/"), ("Authenticator", "/products/authenticator/")]))
-        \(col("Build", [("Developers", "/developers/"), ("API reference", "/developers/api/"), ("Webhooks", "/developers/webhooks/"), ("Changelog", "/developers/changelog/"), ("Status", "/status/")]))
-        \(col("Trust", [("Security overview", "/security/"), ("Report a vulnerability", "/security/disclosure/"), ("Verification badges", "/security/verification-badges/"), ("Privacy Center", "/privacy/")]))
-        \(col("Company", [("About and contact", "/company/"), ("Legal", "/legal/"), ("Privacy Notice", "/legal/privacy-notice/"), ("Accessibility", "/legal/accessibility-statement/"), ("Cookie Notice", "/legal/cookie-notice/")]))
+        <div class="foot-brand"><a href="/" class="foot-logo" aria-label="Viadere, home">\(lockupOnDark())</a><p class="caps">\(e(config.tagline))</p><p>Verified, privacy-conscious connections between businesses and the people they serve.</p></div>
+        \(col("Products", [("Messaging", "/products/messaging/"), ("Approve", "/products/approve/"), ("Verify", "/products/verify/"), ("Authenticator", "/products/authenticator/"), ("All products", "/products/")]))
+        \(col("Build", [("Developers", "/developers/"), ("Quickstart", "/developers/quickstart/"), ("API reference", "/developers/api/"), ("Webhooks", "/developers/webhooks/"), ("Changelog", "/developers/changelog/"), ("Status", "/status/")]))
+        \(col("Trust", [("Security overview", "/security/"), ("Architecture", "/security/architecture/"), ("Report a vulnerability", "/security/disclosure/"), ("Verification badges", "/security/verification-badges/"), ("Privacy Center", "/privacy/")]))
+        \(col("Company", [("About", "/company/"), ("Contact", "/company/contact/"), ("Legal", "/legal/"), ("Privacy Notice", "/legal/privacy-notice/"), ("Accessibility", "/legal/accessibility-statement/"), ("Cookie Notice", "/legal/cookie-notice/")]))
         </div>
         <div class="fine">
-        <p>This site sets no cookies and makes no third-party requests.</p>
-        <p>Legal documents on this site are drafts pending counsel review unless a page states an effective date. Product status badges show what is live, in beta or planned.</p>
+        <p>This site sets no cookies, runs no scripts and makes no third-party requests.</p>
+        <p>Legal documents on this site are drafts pending counsel review unless a page states an effective date. Product status badges show what is live, in beta or planned. Product screens on this site are illustrations with fictional businesses.</p>
         </div>
         </div></footer>
         """
     }
 
+    func actions(_ p: Page, onDark: Bool = false) -> String {
+        let list = p.front["actions"]?.array ?? []
+        guard !list.isEmpty else { return "" }
+        return "<div class=\"actions\">" + list.enumerated().map { i, a in
+            "<a class=\"btn\(i == 0 ? "" : " secondary")\" href=\"\(e(a["href"]?.string ?? "/"))\">\(e(a["label"]?.string ?? ""))\(i == 0 ? Icons.svg("arrow") : "")</a>"
+        }.joined() + "</div>"
+    }
+
     func homeHero(_ p: Page) -> String {
         let f = p.front
-        let h1 = e(f["headline"]?.string ?? p.title)
+        let h1 = Markdown().inline(f["headline"]?.string ?? p.title)
         let lede = e(f["lede"]?.string ?? p.description)
-        let eyebrow = f["eyebrow"]?.string.map { "<p class=\"eyebrow\">\(e($0))</p>" } ?? ""
-        let ctas = (f["actions"]?.array ?? []).enumerated().map { i, a in
-            "<a class=\"btn\(i == 0 ? "" : " secondary")\" href=\"\(e(a["href"]?.string ?? "/"))\">\(e(a["label"]?.string ?? ""))</a>"
+        let caps = e(f["eyebrow"]?.string ?? config.tagline)
+        let proof = (f["proof"]?.array ?? []).map { item in
+            "<li>\(Icons.svg(item["icon"]?.string ?? "check"))\(e(item["label"]?.string ?? ""))</li>"
         }.joined()
         return """
-        <section class="hero" aria-labelledby="hero-h"><div class="wrap hero-grid">
-        <div>\(eyebrow)<h1 id="hero-h">\(h1)</h1><p class="lede">\(lede)</p><div class="actions">\(ctas)</div></div>
-        <figure class="hero-art" aria-labelledby="demo-cap">
-        <svg class="big-mark mark-light" viewBox="0 0 321.71 146" aria-hidden="true" focusable="false"><use href="#mark"/></svg>
-        <svg class="big-mark mark-dark" viewBox="0 0 321.71 146" aria-hidden="true" focusable="false"><use href="#mark-dark"/></svg>
-        <div class="demo">
-        <div class="row"><span class="avatar"><svg viewBox="0 0 321.71 146" aria-hidden="true" focusable="false"><use href="#mark-dark"/></svg></span><span><span class="who">Example Store</span><br><span class="tag">Verified business</span></span></div>
-        <p>Someone is trying to spend $285.28 at Example Store. Is this you?</p>
-        <div class="btns" aria-hidden="true"><span>Yes, it is me</span><span>No</span></div>
-        </div>
-        <figcaption id="demo-cap" class="demo-note">Illustration of an approval request. Not a live demo; names and amounts are examples.</figcaption>
-        </figure></div></section>
+        <section class="hero dark" aria-labelledby="hero-h"><div class="hero-glow" aria-hidden="true"></div>
+        <div class="wrap hero-inner">
+        <div class="hero-mark"><picture><source media="(prefers-reduced-motion: reduce)" srcset="/assets/media/viadere-mark-final.webp" type="image/webp"><img src="/assets/media/viadere-mark-reveal.webp" width="1008" height="567" alt="The Viadere mark: a satin ribbon that draws the letters v, i and a, then a floating dot settles above the i." decoding="async" fetchpriority="high"></picture></div>
+        <p class="caps hero-caps">\(caps)</p>
+        <h1 id="hero-h">\(h1)</h1>
+        <p class="lede">\(lede)</p>
+        \(actions(p))
+        \(proof.isEmpty ? "" : "<ul class=\"hero-proof\">\(proof)</ul>")
+        </div></section>
         """
+    }
+
+    func subnav(_ p: Page) -> String {
+        guard p.front["subnav"]?.bool ?? true else { return "" }
+        let siblings = sectionPages(p.section)
+        guard siblings.count > 1 else { return "" }
+        let title = Self.sectionTitles[p.section] ?? p.section.capitalized
+        return "<nav class=\"subnav\" aria-label=\"\(e(title))\"><div class=\"wrap\"><ul>" + siblings.map { s in
+            "<li><a href=\"\(s.url)\"\(s.url == p.url ? " aria-current=\"page\"" : "")>\(e(s.front["nav_title"]?.string ?? s.title))</a></li>"
+        }.joined() + "</ul></div></nav>"
     }
 
     func pageHead(_ p: Page) -> String {
         var badges = ""
-        if let s = p.status, p.isProductPage { badges = " <span class=\"badge badge-\(s.rawValue)\">\(s.label)</span>" }
+        if let s = p.status, p.isProductPage { badges = "<span class=\"badge badge-\(s.rawValue)\">\(s.label)</span>" }
         if isDraft(p) { badges += " <span class=\"badge badge-draft\">Draft</span>" }
         let eyebrow = p.front["eyebrow"]?.string ?? (p.section == "legal" ? "Legal" : Self.sectionTitles[p.section] ?? "")
+        let art = p.front["hero_art"]?.string.flatMap(Showcase.render) ?? ""
+        let headline = p.front["headline"]?.string.map { Markdown().inline($0) } ?? e(p.title)
         return """
-        <div class="page-head"><div class="wrap">\(breadcrumbs(p))
-        <p class="eyebrow">\(e(eyebrow))</p>
-        <h1>\(e(p.title))\(badges)</h1>
+        <div class="page-head\(art.isEmpty ? "" : " has-art")\(isMarketing(p) ? " is-marketing" : "")"><div class="wrap ph-grid"><div class="ph-copy">\(breadcrumbs(p))
+        <p class="eyebrow">\(e(eyebrow))\(badges.isEmpty ? "" : " " + badges)</p>
+        <h1>\(headline)</h1>
         \(p.description.isEmpty ? "" : "<p class=\"lede\">\(e(p.description))</p>")
-        </div></div>
+        \(actions(p))
+        </div>\(art.isEmpty ? "" : "<div class=\"ph-art\">\(art)</div>")</div></div>
         """
     }
 
@@ -208,6 +234,8 @@ public struct Layout {
         let legalFoot = p.isLegal && p.url != "/legal/" ? legalHistory(p, history: history) : ""
         if isHome {
             main = homeHero(p) + body
+        } else if isMarketing(p) {
+            main = pageHead(p) + subnav(p) + "<div class=\"mk-body\">\(body)</div>"
         } else {
             let side = sidebar(p)
             let wide = (p.front["wide"]?.bool ?? (p.section == "developers")) ? " wide" : ""
@@ -237,11 +265,11 @@ public struct Layout {
         <meta property="og:type" content="website">
         <meta property="og:url" content="\(e(canonical))">
         </head>
-        <body>
+        <body\(isHome ? " class=\"is-home\"" : "")>
         \(sprite)
         <a class="skip" href="#main">Skip to main content</a>
-        <header class="site-header"><div class="wrap bar">
-        <a class="brand" href="/" aria-label="Viadere, home">\(lockup())</a>
+        <header class="site-header\(isHome ? " dark" : "")"><div class="wrap bar">
+        <a class="brand" href="/" aria-label="Viadere, home">\(isHome ? lockupOnDark() : lockup())</a>
         \(primaryNav(current: p))
         </div></header>
         <main id="main" tabindex="-1">

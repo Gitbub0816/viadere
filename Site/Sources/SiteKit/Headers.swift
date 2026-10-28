@@ -22,6 +22,9 @@ public enum DeployFiles {
         /assets/fonts/*
           Cache-Control: public, max-age=2592000
 
+        /assets/media/*
+          Cache-Control: public, max-age=2592000
+
         /.well-known/security.txt
           Content-Type: text/plain; charset=utf-8
           Cache-Control: public, max-age=3600

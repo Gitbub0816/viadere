@@ -57,6 +57,71 @@ struct MarkdownTests {
     }
 }
 
+@Suite("Rich components")
+struct RichComponentTests {
+    @Test func sectionContainerIsAFullWidthBand() {
+        let html = Markdown().render("::: section dark cta\n## Hi\n:::\n").html
+        #expect(html.contains("<section class=\"band dark cta\"><div class=\"wrap\">"))
+        #expect(html.contains("</div></section>"))
+    }
+    @Test func linkClassesAndIcons() {
+        let html = Markdown().render("[Go](/a/){.btn .secondary} {icon:key} {icon:nope}").html
+        #expect(html.contains("<a href=\"/a/\" class=\"btn secondary\">Go</a>"))
+        #expect(html.contains("class=\"ic ic-key\""))
+        #expect(!html.contains("{icon:key}"))
+        #expect(Markdown.plainText("{icon:key} Keys") == "Keys")
+    }
+    @Test func taskListItems() {
+        let html = Markdown().render("- [ ] open\n- [x] done\n").html
+        #expect(html.contains("<li class=\"task\"><span class=\"tick\" aria-hidden=\"true\"></span>open</li>"))
+        #expect(html.contains("<li class=\"task done\">"))
+    }
+    @Test func codeWindowWithTitleAndHighlighting() {
+        let html = Markdown().render("```swift Demo.swift\nlet s = \"<b>\" // note\n```\n").html
+        #expect(html.contains("code-window titled"))
+        #expect(html.contains("<span class=\"code-title\">Demo.swift</span>"))
+        #expect(html.contains("<span class=\"tok-k\">let</span>"))
+        #expect(html.contains("<span class=\"tok-s\">&quot;&lt;b&gt;&quot;</span>"))
+        #expect(html.contains("<span class=\"tok-c\">// note</span>"))
+        #expect(!html.contains("<b>"))
+    }
+    @Test func highlighterEscapesEverythingAndKeepsText() {
+        for lang in ["swift", "json", "bash", "python", "http", "unknown"] {
+            let src = "<script>alert('x')</script> & \"q\" 12 # c"
+            let out = Highlighter.highlight(src, language: lang)
+            #expect(!out.contains("<script>"), "\(lang)")
+            let text = out.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            #expect(text == HTML.escape(src), "\(lang)")
+        }
+    }
+    @Test func everyMockupRendersAndIsLabelledAsAnIllustration() {
+        for name in Showcase.names {
+            let html = Showcase.render(name)
+            #expect(html != nil, "\(name)")
+            #expect(!(html ?? "").contains("style="), "\(name)")
+            #expect(!(html ?? "").contains("<script"), "\(name)")
+        }
+        for name in ["signin", "payment", "conversation", "wallet", "verify", "authenticator", "lineup", "contrast"] {
+            #expect(Showcase.render(name)!.lowercased().contains("illustration"), "\(name)")
+        }
+        #expect(Showcase.render("verify")!.contains("Planned"))
+        #expect(Showcase.render("authenticator")!.contains("Planned"))
+        #expect(Showcase.render("nope") == nil)
+    }
+    @Test func mockupTextIsLinted() throws {
+        let p = try page("/x/", "title: T\nhero_art: channels", "Body.")
+        let text = SiteBuilder.assembledText(p, expanded: p.body, md: Markdown())
+        #expect(text.contains("Ordinary SMS is not end-to-end encrypted"))
+        #expect(rules(p, text).isEmpty)
+    }
+    @Test func unknownMockupFailsTheBuild() throws {
+        var md = Markdown()
+        let p = try page("/x/", "title: T", "{{ generate: mockup nope }}\n")
+        let b = SiteBuilder(options: BuildOptions(siteRoot: siteRoot))
+        #expect(throws: SiteError.self) { _ = try b.expand(p, pages: [p], api: nil, md: &md) }
+    }
+}
+
 @Suite("Marketing integrity lint")
 struct LintTests {
     @Test func catchesEveryBannedClaim() throws {
@@ -173,7 +238,10 @@ struct OpenAPITests {
         for path in sourcePaths { #expect(rendered.contains(path), "\(path) not rendered") }
         let html = api.tags.map { api.renderTagPage($0) }.joined()
         for op in api.operations { #expect(html.contains("id=\"op-\(op.id)\""), "\(op.id) missing") }
-        #expect(api.webhooks.count == 8)
+        // Every webhook declared in the contract is rendered (counted from the source, so adding one cannot be missed).
+        let declared = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\nwebhooks:\n").last?
+            .components(separatedBy: "\n").prefix { $0.isEmpty || $0.hasPrefix(" ") }.filter { $0.hasPrefix("  ") && !$0.hasPrefix("   ") }.count ?? 0
+        #expect(api.webhooks.count == declared && declared > 0)
         let hooks = api.renderWebhooks()
         for (name, _) in api.webhooks { #expect(hooks.contains("event-\(slugify(name))")) }
         let schemas = api.renderSchemas()
@@ -217,7 +285,9 @@ struct SiteBuildTests {
             let html = try String(contentsOf: Self.outDir.appendingPathComponent("legal/\(s)/index.html"), encoding: .utf8)
             #expect(html.contains("DRAFT. Not in effect."), "\(s)")
             #expect(html.contains("Version history"), "\(s)")
-            #expect(FileManager.default.fileExists(atPath: Self.outDir.appendingPathComponent("legal/\(s)/versions/0.1.0/index.html").path), "\(s)")
+            let source = try String(contentsOf: siteRoot.appendingPathComponent("content/legal/\(s)/index.md"), encoding: .utf8)
+            let version = try FrontMatter.split(source).0["version"]?.string ?? "?"
+            #expect(FileManager.default.fileExists(atPath: Self.outDir.appendingPathComponent("legal/\(s)/versions/\(version)/index.html").path), "\(s) \(version)")
         }
     }
 
@@ -245,6 +315,16 @@ struct SiteBuildTests {
         #expect(sec.contains("Contact:") && sec.contains("Expires:") && sec.contains("PLACEHOLDER"))
         let home = try String(contentsOf: Self.outDir.appendingPathComponent("index.html"), encoding: .utf8)
         #expect(home.contains("Content-Security-Policy") && home.contains("Skip to main content"))
+    }
+
+    @Test func homeHeroUsesTheRevealWithAReducedMotionStill() throws {
+        _ = Self.report
+        let home = try String(contentsOf: Self.outDir.appendingPathComponent("index.html"), encoding: .utf8)
+        #expect(home.contains("<source media=\"(prefers-reduced-motion: reduce)\" srcset=\"/assets/media/viadere-mark-final.webp\""))
+        #expect(home.contains("src=\"/assets/media/viadere-mark-reveal.webp\""))
+        for f in ["viadere-mark-reveal.webp", "viadere-mark-final.webp"] {
+            #expect(FileManager.default.fileExists(atPath: Self.outDir.appendingPathComponent("assets/media/\(f)").path), "\(f)")
+        }
     }
 
     @Test func brandAssetsMatchDesignSource() throws {
