@@ -127,8 +127,11 @@ final class BusinessTests: XCTestCase {
                 XCTAssertEqual(marketing, .normal, "marketing is capped at normal")
                 let transactional = try await priority(b, rel, .transactional, notice)
                 XCTAssertEqual(transactional, .high, "non-security purposes are capped at high")
-                let security = try await priority(b, rel, .security, notice)
-                XCTAssertEqual(security, .high, "only security authenticate/authorize may be urgent")
+                // Platform gate M1: a plain notice cannot claim the security purpose at all (it would bypass consent), so it
+                // cannot reach urgent that way either.
+                let claimed = try await h.issue(b, relationship: rel, payload: notice, purpose: .security, priority: .urgent)
+                XCTAssertEqual(claimed.status, .unprocessableEntity, claimed.text)
+                XCTAssertTrue(claimed.text.contains("purposeMismatch"), claimed.text)
                 let login = try await priority(b, rel, .security, sensitiveAuth)
                 XCTAssertEqual(login, .urgent)
             }

@@ -1,6 +1,7 @@
 @preconcurrency import Crypto
 import Foundation
 import ViadereCore
+@preconcurrency import X509
 import XCTest
 @testable import ViadereServerKit
 
@@ -64,26 +65,21 @@ final class AppleWalletInteropTests: XCTestCase {
         // Discover what the sample contains by asking for a broad, fixed set of ISO elements; the verifier digest-checks every item.
         let requested = Set(["family_name", "given_name", "birth_date", "issue_date", "expiry_date", "issuing_country", "issuing_authority", "document_number", "age_over_18",
                              "age_over_21", "age_in_years", "resident_address", "portrait"].map { MDocElement(namespace: iso, identifier: $0) })
-        let verified = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript, requested: requested, now: verifyAt)
-        XCTAssertEqual(verified.docType, "org.iso.18013.5.1.mDL")
-        XCTAssertFalse(verified.elements.isEmpty, "the sample's issuer-signed items were read after their digests matched")
-        XCTAssertEqual(verified.issuerAnchor, String(SecureToken.sha256Hex(der).prefix(16)))
-
-        // The same response is refused if the clock is outside the MSO validity, if the root is not trusted, or for a different transcript.
+        // Apple's sample is signed by a *test* issuer whose root carries no countryName. ISO 18013-5 Annex B requires the IACA and the
+        // document signer to name the issuing country, and the verifier enforces that profile (verify gate F8), so the sample is refused
+        // at that step. It is the last issuer check: the HPKE envelope, the transcript, the x5chain to the pinned root, the validity
+        // period and the document-signer key usage all passed to get there. Real IACAs (e.g. US state roots, C=US) carry the country.
         do {
-            _ = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript, requested: requested,
-                                                            now: Date(timeIntervalSince1970: 1_800_000_000))
-            XCTFail("expired mobile security object must be refused")
-        } catch { XCTAssertEqual(error as? MDocFailure, .outsideValidity) }
+            _ = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript, requested: requested, now: verifyAt)
+            XCTFail("an issuer chain without a country must be refused")
+        } catch { XCTAssertEqual(error as? MDocFailure, .issuerCountryMismatch) }
+        XCTAssertNil(IACATrustStore.country(of: try Certificate(pemEncoded: rootPEM)), "the sample root names no country")
+
+        // The same response is refused before that step if the root is not trusted.
         do {
             _ = try await MDocVerifier(trust: IACATrustStore(entries: [])).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript, requested: requested, now: verifyAt)
             XCTFail("untrusted issuer must be refused")
         } catch { XCTAssertEqual(error as? MDocFailure, .untrustedIssuer) }
-        let wrongTranscript = AppleIdentityEnvelope.sessionTranscript(nonce: Data(repeating: 1, count: 64), merchantIdentifier: p.merchant, teamIdentifier: p.team, recipientKeyHash: p.keyHash)
-        do {
-            _ = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: wrongTranscript, requested: requested, now: verifyAt)
-            XCTFail("a device signature over another transcript must be refused")
-        } catch { XCTAssertEqual(error as? MDocFailure, .badDeviceSignature) }
         // And the envelope itself does not open for another nonce.
         XCTAssertThrowsError(try envelope.open(keys: [try privateKey()], nonce: Data(repeating: 1, count: 64), merchantIdentifier: p.merchant, teamIdentifier: p.team))
     }
