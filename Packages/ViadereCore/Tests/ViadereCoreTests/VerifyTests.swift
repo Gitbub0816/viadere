@@ -208,3 +208,37 @@ struct VerifyTests {
         #expect(throws: CBORError.self) { try CBOR.decode(Data([0xD8, 0x18]), limits: CBOR.Limits(allowedTags: [24])) }
     }
 }
+
+@Suite struct CBORParserDifferentialTests {
+    /// {"a": 1, "a": 2} where the second key uses a non-shortest text length head (0x78 0x01 'a').
+    static let twoEncodingsOfOneKey = Data([0xA2, 0x61, 0x61, 0x01, 0x78, 0x01, 0x61, 0x02])
+
+    /// Info finding: a duplicate key hidden behind a non-shortest encoding passed the raw-bytes check, and "first match" and "last match"
+    /// readers then disagreed (1 vs 2).
+    @Test func aDuplicateKeyIsFoundOnTheDecodedKeyEvenWithoutStrictMode() {
+        #expect(throws: CBORError.duplicateKey) { try CBOR.decode(Self.twoEncodingsOfOneKey) }
+        #expect(throws: CBORError.duplicateKey) { try CBOR.decode(Self.twoEncodingsOfOneKey, limits: CBOR.Limits(strictShortestForm: false)) }
+    }
+
+    @Test func strictModeRefusesEveryNonShortestHead() {
+        let strict = CBOR.Limits(strictShortestForm: true)
+        let cases: [Data] = [
+            Data([0x18, 0x05]),                          // 5 as a one-byte argument
+            Data([0x19, 0x00, 0xFF]),                    // 255 in two bytes
+            Data([0x1A, 0x00, 0x00, 0xFF, 0xFF]),        // 65535 in four bytes
+            Data([0x1B, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]),
+            Data([0x78, 0x01, 0x61]),                    // text of length 1 with a one-byte length
+            Data([0x98, 0x01, 0x00]),                    // array of one with a one-byte length
+        ]
+        for data in cases { #expect(throws: CBORError.notCanonical) { try CBOR.decode(data, limits: strict) } }
+        // The same bytes are accepted when strict mode is off (formats that never required it keep working).
+        #expect((try? CBOR.decode(Data([0x18, 0x05]))) == .unsigned(5))
+        // Shortest forms are accepted in strict mode.
+        #expect((try? CBOR.decode(Data([0x18, 0x18]), limits: strict)) == .unsigned(24))
+        #expect((try? CBOR.decode(Data([0x19, 0x01, 0x00]), limits: strict)) == .unsigned(256))
+        var tagged = CBOR.Limits(strictShortestForm: true)
+        tagged.allowedTags = [5]
+        #expect(throws: CBORError.notCanonical) { try CBOR.decode(Data([0xD8, 0x05, 0x01]), limits: tagged) }
+        #expect((try? CBOR.decode(Data([0xC5, 0x01]), limits: tagged)) == .tagged(5, .unsigned(1)))
+    }
+}

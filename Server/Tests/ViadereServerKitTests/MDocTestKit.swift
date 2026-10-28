@@ -15,6 +15,7 @@ struct TestMDocPKI {
     let iaca: Certificate
     let ds: Certificate
     let iacaName: DistinguishedName
+    var intermediateCertificate: Certificate?
 
     struct Options {
         var iacaNotAfter: Date?
@@ -25,28 +26,44 @@ struct TestMDocPKI {
         var dsEKU = true
         var dsDigitalSignature = true
         var dsIsCA = false
+        var dsCountry = "US"
+        var iacaCountry = "US"
+        /// IACA -> intermediate CA -> document signer (not allowed by ISO 18013-5 Annex B).
+        var intermediate = false
     }
 
     init(now: Date = Date(timeIntervalSince1970: 1_800_000_000), options: Options = Options(), name: String = "Test State IACA") {
         self.now = now
-        let iacaName = try! DistinguishedName { CommonName(name); CountryName("US") }
+        let iacaName = try! DistinguishedName { CommonName(name); CountryName(options.iacaCountry) }
         self.iacaName = iacaName
         let iacaExtensions = try! Certificate.Extensions {
-            if options.iacaIsCA { Critical(BasicConstraints.isCertificateAuthority(maxPathLength: 0)) }
+            if options.iacaIsCA { Critical(BasicConstraints.isCertificateAuthority(maxPathLength: options.intermediate ? 1 : 0)) }
             Critical(KeyUsage(keyCertSign: options.iacaKeyCertSign, cRLSign: true))
         }
         iaca = try! Certificate(version: .v3, serialNumber: .init(), publicKey: .init(iacaKey.publicKey), notValidBefore: now.addingTimeInterval(-86_400 * 365),
                                 notValidAfter: options.iacaNotAfter ?? now.addingTimeInterval(86_400 * 3000), issuer: iacaName, subject: iacaName,
                                 signatureAlgorithm: .ecdsaWithSHA256, extensions: iacaExtensions, issuerPrivateKey: .init(iacaKey))
-        let dsName = try! DistinguishedName { CommonName("Test Document Signer"); CountryName("US") }
+        let dsName = try! DistinguishedName { CommonName("Test Document Signer"); CountryName(options.dsCountry) }
+        var dsIssuer = iacaName
+        var dsIssuerKey = iacaKey
+        if options.intermediate {
+            let intKey = P256.Signing.PrivateKey()
+            let intName = try! DistinguishedName { CommonName("Test Intermediate"); CountryName(options.iacaCountry) }
+            intermediateCertificate = try! Certificate(version: .v3, serialNumber: .init(), publicKey: .init(intKey.publicKey), notValidBefore: now.addingTimeInterval(-86_400 * 365),
+                                                       notValidAfter: now.addingTimeInterval(86_400 * 2000), issuer: iacaName, subject: intName, signatureAlgorithm: .ecdsaWithSHA256,
+                                                       extensions: try! Certificate.Extensions { Critical(BasicConstraints.isCertificateAuthority(maxPathLength: 0)); Critical(KeyUsage(keyCertSign: true, cRLSign: true)) },
+                                                       issuerPrivateKey: .init(iacaKey))
+            dsIssuer = intName
+            dsIssuerKey = intKey
+        }
         let dsExtensions = try! Certificate.Extensions {
             if options.dsIsCA { Critical(BasicConstraints.isCertificateAuthority(maxPathLength: 0)) } else { Critical(BasicConstraints.notCertificateAuthority) }
             Critical(KeyUsage(digitalSignature: options.dsDigitalSignature))
             if options.dsEKU { try ExtendedKeyUsage([ExtendedKeyUsage.Usage(oid: IACATrustStore.documentSignerEKU)]) }
         }
         ds = try! Certificate(version: .v3, serialNumber: .init(), publicKey: .init(dsKey.publicKey), notValidBefore: options.dsNotBefore ?? now.addingTimeInterval(-86_400 * 30),
-                              notValidAfter: options.dsNotAfter ?? now.addingTimeInterval(86_400 * 300), issuer: iacaName, subject: dsName,
-                              signatureAlgorithm: .ecdsaWithSHA256, extensions: dsExtensions, issuerPrivateKey: .init(iacaKey))
+                              notValidAfter: options.dsNotAfter ?? now.addingTimeInterval(86_400 * 300), issuer: dsIssuer, subject: dsName,
+                              signatureAlgorithm: .ecdsaWithSHA256, extensions: dsExtensions, issuerPrivateKey: .init(dsIssuerKey))
     }
 
     var iacaDER: Data {
@@ -59,6 +76,17 @@ struct TestMDocPKI {
         var serializer = DER.Serializer()
         try! serializer.serialize(ds)
         return Data(serializer.serializedBytes)
+    }
+
+    /// The `x5chain` blobs: the document signer, then the intermediate when there is one.
+    var chainDER: [Data] {
+        var out = [dsDER]
+        if let intermediateCertificate {
+            var serializer = DER.Serializer()
+            try! serializer.serialize(intermediateCertificate)
+            out.append(Data(serializer.serializedBytes))
+        }
+        return out
     }
 
     var fingerprint: String { SecureToken.sha256Hex(iacaDER) }
@@ -166,7 +194,7 @@ struct TestMDoc {
         let signerPKI = flaws.otherPKI ?? pki
         let protectedHeader = CBORValue.intMap([(1, flaws.issuerAlgorithm >= 0 ? .unsigned(UInt64(flaws.issuerAlgorithm)) : .negative(flaws.issuerAlgorithm))])
         var unprotected: [(Int64, CBORValue)] = []
-        if !flaws.omitX5Chain { unprotected.append((33, .bytes(signerPKI.dsDER))) }
+        if !flaws.omitX5Chain { unprotected.append((33, signerPKI.chainDER.count == 1 ? .bytes(signerPKI.dsDER) : .array(signerPKI.chainDER.map { .bytes($0) }))) }
         if flaws.algorithmInUnprotected { unprotected.append((1, .negative(-7))) }
         let issuerAuth = sign1(protected: protectedHeader, unprotected: .intMap(unprotected), payload: msoPayload, key: signerPKI.dsKey)
 

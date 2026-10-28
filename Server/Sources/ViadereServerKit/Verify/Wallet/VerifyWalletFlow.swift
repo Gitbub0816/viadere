@@ -115,6 +115,7 @@ extension VerifyService {
 enum WalletClaims {
     static func claims(from verification: MDocVerification, plan: WalletElementPlan.Request, now: Date) -> EvidenceClaims? {
         var claims = EvidenceClaims(method: .walletMdoc, issuer: verification.issuerAnchor, verifiedAt: now, validUntil: verification.validUntil, revocation: .notChecked)
+        claims.issuerCountry = verification.issuerCountry
         func text(_ id: String) -> String? { verification.elements[MDocElement(namespace: WalletElementPlan.isoNamespace, identifier: id)]?.textString }
         var present = false
         switch plan {

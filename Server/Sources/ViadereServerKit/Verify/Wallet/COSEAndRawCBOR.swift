@@ -9,7 +9,9 @@ import ViadereCore
 /// keeps raw slices of those items instead of re-encoding decoded values.
 enum RawCBOR {
     /// 0 date-time (`tdate`), 24 encoded CBOR data item, 1004 full-date. Every other tag is refused.
-    static let limits = CBOR.Limits(maxDepth: 14, maxBytes: 192 * 1024, maxItems: 2048, allowedTags: [0, 24, 1004])
+    /// Strict: shortest-form heads only, and duplicate keys are found on the decoded key. Every view of a structure (the decoded value and the
+    /// raw slices below) therefore agrees on what it says.
+    static let limits = CBOR.Limits(maxDepth: 14, maxBytes: 192 * 1024, maxItems: 2048, allowedTags: [0, 24, 1004], strictShortestForm: true)
 
     static func decode(_ data: Data) throws -> CBORValue { try CBOR.decode(data, limits: limits) }
 
@@ -25,6 +27,7 @@ enum RawCBOR {
             guard data.count >= 1 + width else { throw CBORError.truncated }
             var value: UInt64 = 0
             for byte in data.dropFirst().prefix(width) { value = value << 8 | UInt64(byte) }
+            guard CBOR.isShortestHead(info: info, value: value) else { throw CBORError.notCanonical }
             return (major, value, 1 + width)
         default: throw CBORError.unsupported
         }
@@ -52,12 +55,15 @@ enum RawCBOR {
         guard major == 5, count <= UInt64(limits.maxItems) else { throw CBORError.malformed }
         var offset = headLength
         var found: Data?
+        var seen = Set<[UInt8]>()
         for _ in 0..<Int(count) {
             let keyRest = Data(data.dropFirst(offset))
             let keyItem = try CBOR.decodePrefix(keyRest, limits: limits)
             offset += keyItem.length
             let valueRest = Data(data.dropFirst(offset))
             let valueLength = try CBOR.decodePrefix(valueRest, limits: limits).length
+            // One view: a duplicate key (also behind another encoding of the same key) is an error, so "first" and "last" cannot differ.
+            guard seen.insert(Array(CBOR.encode(keyItem.value, deterministic: true))).inserted else { throw CBORError.duplicateKey }
             if keyItem.value == .text(key) { found = Data(valueRest.prefix(valueLength)) }
             offset += valueLength
         }

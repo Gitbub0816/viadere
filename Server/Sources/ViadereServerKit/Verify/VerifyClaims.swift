@@ -12,6 +12,9 @@ struct EvidenceClaims: Sendable {
     /// The evidence stops being valid (credential or document expiry); a result never outlives it.
     var validUntil: Date
     var revocation: RevocationState
+    /// The document's issuing country (ISO 3166-1 alpha-2) when the method established one: the IACA / document-signer country for
+    /// Wallet, the provider's `issuing_state` for a document check. `nil` = unknown (jurisdiction rules then fail closed).
+    var issuerCountry: String?
 
     /// Explicit issuer statements `age_over_NN` → value.
     var ageOver: [Int: Bool] = [:]
@@ -39,7 +42,7 @@ enum ClaimsBuilder {
         if let exact = claims.ageOver[years] { return exact }
         if claims.ageOver.contains(where: { $0.key >= years && $0.value }) { return true }
         if claims.ageOver.contains(where: { $0.key <= years && !$0.value }) { return false }
-        if let birth = claims.birthDate { return AgeThreshold.meets(birth: birth, years: years, today: AgeThreshold.Day(utc: now)) }
+        if let birth = claims.birthDate { return AgeThreshold.meets(birth: birth, years: years, today: AgeThreshold.Day(earliestLocal: now)) }
         if let age = claims.ageInYears, (0...150).contains(age), age >= years { return true }
         return nil
     }

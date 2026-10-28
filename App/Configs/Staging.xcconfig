@@ -9,7 +9,7 @@
 // The only overridable staging values are the three push/attest switches (see "TestFlight" below) through the VIADERE_STAGING_* names.
 
 // ---- server, domains ---------------------------------------------------------------------------------------------
-VIADERE_API_BASE_URL = https:/$()/api.staging.viadere.com
+VIADERE_API_BASE_URL = https:/$()/api-staging.viadere.com
 // Passkey relying party and associated domains: the staging web origin (server RP_ID / RP_ORIGIN). This host must reach the Fly origin so
 // /.well-known/apple-app-site-association is served for it (docs/ops/STAGING-SETUP.md, Cloudflare DNS).
 VIADERE_WEB_DOMAIN = staging.viadere.com
@@ -19,7 +19,7 @@ VIADERE_DISPLAY_NAME = Viadere Staging
 // ---- ATS: strict, no exceptions (Debug alone defines VIADERE_LOCAL_DEV) -------------------------------------------------
 VIADERE_PLIST_DEFS =
 
-// ---- certificate pins for api.staging.viadere.com (SPKI SHA-256, base64) -----------------------------------------------------
+// ---- certificate pins for api-staging.viadere.com (SPKI SHA-256, base64) -----------------------------------------------------
 // MUST be filled before use: a Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
 // Compute them with App/Scripts/compute-spki-pins.py (docs/ops/STAGING-SETUP.md). Pin the CA intermediate(s) of the Cloudflare edge chain, not
 // the leaf: Cloudflare renews the edge certificate (and may switch CAs) without notice. Primary and backup must differ.

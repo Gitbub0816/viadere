@@ -474,11 +474,11 @@ struct ClipAndConfigTests {
 
     @Test func stagingHostTakesPinsPushEnvironmentAndRelyingPartyFromTheBuild() {
         let a = Data(repeating: 1, count: 32).base64EncodedString(), b = Data(repeating: 2, count: 32).base64EncodedString()
-        let info: [String: Any] = ["ViadereAPIBaseURL": "https://api.staging.viadere.com", "ViadereAPIPins": "\(a),\(b)",
+        let info: [String: Any] = ["ViadereAPIBaseURL": "https://api-staging.viadere.com", "ViadereAPIPins": "\(a),\(b)",
                                    "ViadereAPNsEnvironment": "sandbox", "ViadereRelyingPartyID": "staging.viadere.com"]
         let config = ViadereConfiguration.resolve(info: info, allowLocalHTTP: false)
-        #expect(config.apiBaseURL.host == "api.staging.viadere.com")
-        #expect(config.pinning.host == "api.staging.viadere.com" && config.pinning.pins == [a, b] && config.pinning.isConfigured)
+        #expect(config.apiBaseURL.host == "api-staging.viadere.com")
+        #expect(config.pinning.host == "api-staging.viadere.com" && config.pinning.pins == [a, b] && config.pinning.isConfigured)
         #expect(config.failClosedPinning)
         #expect(config.apnsEnvironment == .sandbox)
         #expect(config.relyingPartyID == "staging.viadere.com")
@@ -487,12 +487,12 @@ struct ClipAndConfigTests {
     @Test func stagingWithoutRealPinsStaysFailClosed() {
         let a = Data(repeating: 1, count: 32).base64EncodedString()
         for pins in [nil, "", "\(a)", "\(a),REPLACE_ME_X", "\(a),\(a)", "$(VIADERE_API_PINS)"] as [String?] {
-            var info: [String: Any] = ["ViadereAPIBaseURL": "https://api.staging.viadere.com"]
+            var info: [String: Any] = ["ViadereAPIBaseURL": "https://api-staging.viadere.com"]
             if let pins { info["ViadereAPIPins"] = pins }
             let config = ViadereConfiguration.resolve(info: info, allowLocalHTTP: false)
             #expect(!config.pinning.isConfigured, "\(pins ?? "nil")")
             #expect(config.pinning.isPlaceholder)
-            #expect(PinEvaluator.evaluate(host: "api.staging.viadere.com", chainSPKIHashes: [a], configuration: config.pinning, failClosed: true) == .deny)
+            #expect(PinEvaluator.evaluate(host: "api-staging.viadere.com", chainSPKIHashes: [a], configuration: config.pinning, failClosed: true) == .deny)
         }
     }
 

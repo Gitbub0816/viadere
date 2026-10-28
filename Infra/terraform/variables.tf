@@ -26,7 +26,7 @@ variable "apex_domain" {
 }
 
 variable "api_hostname_label" {
-  description = "Label of the API origin hostname under the apex (api, or api.staging)."
+  description = "Label of the API origin hostname under the apex (api, or api-staging)."
   type        = string
   default     = "api"
 }

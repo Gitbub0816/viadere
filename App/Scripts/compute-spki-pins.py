@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the SPKI SHA-256 pin (base64) of every certificate a TLS server presents, for App/Configs/Staging.xcconfig.
 
-    python3 -I App/Scripts/compute-spki-pins.py api.staging.viadere.com
+    python3 -I App/Scripts/compute-spki-pins.py api-staging.viadere.com
     python3 -I App/Scripts/compute-spki-pins.py --pem chain.pem          # a PEM bundle instead of a live connection
 
 Standard library only; shells out to `openssl` (LibreSSL on macOS works). Nothing is sent anywhere except the TLS handshake to the host.
@@ -48,7 +48,7 @@ def describe(pem):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("host", nargs="?", help="server name, e.g. api.staging.viadere.com")
+    parser.add_argument("host", nargs="?", help="server name, e.g. api-staging.viadere.com")
     parser.add_argument("--port", type=int, default=443)
     parser.add_argument("--pem", help="read the certificates from this PEM file instead of connecting")
     args = parser.parse_args()

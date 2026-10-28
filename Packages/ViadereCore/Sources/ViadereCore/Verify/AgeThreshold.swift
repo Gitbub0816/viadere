@@ -35,6 +35,13 @@ public enum AgeThreshold {
             day = c.day!
         }
 
+        /// The **earliest calendar date anywhere on Earth** at `date`: the date at UTC−12. A threshold check uses this "today" so a person
+        /// is never reported as having reached an age while it is still the day before their birthday in some time zone (the conservative
+        /// reading; counsel to confirm for each regulated use). Viadere does not know the person's or the venue's time zone.
+        public init(earliestLocal date: Date) {
+            self.init(utc: date.addingTimeInterval(-12 * 3600))
+        }
+
         static func isLeap(_ year: Int) -> Bool { (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 }
         static func daysIn(month: Int, year: Int) -> Int {
             switch month {
@@ -65,6 +72,6 @@ public enum AgeThreshold {
     /// `meets` for an ISO date string; `nil` when the string is not a strict full-date.
     public static func meets(birthDate: String, years: Int, now: Date) -> Bool? {
         guard let birth = Day(isoDate: birthDate) else { return nil }
-        return meets(birth: birth, years: years, today: Day(utc: now))
+        return meets(birth: birth, years: years, today: Day(earliestLocal: now))
     }
 }

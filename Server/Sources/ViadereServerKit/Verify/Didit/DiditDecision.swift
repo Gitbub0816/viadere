@@ -85,6 +85,8 @@ enum DiditDecisionMapper {
             claims.address = address
         }
         claims.documentPresented = true
+        // The provider reports the issuing state as alpha-3 (or alpha-2); policy rules name alpha-2. Unassigned or placeholder -> unknown.
+        claims.issuerCountry = CountryCodes.alpha2((document["issuing_state"]?.stringValue ?? "").trimmingCharacters(in: .whitespaces))
         return Mapped(state: .approved, claims: claims)
     }
 

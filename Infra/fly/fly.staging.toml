@@ -68,7 +68,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   CORS_ALLOWED_ORIGINS = ""
   ALLOW_INSECURE_WEBHOOKS = "false"
   # ---- public URL / passkeys ------------------------------------------------------------------------
-  PUBLIC_BASE_URL = "https://api.staging.viadere.com"
+  PUBLIC_BASE_URL = "https://api-staging.viadere.com"
   RP_ID = "staging.viadere.com"
   RP_NAME = "Viadere"
   RP_ORIGIN = "https://staging.viadere.com"

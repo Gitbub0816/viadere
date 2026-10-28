@@ -90,7 +90,7 @@ curl -fsS https://viadere-server-staging.fly.dev/readyz     # while the Fly host
 ## Cloudflare in front of Fly (exact steps)
 
 Terraform creates the Cloudflare side (`Infra/terraform/cloudflare.tf`); the numbered steps below are the Fly side plus the
-verification. Hostnames: `api.viadere.com` is the origin hostname served by Fly (staging: `api.staging.viadere.com`).
+verification. Hostnames: `api.viadere.com` is the origin hostname served by Fly (staging: `api-staging.viadere.com`).
 
 3. **Allocate addresses and a certificate on Fly** (Fly issues a Let's Encrypt certificate and validates by DNS-01, which works while
    the record is proxied):
@@ -140,7 +140,7 @@ verification. Hostnames: `api.viadere.com` is the origin hostname served by Fly 
    and `TRUSTED_PROXY_COUNT = "2"` selects the client. Verify on staging before production (a wrong value makes every client share
    one rate-limit bucket, or lets a client choose its own IP):
    ```bash
-   curl -s https://api.staging.viadere.com/v1/<any rate-limited route> -H 'X-Forwarded-For: 203.0.113.9' -i   # spoofed hop
+   curl -s https://api-staging.viadere.com/v1/<any rate-limited route> -H 'X-Forwarded-For: 203.0.113.9' -i   # spoofed hop
    fly logs --app viadere-server-staging | grep -m1 'ip='    # the resolved address must be YOUR address, not 203.0.113.9 and not a Cloudflare range
    ```
 9. **Cache and compression.** The API is dynamic: Terraform adds a cache-bypass rule for `api.viadere.com` (`cloudflare_ruleset.api_cache_bypass`);

@@ -15,6 +15,9 @@ struct MDocVerification: Sendable {
     var validUntil: Date
     /// The requested elements that were present and digest-verified, with their values.
     var elements: [MDocElement: CBORValue]
+    /// The issuing country (ISO 3166-1 alpha-2): the document signer's and the IACA's `countryName`, which agree (and agree with the
+    /// `issuing_country` element when the response carries it).
+    var issuerCountry: String
 }
 
 /// Verifies an ISO/IEC 18013-5 `DeviceResponse` (the plaintext Apple Wallet's identity presentment produces, no ISO session encryption):
@@ -33,6 +36,8 @@ struct MDocVerifier: Sendable {
     /// Clock skew tolerated between the issuer's clock and ours for `signed` and `validFrom`.
     static let skew: TimeInterval = 300
     static let maxItemsPerNamespace = 128
+    /// Read (when present) for the country consistency check; not part of any capability's output.
+    static let issuingCountryElement = MDocElement(namespace: WalletElementPlan.isoNamespace, identifier: "issuing_country")
 
     let trust: IACATrustStore
 
@@ -52,11 +57,15 @@ struct MDocVerifier: Sendable {
         guard let documents = response["documents"]?.arrayValue, documents.count == 1,
               let documentsRaw = try? RawCBOR.mapValue(raw, key: "documents"), let documentRaw = try? RawCBOR.arrayElements(documentsRaw).first
         else { throw MDocFailure.malformedResponse }
-        let document = documents[0]
+        // One view of the structure: everything below is read from the raw slices (which reject duplicate keys and non-shortest heads),
+        // decoded once; the decoded `response` above is used only to find them. A disagreement between the two is a refusal.
+        guard let document = try? RawCBOR.decode(documentRaw), document == documents[0] else { throw MDocFailure.malformedResponse }
         guard let docType = document["docType"]?.textString, Self.acceptedDocTypes.contains(docType) else { throw MDocFailure.unsupportedDocType }
         guard let issuerSignedRaw = try? RawCBOR.mapValue(documentRaw, key: "issuerSigned"),
               let deviceSignedRaw = try? RawCBOR.mapValue(documentRaw, key: "deviceSigned"),
-              let issuerAuthValue = document["issuerSigned"]?["issuerAuth"] else { throw MDocFailure.malformedResponse }
+              let issuerSigned = try? RawCBOR.decode(issuerSignedRaw), let deviceSigned = try? RawCBOR.decode(deviceSignedRaw),
+              document["issuerSigned"] == issuerSigned, document["deviceSigned"] == deviceSigned,
+              let issuerAuthValue = issuerSigned["issuerAuth"] else { throw MDocFailure.malformedResponse }
 
         // 1 and 2: issuer authentication.
         let issuerAuth = try COSESign1(issuerAuthValue)
@@ -72,13 +81,20 @@ struct MDocVerifier: Sendable {
         guard issuer.leaf.notValidBefore <= mso.signed.addingTimeInterval(Self.skew), mso.signed <= issuer.leaf.notValidAfter else { throw MDocFailure.outsideValidity }
 
         // 3: digests of every item in the allowed namespaces.
-        let elements = try Self.verifiedElements(issuerSignedRaw: issuerSignedRaw, mso: mso, requested: requested)
+        let read = try Self.verifiedElements(issuerSignedRaw: issuerSignedRaw, mso: mso, requested: requested.union([Self.issuingCountryElement]))
+        var elements = read
+        // The issuing country element, when the response carries it, must be the certificates' country (ISO 18013-5 Annex B: the DS and the
+        // IACA name the issuing country). Apple's Wallet cannot be asked for it, so its absence is not an error.
+        if let claimed = elements.removeValue(forKey: Self.issuingCountryElement) {
+            guard let text = claimed.textString, CountryCodes.alpha2(text) == issuer.country, text.count == 2 else { throw MDocFailure.issuerCountryMismatch }
+            if requested.contains(Self.issuingCountryElement) { elements[Self.issuingCountryElement] = claimed }
+        }
 
         // 4: device authentication over the transcript.
-        try Self.verifyDeviceAuth(deviceSigned: document["deviceSigned"], deviceSignedRaw: deviceSignedRaw, deviceKey: mso.deviceKey, docType: docType,
+        try Self.verifyDeviceAuth(deviceSigned: deviceSigned, deviceSignedRaw: deviceSignedRaw, deviceKey: mso.deviceKey, docType: docType,
                                   sessionTranscript: sessionTranscript)
         return MDocVerification(docType: docType, issuerAnchor: String(issuer.anchorFingerprint.prefix(16)), signedAt: mso.signed,
-                                validFrom: mso.validFrom, validUntil: mso.validUntil, elements: elements)
+                                validFrom: mso.validFrom, validUntil: mso.validUntil, elements: elements, issuerCountry: issuer.country)
     }
 
     // MARK: Issuer certificate chain

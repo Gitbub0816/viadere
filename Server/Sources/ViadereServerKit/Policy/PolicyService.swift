@@ -33,10 +33,17 @@ struct PolicyInput: Sendable {
     var parameters: [String: JSONValue]?
     var purpose: String?
     var jurisdiction: String?
+    /// Further regions the request involves (the business's legal-entity jurisdiction, the document issuer's country): a rule applies if it
+    /// applies to any of them.
+    var additionalJurisdictions: [String] = []
+    /// A jurisdiction the request involves could not be established; block rules on high-sensitivity capabilities then fail closed.
+    var jurisdictionIncomplete = false
     var requestId: String?
 
     init(_ capability: Capability, subjectRef: SubjectRef? = nil, parameters: [String: JSONValue]? = nil, purpose: String? = nil,
-         jurisdiction: String? = nil, requestId: String? = nil) {
+         jurisdiction: String? = nil, additionalJurisdictions: [String] = [], jurisdictionIncomplete: Bool = false, requestId: String? = nil) {
+        self.additionalJurisdictions = additionalJurisdictions
+        self.jurisdictionIncomplete = jurisdictionIncomplete
         self.capability = capability
         self.subjectRef = subjectRef
         self.parameters = parameters
@@ -131,7 +138,8 @@ struct PolicyService {
         let facts = try await businessFacts(principal: principal)
         let request = PolicyRequest(capability: input.capability, businessId: principal.businessId, environment: principal.livemode ? .live : .test,
                                     subjectRef: input.subjectRef, parameters: input.parameters, purpose: input.purpose,
-                                    jurisdiction: input.jurisdiction, requestId: input.requestId, now: ctx.now)
+                                    jurisdiction: input.jurisdiction, requestId: input.requestId,
+                                    additionalJurisdictions: input.additionalJurisdictions, jurisdictionIncomplete: input.jurisdictionIncomplete, now: ctx.now)
         let decision = PolicyEngine.evaluate(request, business: facts, subject: subject, stage: stage)
         if auditAllowed || !decision.allowed { try await record(decision, input: input, principal: principal) }
         return decision

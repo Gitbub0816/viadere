@@ -202,10 +202,10 @@ struct PolicyEngineTests {
         #expect(decide(nil, extra: ["US"]).allowed)
         #expect(decide("US", incomplete: true).primaryReason == .jurisdictionBlocked, "a jurisdiction that could not be determined")
         // A low-sensitivity capability keeps the old behavior: an unknown jurisdiction does not trip a block rule.
-        let lowBlock = PolicyRule(capability: .interactionNotice, kind: .jurisdictionBlock, jurisdictions: ["XX"], reason: "test")
-        let low = facts(entitled: [.interactionNotice], scopes: [.interactionNotice], tiers: [.m], rules: [lowBlock])
-        #expect(PolicyCatalogProbe.sensitivity(.interactionNotice) < .high)
-        #expect(PolicyEngine.evaluate(request(.interactionNotice), business: low, stage: .business).allowed)
+        let lowBlock = PolicyRule(capability: .messageSend, kind: .jurisdictionBlock, jurisdictions: ["XX"], reason: "test")
+        let low = facts(entitled: [.messageSend], scopes: [.messageSend], tiers: [.m], rules: [lowBlock])
+        #expect(PolicyCatalogProbe.sensitivity(.messageSend) < .high)
+        #expect(PolicyEngine.evaluate(request(.messageSend), business: low, stage: .business).allowed)
         // Allow-only needs every involved jurisdiction to be listed.
         let only = PolicyRule(capability: .ageMinimum, kind: .jurisdictionAllowOnly, jurisdictions: ["US"], reason: "pilot")
         let pilot = facts(entitled: [.ageMinimum], scopes: [.ageMinimum], tiers: [.m, .v], rules: [only])
@@ -380,4 +380,29 @@ struct CatalogDocumentationTests {
 
 enum PolicyCatalogProbe {
     static func sensitivity(_ capability: Capability) -> Sensitivity { capability.definition?.sensitivity ?? .low }
+}
+
+@Suite struct CountryCodesTests {
+    @Test func theTableIsTheFullISO3166List() {
+        #expect(CountryCodes.alpha3ToAlpha2.count == 249)
+        #expect(Set(CountryCodes.alpha3ToAlpha2.values).count == 249, "alpha-2 codes are unique")
+        #expect(CountryCodes.alpha3ToAlpha2.keys.allSatisfy { $0.count == 3 } && CountryCodes.alpha3ToAlpha2.values.allSatisfy { $0.count == 2 })
+        #expect(CountryCodes.alpha2("USA") == "US" && CountryCodes.alpha2("deu") == "DE" && CountryCodes.alpha2("GB") == "GB" && CountryCodes.alpha2("gb") == "GB")
+        #expect(CountryCodes.alpha2("ZZ") == nil && CountryCodes.alpha2("XXX") == nil && CountryCodes.alpha2("unknown") == nil && CountryCodes.alpha2("") == nil)
+        #expect(CountryCodes.alpha2("CHE") == "CH" && CountryCodes.alpha2("SWZ") == "SZ" && CountryCodes.alpha2("MKD") == "MK" && CountryCodes.alpha2("TLS") == "TL")
+    }
+}
+
+@Suite struct AgeThresholdConservativeDateTests {
+    func utc(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+
+    /// Gate F7 exploit: at 02:00 UTC on the 18th birthday it is still the day before in UTC-12; the UTC date used to say "18".
+    @Test func aPersonIsNotReportedAsOfAgeUntilTheBirthdayHasStartedEverywhere() {
+        #expect(AgeThreshold.meets(birthDate: "2008-03-10", years: 18, now: utc("2026-03-10T02:00:00Z")) == false)
+        #expect(AgeThreshold.meets(birthDate: "2008-03-10", years: 18, now: utc("2026-03-10T11:59:59Z")) == false)
+        #expect(AgeThreshold.meets(birthDate: "2008-03-10", years: 18, now: utc("2026-03-10T12:00:00Z")) == true)
+        #expect(AgeThreshold.meets(birthDate: "2008-03-10", years: 18, now: utc("2026-03-11T00:00:00Z")) == true)
+        #expect(AgeThreshold.Day(earliestLocal: utc("2026-01-01T05:00:00Z")) == AgeThreshold.Day(year: 2025, month: 12, day: 31))
+        #expect(AgeThreshold.Day(utc: utc("2026-01-01T05:00:00Z")) == AgeThreshold.Day(year: 2026, month: 1, day: 1), "the UTC date is unchanged")
+    }
 }

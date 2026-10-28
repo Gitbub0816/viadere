@@ -12,7 +12,7 @@
 | Secret scanning | gitleaks over full history on every push/PR/day; GitHub secret scanning and push protection to be enabled | `security.yml`; repo setting | Built / setting |
 | Container scanning | trivy on the built Server image (gate on fixable HIGH/CRITICAL) before publish and on PRs | `security.yml`, `release.yml` | Built |
 | SAST | semgrep (official container) with security-audit, secrets, GitHub-actions, Dockerfile and Swift rule packs, SARIF to code scanning. CodeQL is unavailable for Swift on Linux | `security.yml` | Built; Swift rule coverage is thin (R-036) |
-| DAST | Authenticated scan of staging with a self-hosted scanner (OWASP ZAP in a container, a Java tool: allowed, not Node) before each release candidate; part of the pen test scope | `TODO` workflow against `api.staging` | **Gap** |
+| DAST | Authenticated scan of staging with a self-hosted scanner (OWASP ZAP in a container, a Java tool: allowed, not Node) before each release candidate; part of the pen test scope | `TODO` workflow against `api-staging` | **Gap** |
 | IaC review | `tofu fmt/validate` in CI, trivy config scan, plan reviewed by a human before apply, state in an encrypted backend | `ci.yml`, `security.yml`, Infra/terraform/README.md | Built; apply is manual |
 | SBOM | SPDX of the repository per scan; SPDX of the Server image per release, attested (cosign) and stored 365 days | `security.yml`, `release.yml` | Built |
 | Pinned build provenance | Keyless cosign signature + SLSA provenance (`actions/attest-build-provenance`) pushed to GHCR; deploy verifies both and deploys by digest; actions pinned to commit SHAs; scanner binaries by SHA-256; images by digest | `release.yml`, `.github/scripts/install-tools.sh` | Built |

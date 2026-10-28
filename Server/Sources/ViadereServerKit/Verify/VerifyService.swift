@@ -57,6 +57,14 @@ struct VerifyService {
         String(decoding: (try? CanonicalJSON.serialize(.object(parameters))) ?? Data("{}".utf8), as: UTF8.self)
     }
 
+    /// The jurisdictions of the business side of a request: the legal-entity jurisdiction from its approved onboarding review. Empty when
+    /// the business has none on record (a block rule on a high-sensitivity capability then fails closed).
+    func businessJurisdictions(_ businessId: UUID) async throws -> [String] {
+        guard let row = try await BusinessOnboardingRecord.query(on: db).filter(\.$businessId == businessId).first(),
+              row.legalStatus == OnboardingReview.approved.rawValue, let region = row.legalJurisdiction, PolicyAdmin.isRegion(region) else { return [] }
+        return [region]
+    }
+
     func create(principal: BusinessPrincipal, body: CreateVerificationRequest, idempotencyKey: String) async throws -> (resource: VerificationRequestResource, created: Bool) {
         let capability = body.capability
         guard Self.supportedCapabilities.contains(capability) else {
@@ -67,7 +75,8 @@ struct VerifyService {
         // 1. Policy at the business level first: key scope, entitlement ceiling, tier, kill switches, typed parameters, purpose, law/policy.
         //    A key without the capability learns nothing about the customer (acceptance 1).
         try await PolicyService(db: db, ctx: ctx).enforce(
-            PolicyInput(capability, subjectRef: body.subjectRef, parameters: parameters, purpose: body.purposeCode), principal: principal, auditAllowed: false)
+            PolicyInput(capability, subjectRef: body.subjectRef, parameters: parameters, purpose: body.purposeCode,
+                        additionalJurisdictions: try await businessJurisdictions(principal.businessId.uuid)), principal: principal, auditAllowed: false)
         try await limit("verify-create", key: principal.businessId.description, rule: settings.createRate)
 
         // 2. Envelope validation.
@@ -169,7 +178,8 @@ struct VerifyService {
     func request(principal: BusinessPrincipal, id: VerificationRequestID) async throws -> VerificationRequestResource {
         guard let record = try await VerificationRequestRecord.query(on: db).filter(\.$id == id.uuid)
             .filter(\.$businessId == principal.businessId.uuid).filter(\.$livemode == principal.livemode).first() else { throw APIError.notFound }
-        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(record.capabilityValue, parameters: record.parameterValues, purpose: record.purpose), principal: principal, auditAllowed: false)
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(record.capabilityValue, parameters: record.parameterValues, purpose: record.purpose,
+                                                                      additionalJurisdictions: try await businessJurisdictions(principal.businessId.uuid)), principal: principal, auditAllowed: false)
         // A request past its expiry that nobody finished is finished now, so the business never waits on the sweeper.
         if record.consumerStatus.isOpen, ctx.now >= record.expiresAt { try await close(record, status: .expired, reason: "expired") }
         let fresh = try await VerificationRequestRecord.find(record.id, on: db) ?? record
@@ -184,7 +194,8 @@ struct VerifyService {
         guard let row = try await VerificationResultRecord.query(on: db).filter(\.$refHash == hash).filter(\.$businessId == principal.businessId.uuid).first(),
               let request = try await VerificationRequestRecord.find(row.requestId, on: db), request.livemode == principal.livemode else { throw APIError.notFound }
         let capability = request.capabilityValue
-        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(capability, parameters: request.parameterValues, purpose: request.purpose), principal: principal, auditAllowed: false)
+        try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(capability, parameters: request.parameterValues, purpose: request.purpose,
+                                                                      additionalJurisdictions: try await businessJurisdictions(principal.businessId.uuid)), principal: principal, auditAllowed: false)
         try await limit("verify-result", key: principal.businessId.description, rule: .perMinute(120, burst: 60))
         let now = ctx.now
         guard row.retrievedAt == nil, now < row.expiresAt else { throw APIError.gone("This result was already retrieved or has expired.") }
@@ -431,7 +442,12 @@ struct VerifyService {
             try await persist(record, resultId: resultId, outcome: .notVerified, status: .notVerified, built: nil, reason: "key_unavailable")
             return outcome(try await VerificationRequestRecord.find(record.id, on: db) ?? record)
         }
-        let input = PolicyInput(capability, subjectRef: subjectRef, parameters: record.parameterValues, purpose: record.purpose, requestId: record.requestID.description)
+        // Jurisdiction (F4): evaluated again here, now that the document's issuing country is known. Both the business's legal-entity
+        // jurisdiction and the issuer's country count; an issuer that cannot be established fails block rules closed (live requests).
+        let issuer = claims.issuerCountry
+        let input = PolicyInput(capability, subjectRef: subjectRef, parameters: record.parameterValues, purpose: record.purpose,
+                                additionalJurisdictions: try await businessJurisdictions(record.businessId) + [issuer].compactMap { $0 },
+                                jurisdictionIncomplete: record.livemode && issuer == nil, requestId: record.requestID.description)
         let decision = try await PolicyService(db: db, ctx: ctx, platformOnlyDenials: true).authorizeDisclosure(input, principal: principal, relationship: relationship, evidence: [holding])
         guard decision.allowed else {
             // Revoked receipt, withdrawn entitlement, switched-off capability, ...: the same `not_verified` for the business.

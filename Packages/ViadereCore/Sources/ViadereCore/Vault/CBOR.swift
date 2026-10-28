@@ -78,11 +78,16 @@ public enum CBOR {
         public var maxItems: Int
         /// Tags the decoder accepts (none by default: a tag is refused). Each accepted tag wraps exactly one item.
         public var allowedTags: Set<UInt64>
-        public init(maxDepth: Int = 8, maxBytes: Int = 64 * 1024, maxItems: Int = 1024, allowedTags: Set<UInt64> = []) {
+        /// Strict mode: every head (integer, length, tag) must use its shortest form, else `CBORError.notCanonical`. A non-shortest head
+        /// is a second encoding of the same value; a parser that does not refuse it can disagree with another parser (or with a raw-bytes
+        /// comparison) about what a structure says. Off by default for the formats that never required it.
+        public var strictShortestForm: Bool
+        public init(maxDepth: Int = 8, maxBytes: Int = 64 * 1024, maxItems: Int = 1024, allowedTags: Set<UInt64> = [], strictShortestForm: Bool = false) {
             self.maxDepth = maxDepth
             self.maxBytes = maxBytes
             self.maxItems = maxItems
             self.allowedTags = allowedTags
+            self.strictShortestForm = strictShortestForm
         }
         public static let standard = Limits()
     }
@@ -146,6 +151,7 @@ public enum CBOR {
                 let width = 1 << Int(info - 24)
                 var value: UInt64 = 0
                 for b in try take(width) { value = value << 8 | UInt64(b) }
+                if limits.strictShortestForm, !CBOR.isShortestHead(info: info, value: value) { throw CBORError.notCanonical }
                 return value
             default: throw CBORError.unsupported
             }
@@ -181,11 +187,13 @@ public enum CBOR {
                 let n = try argument(info)
                 guard n <= UInt64(limits.maxItems) else { throw CBORError.tooLarge }
                 var entries: [CBORValue.Entry] = []
+                // Duplicates are found on the **decoded** key (re-encoded in shortest form), not on the raw bytes: two encodings of one key
+                // (`0x61 'a'` and `0x78 0x01 'a'`) are the same key, and a parser that keeps the first and one that keeps the last would
+                // otherwise read different values.
                 var seen = Set<[UInt8]>()
                 for _ in 0..<Int(n) {
-                    let start = index
                     let key = try read(depth: depth + 1)
-                    guard seen.insert(Array(bytes[start..<index])).inserted else { throw CBORError.duplicateKey }
+                    guard seen.insert(Array(CBOR.encode(key, deterministic: true))).inserted else { throw CBORError.duplicateKey }
                     entries.append(.init(key: key, value: try read(depth: depth + 1)))
                 }
                 return .map(entries)
@@ -202,6 +210,16 @@ public enum CBOR {
                 }
             default: throw CBORError.unsupported
             }
+        }
+    }
+
+    /// Whether an argument of `value` encoded with additional information `info` (24...27) is the shortest form.
+    public static func isShortestHead(info: UInt8, value: UInt64) -> Bool {
+        switch info {
+        case 24: value >= 24
+        case 25: value > 0xFF
+        case 26: value > 0xFFFF
+        default: value > 0xFFFF_FFFF
         }
     }
 

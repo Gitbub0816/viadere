@@ -28,6 +28,8 @@ enum MDocFailure: String, Error {
     case decryptionFailed = "decryption_failed"
     case noRequestedElement = "no_requested_element"
     case thresholdUnavailable = "threshold_unavailable"
+    case issuerChainNotDirect = "issuer_chain_not_direct"
+    case issuerCountryMismatch = "issuer_country_mismatch"
 }
 
 /// The IACA trust anchors for mdoc issuers (ISO 18013-5 Annex B): one root per issuing authority (state DMV, Apple's digital ID IACA).
@@ -123,19 +125,34 @@ struct IACATrustStore: Sendable {
         var leaf: Certificate
         /// Lowercase hex SHA-256 of the trust anchor's DER.
         var anchorFingerprint: String
+        /// The country (ISO 3166-1 alpha-2, upper case) of the document signer **and** the IACA, which are required to agree.
+        var country: String
+    }
+
+    /// The `countryName` (C) of a certificate subject, as an assigned ISO 3166-1 alpha-2 code, or `nil`.
+    static func country(of certificate: Certificate) -> String? {
+        for rdn in certificate.subject {
+            for attribute in rdn where attribute.type == .RDNAttributeType.countryName {
+                if let value = String(attribute.value), value.count == 2, let code = CountryCodes.alpha2(value) { return code }
+            }
+        }
+        return nil
     }
 
     /// Document signer EKU (ISO 18013-5 Annex B.1.1): `id-mdl-kp-mdlDS`, 1.0.18013.5.1.2.
     static let documentSignerEKU: ASN1ObjectIdentifier = [1, 0, 18013, 5, 1, 2]
 
     /// Validates `chain` (leaf first) to a trusted IACA at `now`: RFC 5280 path validation, then the mdoc profile on the leaf (keyUsage
-    /// `digitalSignature`, EKU `id-mdl-kp-mdlDS`, an EC key) and a path of at most two intermediates.
+    /// `digitalSignature`, EKU `id-mdl-kp-mdlDS`, an EC key) and the ISO 18013-5 Annex B shape: the document signer is issued **directly**
+    /// by the IACA (the validated path is exactly DS → IACA; no intermediates, which Annex B does not define), and the document signer's
+    /// country equals the IACA's.
     func validate(chain: [Certificate], now: Date) async throws -> ValidatedIssuer {
         guard let leaf = chain.first, chain.count <= 3 else { throw MDocFailure.noIssuerCertificate }
         guard !entries.isEmpty else { throw MDocFailure.untrustedIssuer }
         var verifier = Verifier(rootCertificates: CertificateStore(roots)) { RFC5280Policy(fixedExpiryValidationTime: now) }
         let outcome = await verifier.validate(leaf: leaf, intermediates: CertificateStore(chain.dropFirst()))
         guard case .validCertificate(let validated) = outcome else { throw MDocFailure.untrustedIssuer }
+        guard validated.count == 2 else { throw MDocFailure.issuerChainNotDirect }
         var serializer = DER.Serializer()
         try serializer.serialize(validated.root)
         let anchor = SecureToken.sha256Hex(serializer.serializedBytes)
@@ -145,6 +162,7 @@ struct IACATrustStore: Sendable {
               let eku = try? leaf.extensions.extendedKeyUsage, eku.contains(ExtendedKeyUsage.Usage(oid: Self.documentSignerEKU)),
               COSEVerificationKey(certificateKey: leaf.publicKey) != nil else { throw MDocFailure.badIssuerCertificateUsage }
         if case .isCertificateAuthority? = try? leaf.extensions.basicConstraints { throw MDocFailure.badIssuerCertificateUsage }
-        return ValidatedIssuer(leaf: leaf, anchorFingerprint: anchor)
+        guard let country = Self.country(of: leaf), country == Self.country(of: validated.last!) else { throw MDocFailure.issuerCountryMismatch }
+        return ValidatedIssuer(leaf: leaf, anchorFingerprint: anchor, country: country)
     }
 }

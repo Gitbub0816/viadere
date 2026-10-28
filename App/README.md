@@ -45,7 +45,7 @@ signed decisions with ViadereCore's real verifiers).
 
 ### Staging build
 
-The `Staging` configuration (`Configs/Staging.xcconfig`, scheme **Staging**) is Release-grade (no DEBUG, strict ATS) and points at `https://api.staging.viadere.com` with the passkey domain `staging.viadere.com`, the same bundle IDs, APNs sandbox and App Attest `development`. Fill `VIADERE_PIN_PRIMARY` / `VIADERE_PIN_BACKUP` first (`python3 -I Scripts/compute-spki-pins.py api.staging.viadere.com`); `Scripts/check-release-pins.sh` fails a Staging archive while they are placeholders. Full guide, including TestFlight: [`docs/ops/STAGING-SETUP.md`](../docs/ops/STAGING-SETUP.md).
+The `Staging` configuration (`Configs/Staging.xcconfig`, scheme **Staging**) is Release-grade (no DEBUG, strict ATS) and points at `https://api-staging.viadere.com` with the passkey domain `staging.viadere.com`, the same bundle IDs, APNs sandbox and App Attest `development`. Fill `VIADERE_PIN_PRIMARY` / `VIADERE_PIN_BACKUP` first (`python3 -I Scripts/compute-spki-pins.py api-staging.viadere.com`); `Scripts/check-release-pins.sh` fails a Staging archive while they are placeholders. Full guide, including TestFlight: [`docs/ops/STAGING-SETUP.md`](../docs/ops/STAGING-SETUP.md).
 
 ### Local server
 
