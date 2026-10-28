@@ -434,6 +434,9 @@ struct AuditRetention {
     let ctx: ServerContext
 
     func purge(before cutoff: Date, report: inout RetentionPurger.Report) async throws -> Int {
+        // The chain is one sequence: its oldest prefix cannot be purged selectively, so ANY active hold (global, business or consumer) stops the purge.
+        let holds = try await RetentionPolicy(db: db, ctx: ctx).activeHolds()
+        if holds.global || !holds.businesses.isEmpty || !holds.consumers.isEmpty { report.skipped[RetentionClass.auditEvents.rawValue] = "legal_hold"; return 0 }
         guard ctx.config.operations.auditExport != nil else { report.skipped[RetentionClass.auditEvents.rawValue] = "no_export_target"; return 0 }
         guard let mark = try await PlatformFlagRecord.query(on: db).filter(\.$flag == PlatformFlag.auditExportMark.rawValue).first(),
               let exportedSeq = Int(mark.value) else { report.skipped[RetentionClass.auditEvents.rawValue] = "not_exported"; return 0 }

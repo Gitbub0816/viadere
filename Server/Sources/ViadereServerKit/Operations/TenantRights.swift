@@ -90,6 +90,11 @@ struct TenantDataRequests {
     func complete(id: UUID, operatorId: UUID) async throws {
         guard let record = try await DataRequestRecord.find(id, on: db), record.kind == "delete", record.status == "requested" else { throw APIError.notFound }
         let businessId = record.businessId
+        // A legal hold on this organization (or on everything) outranks a deletion request: the request stays open until the hold is released.
+        let holds = try await RetentionPolicy(db: db, ctx: ctx).activeHolds()
+        guard !holds.global, !holds.businesses.contains(businessId) else {
+            throw APIError.conflict("A legal hold is active, so this organization's data cannot be deleted yet. Release the hold first.")
+        }
         let now = ctx.now
         try await APIKeyLifecycle(db: db, ctx: ctx).revokeAll(businessId: businessId, live: nil, reason: "organization deletion", actor: .operatorUser(operatorId))
         try await db.transaction { tx in
