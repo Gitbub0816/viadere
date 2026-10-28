@@ -79,7 +79,11 @@ struct ConsumerExports {
     @discardableResult
     func processQueued(limit: Int = 5) async throws -> Int {
         // A worker that died mid-build leaves a "building" row behind; put it back after a lease.
-        try await ConsumerExportRecord.query(on: db).filter(\.$status == "building").filter(\.$createdAt < ctx.now.addingTimeInterval(-900)).set(\.$status, to: "queued").update()
+        // (Read first: this runs on every tick of every instance, and an idle run must not take a write lock.)
+        let stuck = ConsumerExportRecord.query(on: db).filter(\.$status == "building").filter(\.$createdAt < ctx.now.addingTimeInterval(-900))
+        if try await stuck.count() > 0 {
+            try await ConsumerExportRecord.query(on: db).filter(\.$status == "building").filter(\.$createdAt < ctx.now.addingTimeInterval(-900)).set(\.$status, to: "queued").update()
+        }
         let queued = try await ConsumerExportRecord.query(on: db).filter(\.$status == "queued").sort(\.$createdAt, .ascending).limit(limit).all()
         var built = 0
         for record in queued {

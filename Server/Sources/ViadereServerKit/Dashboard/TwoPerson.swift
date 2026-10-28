@@ -84,8 +84,11 @@ struct PendingChanges {
 
     func expireDue() async throws {
         let now = ctx.now
-        try await PendingChangeRecord.query(on: db).filter(\.$status == "pending").filter(\.$expiresAt <= now).set(\.$status, to: "expired").update()
-        try await PendingChangeRecord.query(on: db).filter(\.$status == "approved").filter(\.$expiresAt <= now).set(\.$status, to: "expired").update()
+        // Read first: an idle run (every console load, every maintenance minute) takes no write lock.
+        for open in ["pending", "approved"] {
+            guard try await PendingChangeRecord.query(on: db).filter(\.$status == open).filter(\.$expiresAt <= now).count() > 0 else { continue }
+            try await PendingChangeRecord.query(on: db).filter(\.$status == open).filter(\.$expiresAt <= now).set(\.$status, to: "expired").update()
+        }
     }
 
     private func load(_ id: UUID, businessId: UUID) async throws -> PendingChangeRecord {

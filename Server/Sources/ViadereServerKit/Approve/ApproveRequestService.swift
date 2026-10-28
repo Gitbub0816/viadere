@@ -273,8 +273,11 @@ struct ApproveRequestService {
             try await ApproveRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status != ApprovalRequestStatus.pending.rawValue).delete()
         }
         // Enrollments the customer never completed.
-        try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now)
-            .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
+        // Read first so an idle tick takes no write lock.
+        if try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now).count() > 0 {
+            try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now)
+                .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
+        }
         return count
     }
 

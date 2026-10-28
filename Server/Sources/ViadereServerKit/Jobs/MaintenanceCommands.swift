@@ -214,15 +214,18 @@ struct RetentionService {
         let outboundCutoff = now.addingTimeInterval(-Double(r.outboundDays) * 86_400)
         let finished = ["sent", "delivered", "failed", "cancelled"]
         let sms = SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff)
-        removed += try await sms.count()
-        try await SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff).delete()
+        let smsCount = try await sms.count()
+        removed += smsCount
+        if smsCount > 0 { try await SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff).delete() }
         let channel = ChannelOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff)
-        removed += try await channel.count()
-        try await ChannelOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff).delete()
+        let channelCount = try await channel.count()
+        removed += channelCount
+        if channelCount > 0 { try await ChannelOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < outboundCutoff).delete() }
         let tokenCutoff = now.addingTimeInterval(-Double(r.linkTokenDays) * 86_400)
         let tokens = LinkTokenRecord.query(on: db).filter(\.$expiresAt < tokenCutoff)
-        removed += try await tokens.count()
-        try await LinkTokenRecord.query(on: db).filter(\.$expiresAt < tokenCutoff).delete()
+        let tokensCount = try await tokens.count()
+        removed += tokensCount
+        if tokensCount > 0 { try await LinkTokenRecord.query(on: db).filter(\.$expiresAt < tokenCutoff).delete() }
         let webhookCutoff = now.addingTimeInterval(-Double(r.webhookDeliveryDays) * 86_400)
         let old = try await WebhookDeliveryRecord.query(on: db).filter(\.$status ~~ ["succeeded", "dead"]).filter(\.$createdAt < webhookCutoff)
             .limit(500).all().compactMap(\.id)
@@ -235,8 +238,11 @@ struct RetentionService {
         // The class-based purges of docs/ops/DATA-INVENTORY.md §5 (retention settings, tenant shortening, legal holds).
         _ = await RetentionPurger(db: db, ctx: ctx).run()
         // Sealed refresh-token successors are only needed for the grace window after a rotation.
-        try await RefreshTokenRecord.query(on: db).filter(\.$successorSealed != nil)
-            .filter(\.$usedAt < now.addingTimeInterval(-ConsumerTokenService.graceWindow)).set(\.$successorSealed, to: nil).update()
+        let sealedSuccessors = RefreshTokenRecord.query(on: db).filter(\.$successorSealed != nil).filter(\.$usedAt < now.addingTimeInterval(-ConsumerTokenService.graceWindow))
+        if try await sealedSuccessors.count() > 0 {
+            try await RefreshTokenRecord.query(on: db).filter(\.$successorSealed != nil)
+                .filter(\.$usedAt < now.addingTimeInterval(-ConsumerTokenService.graceWindow)).set(\.$successorSealed, to: nil).update()
+        }
         return removed
     }
 }

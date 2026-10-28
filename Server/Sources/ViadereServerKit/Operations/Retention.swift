@@ -215,6 +215,14 @@ struct RetentionPurger {
     let ctx: ServerContext
     static let batch = 200
 
+    /// Deletes what the query matches and returns how many rows that was. The read comes first so an idle run (the usual case, every minute on every
+    /// instance) takes no write lock at all.
+    private func deleteMatching<M: Model>(_ query: QueryBuilder<M>) async throws -> Int {
+        let count = try await query.copy().count()
+        if count > 0 { try await query.delete() }
+        return count
+    }
+
     struct Report: Equatable {
         var counts: [String: Int] = [:]
         var skipped: [String: String] = [:]
@@ -358,71 +366,60 @@ struct RetentionPurger {
             }
         case .outbound:
             let finished = ["sent", "delivered", "failed", "cancelled"]
-            removed += try await SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < platformCutoff).count()
-            try await SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < platformCutoff).delete()
+            removed += try await deleteMatching(SMSOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < platformCutoff))
             var channel = ChannelOutboundRecord.query(on: db).filter(\.$status ~~ finished).filter(\.$createdAt < platformCutoff)
             if !heldBusinesses.isEmpty { channel = channel.filter(\.$businessId !~ heldBusinesses) }
             let ids = try await channel.limit(500).all().compactMap(\.id)
             if !ids.isEmpty { try await ChannelOutboundRecord.query(on: db).filter(\.$id ~~ ids).delete() }
             removed += ids.count
         case .linkTokens:
-            removed += try await LinkTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).count()
-            try await LinkTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).delete()
+            removed += try await deleteMatching(LinkTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff))
         case .securityTokens:
-            removed += try await AccessTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).count()
-            try await AccessTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).delete()
-            removed += try await RefreshTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).count()
-            try await RefreshTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff).delete()
+            removed += try await deleteMatching(AccessTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff))
+            removed += try await deleteMatching(RefreshTokenRecord.query(on: db).filter(\.$expiresAt < platformCutoff))
             let oneDayAgo = now.addingTimeInterval(-day)
-            removed += try await DeviceEnrollChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo).count()
-            try await DeviceEnrollChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo).delete()
-            removed += try await InteractionChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo).count()
-            try await InteractionChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo).delete()
+            removed += try await deleteMatching(DeviceEnrollChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo))
+            removed += try await deleteMatching(InteractionChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo))
         case .channelCapability:
-            removed += try await ChannelEndpointRecord.query(on: db).filter(\.$updatedAt < platformCutoff).count()
-            try await ChannelEndpointRecord.query(on: db).filter(\.$updatedAt < platformCutoff).delete()
+            removed += try await deleteMatching(ChannelEndpointRecord.query(on: db).filter(\.$updatedAt < platformCutoff))
             let weekAgo = now.addingTimeInterval(-7 * day)
-            removed += try await RCSPostbackRecord.query(on: db).filter(\.$expiresAt < weekAgo).count()
-            try await RCSPostbackRecord.query(on: db).filter(\.$expiresAt < weekAgo).delete()
+            removed += try await deleteMatching(RCSPostbackRecord.query(on: db).filter(\.$expiresAt < weekAgo))
             let twoWeeksAgo = now.addingTimeInterval(-14 * day)
-            removed += try await ProcessedProviderMessageRecord.query(on: db).filter(\.$receivedAt < twoWeeksAgo).count()
-            try await ProcessedProviderMessageRecord.query(on: db).filter(\.$receivedAt < twoWeeksAgo).delete()
+            removed += try await deleteMatching(ProcessedProviderMessageRecord.query(on: db).filter(\.$receivedAt < twoWeeksAgo))
         case .securityNotices:
-            removed += try await SecurityNoticeRecord.query(on: db).filter(\.$createdAt < platformCutoff).count()
-            try await SecurityNoticeRecord.query(on: db).filter(\.$createdAt < platformCutoff).delete()
+            removed += try await deleteMatching(SecurityNoticeRecord.query(on: db).filter(\.$createdAt < platformCutoff))
             let dismissedCutoff = now.addingTimeInterval(-90 * day)
-            removed += try await SecurityNoticeRecord.query(on: db).filter(\.$dismissedAt != nil).filter(\.$dismissedAt < dismissedCutoff).count()
-            try await SecurityNoticeRecord.query(on: db).filter(\.$dismissedAt != nil).filter(\.$dismissedAt < dismissedCutoff).delete()
+            removed += try await deleteMatching(SecurityNoticeRecord.query(on: db).filter(\.$dismissedAt != nil).filter(\.$dismissedAt < dismissedCutoff))
         case .supportRecords:
             var tickets = SupportTicketRecord.query(on: db).filter(\.$status == "closed").filter(\.$updatedAt < platformCutoff)
             if !heldBusinesses.isEmpty { tickets = tickets.filter(\.$businessId !~ heldBusinesses) }
             let ticketIds = try await tickets.limit(Self.batch).all().compactMap(\.id)
             if !ticketIds.isEmpty { try await SupportTicketRecord.query(on: db).filter(\.$id ~~ ticketIds).delete() }
             removed += ticketIds.count
-            removed += try await OperatorNoticeRecord.query(on: db).filter(\.$status == "done").filter(\.$createdAt < platformCutoff).count()
-            try await OperatorNoticeRecord.query(on: db).filter(\.$status == "done").filter(\.$createdAt < platformCutoff).delete()
+            removed += try await deleteMatching(OperatorNoticeRecord.query(on: db).filter(\.$status == "done").filter(\.$createdAt < platformCutoff))
             let decided = ["rejected", "executed", "expired", "cancelled"]
-            removed += try await PendingChangeRecord.query(on: db).filter(\.$status ~~ decided).filter(\.$requestedAt < platformCutoff).count()
-            try await PendingChangeRecord.query(on: db).filter(\.$status ~~ decided).filter(\.$requestedAt < platformCutoff).delete()
+            removed += try await deleteMatching(PendingChangeRecord.query(on: db).filter(\.$status ~~ decided).filter(\.$requestedAt < platformCutoff))
             var requests = DataRequestRecord.query(on: db).filter(\.$status ~~ ["completed", "rejected", "expired"]).filter(\.$createdAt < platformCutoff)
             if !heldBusinesses.isEmpty { requests = requests.filter(\.$businessId !~ heldBusinesses) }
             let requestIds = try await requests.limit(Self.batch).all().compactMap(\.id)
             if !requestIds.isEmpty { try await DataRequestRecord.query(on: db).filter(\.$id ~~ requestIds).delete() }
             removed += requestIds.count
-            removed += try await AccountFreezeRecord.query(on: db).filter(\.$releasedAt != nil).filter(\.$releasedAt < platformCutoff).count()
-            try await AccountFreezeRecord.query(on: db).filter(\.$releasedAt != nil).filter(\.$releasedAt < platformCutoff).delete()
+            removed += try await deleteMatching(AccountFreezeRecord.query(on: db).filter(\.$releasedAt != nil).filter(\.$releasedAt < platformCutoff))
             // A tenant export artifact is erased as soon as its 24-hour window ends.
-            try await DataRequestRecord.query(on: db).filter(\.$artifactExpiresAt != nil).filter(\.$artifactExpiresAt < now).filter(\.$artifact != nil)
-                .set(\.$artifact, to: nil).set(\.$status, to: "expired").update()
+            let expiredArtifacts = DataRequestRecord.query(on: db).filter(\.$artifactExpiresAt != nil).filter(\.$artifactExpiresAt < now).filter(\.$artifact != nil)
+            if try await expiredArtifacts.count() > 0 {
+                try await DataRequestRecord.query(on: db).filter(\.$artifactExpiresAt != nil).filter(\.$artifactExpiresAt < now).filter(\.$artifact != nil)
+                    .set(\.$artifact, to: nil).set(\.$status, to: "expired").update()
+            }
             // Short-lived: an expired data-export bundle is erased at once and its row removed after a week.
-            try await ConsumerExportRecord.query(on: db).filter(\.$expiresAt < now).filter(\.$bundle != nil).set(\.$bundle, to: nil).set(\.$status, to: "expired").update()
+            if try await ConsumerExportRecord.query(on: db).filter(\.$expiresAt < now).filter(\.$bundle != nil).count() > 0 {
+                try await ConsumerExportRecord.query(on: db).filter(\.$expiresAt < now).filter(\.$bundle != nil).set(\.$bundle, to: nil).set(\.$status, to: "expired").update()
+            }
             let exportCutoff = now.addingTimeInterval(-7 * day)
-            removed += try await ConsumerExportRecord.query(on: db).filter(\.$expiresAt < exportCutoff).count()
-            try await ConsumerExportRecord.query(on: db).filter(\.$expiresAt < exportCutoff).delete()
+            removed += try await deleteMatching(ConsumerExportRecord.query(on: db).filter(\.$expiresAt < exportCutoff))
             // Dashboard sign-in context older than a year.
             let contextCutoff = now.addingTimeInterval(-400 * day)
-            removed += try await DashboardKnownContextRecord.query(on: db).filter(\.$lastSeenAt < contextCutoff).count()
-            try await DashboardKnownContextRecord.query(on: db).filter(\.$lastSeenAt < contextCutoff).delete()
+            removed += try await deleteMatching(DashboardKnownContextRecord.query(on: db).filter(\.$lastSeenAt < contextCutoff))
         }
         return removed
     }
