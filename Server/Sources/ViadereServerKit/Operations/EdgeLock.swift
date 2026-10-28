@@ -10,6 +10,9 @@ struct EdgeContext: Sendable {
     var clientCertFingerprint: String?
     /// Subject key identifier of the CA that issued that certificate (lowercase hex), if forwarded.
     var clientCertIssuerSKI: String?
+    /// SHA-256 (lowercase hex) of the issuer certificate, if the edge forwards it. Cloudflare does not expose one today, so the edge ruleset removes
+    /// the header; if it ever does, an issuer binding must match it.
+    var clientCertIssuerSHA256: String?
 }
 
 struct EdgeContextKey: StorageKey { typealias Value = EdgeContext }
@@ -66,6 +69,7 @@ struct EdgeLockMiddleware: AsyncMiddleware {
             if viaEdge, request.headers.first(name: settings.clientCertVerifiedHeader)?.lowercased() == "true" {
                 edge.clientCertFingerprint = Self.hex(request.headers.first(name: settings.clientCertFingerprintHeader), length: 64)
                 edge.clientCertIssuerSKI = Self.hex(request.headers.first(name: settings.clientCertIssuerHeader), length: nil)
+                edge.clientCertIssuerSHA256 = Self.hex(request.headers.first(name: settings.clientCertIssuerSHA256Header), length: 64)
             }
             request.storage[EdgeContextKey.self] = edge
             return try await next.respond(to: request)

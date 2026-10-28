@@ -352,3 +352,20 @@ struct CreatePlatformWP6Schema: AsyncMigration {
         }
     }
 }
+
+/// Platform gate M4: a CA is bound by the SHA-256 of its certificate (`fingerprint`) and, for matching what the edge forwards, its subject key
+/// identifier (`issuer_ski`, never trusted on its own: a second tenant cannot claim an identifier already in use). Issuer bindings made before this
+/// column existed were keyed by the bare identifier; they are revoked here and the tenant uploads the CA certificate again.
+struct CreateMTLSIssuerBinding: AsyncMigration {
+    var name: String { "CreateMTLSIssuerBinding.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema("business_mtls_certs").field("issuer_ski", .string).update()
+        try await BusinessMTLSCertRecord.query(on: db).filter(\.$kind == "issuer").filter(\.$issuerSKI == nil).filter(\.$revokedAt == nil)
+            .set(\.$revokedAt, to: Date()).update()
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema("business_mtls_certs").deleteField("issuer_ski").update()
+    }
+}

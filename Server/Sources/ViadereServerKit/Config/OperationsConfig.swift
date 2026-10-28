@@ -34,6 +34,7 @@ public struct OperationsSettings: Sendable {
     /// Set by Cloudflare API Shield (rule: `cf.tls_client_auth.cert_verified` and the SHA-256 fingerprint). Trusted only on an edge-locked request.
     public var clientCertFingerprintHeader = "X-Viadere-Client-Cert-Sha256"
     public var clientCertIssuerHeader = "X-Viadere-Client-Cert-Issuer-Ski"
+    public var clientCertIssuerSHA256Header = "X-Viadere-Client-Cert-Issuer-Sha256"
     public var clientCertVerifiedHeader = "X-Viadere-Client-Cert-Verified"
 
     // MARK: Metrics (G-13)

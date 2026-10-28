@@ -22,12 +22,14 @@ struct MTLSCertificates {
         var fingerprint: String
         var subject: String
         var notAfter: Date
+        /// For a CA: its subject key identifier (lowercase hex). Only a lookup key for the header the edge forwards: `fingerprint` is the binding.
+        var issuerSKI: String? = nil
     }
 
     // MARK: Parsing
 
-    /// Reads a PEM certificate. A leaf upload is bound by its SHA-256 fingerprint; a CA upload (`asCA`) by its subject key identifier, so every
-    /// certificate that CA issues to the tenant works. Only the public certificate is read; a private key in the upload is refused.
+    /// Reads a PEM certificate. A leaf upload is bound by its SHA-256 fingerprint; a CA upload (`asCA`) by the SHA-256 of the CA certificate (its key
+    /// identifier is text the CA's owner chooses, so it is never the binding), so every certificate that CA issues to the tenant works. Only the public certificate is read; a private key in the upload is refused.
     static func identity(pem: String, asCA: Bool) throws -> Identity {
         let text = pem.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count <= 16 * 1024, text.hasPrefix("-----BEGIN CERTIFICATE-----"), !text.contains("PRIVATE KEY"),
@@ -44,11 +46,17 @@ struct MTLSCertificates {
                   let ski = try? certificate.extensions.subjectKeyIdentifier else {
                 throw APIError.validation("That certificate is not a certificate authority with a subject key identifier.", details: ["certificate": "not_ca"])
             }
-            return Identity(kind: "issuer", fingerprint: Hex.encode(ski.keyIdentifier), subject: subject, notAfter: certificate.notValidAfter)
+            return Identity(kind: "issuer", fingerprint: try fingerprint(of: certificate), subject: subject, notAfter: certificate.notValidAfter,
+                            issuerSKI: Hex.encode(ski.keyIdentifier))
         }
+        return Identity(kind: "leaf", fingerprint: try fingerprint(of: certificate), subject: subject, notAfter: certificate.notValidAfter)
+    }
+
+    /// SHA-256 of the DER encoding (lowercase hex).
+    static func fingerprint(of certificate: Certificate) throws -> String {
         var serializer = DER.Serializer()
         try certificate.serialize(into: &serializer)
-        return Identity(kind: "leaf", fingerprint: SecureToken.sha256Hex(Data(serializer.serializedBytes)), subject: subject, notAfter: certificate.notValidAfter)
+        return SecureToken.sha256Hex(Data(serializer.serializedBytes))
     }
 
     /// A SHA-256 fingerprint typed or pasted by the tenant (hex, with or without colons).
@@ -78,11 +86,20 @@ struct MTLSCertificates {
         guard try await BusinessMTLSCertRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$revokedAt == nil).count() < Self.maxPerBusiness else {
             throw APIError.conflict("Remove an unused certificate before adding another.")
         }
+        if identity.kind == "issuer" {
+            // A CA is matched at request time by the key identifier the edge forwards, so no other tenant may hold the same identifier: that would let
+            // a CA that merely copies it stand in for this one (and the shared mTLS hostname trusts every uploaded CA).
+            guard let ski = identity.issuerSKI, !ski.isEmpty else { throw APIError.validation("That certificate authority has no subject key identifier.", details: ["certificate": "not_ca"]) }
+            let clash = try await BusinessMTLSCertRecord.query(on: db).filter(\.$kind == "issuer").filter(\.$issuerSKI == ski).filter(\.$revokedAt == nil)
+                .filter(\.$businessId != businessId).count()
+            guard clash == 0 else { throw APIError.conflict("That certificate authority is already registered.") }
+        }
         let record = BusinessMTLSCertRecord()
         record.id = UUID()
         record.businessId = businessId
         record.kind = identity.kind
         record.fingerprint = identity.fingerprint
+        record.issuerSKI = identity.issuerSKI
         record.label = label
         record.subject = identity.subject.isEmpty ? nil : identity.subject
         record.notAfter = identity.notAfter == .distantFuture ? nil : identity.notAfter
@@ -120,8 +137,13 @@ struct MTLSCertificates {
         let now = ctx.now
         var matched = false
         for cert in try await query.all() where cert.isActive(at: now) {
-            let presented = cert.kind == "leaf" ? edge.clientCertFingerprint : edge.clientCertIssuerSKI
-            if let presented, ConstantTime.equals(presented, cert.fingerprint) { matched = true }
+            if cert.kind == "leaf" {
+                if let presented = edge.clientCertFingerprint, ConstantTime.equals(presented, cert.fingerprint) { matched = true }
+            } else if let ski = cert.issuerSKI, let presented = edge.clientCertIssuerSKI, ConstantTime.equals(presented, ski) {
+                // The identifier selects the binding; when the edge also forwards the SHA-256 of the issuer certificate it has to be this CA's.
+                if let issuerHash = edge.clientCertIssuerSHA256, !ConstantTime.equals(issuerHash, cert.fingerprint) { continue }
+                matched = true
+            }
         }
         return matched
     }

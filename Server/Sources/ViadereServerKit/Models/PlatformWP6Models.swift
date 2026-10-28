@@ -138,9 +138,11 @@ final class BusinessMTLSCertRecord: Model, @unchecked Sendable {
     static let schema = "business_mtls_certs"
     @ID(key: .id) var id: UUID?
     @Field(key: "business_id") var businessId: UUID
-    /// `leaf` (SHA-256 fingerprint of the client certificate) or `issuer` (subject key identifier of the CA that issued it).
+    /// `leaf` (SHA-256 fingerprint of the client certificate) or `issuer` (SHA-256 of the CA certificate that issued it; `issuerSKI` carries its key identifier).
     @Field(key: "kind") var kind: String
     @Field(key: "fingerprint") var fingerprint: String
+    /// For an `issuer` binding: the CA's subject key identifier (lowercase hex), used to match the header the edge forwards.
+    @OptionalField(key: "issuer_ski") var issuerSKI: String?
     @Field(key: "label") var label: String
     @OptionalField(key: "subject") var subject: String?
     @OptionalField(key: "not_after") var notAfter: Date?

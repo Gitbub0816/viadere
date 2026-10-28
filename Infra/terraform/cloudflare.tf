@@ -242,6 +242,11 @@ resource "cloudflare_ruleset" "origin_edge_token" {
             operation  = "set"
             expression = "cf.tls_client_auth.cert_issuer_ski"
           }
+          # Cloudflare exposes no SHA-256 of the issuer certificate. The header is removed so a client can never supply one; the origin treats an
+          # absent value as "not forwarded" and relies on the SKI plus Viadere's refusal of duplicate identifiers across tenants (SECURITY.md).
+          "X-Viadere-Client-Cert-Issuer-Sha256" = {
+            operation = "remove"
+          }
         }
       }
       expression  = local.origin_hosts_expression

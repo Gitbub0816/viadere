@@ -1,9 +1,12 @@
+@preconcurrency import Crypto
 import Fluent
 import Foundation
 import NIOHTTP1
 import Vapor
+import SwiftASN1
 import ViadereCore
 import XCTest
+@preconcurrency import X509
 @testable import ViadereServerKit
 
 /// Origin lock (G-10) and Tier E client certificates (SEC-TR-005): a header Cloudflare sets is trusted only on a request that proved it came
@@ -121,9 +124,31 @@ final class WP6EdgeTests: XCTestCase {
         return (businessId, owner)
     }
 
-    private func bind(_ h: TestHarness, _ businessId: UUID, kind: String = "leaf", fingerprint: String, label: String = "gateway", notAfter: Date? = nil) async throws -> BusinessMTLSCertRecord {
+    private func bind(_ h: TestHarness, _ businessId: UUID, kind: String = "leaf", fingerprint: String, issuerSKI: String? = nil, label: String = "gateway",
+                      notAfter: Date? = nil) async throws -> BusinessMTLSCertRecord {
         try await MTLSCertificates(db: h.db, ctx: h.ctx).add(businessId: businessId, label: label,
-            identity: .init(kind: kind, fingerprint: fingerprint, subject: "CN=\(label)", notAfter: notAfter ?? h.clock.now().addingTimeInterval(86_400 * 365)), by: UUID())
+            identity: .init(kind: kind, fingerprint: fingerprint, subject: "CN=\(label)", notAfter: notAfter ?? h.clock.now().addingTimeInterval(86_400 * 365), issuerSKI: issuerSKI), by: UUID())
+    }
+
+    /// A self-signed CA certificate with a chosen subject key identifier (the identifier is attacker-chosen text, which is the point of M4).
+    private func caPEM(ski: [UInt8], name: String) throws -> String {
+        let key = P256.Signing.PrivateKey()
+        let dn = try DistinguishedName { CommonName(name) }
+        let now = Date()
+        let certificate = try Certificate(version: .v3, serialNumber: Certificate.SerialNumber(), publicKey: .init(key.publicKey),
+            notValidBefore: now.addingTimeInterval(-3600), notValidAfter: now.addingTimeInterval(86_400 * 365), issuer: dn, subject: dn,
+            signatureAlgorithm: .ecdsaWithSHA256,
+            extensions: try Certificate.Extensions {
+                Critical(BasicConstraints.isCertificateAuthority(maxPathLength: nil))
+                SubjectKeyIdentifier(keyIdentifier: ArraySlice(ski))
+            }, issuerPrivateKey: .init(key))
+        return try certificate.serializeAsPEM().pemString
+    }
+
+    private func derSHA256(_ pem: String) throws -> String {
+        var serializer = DER.Serializer()
+        try Certificate(pemEncoded: pem).serialize(into: &serializer)
+        return SecureToken.sha256Hex(Data(serializer.serializedBytes))
     }
 
     private func mtlsKey(_ h: TestHarness, _ businessId: UUID, certBinding: UUID? = nil, requires: Bool = true) async throws -> String {
@@ -241,7 +266,7 @@ final class WP6EdgeTests: XCTestCase {
             let plainKey = try await mtlsKey(h, businessId, requires: false)
             let noCert = try await h.apiGet(plainKey, probe, headers: edgeHeaders()).status
             XCTAssertEqual(noCert, .ok, "no requirement yet")
-            _ = try await bind(h, businessId, kind: "issuer", fingerprint: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567", label: "corporate CA")
+            _ = try await bind(h, businessId, kind: "issuer", fingerprint: String(repeating: "5a", count: 32), issuerSKI: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567", label: "corporate CA")
             // The tenant turns the requirement on for every key (the console form is behind the lock, so set the row the form sets).
             try await SecuritySettings(db: h.db, ctx: h.ctx).setMTLSRequired(businessId: businessId, required: true, by: UUID())
             let refused = try await h.apiGet(plainKey, probe, headers: edgeHeaders()).status
@@ -255,6 +280,45 @@ final class WP6EdgeTests: XCTestCase {
             let leafAsIssuer = try await h.apiGet(plainKey, probe, headers: edgeHeaders(issuer: fingerprintA)).status
             XCTAssertEqual(leafAsIssuer, .unauthorized)
             _ = owner
+        }
+    }
+
+    /// Platform gate M4 exploit: the SKI is text the CA's owner chooses. Binding by it let one tenant register a CA that copies another tenant's
+    /// identifier; the binding is now the SHA-256 of the CA certificate, and a second tenant may not claim an identifier already in use.
+    func testACaIsBoundByItsCertificateHashAndAnotherTenantCannotClaimItsKeyIdentifier() async throws {
+        try await withHarness(locked) { h in
+            let (victim, _) = try await organization(h)
+            let (attacker, _) = try await organization(h, email: "evil@example.com", org: "Evil Roasters", handle: "evilroasters")
+            let ski: [UInt8] = Array(0x10...0x23)
+            let victimPEM = try caPEM(ski: ski, name: "Victim CA")
+            let forgedPEM = try caPEM(ski: ski, name: "Forged CA")
+            let identity = try MTLSCertificates.identity(pem: victimPEM, asCA: true)
+            XCTAssertEqual(identity.fingerprint, try derSHA256(victimPEM), "bound by the SHA-256 of the CA certificate")
+            XCTAssertEqual(identity.issuerSKI, Hex.encode(ski))
+            _ = try await MTLSCertificates(db: h.db, ctx: h.ctx).add(businessId: victim, label: "corp CA", identity: identity, by: UUID())
+            // The attacker's CA copies the identifier: refused at onboarding, whichever tenant came first.
+            let forged = try MTLSCertificates.identity(pem: forgedPEM, asCA: true)
+            XCTAssertNotEqual(forged.fingerprint, identity.fingerprint)
+            do {
+                _ = try await MTLSCertificates(db: h.db, ctx: h.ctx).add(businessId: attacker, label: "mine", identity: forged, by: UUID())
+                XCTFail("a duplicate key identifier across tenants must be refused")
+            } catch let error as APIError { XCTAssertEqual(error.status, .conflict) }
+            // At request time the identifier alone authorizes only the tenant that owns the binding.
+            let victimKey = try await mtlsKey(h, victim)
+            let attackerKey = try await mtlsKey(h, attacker)
+            let skiHeader = Hex.encode(ski)
+            let ok = try await h.apiGet(victimKey, probe, headers: edgeHeaders(issuer: skiHeader)).status
+            XCTAssertEqual(ok, .ok)
+            let notMine = try await h.apiGet(attackerKey, probe, headers: edgeHeaders(issuer: skiHeader)).status
+            XCTAssertEqual(notMine, .unauthorized)
+            // When the edge also forwards the issuer certificate's hash, it must be the bound CA's.
+            var withHash = edgeHeaders(issuer: skiHeader)
+            withHash["X-Viadere-Client-Cert-Issuer-Sha256"] = forged.fingerprint
+            let wrongHash = try await h.apiGet(victimKey, probe, headers: withHash).status
+            XCTAssertEqual(wrongHash, .unauthorized, "same identifier, different CA certificate")
+            withHash["X-Viadere-Client-Cert-Issuer-Sha256"] = identity.fingerprint
+            let rightHash = try await h.apiGet(victimKey, probe, headers: withHash).status
+            XCTAssertEqual(rightHash, .ok)
         }
     }
 
