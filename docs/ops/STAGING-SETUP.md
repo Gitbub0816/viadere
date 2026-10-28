@@ -321,11 +321,11 @@ The marketing site (`Site/`, ADR-04) deploys to Workers Static Assets. Cloudflar
 
 1. **Cloudflare API token:** My Profile > API Tokens > Create Token > Custom token > permission **Account > Workers Scripts > Edit**, your account only, nothing else. Copy the token. Copy the **Account ID** from the dashboard home (right column, or the URL).
 2. **GitHub:** the repository > Settings > Environments > **New environment** `site-staging`. In it, add two **environment secrets**: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. (Environment secrets stay out of every other job.)
-3. **Run it:** Actions > **Site** > Run workflow > branch `claude/inspiring-cannon-t5hxfw` (or `main`) > target **staging** > Run. The build job takes about 10 minutes (Swift); the upload creates the Worker `viadere-site-staging`.
+3. **Run it:** every push to `claude/inspiring-cannon-t5hxfw` that touches `Site/` deploys staging automatically. To deploy now: Actions > **Site** > open the newest run on that branch > **Re-run all jobs** (a run from before the secrets existed fails at the upload step; re-running fixes it). The build takes about 10 minutes (Swift); the upload creates the Worker `viadere-site-staging`. (The "Run workflow" button with a staging/production choice appears only once this workflow is on `main`: GitHub offers it only for the default branch.)
 4. **Domain:** Cloudflare > Workers & Pages > `viadere-site-staging` > Settings > Domains & Routes > Add > **Custom domain** `viadere-site.cksites.dev`. Cloudflare creates the DNS record and certificate. (Not `viadere.cksites.dev`: that host is the server's web origin.)
 5. **Optional, recommended while it is unpublished:** Zero Trust > Access > Applications > Add > Self-hosted, domain `viadere-site.cksites.dev`, policy "Allow" for your own email only.
 
-Re-run step 3 for every change. Production (`viadere-site` on `viadere.com`) deploys only from `main`, through the `site-production` environment.
+Pushes keep it current. Production (`viadere-site` on `viadere.com`) deploys only from `main`, through the `site-production` environment.
 
 ### 13b. From a Mac with Swift
 
