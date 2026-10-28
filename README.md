@@ -33,4 +33,6 @@ brew install xcodegen
 cd App && xcodegen && open Viadere.xcodeproj
 ```
 
+Status and next steps: [`docs/HANDOFF.md`](docs/HANDOFF.md).
+
 Before any release, see the configuration checklists in [`App/README.md`](App/README.md) (team ID, certificate pins, App Attest) and [`Server/README.md`](Server/README.md) (secrets, `ENVIRONMENT`, audit chain key, pass certificates).
