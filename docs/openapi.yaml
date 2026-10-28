@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Viadere Business API
-  version: "2026-10-27"
+  version: "2026-10-28"
   summary: Issue structured interactions to verified customers, receive their decisions, and exchange messages.
   description: |
     The business API lets a **verified** business ask a connected customer to confirm, choose, acknowledge, reply,
@@ -721,6 +721,78 @@ paths:
         "410": { $ref: "#/components/responses/Gone" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/verify:
+    post:
+      tags: [Webhooks]
+      operationId: verifyWebhook
+      summary: Prove you control a webhook endpoint
+      description: |
+        Requires scope `webhooks:manage`. Until an endpoint is verified it receives **no events**, not even test events. Viadere POSTs a signed `webhook.verification` request
+        (same headers as every delivery) whose JSON body holds a single-use `challenge`, valid for ten minutes; the endpoint must answer 2xx and echo the challenge, either as
+        `{"challenge": "…"}` or as the bare response body. Each call uses a fresh challenge, so an old response never verifies a later attempt. At most 6 calls per endpoint per hour (`429`).
+        Verifying an already verified endpoint returns `verified: true`. A failed check is a `200` with `verified: false` and a `failure` of `no_echo`, `http_<status>` or `unreachable`.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200":
+          description: The result of the check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookVerificationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/test:
+    post:
+      tags: [Webhooks]
+      operationId: sendWebhookTestEvent
+      summary: Send a signed test event to one endpoint
+      description: |
+        Requires scope `webhooks:manage`. Queues a `webhook.test` event (no customer data) through the normal delivery worker, so it carries the real `Viadere-Signature`, `Viadere-Delivery-Id` and
+        `Viadere-Key-Id` and follows the real retry schedule. `409` if the endpoint is not verified or is paused; at most 10 a minute per endpoint.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200": { description: Queued. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/pause:
+    post:
+      tags: [Webhooks]
+      operationId: pauseWebhook
+      summary: Pause delivery to one endpoint
+      description: |
+        Requires scope `webhooks:manage`. Events keep queueing but are neither sent nor dead-lettered; they go out after `resume` (or expire with the delivery retention period).
+        Idempotent. Viadere may also pause delivery for your whole organization or platform-wide during an incident; the console shows a banner and the queue is kept.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PauseWebhookRequest" }
+      responses:
+        "200": { description: Paused. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/webhooks/{webhookId}/resume:
+    post:
+      tags: [Webhooks]
+      operationId: resumeWebhook
+      summary: Resume delivery to a paused endpoint
+      description: Requires scope `webhooks:manage`. Idempotent. Queued deliveries are sent in order of their next attempt.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200": { description: Resumed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/business/loyalty/program:
     get:
       tags: [Rewards]
@@ -1110,8 +1182,14 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      bearerFormat: "vdk_live_… | vdk_test_…"
-      description: A business API key. Keys are scoped; the required scope is listed on each operation.
+      bearerFormat: "vdk_live_<kid>.<secret> | vdk_test_<kid>.<secret>"
+      description: |
+        A business API key. Format `vdk_<live|test>_<kid>.<secret>`: `kid` is a 16-character **non-secret** key id (it is safe to log and to quote in support requests) and
+        `secret` is 256 bits from a CSPRNG (43 base64url characters). The secret is shown once, when the key is created or rotated in the console; Viadere stores only a verifier.
+        A key is bound to its environment (`test` keys reach sandbox customers only), to your organization and to its scopes, and may carry an expiry (30, 90 or 365 days), an
+        IP allow-list and a bound client certificate (Tier E, mutual TLS). Rotation in the console issues a replacement with the same restrictions and keeps the old key working for the
+        overlap you choose (none, 1 hour, 1 day, 7 days or 30 days) before revoking it automatically. Every rejection (unknown, revoked, expired, wrong address, missing certificate) is the same
+        `401`, so a probe learns nothing. Keys issued before key ids existed (`vdk_live_<43 characters>`) keep working. Required scope per operation is listed on each operation.
 
   parameters:
     IdempotencyKey:
@@ -1175,7 +1253,7 @@ components:
       description: Malformed request.
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Unauthorized:
-      description: Missing, malformed, unknown, revoked or expired API key.
+      description: Missing, malformed, unknown, revoked or expired API key, a request from an address outside the key's allow-list, or a certificate-bound key without its verified client certificate.
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Forbidden:
       description: The key lacks the required scope (`insufficient_scope`), the capability or the business's entitlement (`insufficient_scope`, `not_entitled`), the capability is switched off (`capability_disabled`), a policy rule or evidence requirement denies it (`policy_denied`), the business is not active (unverified or suspended), or consent is required (`consent_required`).
@@ -2094,8 +2172,20 @@ components:
         events: { type: array, items: { $ref: "#/components/schemas/WebhookEventType" } }
         envelopeVersion: { type: string, const: "2026-10-27", description: "Present when the endpoint opted into the opaque v2 envelope (WebhookEnvelopeV2)." }
         secretVersion: { type: integer, minimum: 1, description: "Version of the signing secret; also in the Viadere-Key-Id header." }
+        verifiedAt: { $ref: "#/components/schemas/Timestamp", description: "When ownership of the endpoint was proven (POST …/verify). Until then it receives no events." }
+        pausedAt: { $ref: "#/components/schemas/Timestamp", description: "Set while delivery to the endpoint is paused." }
         active: { type: boolean }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
+    WebhookVerificationResult:
+      type: object
+      required: [verified]
+      properties:
+        verified: { type: boolean }
+        failure: { type: string, description: "Present when not verified: `no_echo` (answered 2xx without the challenge), `http_<status>` (e.g. `http_503`) or `unreachable`.", pattern: "^(no_echo|unreachable|http_[0-9]{3})$" }
+    PauseWebhookRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 200 }
     CreateWebhookRequest:
       type: object
       required: [url, events]

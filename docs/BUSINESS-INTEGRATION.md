@@ -10,11 +10,11 @@ get the customer's decision back, exchange messages, and let customers connect w
 ## 1. Get access
 
 1. **Apply.** Create an organization at `https://viadere.com/dashboard/signup` (you sign in with a passkey; there are no passwords).
-   The organization starts `pending`. A Viadere reviewer verifies it; **your handle and permanent code are issued only on
-   approval**, and until then you cannot create API keys or webhooks and cannot issue interactions.
-2. **Create an API key** in the dashboard (*API keys*). Creating one asks you to confirm with your passkey. Give each key only the
-   scopes it needs; the secret is shown once. Use `vdk_test_…` keys while building and `vdk_live_…` in production. A test key can only address a **sandbox** relationship (create one with `POST /v1/business/sandbox/relationships`, or `client.createSandboxRelationship()` in the Swift SDK): it never reaches a real customer, is not pushed, texted, counted or billed, and a live key cannot address a sandbox relationship.
-3. **Add a webhook endpoint** (*Webhooks*). The signing secret (`whsec_…`) is shown once.
+   The organization starts `pending`. Follow the checklist under *Organization* (section 1a): **prove you control a domain**, have your **legal entity reviewed**, and wait for a Viadere reviewer to approve the application.
+   **Your handle and permanent code are issued only on approval.** Sandbox work (test keys, a webhook endpoint, a test customer) opens as soon as your domain is verified; **live keys** need the approved application and the go-live review.
+2. **Create an API key** in the dashboard (*Developers > API keys*). Creating one asks you to confirm with your passkey. Give each key only the
+   scopes it needs; the secret is shown once (section 1b). Use `vdk_test_…` keys while building and `vdk_live_…` in production. A test key can only address a **sandbox** relationship (create one with `POST /v1/business/sandbox/relationships`, or `client.createSandboxRelationship()` in the Swift SDK): it never reaches a real customer, is not pushed, texted, counted or billed, and a live key cannot address a sandbox relationship.
+3. **Add a webhook endpoint** (*Developers > Webhooks*). The signing secret (`whsec_…`) is shown once, and the endpoint must **prove it is yours** before it receives events (section 3a).
 
 | Scope | Allows |
 |---|---|
@@ -26,6 +26,33 @@ get the customer's decision back, exchange messages, and let customers connect w
 | `rewards:write` | loyalty program, rewards, points and redemption validation (`/v1/business/loyalty/*`, `/v1/business/rewards*`, `/v1/business/redemptions/consume`) |
 | `approvals:manage` | Approve v2: enrollments, requests, results, freeze (`/v1/business/approve/*`) |
 | `keydirectory:manage` | publish and read your key-directory entries (`/v1/business/key-directory/*`) |
+
+### 1a. Onboarding: from workspace to production
+
+You never need a VPN or a private network. The checklist under *Organization* shows exactly what is open; each step names where it is done.
+
+| Step | What you do | What Viadere does |
+|---|---|---|
+| 1. Workspace | Sign up, verify your e-mail, register a passkey, describe your organization and intended use | |
+| 2. Control | Add your domain and publish the record shown **either** as a DNS TXT record at `_viadere-verify.<domain>` (value `viadere-verification=<token>`) **or** as the file `https://<domain>/.well-known/viadere-verification.txt` (same value), then press *Check*. Submit your legal entity: registry number, jurisdiction, registry name and **references** to your registration evidence (a registry URL or record id; do not upload documents). Regulated categories (banking, healthcare, government) get an additional review | A reviewer checks the registry and records approve or reject; no document is stored |
+| 3. Public identity | | A reviewer approves the application; your **permanent handle and code** are issued |
+| 4. Agreements | Read and accept each required agreement at its **current version** (*Compliance > Agreements*): Business Services Agreement, Data Processing Addendum, Acceptable Use Policy, Messaging Consent and Content Policy Addendum, plus capability addenda for approvals (Tier A) and verification (Tier V) | Records who accepted which version, when, and hashes of the address and agent (never the raw values) |
+| 5. Integration | Create a **sandbox key**, a **test customer** (*Developers > Sandbox*), send a test message, add and **verify a webhook endpoint**, receive a simulated reply, add a **security contact** (*Security > Alerts and contacts*) | |
+| 6. Go-live review | *Organization > Request production access*: describe the use case and expected volume | A reviewer decides; you are mailed. Live keys unlock on approval |
+| 7. Ongoing | Keep the domain record in place and accept new versions of agreements when they change materially | Re-checks the domain every `DOMAIN_RECHECK_DAYS` and the agreements; a failure starts a grace period (mailed), then suspension unless fixed. Fixing it lifts that suspension |
+
+The typical low-risk messaging path (workspace, verify control, sandbox key, test message, signed webhook, test reply, request production approval) is the same list; there is no step that needs a VPN.
+
+### 1b. API key lifecycle
+
+* **Format:** `vdk_<test|live>_<kid>.<secret>`. The `kid` (16 characters) is **not secret**: quote it in support requests and logs; the console and the audit trail identify a key by it. The secret is 256 random bits, shown **once** when you create or rotate a key.
+  Keys created before key ids existed (`vdk_live_<43 characters>`) keep working.
+* **Environment-bound:** a `test` key reaches sandbox customers only and a `live` key can never address one.
+* **Expiry** (optional, 30/90/365 days), **last used** (time and a hash of the address, in the key list), **immediate revoke** (effective on the next request), **IP allow-list** (up to 20 addresses or CIDR blocks; the address is the one our edge saw, a client-sent `X-Forwarded-For` does not count).
+* **Rotation with overlap:** *Rotate* issues a replacement with the **same** scopes, capabilities, restrictions and expiry and keeps the old key working for the overlap you pick (none, 1 hour, 1 day, 7 days or 30 days), then revokes it automatically. Deploy the new secret during the overlap; the list shows "Rotating until …". A key that is already rotating cannot be rotated again.
+* **Who:** Owners, Organization Admins, Developers and Security Admins create and rotate keys within the messaging scopes; **only an Owner or Security Admin** can create a key with a scope or capability beyond them. Organizations can require a **second person's approval** for key creation, rotation and role grants (*Security > Approvals*).
+* **If a key leaks:** revoke it (immediately), create a replacement, rotate any webhook secret the key could manage, and tell us. Viadere operators can also revoke a leaked key **without suspending your organization**; you are mailed (the mail never contains a secret).
+* **Enterprise (Tier E):** require a **bound client certificate** for a key, see section 8a.
 
 ### Capabilities (what a key may do)
 
@@ -114,9 +141,12 @@ can export it for a dispute: quote `verification.evidenceRef`.
 Every delivery carries:
 
 ```
-Viadere-Signature: t=1798000000,v1=9c1f…   (several v1= values while a secret is being rotated)
-Viadere-Event-Id:   3f2c…                    (deliveries are at-least-once: deduplicate on it)
-Viadere-Event-Type: interaction.decided
+Viadere-Signature:   t=1798000000,v1=9c1f…   (several v1= values while a secret is being rotated)
+Viadere-Event-Id:    3f2c…                    (deliveries are at-least-once: deduplicate on it)
+Viadere-Delivery-Id: 3f2c…                    (this delivery; stable across retries: your de-duplication key)
+Viadere-Key-Id:      whk_ab12cd34_v2          (which signing secret: endpoint + secret version; changes at each rotation)
+Viadere-Event-Type:  interaction.decided
+Viadere-Webhook-Version: v1                   (v1 = full body, v2 = opaque envelope for approval/verification events)
 ```
 
 `v1` is `hex(HMAC-SHA256(key: UTF-8 of the whole whsec_… string, message: "{t}." + raw request body))`.
@@ -126,6 +156,18 @@ Viadere-Event-Type: interaction.decided
 * Respond `2xx` within 10 seconds. Anything else is retried at 30 s, 2 min, 10 min, 1 h, 6 h, 12 h and 24 h, then dead-lettered
   (you can replay dead letters from the dashboard).
 * Redirects are never followed, and your URL must be a public `https` URL.
+
+### 3a. Endpoint verification, test events and pausing
+
+A new endpoint receives **nothing** until it proves it controls the URL. Press *Verify* in the console (or call `POST /v1/business/webhooks/{id}/verify`, `client.verifyWebhook(id:)` in the Swift SDK): we POST a signed
+`webhook.verification` request with a single-use `challenge`; answer `2xx` and echo it, as `{"challenge": "…"}` or as the plain response body. A wrong or missing echo reports `no_echo`, a non-2xx reports `http_<status>`,
+no connection reports `unreachable`; each attempt uses a new challenge (6 attempts per endpoint per hour). Configure the signing secret on your server first, then verify.
+
+* **Test events:** *Send test event* (or `POST …/test`, `client.testWebhook(id:)`) delivers a signed `webhook.test` event through the real pipeline, with real headers, retries and delivery log.
+* **Pause and resume:** `POST …/pause` and `…/resume` (`client.pauseWebhook(id:reason:)`, `client.resumeWebhook(id:)`) stop and restart delivery for one endpoint; events keep queueing and are delivered after the resume (or expire after the retention period).
+  During an incident Viadere may pause delivery for your organization or for everyone; the console shows a banner and nothing is lost.
+* **Delivery log and replay:** *Developers > Webhooks > Delivery log* shows the last 50 deliveries with attempts and **redacted** payloads (message text and signatures are never shown); a dead-lettered delivery can be replayed.
+* **Retry simulator and schema preview:** show the real backoff schedule for N failures and a sample of every event, built from the real types, without sending anything.
 
 With the SDK:
 
@@ -528,9 +570,18 @@ Let customers connect from your site, email or print.
 The files are versioned and immutable (`Cache-Control: public, max-age=31536000, immutable`); a change ships under a new path (`/v2/`), so a pinned SRI hash never goes stale.
 `GET /connect-button/v1/integrity.json` publishes the current `sha384` of each file. The button only renders a link to `viadere.com/c/{CODE}`: no cookies, storage, analytics or third-party requests.
 
+## 8a. Enterprise connectivity (Tier E): mutual TLS
+
+Optional, for organizations granted Tier E. API semantics are identical on every transport: private connectivity never bypasses authorization (the API key and its scopes, capabilities and entitlements still decide).
+Point your integration at the enterprise hostname (`https://api-mtls.viadere.com`, shown under *Security > Certificates*), present a client certificate issued by the CA you gave us, and bind that certificate (its SHA-256 fingerprint, or the CA)
+under *Security > Certificates*. Then create keys with **Require a bound client certificate**; a key can be bound to one certificate, and a certificate belongs to exactly one organization. Cloudflare verifies the certificate at the edge and tells us what it verified;
+the server believes that only on a request that carries our edge token, so a header you send yourself changes nothing. You can also require a certificate for **every** key of the organization. Remove a certificate and its keys stop working at once.
+A VPN, a private endpoint or dedicated connectivity can be arranged for Tier E through Viadere; they end at the same API layer. Ordinary businesses do not need any of this.
+
 ## 9. Go-live checklist
 
-- [ ] Organization verified; handle and code issued.
+- [ ] Organization verified (domain, legal entity, agreements accepted at their current versions); handle and code issued; go-live approved; a security contact is set.
+- [ ] Webhook endpoint verified (*Verify*), and you have sent a test event and received a signed `message.received` simulation.
 - [ ] Live key stored in a secrets manager, scoped to what the integration needs; test key used in CI.
 - [ ] Webhook endpoint verifies signatures on the raw body, rejects stale timestamps, deduplicates on `Viadere-Event-Id`, and answers `2xx` quickly (do the work asynchronously).
 - [ ] Every `POST` carries a deterministic idempotency key, persisted before sending.
@@ -539,4 +590,4 @@ The files are versioned and immutable (`Cache-Control: public, max-age=31536000,
 - [ ] Customer-authored text (`message.received`) is handled as untrusted input.
 - [ ] Redemption codes are validated server-side with `consumeRedemption` (never trusted from the app) and `409`/`410` mean "do not hand over the reward".
 - [ ] If you use Verify: you handle `not_verified` without inferring why, retrieve each result exactly once and store only what you need, and you have your own legal basis for the age or identity check you run.
-- [ ] You monitor `429`s, your complaint rate and your opt-out rate; you rotate keys and webhook secrets on a schedule (rotation keeps the old secret valid for 24 hours).
+- [ ] You monitor `429`s, your complaint rate and your opt-out rate; you rotate keys and webhook secrets on a schedule (webhook rotation keeps the old secret valid for 24 hours; API-key rotation keeps the old key for the overlap you choose) and use an IP allow-list and an expiry on live keys.
