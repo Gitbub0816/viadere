@@ -9,6 +9,12 @@ on:
     branches: [main]
     paths: ["Site/**", "docs/openapi.yaml", ".github/workflows/site.yml"]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to upload: staging (Worker viadere-site-staging, any branch) or production (main only)"
+        type: choice
+        options: [staging, production]
+        default: staging
 
 permissions:
   contents: read
@@ -45,12 +51,15 @@ jobs:
   deploy:
     name: Upload to Cloudflare
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Production: a push to main, or a manual run on main. Staging: a manual run with target=staging, from any branch.
+    if: >-
+      github.event_name != 'pull_request' &&
+      ((github.ref == 'refs/heads/main' && inputs.target != 'staging') || inputs.target == 'staging')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
-      name: site-production
-      url: https://viadere.com
+      name: ${{ inputs.target == 'staging' && 'site-staging' || 'site-production' }}
+      url: ${{ inputs.target == 'staging' && 'https://viadere-site.cksites.dev' || 'https://viadere.com' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,8 +72,10 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          SITE_WORKER_NAME: viadere-site
+          SITE_WORKER_NAME: ${{ inputs.target == 'staging' && 'viadere-site-staging' || 'viadere-site' }}
         # INTERFACE ASSUMPTION (owned by WP7): upload.py reads the two CLOUDFLARE_* variables and takes the dist directory and script name.
         run: python3 -I Site/deploy/upload.py --dist Site/dist --script "${SITE_WORKER_NAME}"
       - name: Smoke test
+        # Staging is reachable only once its custom domain is attached (docs/ops/STAGING-SETUP.md section 13), so only production is probed.
+        if: inputs.target != 'staging'
         run: curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 5 --retry-all-errors https://viadere.com/ | head -n 1

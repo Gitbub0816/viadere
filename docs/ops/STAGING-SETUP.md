@@ -315,7 +315,21 @@ Hardware matters: App Attest, the Secure Enclave and passkeys need a **real iPho
 
 ## 13. Deploy the website to a throwaway Cloudflare Worker behind Access
 
-The marketing site (`Site/`, ADR-04) deploys to Workers Static Assets. For a first test use a throwaway Worker name so nothing touches the real one, and protect it with Cloudflare Access.
+The marketing site (`Site/`, ADR-04) deploys to Workers Static Assets. Cloudflare's own Git builds cannot build it (no Swift toolchain in their build image, and they deploy with Node-based tooling, which `CLAUDE.md` rules out), so GitHub Actions builds it and uploads the result.
+
+### 13a. From the browser (no command line)
+
+1. **Cloudflare API token:** My Profile > API Tokens > Create Token > Custom token > permission **Account > Workers Scripts > Edit**, your account only, nothing else. Copy the token. Copy the **Account ID** from the dashboard home (right column, or the URL).
+2. **GitHub:** the repository > Settings > Environments > **New environment** `site-staging`. In it, add two **environment secrets**: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. (Environment secrets stay out of every other job.)
+3. **Run it:** Actions > **Site** > Run workflow > branch `claude/inspiring-cannon-t5hxfw` (or `main`) > target **staging** > Run. The build job takes about 10 minutes (Swift); the upload creates the Worker `viadere-site-staging`.
+4. **Domain:** Cloudflare > Workers & Pages > `viadere-site-staging` > Settings > Domains & Routes > Add > **Custom domain** `viadere-site.cksites.dev`. Cloudflare creates the DNS record and certificate. (Not `viadere.cksites.dev`: that host is the server's web origin.)
+5. **Optional, recommended while it is unpublished:** Zero Trust > Access > Applications > Add > Self-hosted, domain `viadere-site.cksites.dev`, policy "Allow" for your own email only.
+
+Re-run step 3 for every change. Production (`viadere-site` on `viadere.com`) deploys only from `main`, through the `site-production` environment.
+
+### 13b. From a Mac with Swift
+
+For a first test use a throwaway Worker name so nothing touches the real one, and protect it with Cloudflare Access.
 
 1. Build:
 
