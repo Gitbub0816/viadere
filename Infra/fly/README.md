@@ -60,6 +60,22 @@ fly secrets list --app viadere-server-staging      # names and digests only
 from a file on `tmpfs` and delete it. The full list of names is `secrets.txt`; `python3 -I Infra/fly/check_env_coverage.py` proves
 every variable in `Server/.env.example` is covered.
 
+### 1a. Database roles (the release command and the runtime use different logins)
+
+`neon.tf` creates `viadere_migrator` (owns the schema) and `viadere_app` (runtime). Two secrets, two connection strings: `DATABASE_MIGRATION_URL` = the migrator's, read **only** by
+`ViadereServer migrate` (the release command); `DATABASE_URL` = `viadere_app`'s, used by every serving machine; `DATABASE_APP_ROLE = "viadere_app"` is a plain `[env]` value. The `migrate` run grants
+`viadere_app` SELECT/INSERT/UPDATE/DELETE on all tables and sequence usage, sets default privileges for tables later migrations create, revokes `CREATE` on schema `public` and `UPDATE` on `audit_events`.
+Staging and production refuse to start when `DATABASE_MIGRATION_URL` is set and the runtime login could still change the schema. Residual risk: Fly secrets are app-wide, so the migration URL is also in the
+serving machines' environment (the server reads it only in the `migrate` command). Rotate the migrator's password (Neon) after any suspected host compromise. Recovery from a mistaken single-role deployment: set both URLs,
+run the release; the startup check names the variable that is wrong.
+
+### 1b. Metrics, audit export
+
+`METRICS_TOKEN` protects `GET /metrics` (counters and gauges, no personal data; add the header `Authorization: Bearer <token>` in the scraper; the edge token is required as for everything else, so scrape through
+Cloudflare or set `METRICS_PORT` and scrape the private address). `AUDIT_HEAD_EXPORT=gcs` with `AUDIT_HEAD_EXPORT_TARGET=$(tofu output -raw audit_head_bucket)`, `AUDIT_HEAD_KMS_KEY=<audit_head_kms_key output>/cryptoKeyVersions/1`
+and the three `GCP_*` workload-identity values writes a signed head every `AUDIT_HEAD_EXPORT_INTERVAL_HOURS` to the locked bucket (`Infra/terraform/audit_bucket.tf`); `AUDIT_HEAD_EXPORT=r2` is the Cloudflare
+alternative (bucket with Object Lock, `AUDIT_HEAD_EXPORT_ENDPOINT=https://<account>.r2.cloudflarestorage.com`, an access key limited to PutObject on that bucket). Alert when `viadere_audit_head_export_age_seconds` exceeds twice the interval.
+
 ### 2. First deploy (staging, then production)
 
 ```bash
@@ -88,19 +104,26 @@ verification. Hostnames: `api.viadere.com` is the origin hostname served by Fly 
    for `api.viadere.com`; never use Flexible or Full (non-strict).
 6. **Lock the origin to Cloudflare.** The Fly app is reachable at `*.fly.dev` and by IP, so the proxy being in front proves nothing
    unless the origin refuses everyone else. Layered controls, strongest last:
-   1. *Shared header (implemented at Cloudflare; **enforcement in the server is a gap**).* A Cloudflare Transform Rule sets
-      `X-Viadere-Edge-Token: <random>` on every request to the origin (`cloudflare_ruleset.origin_edge_token`, value from the
-      sensitive variable `edge_token`, rotate by applying a new value to Cloudflare and to Fly secret `EDGE_TOKEN` with an
-      overlap period). The server must reject any request (except `/healthz` and `/readyz` from Fly's checks) whose header is
-      missing or not constant-time equal to `EDGE_TOKEN`. **This middleware does not exist yet** (see
-      `docs/ops/KILL-SWITCHES.md`, gap G-10); until then the header is set but not verified. Do not claim origin lock-down before it lands.
+   1. *Shared header (set at Cloudflare, **enforced by the server**, gap G-10 closed).* A Cloudflare Transform Rule sets
+      `X-Viadere-Edge-Token: <random>` on every request to the API hostnames (`cloudflare_ruleset.origin_edge_token`, value from the
+      sensitive variable `edge_token`). The server answers `421` to any request that lacks it or whose value is not equal, in constant
+      time, to Fly secret `EDGE_TOKEN` (or `EDGE_TOKEN_PREVIOUS`), **before routing, authentication or any database access**, and
+      refuses to boot in staging or production without `EDGE_TOKEN`. *Health-check rule:* `GET`/`HEAD` of `/healthz` and `/readyz`
+      are exempt **only** when the TCP peer is on Fly's private network (`fdaa::/16`, `172.16.0.0/12`, `10.0.0.0/8`, loopback) **and**
+      the request carries no proxy header (`X-Forwarded-For`, `Forwarded`, `Fly-Client-IP`, `CF-*`, `X-Real-IP`, `True-Client-IP`, `Via`);
+      Fly's checker adds none of them (the `[[http_service.checks]]` block sends only `X-Forwarded-Proto`), Cloudflare and Fly's proxy
+      always add some, so a public request can never use the exemption. Do not add a proxy header to the checks.
+      *Rotation:* set the new value as `EDGE_TOKEN` and the old one as `EDGE_TOKEN_PREVIOUS` (`fly secrets set` restarts machines
+      one at a time), apply the new `edge_token` in Terraform, then remove `EDGE_TOKEN_PREVIOUS`. *Verify after deploy:*
+      `curl -s -o /dev/null -w '%{http_code}\n' https://viadere-server.fly.dev/v1/directory/search?q=a` must print `421` (the Fly hostname
+      reaches the origin without the token), and the same call through `https://api.viadere.com` must print `200`.
    2. *Authenticated Origin Pulls (mTLS Cloudflare -> origin).* Terraform enables zone-level AOP
       (`cloudflare_authenticated_origin_pulls_settings`) so Cloudflare presents a client certificate to the origin. **The Fly
       proxy does not verify client certificates** (its `http_service` supports only ALPN/TLS-version options), so to enforce it
       the origin must terminate TLS itself: expose a raw TCP service (`[[services]]` with `handlers = []` on port 443, no `tls`
       handler), serve the Let's Encrypt/Cloudflare Origin CA certificate from the server and configure NIO-SSL with
       `certificateVerification = .noHostnameVerification` and Cloudflare's origin-pull CA as the only trust root. That needs a
-      Server change (gap G-11) and gives up Fly's HTTP-layer features (checks stay TCP/`/healthz` over the app's own TLS).
+      Server change (gap G-11, still open: it needs a platform decision) and gives up Fly's HTTP-layer features (checks stay TCP/`/healthz` over the app's own TLS).
       The alternative that needs no server change is **Cloudflare Tunnel**: run `cloudflared` (Go) as a second process group,
       remove the public `[http_service]` and let Cloudflare reach the app over Fly's private network. Pick one in the next
       architecture review; this repo ships the Terraform for AOP and the header, and the fly.toml for the Fly-proxied variant.
@@ -143,11 +166,12 @@ fly secrets set --app viadere-server NAME=...  # restarts machines one by one
   `EMAIL_API_KEY`, `APNS_KEY_P8`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` / `TWILIO_MESSAGING_SERVICE_SID`,
   `RCS_PROVIDER_TOKEN`, `RCS_WEBHOOK_SECRET`, `PASS_CERTIFICATE_PEM`, `PASS_PRIVATE_KEY_PEM`, `PASS_WWDR_CERTIFICATE_PEM`,
   `EMAIL_API_AUTH_*` (only for providers that need them), `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` (upgrade only).
+  WP6: `EDGE_TOKEN`, `EDGE_TOKEN_PREVIOUS`, `METRICS_TOKEN`, `DATABASE_MIGRATION_URL`, the rotation lists `DATA_ENCRYPTION_KEYS_PREVIOUS`, `SERVER_PEPPERS_PREVIOUS`, `AUDIT_CHAIN_KEYS_PREVIOUS`, `CONNECT_LINK_SIGNING_KEYS_PREVIOUS` (only during a rotation, `docs/ops/KEY-ROTATION.md`) and `AUDIT_HEAD_EXPORT_ACCESS_KEY_ID` / `AUDIT_HEAD_EXPORT_SECRET_ACCESS_KEY` (only for the R2 export). Their plain companions (`DATA_ENCRYPTION_KEY_ID`, `SERVER_PEPPER_ID`, `AUDIT_CHAIN_KEY_EPOCH`, `CONNECT_LINK_SIGNING_KEY_ID`, `DATABASE_APP_ROLE`, `AUDIT_HEAD_EXPORT*`, `GCP_*`, `WEBHOOK_OWNERSHIP_VERIFICATION`, ...) are `[env]` values.
 * **Plain `[env]`**: everything else in `.env.example` (URLs, RP identifiers, Apple identifiers, App Attest, APNs ids/topic,
   retention, abuse, billing, limits, rate-limit store, proxy count, dashboard timeouts).
 * **Exempt**: `POSTGRES_PASSWORD` (docker-compose only) and the `*_PATH` aliases (`APNS_KEY_PATH`, `PASS_*_PATH`): Fly has no mounted
   secret files, so use the inline `APNS_KEY_P8` and `PASS_*_PEM` secrets.
 * `RATE_LIMIT_STORE=database` and `AUTO_MIGRATE=false` are set explicitly; `ENVIRONMENT` is set per app (`production` / `staging`).
-* `EDGE_TOKEN` (origin shared header) is not read by the server yet (gap G-10); it is listed here so the secret exists when it is.
+* `EDGE_TOKEN` (origin shared header) is **required** in staging and production (gap G-10 closed); `EDGE_TOKEN_PREVIOUS` only during a rotation.
 * The placeholders `REPLACE_WITH_*` in `fly.*.toml` (`APPLE_TEAM_ID`, `APNS_KEY_ID`, `APNS_TEAM_ID`) must be replaced before the
   first deploy; they are identifiers, not secrets.

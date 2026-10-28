@@ -129,3 +129,13 @@ General: confirm on the vendor status page and our own probes, declare SEV by us
 **Certificate and SPKI pin rotation.** The app pins the API SPKI (`Packages/ViadereKit`). Before any change of CA, key type or Cloudflare certificate pipeline: ship an app release containing the next pin (backup pin) and wait for adoption, then change; a forced change without adoption bricks old app versions. Keep two pins at all times.
 
 **Operator access review (monthly).** List operators and dashboard owners; remove leavers; check `operator.created` events; rotate Cloudflare/Neon/Fly tokens quarterly.
+
+## RB-11 Enterprise mTLS onboarding (Tier E, SEC-TR-005)
+
+Only for a tenant that asked for mutual TLS; every other business uses the normal API hostname without a certificate or a VPN. Requires the Terraform `enable_mtls = true` (hostname `api-mtls.<apex>`, edge block rule, header overwrite; `Infra/terraform/README.md`) and `fly certs add api-mtls.<apex>`.
+1. Operator grants the tenant Tier E (`/operator/businesses/{id}/entitlements`, justification and review reference).
+2. The tenant sends the **public** certificate of the CA that issues its client certificates (never a private key). Verify the CA certificate (basic constraints, validity, subject), then upload it to Cloudflare: `POST /accounts/{account}/mtls_certificates` with `{"ca": true, "certificates": "<PEM>", "name": "<tenant>-ca"}`, and associate the hostname: `PUT /zones/{zone}/certificate_authorities/hostname_associations` with `{"hostnames": ["api-mtls.<apex>"], "mtls_certificate_id": "<id>"}` (the association lists **all** CAs for the hostname; read it first and send the full set).
+3. The tenant binds the same material in the console (Security > Certificates): the leaf SHA-256 fingerprint, or the CA certificate (bound by subject key identifier). One fingerprint belongs to one tenant. Keys are then created with *Require a bound client certificate*; a key may be bound to one certificate.
+4. Test from the tenant's side: a request with the certificate and key works; without the certificate Cloudflare blocks it; with a certificate of another tenant the server answers `401` and audits `apikey.mtls_denied`.
+5. Offboarding or a leaked certificate: the tenant removes the certificate in the console (immediate: the server stops accepting it); the operator removes the CA association/upload at Cloudflare. Rotate by adding the new certificate first, then removing the old one.
+Never trust the headers anywhere else: the server reads them only from a request that carried a valid `X-Viadere-Edge-Token`, and Cloudflare overwrites them on every request to the API hosts.
