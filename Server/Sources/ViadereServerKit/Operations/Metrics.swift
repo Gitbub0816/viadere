@@ -37,6 +37,7 @@ final class MetricsRegistry: @unchecked Sendable {
         case twoPersonRequested = "two_person_requested"
         case assuranceFailed = "assurance_failed"
         case privilegedDenied = "privileged_denied"
+        case verifyPurgeFailed = "verify_purge_failed"
     }
 
     private let lock = NSLock()
@@ -116,6 +117,18 @@ struct MetricsService {
         }
         await gauge("viadere_sms_queued", "Outbound SMS rows waiting to be sent.") {
             Double(try await SMSOutboundRecord.query(on: db).filter(\.$status == "queued").count())
+        }
+        let purgeable = { VerificationAttemptRecord.query(on: db).filter(\.$providerSessionId != nil).filter(\.$purgeStatus ~~ ["pending", "failed"])
+            .filter(\.$status !~ ["issued", "processing"]) }
+        await gauge("viadere_verify_provider_purge_pending", "Didit sessions finished or abandoned whose deletion at the provider is still outstanding.") {
+            Double(try await purgeable().count())
+        }
+        await gauge("viadere_verify_provider_purge_overdue", "Didit sessions still not deleted at the provider more than an hour after they ended. Alert above 0 for 10 minutes.") {
+            Double(try await purgeable().filter(\.$finishedAt < now.addingTimeInterval(-VerifyService.purgeAlertAfter)).count())
+        }
+        await gauge("viadere_verify_provider_purge_oldest_seconds", "Age of the oldest outstanding Didit deletion (0 = none).") {
+            guard let oldest = try await purgeable().filter(\.$finishedAt != nil).sort(\.$finishedAt, .ascending).first()?.finishedAt else { return 0 }
+            return max(0, now.timeIntervalSince(oldest))
         }
         await gauge("viadere_businesses_suspended", "Suspended businesses.") {
             Double(try await BusinessRecord.query(on: db).filter(\.$verificationStatus == VerificationStatus.suspended.rawValue).count())

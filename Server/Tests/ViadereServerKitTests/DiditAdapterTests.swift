@@ -16,10 +16,13 @@ final class FakeDidit: DiditAPI, @unchecked Sendable {
     private var decisionFailures = 0
     private var deleteFailures = 0
     private var decisionFetches = 0
+    private var _deleteCalls = 0
 
     var created: [(workflow: String, vendorData: String)] { lock.withLock { _created } }
     var deleted: [(session: String, instruction: String)] { lock.withLock { _deleted } }
     var usersDeleted: [String] { lock.withLock { _usersDeleted } }
+    /// Every `deleteSession` call, failed or not.
+    var deleteCalls: Int { lock.withLock { _deleteCalls } }
     var fetches: Int { lock.withLock { decisionFetches } }
     func failCreate(_ n: Int) { lock.withLock { createFailures = n } }
     func failDecision(_ n: Int) { lock.withLock { decisionFailures = n } }
@@ -54,6 +57,7 @@ final class FakeDidit: DiditAPI, @unchecked Sendable {
 
     func deleteSession(sessionId: String, instructionId: String) async throws {
         try lock.withLock {
+            _deleteCalls += 1
             if deleteFailures > 0 {
                 deleteFailures -= 1
                 throw DiditError.unavailable

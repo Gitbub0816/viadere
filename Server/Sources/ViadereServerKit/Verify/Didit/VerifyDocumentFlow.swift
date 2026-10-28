@@ -148,9 +148,13 @@ extension VerifyService {
             try await didit.deleteUser(vendorData: vendorData)
             attempt.purgeStatus = "done"
             attempt.purgedAt = ctx.now
+            attempt.purgeNextAt = nil
         } catch {
             attempt.purgeStatus = "failed"
             attempt.purgeAttempts += 1
+            attempt.purgeNextAt = ctx.now.addingTimeInterval(Self.purgeBackoff(afterFailures: attempt.purgeAttempts))
+            ctx.metrics.count(.verifyPurgeFailed)
+            runtime.logger.error("provider purge failed; will retry", metadata: ["failures": "\(attempt.purgeAttempts)"])
         }
         try? await attempt.update(on: db)
         _ = try? await AuditService(db: db, ctx: ctx).record(attempt.purgeStatus == "done" ? "verification.provider_purged" : "verification.provider_purge_failed",

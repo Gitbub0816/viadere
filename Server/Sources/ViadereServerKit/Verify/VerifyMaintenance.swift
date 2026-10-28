@@ -67,8 +67,12 @@ extension VerifyService {
         }
         // Provider sessions: purge every finished or abandoned one that is not yet deleted, retrying failures.
         if let didit = runtime.didit {
+            // Never gives up: retries are spaced by `purgeNextAt` (exponential backoff), not capped by a count.
             let due = try await VerificationAttemptRecord.query(on: db).filter(\.$providerSessionId != nil).filter(\.$purgeStatus ~~ ["pending", "failed"])
-                .filter(\.$status !~ ["issued", "processing"]).filter(\.$purgeAttempts < Self.maxPurgeAttempts).limit(25).all()
+                .filter(\.$status !~ ["issued", "processing"]).group(.or) { group in
+                    group.filter(\.$purgeNextAt == nil)
+                    group.filter(\.$purgeNextAt <= now)
+                }.limit(25).all()
             for attempt in due {
                 await purge(attempt, didit: didit)
                 changed += 1

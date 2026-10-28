@@ -83,7 +83,8 @@ final class VerifyRuntime: @unchecked Sendable {
         return settings.walletConfigured && !(trust?.isEmpty ?? true) && walletKeys != nil
     }
 
-    func documentAvailable(settings: VerifySettings) -> Bool { settings.diditConfigured && didit != nil }
+    /// Whether a **new** document verification can start: fully configured, the new-sessions switch on, and a client.
+    func documentAvailable(settings: VerifySettings) -> Bool { settings.diditConfigured && settings.diditNewSessionsEnabled && didit != nil }
 }
 
 private struct VerifyRuntimeKey: StorageKey { typealias Value = VerifyRuntime }
@@ -109,7 +110,8 @@ enum VerifyRegistration {
     static func configure(_ app: Application, config: ServerConfig) {
         let runtime = app.verify
         let settings = config.verify
-        if settings.diditConfigured, let key = settings.diditAPIKey, runtime.didit == nil {
+        // The client exists whenever credentials do, even with new sessions switched off or the workflow unset: it is the purge client.
+        if let key = settings.diditAPIKey, !key.isEmpty, runtime.didit == nil {
             runtime.didit = VaporDiditAPI(client: app.client, apiKey: key, base: settings.diditAPIBase)
         }
     }

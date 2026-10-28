@@ -25,6 +25,10 @@ public struct VerifySettings: Sendable {
 
     // Didit
     public var diditAPIKey: String?
+    /// The **new sessions** switch (`DIDIT_NEW_SESSIONS_ENABLED`, default on). Off: no new document verification starts, but the provider client
+    /// stays (it needs only `DIDIT_API_KEY`) so finished and abandoned sessions are still purged. Removing the API key is *not* the way to
+    /// stop Didit; it would also stop the erasure of what Didit already holds.
+    public var diditNewSessionsEnabled = true
     public var diditAPIBase = "https://verification.didit.me"
     /// The workflow that runs document capture, liveness and face match (the only one used for age thresholds and identity).
     public var diditWorkflowIdentity: String?
@@ -72,6 +76,7 @@ extension ServerConfig {
             throw ServerConfigError.invalid("WALLET_IACA_SHA256 (comma-separated SHA-256 fingerprints, 64 hex characters each)")
         }
         settings.diditAPIKey = value("DIDIT_API_KEY")
+        settings.diditNewSessionsEnabled = env["DIDIT_NEW_SESSIONS_ENABLED"] != "false"
         settings.diditWorkflowIdentity = value("DIDIT_WORKFLOW_ID_IDENTITY")
         settings.diditWebhookSecrets = [value("DIDIT_WEBHOOK_SECRET"), value("DIDIT_WEBHOOK_SECRET_PREVIOUS")].compactMap { $0 }
         if let base = value("DIDIT_API_BASE") {

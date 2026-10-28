@@ -30,7 +30,15 @@ struct VerifyService {
     /// Rows older than this (closed requests, their attempts and results) are deleted. Audit and consent receipts follow their own rules.
     static let recordRetention: TimeInterval = 400 * 86_400
     static let providerEventRetention: TimeInterval = 7 * 86_400
-    static let maxPurgeAttempts = 30
+    /// Provider purge retries back off exponentially (30 s, 1 min, 2 min, ... capped at a day) and **never stop**: an outage of any length must
+    /// not leave a document, selfie or face template at the provider. A purge that is still failing after `purgeAlertAfter` raises the
+    /// `viadere_verify_provider_purge_overdue` gauge (alert: page when it is above 0 for 10 minutes).
+    static let purgeBackoffBase: TimeInterval = 30
+    static let purgeBackoffCap: TimeInterval = 86_400
+    static let purgeAlertAfter: TimeInterval = 3_600
+    static func purgeBackoff(afterFailures failures: Int) -> TimeInterval {
+        min(purgeBackoffCap, purgeBackoffBase * Double(1 << min(max(0, failures - 1), 20)))
+    }
     /// The chosen verification method cannot run right now (not configured, provider outage). The person can choose another.
     static var methodUnavailable: APIError { APIError(.serviceUnavailable, .unavailable, "This way of verifying is not available right now. Try another.") }
 

@@ -91,6 +91,8 @@ final class VerificationAttemptRecord: Model, @unchecked Sendable {
     @OptionalField(key: "purge_status") var purgeStatus: String?
     @Field(key: "purge_attempts") var purgeAttempts: Int
     @OptionalField(key: "purged_at") var purgedAt: Date?
+    /// When the next purge try is due after a failure (exponential backoff); `nil` = due now.
+    @OptionalField(key: "purge_next_at") var purgeNextAt: Date?
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date
     @OptionalField(key: "finished_at") var finishedAt: Date?
