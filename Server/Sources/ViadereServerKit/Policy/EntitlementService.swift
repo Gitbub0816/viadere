@@ -19,6 +19,9 @@ struct EntitlementActor: Sendable {
 struct EntitlementSnapshot: Sendable {
     var tiers: Set<BusinessRiskTier>
     var capabilities: Set<Capability>
+    /// The operator-granted, expiring legacy approval entitlement (`LegacyApproval`): `authorize` and high/critical `authenticate` interactions
+    /// decided on relay status alone, while Approve v2 exists.
+    var legacyApproval = false
 }
 
 struct EntitlementService {
@@ -35,6 +38,7 @@ struct EntitlementService {
         let now = ctx.now
         var tiers = BusinessRiskTier.baseline
         var capabilities = Set(Capability.messaging)
+        var legacy = false
         let rows = try await BusinessEntitlementRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$revokedAt == nil).all()
         for row in rows where row.isActive(at: now) {
             switch row.kind {
@@ -42,10 +46,11 @@ struct EntitlementService {
             case BusinessEntitlementRecord.capabilityKind:
                 let capability = Capability(rawValue: row.value)
                 if capability.isKnown { capabilities.insert(capability) }
+            case BusinessEntitlementRecord.legacyKind: if row.value == LegacyApproval.entitlementValue, now < LegacyApproval.sunset { legacy = true }
             default: break
             }
         }
-        return EntitlementSnapshot(tiers: tiers, capabilities: capabilities)
+        return EntitlementSnapshot(tiers: tiers, capabilities: capabilities, legacyApproval: legacy)
     }
 
     /// Every entitlement row of a business, newest first (operator console).
@@ -88,6 +93,29 @@ struct EntitlementService {
         return try await create(businessId: businessId, kind: BusinessEntitlementRecord.capabilityKind, value: capability.rawValue, actor: actor,
                                 justification: justification, reviewReference: reviewReference?.trimmingCharacters(in: .whitespacesAndNewlines),
                                 audited: "entitlement.capability_granted", expiresAt: expiresAt)
+    }
+
+    /// Grants the legacy approval entitlement (gate finding F2): the business may keep deciding `authorize` and high/critical `authenticate`
+    /// interactions on relay status alone. It always expires (at most 180 days, never after the platform sunset) and needs a justification that
+    /// names the migration plan to Approve v2.
+    @discardableResult
+    func grantLegacyApproval(businessId: UUID, actor: EntitlementActor, justification: String, expiresAt: Date) async throws -> BusinessEntitlementRecord {
+        let now = ctx.now
+        guard now < LegacyApproval.sunset, expiresAt > now, expiresAt <= min(LegacyApproval.sunset, now.addingTimeInterval(LegacyApproval.maximumGrant)) else {
+            throw APIError.validation("The legacy approval path ends on \(ISO8601DateFormatter().string(from: LegacyApproval.sunset)); a grant lasts at most 180 days.",
+                                      details: ["expires_at": "invalid"])
+        }
+        let snapshot = try await snapshot(businessId: businessId)
+        guard snapshot.capabilities.contains(.transactionApprove) || snapshot.capabilities.contains(.authChallenge) else {
+            throw APIError.validation("The business holds neither transaction.approve nor auth.challenge.", details: ["capability": "required"])
+        }
+        return try await create(businessId: businessId, kind: BusinessEntitlementRecord.legacyKind, value: LegacyApproval.entitlementValue, actor: actor,
+                                justification: justification, reviewReference: nil, audited: "entitlement.legacy_approval_granted", expiresAt: expiresAt)
+    }
+
+    func revokeLegacyApproval(businessId: UUID, actor: EntitlementActor, justification: String) async throws {
+        try await revoke(businessId: businessId, kind: BusinessEntitlementRecord.legacyKind, value: LegacyApproval.entitlementValue, actor: actor,
+                         justification: justification, cascade: [], audited: "entitlement.legacy_approval_revoked")
     }
 
     private func create(businessId: UUID, kind: String, value: String, actor: EntitlementActor, justification rawJustification: String,

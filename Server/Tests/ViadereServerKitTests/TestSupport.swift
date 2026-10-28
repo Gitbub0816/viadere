@@ -408,10 +408,10 @@ final class TestHarness: @unchecked Sendable {
     /// behave as before. Pass `Capability.messaging` for a plain verified business.
     func makeBusiness(name: String, handle: String?, status: VerificationStatus = .verified, tier: String = "free", quota: Int? = nil,
                       scopes: [String] = BusinessAPIKeys.Scope.all, live: Bool = true,
-                      capabilities: [Capability] = Capability.operational) async throws -> TestBusiness {
+                      capabilities: [Capability] = Capability.operational, legacyApproval: Bool = true) async throws -> TestBusiness {
         let record = try await BusinessRegistry(db: db, ctx: ctx).register(displayName: name, handle: handle, category: .other, status: status,
                                                                             tier: tier, dailyQuota: quota)
-        if status == .verified { try await entitle(record.id!, capabilities) }
+        if status == .verified { try await entitle(record.id!, capabilities, legacyApproval: legacyApproval) }
         let key = try await BusinessAPIKeys.issue(businessId: record.id!, name: "test", live: live, scopes: scopes, capabilities: capabilities, now: clock.now(), on: db)
         let directory = DirectoryService(db: db)
         // Pending/suspended businesses have no public summary through `verified`; build it directly.
@@ -420,7 +420,8 @@ final class TestHarness: @unchecked Sendable {
     }
 
     /// Grants the tiers and capabilities `capabilities` needs, as an operator would (with a recorded justification).
-    func entitle(_ businessId: UUID, _ capabilities: [Capability]) async throws {
+    /// `legacyApproval`: tests that are not about the legacy `authorize` path get the operator's explicit legacy entitlement (gate finding F2).
+    func entitle(_ businessId: UUID, _ capabilities: [Capability], legacyApproval: Bool = true) async throws {
         let service = EntitlementService(db: db, ctx: ctx)
         let actor = EntitlementActor.system("test")
         for capability in capabilities where !Capability.messaging.contains(capability) {
@@ -430,6 +431,10 @@ final class TestHarness: @unchecked Sendable {
             }
             try await service.grant(businessId: businessId, capability: capability, actor: actor, justification: "Test fixture: capability \(capability).",
                                     reviewReference: "TEST-REVIEW-1")
+        }
+        if legacyApproval, capabilities.contains(.transactionApprove) || capabilities.contains(.authChallenge) {
+            try await service.grantLegacyApproval(businessId: businessId, actor: actor, justification: "Test fixture: legacy approval path under test.",
+                                                  expiresAt: clock.now().addingTimeInterval(30 * 86_400))
         }
     }
 

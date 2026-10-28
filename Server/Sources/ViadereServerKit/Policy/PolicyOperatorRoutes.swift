@@ -8,6 +8,8 @@ private struct EntitlementForm: Content {
     var value: String
     var justification: String?
     var reviewReference: String?
+    /// Legacy approval only: how long the grant lasts (1...180 days, never past the platform sunset).
+    var expiresInDays: String?
 }
 
 private struct SwitchForm: Content {
@@ -53,6 +55,12 @@ enum PolicyOperatorRoutes {
             case BusinessEntitlementRecord.capabilityKind:
                 try await service.grant(businessId: id, capability: Capability(rawValue: form.value), actor: actor,
                                         justification: form.justification ?? "", reviewReference: form.reviewReference)
+            case BusinessEntitlementRecord.legacyKind:
+                guard let days = form.expiresInDays.flatMap({ Int($0) }), (1...180).contains(days) else {
+                    throw APIError.validation("Choose how many days (1 to 180).", details: ["expiresInDays": "invalid"])
+                }
+                try await service.grantLegacyApproval(businessId: id, actor: actor, justification: form.justification ?? "",
+                                                      expiresAt: req.ctx.now.addingTimeInterval(TimeInterval(days) * 86_400))
             default: throw APIError.validation("Choose a tier or a capability.", details: ["kind": "invalid"])
             }
             return DashboardResponses.redirect("\(next)?m=granted")
@@ -69,6 +77,8 @@ enum PolicyOperatorRoutes {
                 try await service.revoke(businessId: id, tier: tier, actor: actor, justification: form.justification ?? "")
             case BusinessEntitlementRecord.capabilityKind:
                 try await service.revoke(businessId: id, capability: Capability(rawValue: form.value), actor: actor, justification: form.justification ?? "")
+            case BusinessEntitlementRecord.legacyKind:
+                try await service.revokeLegacyApproval(businessId: id, actor: actor, justification: form.justification ?? "")
             default: throw APIError.validation("Choose a tier or a capability.", details: ["kind": "invalid"])
             }
             return DashboardResponses.redirect("\(next)?m=revoked")
@@ -163,6 +173,12 @@ enum PolicyOperatorRoutes {
         <label for="gj">Purpose justification (required, 20+ characters)</label><textarea id="gj" name="justification" maxlength="1000" required></textarea>\
         <label for="gr">Heightened review reference (identity name and address only)</label><input id="gr" name="reviewReference" type="text" maxlength="120">\
         <button class="btn" type="submit">Grant</button></form></div>\
+        <div class="card"><h2>Legacy approval path</h2>\(DashboardFormat.badge(snapshot.legacyApproval ? "Granted" : "Closed", snapshot.legacyApproval ? "wa" : "ok"))\
+        <p class="mu sm">Approve v2 is the only approval path whose result the business verifies itself. The legacy authorize and high-risk authenticate interactions trust the relay's status, so they are closed for live traffic unless this entitlement is granted: justified, audited, at most 180 days, and never past \(DashboardUI.esc(ISO8601DateFormatter().string(from: LegacyApproval.sunset))). The sandbox is not affected.</p>\
+        <form method="post" action="\(base)/\(snapshot.legacyApproval ? "revoke" : "grant")">\(csrf)<input type="hidden" name="kind" value="legacy"><input type="hidden" name="value" value="\(LegacyApproval.entitlementValue)">\
+        \(snapshot.legacyApproval ? "" : "<label for=\"ld\">Days (1 to 180)</label><input id=\"ld\" name=\"expiresInDays\" type=\"number\" min=\"1\" max=\"180\" required>")\
+        <label for="lj">Justification: why, and the plan to move to Approve v2 (20+ characters)</label><textarea id="lj" name="justification" maxlength="1000" required></textarea>\
+        <button class="btn \(snapshot.legacyApproval ? "d" : "")" type="submit">\(snapshot.legacyApproval ? "Revoke legacy approval" : "Grant legacy approval")</button></form></div>\
         <div class="card"><h2>History</h2>\(DashboardFormat.table(["Entitlement", "By", "When", "Justification", "State"], historyRows, empty: "No grants: Tier M defaults only.", caption: "Entitlement history"))</div>
         """
         return DashboardUI.operatorPage(p, title: "Entitlements", active: "/operator/businesses", subtitle: "Risk tiers and capabilities.", flash: flash(req), body: body)

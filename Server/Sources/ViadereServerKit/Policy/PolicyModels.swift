@@ -9,6 +9,8 @@ final class BusinessEntitlementRecord: Model, @unchecked Sendable {
     static let schema = "business_entitlements"
     static let tierKind = "tier"
     static let capabilityKind = "capability"
+    /// `value = LegacyApproval.entitlementValue`; always has `expires_at`.
+    static let legacyKind = "legacy"
 
     @ID(key: .id) var id: UUID?
     @Field(key: "business_id") var businessId: UUID

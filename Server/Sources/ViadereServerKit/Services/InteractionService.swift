@@ -72,6 +72,8 @@ struct InteractionService {
         let policy = PolicyService(db: db, ctx: ctx)
         let capability = Capability.required(forInteractionKind: request.kind)
         try await policy.enforce(PolicyInput(capability), principal: principal, auditAllowed: false)
+        // Gate finding F2: an approval decided on relay status alone needs the explicit, expiring legacy entitlement while Approve v2 exists.
+        try await LegacyApproval.require(kind: request.kind, sensitivity: request.sensitivity, principal: principal, ctx: ctx, db: db)
         // Idempotency: same key + same body → the original; same key + different body → 409.
         if let existing = try await existing(businessId: principal.businessId, key: request.idempotencyKey) {
             return try replay(existing, requestHash: requestHash)
