@@ -54,23 +54,40 @@ extension APIRoutes {
 }
 
 extension VerificationPrompt {
-    /// The digest of what the prompt displays, over canonical JSON of exactly: request, recipient (id and name), capability, parameters,
-    /// purpose, the disclosed fields and the expiry. Consent quotes it; the server recomputes it from its own record, so consent can only
-    /// be given to what the server will release.
-    public static func displayDigest(requestId: VerificationRequestID, businessId: BusinessID, recipientName: String, capability: Capability,
-                                     parameters: [String: JSONValue], purposeCode: String, fields: [String], expiresAt: Date) -> String {
+    /// The digest of **what the prompt displays**, computed from the fields themselves (version 2): the request, the recipient exactly as
+    /// shown (id, name, handle, whether it is shown as verified), the capability and parameters, the purpose, every disclosure line (field,
+    /// title and detail text), every "not disclosed" line, the metadata lines and the expiry.
+    ///
+    /// The **app** computes this from the prompt it is about to render and quotes the result when the person consents; the server computes
+    /// it from its own record and compares. Nothing in the app echoes a digest the server supplied, so consent is bound to the text the
+    /// person actually saw: a prompt whose displayed text was altered on the way (or differs from what the server will release) yields a
+    /// digest the server does not hold, and the consent is refused. `displayDigest` and `methods`/`status` are not part of it.
+    public func renderedDigest() -> String {
         let value: JSONValue = .object([
-            "v": .integer(1),
-            "requestId": .string(requestId.description),
+            "v": .integer(2),
+            "requestId": .string(id.description),
             "businessId": .string(businessId.description),
-            "recipient": .string(recipientName),
+            "recipient": .object([
+                "name": .string(recipientName),
+                "handle": recipientHandle.map(JSONValue.string) ?? .null,
+                "verified": .bool(recipientVerified),
+            ]),
             "capability": .string(capability.rawValue),
             "parameters": .object(parameters),
             "purpose": .string(purposeCode),
-            "fields": .array(fields.sorted().map(JSONValue.string)),
+            "disclosure": .array(disclosure.map { .object(["field": .string($0.field), "title": .string($0.title), "detail": .string($0.detail)]) }),
+            "notDisclosed": .array(notDisclosed.map(JSONValue.string)),
+            "metadata": .array(includedMetadata.map(JSONValue.string)),
             "expiresAt": .string(ViadereDate.format(ViadereDate.truncatedToMilliseconds(expiresAt))),
         ])
         let bytes = (try? CanonicalJSON.serialize(value)) ?? Data()
-        return "sha256:" + Hex.encode(SHA256.hash(data: Data("VIADERE-VERIFY-CONSENT-V1\n".utf8) + bytes))
+        return "sha256:" + Hex.encode(SHA256.hash(data: Data("VIADERE-VERIFY-CONSENT-V2\n".utf8) + bytes))
+    }
+
+    /// This prompt with `displayDigest` set to `renderedDigest()` (what a server sends).
+    public func withRenderedDigest() -> VerificationPrompt {
+        var copy = self
+        copy.displayDigest = renderedDigest()
+        return copy
     }
 }

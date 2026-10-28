@@ -78,6 +78,33 @@ struct VerificationFlowTests {
         #expect(log.count == 1 && log[0].0 == prompt.id && log[0].1 == prompt.displayDigest)
     }
 
+    /// Gate F6 exploit: the app echoed the digest the server supplied, so consent was bound to the server's claim, not to the text rendered.
+    @Test func consentQuotesADigestComputedFromTheRenderedFieldsNotOneEchoedFromTheServer() async throws {
+        let api = MockVerifyAPI()
+        var prompt = VerificationPrompt.sampleAge()
+        // The text on screen was altered in transit but the server's digest field still describes the original.
+        prompt.disclosure[0].detail = "Your date of birth is shared with the business."
+        await api.add(prompt)
+        let tampered = await model(prompt, api: api)
+        await tampered.load()
+        await tampered.consent()
+        guard case .failed = tampered.phase else { Issue.record("an inconsistent prompt must not be consented to"); return }
+        #expect(await api.consentLog.isEmpty, "nothing was sent")
+        // A consistent prompt: what is sent is the digest of the rendered fields (including the verified badge and the not-disclosed text).
+        let ok = VerificationPrompt.sampleAge()
+        let vm = await model(ok, api: api)
+        await vm.load()
+        await vm.consent()
+        let log = await api.consentLog
+        #expect(log.last?.1 == ok.renderedDigest())
+        var unverified = ok
+        unverified.recipientVerified = false
+        #expect(unverified.renderedDigest() != ok.renderedDigest())
+        var lessWithheld = ok
+        lessWithheld.notDisclosed = []
+        #expect(lessWithheld.renderedDigest() != ok.renderedDigest())
+    }
+
     @Test func aChangedRequestIsNotConsentedToBlindly() async throws {
         let api = MockVerifyAPI()
         var prompt = VerificationPrompt.sampleAge()

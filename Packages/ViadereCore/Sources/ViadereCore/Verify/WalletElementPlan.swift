@@ -58,6 +58,20 @@ public enum WalletElementPlan {
         }
     }
 
+    /// What the app declares to Wallet about keeping the data (`PKIdentityIntentToStore`). Wallet shows it to the person on the sheet, so it
+    /// must be true:
+    /// - an age threshold or "has a verified ID" releases a yes/no that Viadere and the business keep only as that boolean: `willNotStore`;
+    /// - a name or an address is **relayed to the business, which may keep it** under its own retention terms: `mayStore`. Declaring
+    ///   `willNotStore` for it would tell the person something false about data a third party then holds.
+    public enum StorageIntent: Sendable, Hashable { case willNotStore, mayStore }
+
+    public static func storageIntent(for request: Request) -> StorageIntent {
+        switch request {
+        case .ageAtLeast, .documentPresented: .willNotStore
+        case .givenAndFamilyName, .residentAddress: .mayStore
+        }
+    }
+
     /// `age_over_NN` for a threshold (two digits, as ISO 18013-5 names them).
     public static func ageOverIdentifier(_ years: Int) -> String { "age_over_" + (years < 10 ? "0" : "") + String(years) }
 

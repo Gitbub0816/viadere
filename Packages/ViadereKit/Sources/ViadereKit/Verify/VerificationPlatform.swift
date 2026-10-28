@@ -63,11 +63,13 @@ public struct PassKitWalletIdentity: WalletIdentityService {
 
     private func descriptor(for request: WalletElementPlan.Request) -> PKIdentityDriversLicenseDescriptor {
         let descriptor = PKIdentityDriversLicenseDescriptor()
+        // The declared intent is the truthful one (`WalletElementPlan.storageIntent`): a name or an address goes to a business that may keep it.
+        let intent: PKIdentityIntentToStore = WalletElementPlan.storageIntent(for: request) == .mayStore ? .mayStore : .willNotStore
         switch request {
-        case .ageAtLeast(let years): descriptor.addElements([.age(atLeast: years)], intentToStore: .willNotStore)
-        case .givenAndFamilyName: descriptor.addElements([.givenName, .familyName], intentToStore: .willNotStore)
-        case .residentAddress: descriptor.addElements([.address], intentToStore: .willNotStore)
-        case .documentPresented: descriptor.addElements([.issuingAuthority], intentToStore: .willNotStore)
+        case .ageAtLeast(let years): descriptor.addElements([.age(atLeast: years)], intentToStore: intent)
+        case .givenAndFamilyName: descriptor.addElements([.givenName, .familyName], intentToStore: intent)
+        case .residentAddress: descriptor.addElements([.address], intentToStore: intent)
+        case .documentPresented: descriptor.addElements([.issuingAuthority], intentToStore: intent)
         }
         return descriptor
     }

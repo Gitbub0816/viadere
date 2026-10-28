@@ -160,20 +160,33 @@ struct VerifyTests {
     @Test func displayDigestBindsEveryDisplayedField() {
         let id = VerificationRequestID()
         let business = BusinessID()
-        func digest(_ name: String = "Northwind", years: Int64 = 18, purpose: String = "age_restricted_access", fields: [String] = ["meets_threshold"],
-                    expires: Date? = nil, biz: BusinessID? = nil) -> String {
-            VerificationPrompt.displayDigest(requestId: id, businessId: biz ?? business, recipientName: name, capability: .ageMinimum, parameters: ["years": .integer(years)],
-                                             purposeCode: purpose, fields: fields, expiresAt: expires ?? now)
-        }
-        let base = digest()
-        #expect(base == digest())
-        #expect(base.hasPrefix("sha256:") && base.count == 71)
-        #expect(base != digest("Northwind Air"))
-        #expect(base != digest(years: 21))
-        #expect(base != digest(purpose: "other_purpose"))
-        #expect(base != digest(fields: ["meets_threshold", "given_name"]))
-        #expect(base != digest(expires: now.addingTimeInterval(1)))
-        #expect(base != digest(biz: BusinessID()))
+        let base = VerificationPrompt(
+            id: id, status: .pendingConsent, businessId: business, recipientName: "Northwind", recipientHandle: "@northwind", recipientVerified: true, capability: .ageMinimum,
+            parameters: ["years": .integer(18)], purposeCode: "age_restricted_access",
+            disclosure: VerificationPromptContent.disclosure(for: .ageMinimum, parameters: ["years": .integer(18)]),
+            notDisclosed: VerificationPromptContent.notDisclosed(for: .ageMinimum), includedMetadata: VerificationPromptContent.metadata,
+            methods: [], createdAt: now, expiresAt: now, displayDigest: "")
+        let digest = base.renderedDigest()
+        #expect(digest == base.renderedDigest())
+        #expect(digest.hasPrefix("sha256:") && digest.count == 71)
+        func changed(_ edit: (inout VerificationPrompt) -> Void) -> String { var p = base; edit(&p); return p.renderedDigest() }
+        #expect(digest != changed { $0.recipientName = "Northwind Air" })
+        #expect(digest != changed { $0.recipientHandle = "@other" })
+        #expect(digest != changed { $0.recipientHandle = nil })
+        #expect(digest != changed { $0.recipientVerified = false }, "the verified badge is part of what the person saw (gate F6)")
+        #expect(digest != changed { $0.parameters = ["years": .integer(21)] })
+        #expect(digest != changed { $0.purposeCode = "other_purpose" })
+        #expect(digest != changed { $0.expiresAt = now.addingTimeInterval(1) })
+        #expect(digest != changed { $0.businessId = BusinessID() })
+        #expect(digest != changed { $0.capability = .identityVerified })
+        #expect(digest != changed { $0.disclosure[0].title = "Whether you are 18 or older (and your birthday)" }, "the disclosure text")
+        #expect(digest != changed { $0.disclosure[0].detail = "Your date of birth is shared." }, "the disclosure detail")
+        #expect(digest != changed { $0.disclosure.append(VerificationDisclosureItem(field: "given_name", title: "Your first name", detail: "x")) })
+        #expect(digest != changed { $0.notDisclosed.removeAll { $0 == "Your date of birth" } }, "the not-disclosed text")
+        #expect(digest != changed { $0.includedMetadata = [] })
+        // Not part of it: the digest field itself, availability of methods, and status.
+        #expect(digest == changed { $0.displayDigest = "sha256:echo"; $0.status = .consented; $0.methods = [VerificationMethodOption(kind: .wallet, available: true)] })
+        #expect(base.withRenderedDigest().displayDigest == digest)
     }
 
     @Test func promptContentNamesExactlyTheClaimFieldsAndWhatIsWithheld() {
@@ -240,5 +253,15 @@ struct VerifyTests {
         tagged.allowedTags = [5]
         #expect(throws: CBORError.notCanonical) { try CBOR.decode(Data([0xD8, 0x05, 0x01]), limits: tagged) }
         #expect((try? CBOR.decode(Data([0xC5, 0x01]), limits: tagged)) == .tagged(5, .unsigned(1)))
+    }
+}
+
+@Suite struct WalletStorageIntentTests {
+    /// Gate F5: name and address are relayed to a business that may keep them; the Wallet sheet must not say "will not store".
+    @Test func nameAndAddressDeclareMayStoreAndBooleansDeclareWillNotStore() {
+        #expect(WalletElementPlan.storageIntent(for: .givenAndFamilyName) == .mayStore)
+        #expect(WalletElementPlan.storageIntent(for: .residentAddress) == .mayStore)
+        #expect(WalletElementPlan.storageIntent(for: .ageAtLeast(21)) == .willNotStore)
+        #expect(WalletElementPlan.storageIntent(for: .documentPresented) == .willNotStore)
     }
 }

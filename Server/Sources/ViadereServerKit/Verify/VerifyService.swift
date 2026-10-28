@@ -242,13 +242,9 @@ struct VerifyService {
     }
 
     func prompt(for record: VerificationRequestRecord) async throws -> VerificationPrompt {
-        guard let business = try await BusinessRecord.find(record.businessId, on: db), let definition = record.capabilityValue.definition else { throw APIError.notFound }
+        guard let business = try await BusinessRecord.find(record.businessId, on: db), record.capabilityValue.definition != nil else { throw APIError.notFound }
         let handle = try await DirectoryService(db: db).summary(for: business)?.handle
         let parameters = record.parameterValues
-        let fields = definition.disclosedClaimFields
-        let digest = VerificationPrompt.displayDigest(requestId: record.requestID, businessId: BusinessID(record.businessId), recipientName: record.recipientName,
-                                                      capability: record.capabilityValue, parameters: parameters, purposeCode: record.purpose, fields: fields,
-                                                      expiresAt: record.expiresAt)
         var status = record.consumerStatus
         if status.isOpen, ctx.now >= record.expiresAt { status = .expired }
         return VerificationPrompt(
@@ -256,7 +252,7 @@ struct VerifyService {
             recipientVerified: business.isVerified, capability: record.capabilityValue, parameters: parameters, purposeCode: record.purpose,
             disclosure: VerificationPromptContent.disclosure(for: record.capabilityValue, parameters: parameters),
             notDisclosed: VerificationPromptContent.notDisclosed(for: record.capabilityValue), includedMetadata: VerificationPromptContent.metadata,
-            methods: methods(for: record), createdAt: record.createdAt, expiresAt: record.expiresAt, displayDigest: digest, receiptId: record.receiptId)
+            methods: methods(for: record), createdAt: record.createdAt, expiresAt: record.expiresAt, displayDigest: "", receiptId: record.receiptId).withRenderedDigest()
     }
 
     func methods(for record: VerificationRequestRecord) -> [VerificationMethodOption] {

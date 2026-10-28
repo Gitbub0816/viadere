@@ -157,8 +157,15 @@ public final class VerificationViewModel: Identifiable {
         if await lock.isAvailable() {
             guard await lock.authenticate(reason: "Confirm to share this with \(shown.recipientName)") else { return }
         }
+        // The digest is computed here, from the fields this screen renders (never echoed from the server): consent is bound to what the
+        // person saw. A prompt whose carried digest disagrees with its own content was altered or is inconsistent: nothing is shared.
+        let rendered = shown.renderedDigest()
+        guard rendered == shown.displayDigest else {
+            phase = .failed("This request changed. Open it again to review it.")
+            return
+        }
         do {
-            apply(try await api.consent(id, displayDigest: shown.displayDigest))
+            apply(try await api.consent(id, displayDigest: rendered))
             await refreshAvailability()
         } catch let error as APIError {
             phase = .failed(error.code == .conflict ? "This request changed. Open it again to review it." : error.userMessage)

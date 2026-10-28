@@ -111,3 +111,26 @@ extension VerifyFlowTests {
         XCTAssertEqual(ClaimsBuilder.meetsThreshold(claims, years: 18, now: later), true)
     }
 }
+
+extension VerifyFlowTests {
+    /// F6: the server's digest is the shared Core function over what the prompt displays, including the verified badge and the texts;
+    /// a consent quoting the digest of any other rendering is refused.
+    func testConsentIsBoundToTheRenderedFieldsIncludingTheBadgeAndTheTexts() async throws {
+        try await withVerify { h, fake in
+            let r = try await rig(h, fake)
+            let id = try await createdID(r)
+            let shown = try await prompt(r, id)
+            XCTAssertEqual(shown.displayDigest, shown.renderedDigest())
+            for tamper in [{ (p: inout VerificationPrompt) in p.recipientVerified.toggle() },
+                           { (p: inout VerificationPrompt) in p.disclosure[0].detail += " Also your birthdate." },
+                           { (p: inout VerificationPrompt) in p.notDisclosed = [] }] {
+                var edited = shown
+                tamper(&edited)
+                let response = try await r.h.signedPost(r.consumer, "/v1/verifications/\(id)/consent", VerificationConsentRequest(displayDigest: edited.renderedDigest()))
+                XCTAssertEqual(response.status, .conflict)
+            }
+            try await eq(try await prompt(r, id).status, .pendingConsent)
+            try await eq(try await r.h.signedPost(r.consumer, "/v1/verifications/\(id)/consent", VerificationConsentRequest(displayDigest: shown.renderedDigest())).status, .ok)
+        }
+    }
+}

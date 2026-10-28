@@ -118,13 +118,11 @@ extension VerificationPrompt {
         let id = VerificationRequestID()
         let businessId = BusinessID()
         let parameters: [String: JSONValue] = ["years": .integer(years)]
-        let digest = VerificationPrompt.displayDigest(requestId: id, businessId: businessId, recipientName: business, capability: .ageMinimum, parameters: parameters,
-                                                      purposeCode: "age_restricted_access", fields: ["meets_threshold"], expiresAt: now.addingTimeInterval(expiresIn))
         return VerificationPrompt(
             id: id, status: .pendingConsent, businessId: businessId, recipientName: business, recipientHandle: "@northwind", recipientVerified: true, capability: .ageMinimum,
             parameters: parameters, purposeCode: "age_restricted_access", disclosure: VerificationPromptContent.disclosure(for: .ageMinimum, parameters: parameters),
             notDisclosed: VerificationPromptContent.notDisclosed(for: .ageMinimum), includedMetadata: VerificationPromptContent.metadata,
             methods: [VerificationMethodOption(kind: .wallet, available: true), VerificationMethodOption(kind: .document, available: true)], createdAt: now,
-            expiresAt: now.addingTimeInterval(expiresIn), displayDigest: digest)
+            expiresAt: now.addingTimeInterval(expiresIn), displayDigest: "").withRenderedDigest()
     }
 }
