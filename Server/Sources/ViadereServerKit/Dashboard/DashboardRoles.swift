@@ -172,3 +172,20 @@ enum KeyScopePolicy {
         !Set(scopes).isSubset(of: baselineScopes) || !Set(capabilities).isSubset(of: Set(Capability.messaging.map(\.rawValue)))
     }
 }
+
+/// The permission matrix as Markdown, rendered from `DashboardPermission.roles`. `docs/ops/CONSOLE-ROLES.md` embeds this text between the
+/// markers and `WP6RolesTests` fails when the file and the code differ, so the document cannot drift from what the server enforces.
+enum OrgRoleMatrix {
+    static let beginMarker = "<!-- matrix:begin -->"
+    static let endMarker = "<!-- matrix:end -->"
+
+    static func markdown() -> String {
+        let roles = OrgRole.allCases.sorted(by: >)
+        var lines = ["| Permission | " + roles.map(\.title).joined(separator: " | ") + " |",
+                     "|---|" + roles.map { _ in ":-:" }.joined(separator: "|") + "|"]
+        for permission in DashboardPermission.allCases {
+            lines.append("| `\(permission.rawValue)` | " + roles.map { permission.roles.contains($0) ? "x" : "" }.joined(separator: " | ") + " |")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
