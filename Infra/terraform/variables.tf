@@ -105,6 +105,18 @@ variable "enable_origin_edge_token" {
   default = true
 }
 
+variable "enable_mtls" {
+  description = "Create the Tier E enterprise hostname with API Shield mTLS (SEC-TR-005). Off until the first enterprise tenant is onboarded. The client-certificate headers are overwritten at the edge whether this is on or not."
+  type        = bool
+  default     = false
+}
+
+variable "mtls_hostname_label" {
+  description = "Label of the enterprise mTLS hostname under the apex (api-mtls, or api-mtls.staging)."
+  type        = string
+  default     = "api-mtls"
+}
+
 variable "managed_ruleset_ids" {
   description = "Cloudflare managed ruleset ids to execute (plan dependent). Defaults: Cloudflare Managed Ruleset and OWASP Core Ruleset."
   type        = map(string)

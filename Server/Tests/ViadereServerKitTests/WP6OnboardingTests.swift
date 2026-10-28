@@ -47,6 +47,24 @@ final class WP6OnboardingTests: XCTestCase {
         XCTAssertTrue(sensitive.requestBlockers.contains(.enhancedReview))
     }
 
+    /// The contract catalog and the public legal pages cannot drift: the slug, the version and the page itself must agree (spec 18.11).
+    func testTheContractCatalogMatchesThePublicLegalPages() throws {
+        let legal = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Site/content/legal")
+        for document in LegalCatalog.documents {
+            let page = legal.appendingPathComponent(document.slug).appendingPathComponent("index.md")
+            let text = try String(contentsOf: page, encoding: .utf8)
+            let front = try XCTUnwrap(text.components(separatedBy: "---\n").dropFirst().first, document.slug)
+            let version = front.split(separator: "\n").first { $0.hasPrefix("version:") }.map { $0.dropFirst("version:".count).trimmingCharacters(in: .whitespaces) }
+            XCTAssertEqual(version, document.version, "\(document.slug): the catalog version must be the version of the published page")
+            XCTAssertTrue(front.contains("counsel_review:"), "\(document.slug) carries its review status")
+            XCTAssertLessThanOrEqual(LegalCatalog.compare(document.materialSince, document.version), 0)
+        }
+        XCTAssertEqual(Set(LegalCatalog.documents.map(\.slug)).count, LegalCatalog.documents.count)
+        XCTAssertEqual(LegalCatalog.compare("0.10.0", "0.9.0"), 1)
+        XCTAssertEqual(LegalCatalog.compare("1.0", "1.0.0"), 0)
+    }
+
     // MARK: §9.4 acceptance flow
 
     /// A legitimate low-risk messaging business: workspace -> verify control -> sandbox key -> send a test message -> configure a signed webhook ->

@@ -17,7 +17,7 @@ if a previous list repeats the current id, an id is malformed, a previous key is
 ## 1. Order of operations (all four)
 
 1. Take a backup/snapshot (Neon) and generate the new key. Store old and new in escrow.
-2. `fly secrets set` the new value, the new id, and the old value into the matching `*_PREVIOUS` list **in one command** (machines restart one by one; during the roll both versions run, and both can read each other's data because every instance has the old key in its previous list **after** the first restart - set the previous list first when you cannot restart all at once: step 2a `*_PREVIOUS`, step 2b the new key).
+2. Set the old value in the matching `*_PREVIOUS` list **and** the new value plus its id in **one** `fly secrets set` (one restart). Machines restart one by one; during the roll an instance that has not restarted yet can still read everything the new instances wrote only if it knows the new key, so for the data key do the roll in two steps when you cannot tolerate a few read errors: first add only `DATA_ENCRYPTION_KEYS_PREVIOUS="k1:<old>,k2:<new>"` (everyone can read both), then switch the current key.
 3. Run the re-encryption or verification step of the section below.
 4. Only after verification, remove the old key from `*_PREVIOUS` and restart.
 
@@ -44,12 +44,18 @@ and `dashboard_ceremonies.payload_json` may hold unsealed values (older plaintex
 
 ## 3. Pepper (`SERVER_PEPPER`)
 
-The pepper keys two kinds of hash. **Versioned** hashes (`<pepper id>:<hex>`, `Hasher256.versionedHex` / `verifyVersioned`: contract acceptance address/agent, API-key last-used address) survive a
-rotation while the old pepper is in `SERVER_PEPPERS_PREVIOUS`. The **original lookup** hashes (`hmacHex`: phone-number hashes, dashboard e-mail hashes, recovery hashes, OTP hashes, pairwise
-references) are single-valued indexes: after a rotation they no longer match, so a rotation of `SERVER_PEPPER` must be planned with the matching re-issue steps: phone links re-verify, dashboard
-users sign in again with their e-mail (the hash is re-derived on the next successful sign-in), recovery codes are re-issued, SMS contexts reset. Treat a pepper rotation as a **planned
-maintenance event** with user-visible re-verification, not a background job, and prefer rotating only after a suspected exposure. `SUBJECT_REF_KEY` has its own re-derivation (clear
-`relationships.subject_ref`; the job re-derives; businesses re-fetch references).
+The pepper keys two kinds of hash.
+
+* **Versioned** hashes (`<pepper id>:<hex>`; `Hasher256.versionedHex` / `verifyVersioned`) name the pepper that made them and keep verifying while that pepper is in `SERVER_PEPPERS_PREVIOUS`. Used today
+  by contract acceptance (address and agent hash) and the API-key last-used address. Use `versionedHex` for every new stored hash that must survive a rotation.
+* **Lookup** hashes (`hmacHex`) are single-valued indexes made with the **current** pepper: phone-number hashes and OTP hashes, the dashboard e-mail hash and e-mail-code hash, recovery id and code hashes,
+  reward redemption and delegation invitation hashes, RCS postback and Wallet authentication hashes, Approve enrollment code hashes, Verify idempotency and result references, the CSRF derivation. There is
+  **no automatic re-hash**: after a rotation these no longer match what is stored. The visible effects: phone links must be re-verified, dashboard users cannot sign in by e-mail until their hash is
+  rewritten (an operator re-issues the e-mail hash from the sealed e-mail with a one-off script, which does not exist yet), recovery codes must be re-issued, open codes and invitations expire.
+
+So: **rotating `SERVER_PEPPER` is a planned, user-visible maintenance event**, justified only by a suspected exposure of the pepper together with a database copy (the pepper's job is to stop offline
+guessing from a database leak alone). Until the lookup hashes are migrated to `versionedHex` with multi-pepper lookup (tracked as residual risk in SECURITY.md section 2.80) do not rotate it
+casually. `SUBJECT_REF_KEY` has its own re-derivation (clear `relationships.subject_ref`; the job re-derives; businesses re-fetch references).
 
 ## 4. Audit chain key (`AUDIT_CHAIN_KEY`)
 

@@ -27,3 +27,8 @@ output "neon_database_host" {
   description = "Direct (non-pooled) host. Compose DATABASE_URL yourself and store it with `fly secrets set`; passwords are never output."
   value       = neon_project.viadere.database_host
 }
+
+output "mtls_hostname" {
+  description = "Tier E enterprise hostname (empty unless enable_mtls)."
+  value       = var.enable_mtls ? local.mtls_host : ""
+}

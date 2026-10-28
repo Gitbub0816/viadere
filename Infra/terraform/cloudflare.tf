@@ -3,6 +3,11 @@
 
 locals {
   api_host = "${var.api_hostname_label}.${var.apex_domain}"
+  # Enterprise hostname (Tier E, API Shield mTLS). Same Fly origin, same API layer: only the edge asks for a client certificate here.
+  mtls_host = "${var.mtls_hostname_label}.${var.apex_domain}"
+  # Hosts whose requests reach the API origin; the origin headers below are set (and client-supplied copies overwritten) on all of them.
+  origin_hosts = var.enable_mtls ? [local.api_host, local.mtls_host] : [local.api_host]
+  origin_hosts_expression = "http.host in {${join(" ", [for h in local.origin_hosts : "\"${h}\""])}}"
   # Zone-wide settings only exist once per zone: staging and production zones are separate (staging.<apex> is a child zone or
   # its own domain in the staging workspace). This module is applied once per environment with its own zone id and state.
 }
@@ -194,26 +199,86 @@ resource "cloudflare_authenticated_origin_pulls_settings" "zone" {
 # resource "cloudflare_authenticated_origin_pulls_certificate" "zone" { ... }  # see the provider docs for the exact schema in use
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Shared secret header on every origin request. The server must verify it (gap G-10 in docs/ops/KILL-SWITCHES.md).
+# Headers the origin trusts, set at the edge (gap G-10, SEC-TR-005; docs/ops/KILL-SWITCHES.md):
+#  1. X-Viadere-Edge-Token: the shared secret. The server refuses (421) every request that lacks it, in constant time.
+#  2. X-Viadere-Client-Cert-*: what Cloudflare itself verified about the client certificate (API Shield mTLS). They are **always overwritten**
+#     here, for every request to the API hosts, so a client can never smuggle its own values through Cloudflare to the origin; on a host or
+#     request without a certificate they read `false` and empty. The server believes them only on a request that carries the edge token.
+# One entry-point ruleset exists per zone and phase, so both live in the same resource.
 # ---------------------------------------------------------------------------------------------------------------------
 resource "cloudflare_ruleset" "origin_edge_token" {
-  count   = var.enable_origin_edge_token ? 1 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "Viadere origin edge token"
+  name    = "Viadere origin headers"
   kind    = "zone"
   phase   = "http_request_late_transform"
-  rules = [{
-    action = "rewrite"
-    action_parameters = {
-      headers = {
-        "X-Viadere-Edge-Token" = {
-          operation = "set"
-          value     = var.edge_token
+  rules = [
+    {
+      action = "rewrite"
+      action_parameters = {
+        headers = {
+          "X-Viadere-Edge-Token" = {
+            operation = "set"
+            value     = var.edge_token
+          }
         }
       }
-    }
-    expression  = "http.host eq \"${local.api_host}\""
-    description = "Set the origin shared header"
+      expression  = local.origin_hosts_expression
+      description = "Set the origin shared header"
+      enabled     = var.enable_origin_edge_token
+    },
+    {
+      action = "rewrite"
+      action_parameters = {
+        headers = {
+          "X-Viadere-Client-Cert-Verified" = {
+            operation  = "set"
+            expression = "to_string(cf.tls_client_auth.cert_verified)"
+          }
+          "X-Viadere-Client-Cert-Sha256" = {
+            operation  = "set"
+            expression = "cf.tls_client_auth.cert_fingerprint_sha256"
+          }
+          "X-Viadere-Client-Cert-Issuer-Ski" = {
+            operation  = "set"
+            expression = "cf.tls_client_auth.cert_issuer_ski"
+          }
+        }
+      }
+      expression  = local.origin_hosts_expression
+      description = "Overwrite the client-certificate headers with what Cloudflare verified"
+      enabled     = true
+    },
+  ]
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Tier E enterprise connectivity: API Shield mutual TLS on a separate hostname (SEC-TR-005). Ordinary businesses use the normal API hostname
+# with no certificate and no VPN; an enterprise points its integration at the mTLS hostname and presents a client certificate issued by a CA
+# that Viadere uploaded for it (account-level `mtls_certificates` plus a hostname association, done per tenant at onboarding through the
+# Cloudflare API: docs/ops/RUNBOOKS.md "Enterprise mTLS onboarding"). The edge refuses a request without a verified certificate on this
+# hostname; the server additionally checks that the certificate is bound to the tenant that owns the API key.
+# ---------------------------------------------------------------------------------------------------------------------
+resource "cloudflare_dns_record" "api_mtls" {
+  count   = var.enable_mtls ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = local.mtls_host
+  type    = "CNAME"
+  content = var.fly_origin_hostname
+  proxied = true
+  ttl     = 1 # automatic
+  comment = "Tier E: API Shield mTLS hostname (same Fly origin). Add its certificate on Fly: fly certs add."
+}
+
+resource "cloudflare_ruleset" "mtls_enforce" {
+  count   = var.enable_mtls ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "Viadere API Shield mTLS"
+  kind    = "zone"
+  phase   = "http_request_firewall_custom"
+  rules = [{
+    action      = "block"
+    expression  = "http.host eq \"${local.mtls_host}\" and not cf.tls_client_auth.cert_verified"
+    description = "Enterprise hostname: refuse requests without a verified client certificate"
     enabled     = true
   }]
 }

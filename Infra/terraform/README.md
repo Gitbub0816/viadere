@@ -4,9 +4,10 @@ OpenTofu (Terraform-compatible) for the three managed platforms that are not Fly
 
 | File | Manages |
 |---|---|
-| `cloudflare.tf` | zone TLS settings, HSTS, DNSSEC, CAA, DNS (apex, www, api, status), WAF managed rules, edge rate limits, Authenticated Origin Pulls, origin shared header, site hostnames |
+| `cloudflare.tf` | zone TLS settings, HSTS, DNSSEC, CAA, DNS (apex, www, api, status), WAF managed rules, edge rate limits, Authenticated Origin Pulls, the origin headers (edge token, verified client-certificate headers), the Tier E mTLS hostname (`enable_mtls`), site hostnames |
+| `audit_bucket.tf` | write-once Cloud Storage bucket (locked retention policy) for exported audit-chain heads, create-only IAM for the server, auditor read role |
 | `kms.tf` | Google Cloud KMS key ring, HSM keys per purpose, a dedicated least-privilege service account, workload identity, audit logging and alerts |
-| `neon.tf` | Neon project (PostgreSQL 18), roles, database, daily snapshot schedule |
+| `neon.tf` | Neon project (PostgreSQL 18), the migrator and runtime roles (`DATABASE_MIGRATION_URL` / `DATABASE_URL`), database, daily snapshot schedule |
 | `backend.tf` | remote state **placeholder** (GCS); `backend.example.hcl` lists the keys |
 | `versions.tf` | provider pins |
 
@@ -72,3 +73,19 @@ or child zone, KMS key ring, and Neon project. Nothing is shared, so a staging m
 ## Validation status
 
 `tofu init -backend=false && tofu validate` passes (OpenTofu 1.13.2). `tofu plan` was not run (needs real credentials and ids).
+
+## WP6 additions (2026-10-28)
+
+* **Not validated here.** `tofu` is not installed in the build container, so `audit_bucket.tf` and the new `cloudflare.tf` rules (`origin_edge_token` headers, `api_mtls`, `mtls_enforce`) were written to the
+  schemas used elsewhere in this module but **not** run through `tofu validate`. Run `tofu fmt -check && tofu validate && tofu plan` and have a human review the plan before the first apply.
+* **Origin headers.** `cloudflare_ruleset.origin_edge_token` now also **overwrites** `X-Viadere-Client-Cert-Verified`, `-Sha256` and `-Issuer-Ski` on every request to the API hosts from `cf.tls_client_auth.*`
+  (one entry-point ruleset exists per zone and phase, so both live in it). This is what makes the server's trust in those headers sound: a client cannot pass its own values through Cloudflare.
+  The server believes them only on a request that also carries a valid `X-Viadere-Edge-Token`.
+* **Tier E mTLS (`enable_mtls`).** Creates `api-mtls.<apex>` (proxied to the same Fly origin; add its Fly certificate) and a custom WAF rule that blocks any request to it without a verified client
+  certificate. Uploading an enterprise tenant's CA and associating it with the hostname is a per-tenant operational step through the Cloudflare API (`POST /accounts/{id}/mtls_certificates`,
+  `PUT /zones/{id}/certificate_authorities/hostname_associations`), not Terraform state; see docs/ops/RUNBOOKS.md "Enterprise mTLS onboarding". The tenant then binds the leaf fingerprint or CA key id in the
+  console (Security > Certificates). Ordinary businesses never need a certificate or a VPN.
+* **Audit-head bucket (`audit_bucket.tf`).** `google_storage_bucket.audit_heads` with `retention_policy` (7 years default) and `is_locked = var.audit_bucket_lock` (**irreversible**: lock it in production only after
+  counsel agrees the period), `roles/storage.objectCreator` for the server's service account (create only: no read, overwrite or delete) and an auditor viewer list. Outputs `audit_head_bucket` and `audit_head_kms_key` feed
+  `AUDIT_HEAD_EXPORT_TARGET` and `AUDIT_HEAD_KMS_KEY`. Cloudflare R2 with Object Lock is the documented alternative (`AUDIT_HEAD_EXPORT=r2`); it needs no resource here.
+* **Roles.** `neon.tf` documents the two database roles; the grants are applied by the `migrate` release command (`GrantRuntimeRolePrivileges`).
