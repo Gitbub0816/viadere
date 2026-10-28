@@ -195,6 +195,26 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
                                                                  body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
     }
 
+    /// Proves ownership of the endpoint: the server sends a signed, single-use challenge the endpoint must echo.
+    public func verifyWebhook(id: WebhookSubscriptionID) async throws -> WebhookVerificationResult {
+        try decode(WebhookVerificationResult.self, try await perform(APIRoutes.businessWebhookVerify.descriptor, parameters: ["webhookId": id.description],
+                                                                    body: Optional<EmptyBody>.none, naturallyIdempotent: true))
+    }
+
+    /// Sends one signed `webhook.test` event to the endpoint.
+    public func testWebhook(id: WebhookSubscriptionID) async throws {
+        _ = try await perform(APIRoutes.businessWebhookTest.descriptor, parameters: ["webhookId": id.description], body: Optional<EmptyBody>.none)
+    }
+
+    public func pauseWebhook(id: WebhookSubscriptionID, reason: String? = nil) async throws {
+        _ = try await perform(APIRoutes.businessWebhookPause.descriptor, parameters: ["webhookId": id.description], body: PauseWebhookRequest(reason: reason),
+                              naturallyIdempotent: true)
+    }
+
+    public func resumeWebhook(id: WebhookSubscriptionID) async throws {
+        _ = try await perform(APIRoutes.businessWebhookResume.descriptor, parameters: ["webhookId": id.description], body: Optional<EmptyBody>.none, naturallyIdempotent: true)
+    }
+
     // MARK: Plumbing
 
     func perform<Body: Encodable>(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: Body?, idempotencyKey: String? = nil,
