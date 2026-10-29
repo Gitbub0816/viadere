@@ -1,7 +1,7 @@
 import Foundation
 import ViadereCore
 
-#if canImport(Security) && canImport(LocalAuthentication)
+#if canImport(Security) && canImport(LocalAuthentication) && !os(watchOS)
 import Crypto
 import LocalAuthentication
 import Security

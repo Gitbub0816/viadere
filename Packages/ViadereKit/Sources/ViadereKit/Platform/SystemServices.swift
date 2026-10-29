@@ -1,6 +1,6 @@
 import Foundation
 
-#if canImport(LocalAuthentication)
+#if canImport(LocalAuthentication) && !os(watchOS)
 import LocalAuthentication
 
 /// Face ID / Touch ID / passcode gate for the optional app lock (`.deviceOwnerAuthentication`: biometrics with

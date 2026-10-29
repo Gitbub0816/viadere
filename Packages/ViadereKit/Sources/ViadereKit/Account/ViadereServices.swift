@@ -67,7 +67,7 @@ public struct ViadereServices: Sendable {
 
     // MARK: Live
 
-    #if canImport(Security) && canImport(LocalAuthentication)
+    #if canImport(Security) && canImport(LocalAuthentication) && !os(watchOS)
     /// The production graph: Keychain-backed storage, Secure Enclave keys (software fallback only in DEBUG on the
     /// simulator), pinned URLSession transport, device-signed API client with single-flight refresh.
     /// - Parameters:

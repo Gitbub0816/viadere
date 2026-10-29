@@ -2,7 +2,7 @@ import Crypto
 import Foundation
 import ViadereCore
 
-#if canImport(Security) && canImport(LocalAuthentication)
+#if canImport(Security) && canImport(LocalAuthentication) && !os(watchOS)
 import LocalAuthentication
 import Security
 
@@ -159,12 +159,7 @@ struct EnclaveKey: ManagedSigningKey {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let context = LAContext()
-                #if !os(watchOS)
-                // watchOS has no custom prompt text: the system shows its own wrist-confirmation UI.
                 context.localizedReason = reason
-                #else
-                _ = reason
-                #endif
                 var query: [String: Any] = [
                     kSecClass as String: kSecClassKey,
                     kSecAttrApplicationTag as String: tag,

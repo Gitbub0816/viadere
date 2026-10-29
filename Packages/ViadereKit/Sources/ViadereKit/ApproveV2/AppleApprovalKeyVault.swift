@@ -2,7 +2,7 @@ import Crypto
 import Foundation
 import ViadereCore
 
-#if canImport(Security) && canImport(LocalAuthentication)
+#if canImport(Security) && canImport(LocalAuthentication) && !os(watchOS)
 import Security
 
 /// The production `ApprovalKeyVault`: one Secure Enclave approval key per enrollment (a `SecureEnclaveKeyStore` namespaced by the enrollment id,
