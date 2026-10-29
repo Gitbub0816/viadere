@@ -79,14 +79,14 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   DASHBOARD_IDLE_MINUTES = "30"
   DASHBOARD_ABSOLUTE_HOURS = "12"
   # ---- Apple identifiers (public values) ------------------------------------------------------------
-  APPLE_TEAM_ID = "REPLACE_WITH_TEAM_ID"        # 10 characters
+  APPLE_TEAM_ID = "M669H43X63"        # 10 characters
   APP_STORE_ID = ""
   APP_ATTEST_MODE = "report"            # roll out as `report`, then flip to `require` once the shipping app attests (README Round 4)
   APP_ATTEST_ENVIRONMENT = "development"   # Xcode / internal builds
   APNS_ENVIRONMENT = "sandbox"
   APNS_TOPIC = "com.viadere.app"
-  APNS_KEY_ID = "REPLACE_WITH_KEY_ID"           # identifier of the .p8 key (not secret; the key itself is APNS_KEY_P8)
-  APNS_TEAM_ID = "REPLACE_WITH_TEAM_ID"
+  APNS_KEY_ID = "NH9V2KR4LK"           # identifier of the .p8 key (not secret; the key itself is APNS_KEY_P8)
+  APNS_TEAM_ID = "M669H43X63"
   PASS_TYPE_IDENTIFIER = ""             # set with the three PASS_*_PEM secrets, or leave all four unset (passes off)
   # ---- provider endpoints / senders (public values) -------------------------------------------------
   EMAIL_API_URL = "https://api.mailersend.com/v1/email"
