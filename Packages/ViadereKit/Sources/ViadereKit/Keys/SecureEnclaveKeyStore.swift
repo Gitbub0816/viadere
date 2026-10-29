@@ -73,7 +73,7 @@ public final class SecureEnclaveKeyStore: DeviceKeyStore, @unchecked Sendable {
         case errSecSuccess:
             guard let item, CFGetTypeID(item) == SecKeyGetTypeID() else { return nil }
             return try EnclaveKey(purpose: purpose, tag: tag(purpose), accessGroup: accessGroup(for: purpose),
-                                  privateKey: unsafeBitCast(item, to: SecKey.self))
+                                  privateKey: unsafeDowncast(item, to: SecKey.self))
         case errSecItemNotFound:
             // `.biometryCurrentSet` keys vanish when the enrolled biometrics change.
             return nil
@@ -159,7 +159,12 @@ struct EnclaveKey: ManagedSigningKey {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let context = LAContext()
+                #if !os(watchOS)
+                // watchOS has no custom prompt text: the system shows its own wrist-confirmation UI.
                 context.localizedReason = reason
+                #else
+                _ = reason
+                #endif
                 var query: [String: Any] = [
                     kSecClass as String: kSecClassKey,
                     kSecAttrApplicationTag as String: tag,
@@ -177,7 +182,7 @@ struct EnclaveKey: ManagedSigningKey {
                         : (KeychainStatus.lookupError(status, purpose: purpose) ?? KeyStoreError.signingFailed(status)))
                     return
                 }
-                let key = unsafeBitCast(item, to: SecKey.self)
+                let key = unsafeDowncast(item, to: SecKey.self)
                 var error: Unmanaged<CFError>?
                 guard let der = SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256, data as CFData, &error) as Data? else {
                     continuation.resume(throwing: Self.map(error?.takeRetainedValue(), purpose: purpose))
