@@ -62,6 +62,8 @@ public final class OnboardingViewModel {
     public private(set) var passkeyNotSynced = false
     /// The honest warning is on screen; a second, explicit confirmation skips.
     public private(set) var showsSkipWarning = false
+    /// A passkey sign-in found an existing account: the device step adds this iPhone to it instead of creating an account.
+    public private(set) var joinsExistingAccount = false
 
     public static let skipWarning =
         "If you lose this iPhone and have no other device, your account can't be recovered. Your connections and history would be lost."
@@ -120,6 +122,7 @@ public final class OnboardingViewModel {
             // An existing account already has its recovery credentials (and this new iPhone may not manage them until it is approved):
             // the protect step is for new accounts.
             services.preferences.setBool(true, for: .protectionPromptShown)
+            joinsExistingAccount = true
             // A returning person may already have a device record on this phone.
             if let record = try? await services.records.load() { enrolled = record; step = .notifications } else { step = .device }
         }

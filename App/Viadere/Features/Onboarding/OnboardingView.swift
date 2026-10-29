@@ -159,8 +159,10 @@ private struct DeviceStep: View {
 
     var body: some View {
         OnboardingScaffold(
-            index: 0, title: "Set up this iPhone",
-            message: "Viadere doesn't ask for your name, email or phone number. This iPhone becomes your account, protected by its own Secure Enclave."
+            index: 0, title: vm.joinsExistingAccount ? "Add this iPhone" : "Set up this iPhone",
+            message: vm.joinsExistingAccount
+                ? "Your passkey found your account. This iPhone gets its own keys. It can't approve high-risk requests until one of your trusted devices approves it."
+                : "Viadere doesn't ask for your name, email or phone number. This iPhone becomes your account, protected by its own Secure Enclave."
         ) {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
                 ViadereTextField("Device name", text: $vm.deviceName, prompt: "iPhone",
