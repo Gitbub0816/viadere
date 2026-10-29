@@ -1,6 +1,6 @@
 # ADR-0003: Google Cloud KMS (HSM, EC P-256) for service keys
 
-- **Status:** accepted
+- **Status:** superseded by 0012 (proposed 2026-10-29; stays in force until 0012 is accepted and the Key Vault provider replaces Cloud KMS)
 - **Plan reference:** ADR-03 in `docs/IMPLEMENTATION-PLAN-v2.md` (decided by: Product owner)
 - **Related:** Infra/terraform/kms.tf
 - **Review:** revisit at each phase gate or when a stated assumption changes

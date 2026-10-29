@@ -1,6 +1,6 @@
 # ADR-0002: PostgreSQL 18 on Neon
 
-- **Status:** accepted
+- **Status:** superseded by 0011 (proposed 2026-10-29; stays in force for the transitional Neon staging database until 0011 is accepted and cutover completes)
 - **Plan reference:** ADR-02 in `docs/IMPLEMENTATION-PLAN-v2.md` (decided by: Product owner)
 - **Related:** Infra/terraform/neon.tf
 - **Review:** revisit at each phase gate or when a stated assumption changes
