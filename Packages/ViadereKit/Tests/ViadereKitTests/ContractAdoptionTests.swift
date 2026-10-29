@@ -338,10 +338,10 @@ struct CoolDownTests {
         for envelope in [high, other, report] { await api.add(envelope) }
 
         do { _ = try await added.approvals.submit(high, decision: .approve); Issue.record("approved while cooling down") } catch let error as ApprovalError {
-            guard case .deviceCoolingDown(let until?) = error else { Issue.record("wrong error \(error)"); return }
-            #expect(until > Date())
-            #expect(error.userMessage.hasPrefix("For your security, this iPhone can approve high-risk requests after "))
-            #expect(error.userMessage.hasSuffix(", or confirm it from your other device."))
+            guard case .deviceCoolingDown = error else { Issue.record("wrong error \(error)"); return }
+            // No time is promised: only an approval from a trusted device (or the business, for its own requests) changes it.
+            #expect(error.userMessage == CoolDownPolicy.notApprovedMessage)
+            #expect(!error.userMessage.contains(" after "))
         }
         #expect(await api.decideAttempts == 0, "paused before any Face ID prompt or network decision")
 
@@ -349,6 +349,21 @@ struct CoolDownTests {
         #expect(denied.status == .denied)
         let reported = try await added.approvals.submit(report, decision: .report)
         #expect(reported.decision == .report)
+    }
+
+    @Test func aWindowThatEndedDoesNotMakeADeviceTrusted() {
+        let now = Date()
+        let past = now.addingTimeInterval(-60)
+        var device = Device(id: DeviceID(), consumerId: ConsumerID(), name: "iPhone", platform: .iOS, keys: [], createdAt: now.addingTimeInterval(-90_000),
+                            approvalsLockedUntil: past, trustTier: .d0)
+        #expect(!device.approvesHighRisk(at: now), "the server's tier decides, not the clock")
+        device.trustTier = .d1
+        #expect(device.approvesHighRisk(at: now))
+        // A server that predates tiers is read the old way.
+        device.trustTier = nil
+        #expect(device.approvesHighRisk(at: now))
+        device.approvalsLockedUntil = now.addingTimeInterval(60)
+        #expect(!device.approvesHighRisk(at: now))
     }
 
     @Test func lowerRiskApprovalsAreNotPaused() async throws {
@@ -378,7 +393,7 @@ struct CoolDownTests {
         let model = ApprovalViewModel(envelope: high, services: added)
         await model.load()
         #expect(model.approvalPausedByCoolDown)
-        #expect(model.coolDownMessage.contains("or confirm it from your other device"))
+        #expect(model.coolDownMessage == CoolDownPolicy.notApprovedMessage)
         await model.approve()
         #expect(model.phase == .ready && model.outcome == nil)
         #expect(await api.decideAttempts == 0)
@@ -392,7 +407,7 @@ struct CoolDownTests {
         let newHome = HomeViewModel(services: added)
         await newHome.load()
         let notice = try #require(newHome.coolDownNotice)
-        #expect(notice.contains("this iPhone can approve high-risk requests after"))
+        #expect(notice == CoolDownPolicy.notApprovedMessage)
         let envelope = try #require(newHome.content.pending.first)
         #expect(newHome.isPausedByCoolDown(envelope))
         let oldHome = HomeViewModel(services: trusted)
@@ -409,8 +424,9 @@ struct CoolDownTests {
         let tomorrow = now.addingTimeInterval(24 * 3_600)
         #expect(CoolDownPolicy.timeText(later, now: now, calendar: calendar, locale: locale) == "11:00 AM")
         #expect(CoolDownPolicy.timeText(tomorrow, now: now, calendar: calendar, locale: locale) == "tomorrow at 8:00 AM")
-        #expect(CoolDownPolicy.message(until: later, now: now, calendar: calendar, locale: locale)
-                == "For your security, this iPhone can approve high-risk requests after 11:00 AM, or confirm it from your other device.")
+        // The window's end is not a promise any more: the message is the same whatever it is.
+        #expect(CoolDownPolicy.message(until: later, now: now, calendar: calendar, locale: locale) == CoolDownPolicy.notApprovedMessage)
+        #expect(CoolDownPolicy.message(until: nil, now: now) == CoolDownPolicy.notApprovedMessage)
         #expect(CoolDownPolicy.restricts(.approve, on: PreviewData.authorize(sensitivity: .critical).interaction))
         #expect(!CoolDownPolicy.restricts(.deny, on: PreviewData.authorize(sensitivity: .critical).interaction))
         #expect(!CoolDownPolicy.restricts(.approve, on: PreviewData.authenticate(sensitivity: .standard).interaction))
@@ -476,7 +492,7 @@ struct ConfirmationTests {
         await settings.load()
         let listed = try #require(settings.devices.first { $0.id == target.id })
         #expect(settings.canConfirm(listed))
-        #expect(settings.coolDownNote(for: listed)?.hasPrefix("New device. High-risk approvals unlock") == true)
+        #expect(settings.coolDownNote(for: listed)?.hasPrefix("Not approved yet.") == true)
         await settings.confirm(listed)
         #expect(settings.errorMessage == nil)
         #expect(settings.devices.first { $0.id == target.id }?.approvalsLockedUntil == nil)

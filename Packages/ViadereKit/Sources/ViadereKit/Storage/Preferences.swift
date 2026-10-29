@@ -14,6 +14,8 @@ public enum PreferenceKey: String, CaseIterable, Sendable {
     case appLockEnabled
     case onboardingComplete
     case notificationPrimingShown
+    /// The optional "Protect your account" step (passkey, recovery codes) was completed or skipped.
+    case protectionPromptShown
     /// Show business detail in notification banners (user controls previews further in iOS Settings).
     case richNotificationPreviews
     case lastKnownConsumerId

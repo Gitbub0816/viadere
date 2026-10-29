@@ -86,8 +86,23 @@ public final class SecuritySettingsViewModel {
     /// Only a trusted device may generate new codes (it must not be cooling down).
     public var canRegenerateRecoveryCodes: Bool { isTrustedDevice }
 
-    /// This iPhone is not cooling down and not revoked (`DeviceTrust`, §2.5): it may act on the account's security.
-    public var isTrustedDevice: Bool { thisDeviceLockedUntil == nil && thisDevice?.isRevoked != true }
+    /// This iPhone may act on the account's security (the server's rule, §2.5a): it is approved (D1), or it is the account's only
+    /// candidate (no approved device exists) and outside its new-device window. Unknown (devices not loaded): the server decides.
+    public var isTrustedDevice: Bool {
+        guard let device = thisDevice else { return true }
+        let now = services.clock()
+        guard !device.isRevoked else { return false }
+        if device.approvesHighRisk(at: now) { return true }
+        guard device.trustTier != nil else { return false }
+        let otherApproved = devices.contains { $0.id != device.id && !$0.isRevoked && ($0.trustTier ?? .d0) >= .d1 }
+        return !otherApproved && device.clientKind == .app && !device.isCoolingDown(at: now)
+    }
+
+    /// This iPhone can't approve high-risk requests yet (not D1): the calm explanation, else `nil`.
+    public var thisDeviceTrustNotice: String? {
+        guard let device = thisDevice, !device.isRevoked, !device.approvesHighRisk(at: services.clock()) else { return nil }
+        return CoolDownPolicy.notApprovedMessage
+    }
 
     /// Every recovery of this account that is waiting out its 72 h hold, from `RecoveryInfo` (the server's own list, not the Home notice).
     public var pendingRecoveries: [PendingRecovery] {
@@ -129,8 +144,8 @@ public final class SecuritySettingsViewModel {
         return info.remainingCodes == 1 ? "1 unused code" : "\(info.remainingCodes) unused codes"
     }
 
-    /// New recovery codes: a trusted device **and** a fresh passkey assertion. The old codes stop working. The codes are shown once
-    /// (`newRecoveryCodes`) and never stored.
+    /// New recovery codes: a device that may manage the account **and** this device's Face ID / Touch ID / passcode proof (§2.5a; no
+    /// passkey needed). The old codes stop working. The codes are shown once (`newRecoveryCodes`) and never stored.
     public func regenerateRecoveryCodes() async {
         guard !isRegeneratingCodes else { return }
         guard canRegenerateRecoveryCodes else { recoveryMessage = SecurityNoticesViewModel.coolDownActionMessage; return }
@@ -138,13 +153,11 @@ public final class SecuritySettingsViewModel {
         recoveryMessage = nil
         defer { isRegeneratingCodes = false }
         do {
-            let options = try await services.api.beginRecoveryCodes()
-            let assertion = try await services.passkeys.assert(options: options)
-            let set = try await services.api.regenerateRecoveryCodes(RecoveryCodesRegenerateRequest(ceremonyId: options.ceremonyId, assertion: assertion))
+            let set = try await services.account.makeRecoveryCodes()
             newRecoveryCodes = RecoveryCodesViewModel(codes: set)
             await loadRecovery()
-        } catch let error as PasskeyError {
-            if error != .cancelled { recoveryMessage = error.userMessage }
+        } catch let error as ConfirmationError {
+            if error != .userCancelled { recoveryMessage = error.userMessage }
         } catch let error as APIError {
             recoveryMessage = error.code == .deviceCoolDown ? SecurityNoticesViewModel.coolDownActionMessage : error.userMessage
         } catch {
@@ -261,22 +274,22 @@ public final class SecuritySettingsViewModel {
         return until
     }
 
-    /// Whether this iPhone may confirm another device: it is not itself cooling down and has a Face ID / Touch ID approval key.
+    /// Whether this iPhone may approve another device: it is approved itself (D1) and has a Face ID / Touch ID approval key.
     public var canConfirmOthers: Bool {
-        thisDeviceLockedUntil == nil && thisDevice?.isRevoked == false
-            && thisDevicePurposes.contains(.approvalBiometric)
+        guard let device = thisDevice, !device.isRevoked else { return false }
+        return device.approvesHighRisk(at: services.clock()) && thisDevicePurposes.contains(.approvalBiometric)
     }
 
-    /// Other trusted devices' cool-down, as one calm line (`nil` when the device is trusted).
+    /// A device that is not approved yet, as one calm line (`nil` when it is approved).
     public func coolDownNote(for device: Device) -> String? {
-        let now = services.clock()
-        guard !device.isRevoked, device.isCoolingDown(at: now), let until = device.approvalsLockedUntil else { return nil }
-        return "New device. High-risk approvals unlock \(CoolDownPolicy.timeText(until, now: now))."
+        guard !device.isRevoked, device.clientKind == .app, !device.approvesHighRisk(at: services.clock()) else { return nil }
+        return "Not approved yet. It can't approve high-risk requests until a trusted device approves it."
     }
 
-    /// Whether the "Confirm" action applies to `device`: someone else's cooling-down device, from a device that may confirm.
+    /// Whether the "Approve" action applies to `device`: someone else's device that is not approved yet, from a device that may approve it.
     public func canConfirm(_ device: Device) -> Bool {
-        device.id != currentDeviceId && !device.isRevoked && device.isCoolingDown(at: services.clock()) && canConfirmOthers
+        device.id != currentDeviceId && !device.isRevoked && device.clientKind == .app && !device.approvesHighRisk(at: services.clock())
+            && canConfirmOthers
     }
 
     /// "Usable after 3:42 PM" for a phone still in its cool-down, else `nil`.

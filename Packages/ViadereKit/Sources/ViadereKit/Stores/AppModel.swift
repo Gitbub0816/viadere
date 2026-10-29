@@ -82,7 +82,8 @@ public final class AppModel {
         let complete = services.preferences.bool(.onboardingComplete)
         guard hasSession, complete else {
             phase = .onboarding(OnboardingFlow.resume(hasSession: hasSession, hasDevice: record != nil,
-                                                      primingShown: services.preferences.bool(.notificationPrimingShown), complete: complete,
+                                                      primingShown: services.preferences.bool(.notificationPrimingShown),
+                                                      protectionShown: services.preferences.bool(.protectionPromptShown), complete: complete,
                                                       recoveryPending: RecoveryHoldStore(secrets: services.secrets).load() != nil))
             return
         }

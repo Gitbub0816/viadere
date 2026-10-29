@@ -46,14 +46,69 @@ public struct AccountService: Sendable {
         self.clock = clock
     }
 
-    // MARK: Sign-up / sign-in
+    // MARK: Device-first account (§2.5a)
 
-    /// Creates the account. Returns the account's **recovery codes**, which the server sends exactly once: the caller shows them
+    /// Creates a pseudonymous account **from this device**: no name, email, phone or passkey.
+    ///
+    /// 1. `POST /v1/accounts/enroll/begin`: a single-use challenge and the reserved account id.
+    /// 2. This device's Secure Enclave keys are created and prove possession over that id and challenge; a fresh App Attest key attests
+    ///    exactly that key list (`AppAttestBinding`), sent as `IntegrityEvidence` (`apple-app-attest`).
+    /// 3. `POST /v1/accounts` creates the account, this device and a session already bound to it.
+    ///
+    /// The App Clip registers a request key only (a D0, 7-day device). Recovery credentials are optional and added afterwards
+    /// (`makeRecoveryCodes`, `addRecoveryPasskey`).
+    @discardableResult
+    public func createAccount(deviceName: String?) async throws -> DeviceRecord {
+        let opened = try await api.beginAccountEnrollment()
+        let purposes: [DeviceKeyPurpose] = isAppClip ? [.request] : DeviceKeyPurpose.allCases
+        let provisioned = try await DeviceKeyProvisioner(store: keys).provision(consumerId: opened.accountId, challenge: opened.challenge, purposes: purposes)
+        guard provisioned.registrations.contains(where: { $0.purpose == .request }) else { throw KeyStoreError.unavailable }
+        let evidence = try await EnrollmentAttester(provider: appAttest, skipsWhenUnsupported: skipsAttestationWhenUnsupported)
+            .evidence(consumerId: opened.accountId, challenge: opened.challenge, keys: provisioned.registrations)
+        let name = deviceName.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }.flatMap { $0.isEmpty ? nil : $0 }
+        let created: AccountCreateResponse
+        do {
+            created = try await api.createAccount(AccountCreateRequest(
+                ceremonyId: opened.ceremonyId, challenge: opened.challenge, platform: platform, deviceName: name, keys: provisioned.registrations,
+                integrity: evidence.map(IntegrityEvidence.init(appleAppAttest:)), clientKind: isAppClip ? .appClip : .app))
+        } catch {
+            // Nothing was created on the server: the keys made for it are useless.
+            try? await keys.deleteAllKeys()
+            throw error
+        }
+        try await store(created.session)
+        let record = DeviceRecord(deviceId: created.device.id, consumerId: created.accountId, name: created.device.name,
+                                  purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
+        try await records.save(record)
+        return record
+    }
+
+    /// "Protect your account": a new set of recovery codes, proven with this device's Face ID / Touch ID / passcode key. The old codes stop
+    /// working. The codes are shown once by the caller and never stored.
+    public func makeRecoveryCodes(reason: String = "Make recovery codes for your account") async throws -> RecoveryCodeSet {
+        let ceremony = try await api.beginRecoveryCodes()
+        let proof = try await ConfirmationService(api: api, keys: keys, records: records, clock: clock)
+            .recoveryCredentialProof(ceremonyId: ceremony.ceremonyId, reason: reason)
+        return try await api.regenerateRecoveryCodes(RecoveryCodesRegenerateRequest(ceremonyId: ceremony.ceremonyId, proof: proof))
+    }
+
+    /// "Protect your account": a passkey (synced by iCloud Keychain where it is on) as an optional recovery and sign-in credential. The
+    /// system passkey sheet appears, then this device confirms with its own key.
+    public func addRecoveryPasskey(reason: String = "Add a passkey to your account") async throws -> RecoveryPasskeyAdded {
+        let options = try await api.beginRecoveryPasskey()
+        let credential = try await passkeys.register(options: options)
+        let proof = try await ConfirmationService(api: api, keys: keys, records: records, clock: clock)
+            .recoveryCredentialProof(ceremonyId: options.ceremonyId, reason: reason)
+        return try await api.finishRecoveryPasskey(RecoveryPasskeyFinishRequest(ceremonyId: options.ceremonyId, credential: credential, proof: proof))
+    }
+
+    // MARK: Sign-up / sign-in (passkey: an existing account, or discovery on a new device)
+
+    /// Creates the account the passkey-first way (kept for older flows; new accounts use `createAccount`). Returns the account's **recovery codes**, which the server sends exactly once: the caller shows them
     /// (`RecoveryCodesViewModel`) and must not keep them. They are never stored here.
     @discardableResult
-    public func signUp(displayName: String) async throws -> RecoveryCodeSet? {
+    public func signUp(displayName: String = "") async throws -> RecoveryCodeSet? {
         let name = String(displayName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
-        guard !name.isEmpty else { throw APIError.invalidRequest("name") }
         let options = try await api.beginRegistration(displayName: name)
         let credential = try await passkeys.register(options: options)
         let grant = try await api.finishRegistration(PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: credential))

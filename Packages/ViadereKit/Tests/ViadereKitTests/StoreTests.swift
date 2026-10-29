@@ -158,38 +158,52 @@ struct OnboardingTests {
         #expect(OnboardingFlow.resume(hasSession: false, hasDevice: false, primingShown: false, complete: false) == .welcome)
         #expect(OnboardingFlow.resume(hasSession: true, hasDevice: false, primingShown: false, complete: false) == .device)
         #expect(OnboardingFlow.resume(hasSession: true, hasDevice: true, primingShown: false, complete: false) == .notifications)
-        #expect(OnboardingFlow.resume(hasSession: true, hasDevice: true, primingShown: true, complete: false) == .phone)
+        #expect(OnboardingFlow.resume(hasSession: true, hasDevice: true, primingShown: true, protectionShown: false, complete: false) == .protect)
+        #expect(OnboardingFlow.resume(hasSession: true, hasDevice: true, primingShown: true, protectionShown: true, complete: false) == .phone)
         #expect(OnboardingFlow.resume(hasSession: true, hasDevice: true, primingShown: true, complete: true) == .done)
     }
 
+    /// Device-first: consent, this iPhone creates the account (no name, email, phone or passkey), notifications, optional protection,
+    /// optional phone.
     @Test func fullFlow() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api, signedIn: false)
         let model = OnboardingViewModel(services: services, deviceName: "Ana's iPhone")
-        #expect(!model.canCreateAccount)
+        #expect(model.canCreateAccount, "nothing personal is needed")
         model.begin()
-        #expect(model.step == .account)
-        model.displayName = "Ana"
-        await model.createAccount()
-        // The recovery codes come first, once; "I saved these" is required.
+        #expect(model.step == .device)
+        await model.enrollDevice()
+        #expect(model.step == .notifications)
+        #expect(model.errorMessage == nil)
+        #expect(await services.sessions.isSignedIn)
+        #expect(model.maxAssurance == .biometric)
+        let created = try #require(await api.accountCreateRequests.first)
+        #expect(created.deviceName == "Ana's iPhone")
+        #expect(created.integrity?.format == .appleAppAttest)
+        #expect(await api.enrollmentLog.isEmpty, "no passkey enrollment")
+        #expect(try await api.devices().first?.trustTier == .d1)
+
+        await model.allowNotifications()
+        #expect(model.step == .protect)
+        #expect(services.preferences.bool(.notificationPrimingShown))
+
+        // Recovery codes: this iPhone's Face ID proves it; the codes are shown once, then back to the protect step.
+        await model.makeRecoveryCodes()
         #expect(model.step == .recoveryCodes)
         #expect(model.recoveryCodes?.codes?.codes.count == RecoveryPolicy.codeCount)
         model.recoveryCodesSaved()
         #expect(model.step == .recoveryCodes, "not without the confirmation")
         model.recoveryCodes?.confirmedSaved = true
         model.recoveryCodesSaved()
-        #expect(model.step == .device)
-        #expect(model.recoveryCodes == nil)
-        #expect(await services.sessions.isSignedIn)
-
-        await model.enrollDevice()
-        #expect(model.step == .notifications)
-        #expect(model.maxAssurance == .biometric)
-        #expect(try await api.devices().first?.name == "Ana's iPhone")
-
-        await model.allowNotifications()
+        #expect(model.step == .protect)
+        #expect(model.hasRecoveryCodes)
+        // A passkey as well.
+        await model.addPasskey()
+        #expect(model.hasPasskey)
+        #expect(model.errorMessage == nil)
+        model.continueFromProtection()
         #expect(model.step == .phone)
-        #expect(services.preferences.bool(.notificationPrimingShown))
+        #expect(services.preferences.bool(.protectionPromptShown))
 
         model.setPhone("4805550123")
         #expect(model.phoneRaw == "(480) 555-0123")
@@ -213,31 +227,58 @@ struct OnboardingTests {
         #expect(services.preferences.bool(.onboardingComplete))
     }
 
-    @Test func deviceWithoutBiometricsStillEnrolls() async throws {
-        let services = await ViadereServices.mock(api: MockViadereAPI(seed: false), signedIn: false, unsupportedKeys: [.approvalBiometric])
+    @Test func skippingProtectionNeedsTheHonestWarningFirst() async throws {
+        let services = await ViadereServices.mock(api: MockViadereAPI(seed: false), signedIn: false)
+        let model = OnboardingViewModel(services: services, start: .protect)
+        model.skipProtection()
+        #expect(model.step == .protect, "the first tap only shows the warning")
+        #expect(model.showsSkipWarning)
+        #expect(OnboardingViewModel.skipWarning.contains("can't be recovered"))
+        model.cancelSkip()
+        #expect(!model.showsSkipWarning)
+        model.skipProtection()
+        model.confirmSkipProtection()
+        #expect(model.step == .phone)
+        #expect(services.preferences.bool(.protectionPromptShown))
+    }
+
+    @Test func deviceWithoutBiometricsStillCreatesTheAccountAndCanMakeCodes() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api, signedIn: false, unsupportedKeys: [.approvalBiometric])
         let model = OnboardingViewModel(services: services)
-        model.displayName = "Ana"
-        await model.createAccount()
+        model.begin()
         await model.enrollDevice()
         #expect(model.step == .notifications)
         #expect(model.maxAssurance == .devicePasscode)
         #expect(model.skippedKeys == [.approvalBiometric])
+        model.skipNotifications()
+        await model.makeRecoveryCodes()
+        #expect(model.step == .recoveryCodes, "the passcode key proves it when Face ID isn't set up")
     }
 
-    @Test func passkeyCancellationIsQuiet() async throws {
+    @Test func anExistingAccountSignsInWithItsPasskeyAndEnrollsThisDevice() async throws {
         let api = MockViadereAPI(seed: false)
-        var services = await ViadereServices.mock(api: api, signedIn: false)
-        services.passkeys = MockPasskeyService(fail: .cancelled)
+        let services = await ViadereServices.mock(api: api, signedIn: false)
         let model = OnboardingViewModel(services: services)
-        model.displayName = "Ana"
-        await model.createAccount()
-        #expect(model.errorMessage == nil)
-        #expect(model.step == .welcome)
-        services.passkeys = MockPasskeyService(fail: .failed("x"))
-        let failing = OnboardingViewModel(services: services)
-        failing.displayName = "Ana"
-        await failing.createAccount()
-        #expect(failing.errorMessage != nil)
+        await model.signIn()
+        #expect(model.step == .device)
+        await model.enrollDevice()
+        #expect(model.step == .notifications)
+        #expect(await api.accountCreateRequests.isEmpty, "an existing account is not created again")
+        #expect(await api.enrollmentLog.count == 1)
+    }
+
+    @Test func aFailedAccountCreationLeavesNothingBehind() async throws {
+        let api = MockViadereAPI(seed: false)
+        await api.setRequiresAttestation(true)
+        let services = await ViadereServices.mock(api: api, signedIn: false, appAttest: UnavailableAppAttest())
+        let model = OnboardingViewModel(services: services)
+        model.begin()
+        await model.enrollDevice()
+        #expect(model.step == .device)
+        #expect(model.errorMessage != nil)
+        #expect(!(await services.sessions.isSignedIn))
+        #expect((try? await services.records.load()) == nil)
     }
 }
 

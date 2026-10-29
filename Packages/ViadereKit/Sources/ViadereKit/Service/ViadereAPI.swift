@@ -35,7 +35,17 @@ extension SMSLinkPreview {
 /// Everything the UI and the extensions need from the server, as typed async calls.
 /// `LiveViadereAPI` talks HTTP; `MockViadereAPI` is an in-memory server for previews, tests and demos.
 public protocol ViadereAPI: Sendable {
-    // MARK: Auth
+    // MARK: Device-first accounts (§2.5a)
+    /// `POST /v1/accounts/enroll/begin`: a single-use challenge and the reserved account id the key proofs name.
+    func beginAccountEnrollment() async throws -> AccountEnrollBeginResponse
+    /// `POST /v1/accounts`: creates the pseudonymous account, this device and a session bound to it. No personal field.
+    func createAccount(_ request: AccountCreateRequest) async throws -> AccountCreateResponse
+    /// `POST /v1/recovery-credentials/passkeys/begin`: options to create a passkey as an optional recovery credential.
+    func beginRecoveryPasskey() async throws -> PasskeyRegistrationOptions
+    /// `POST /v1/recovery-credentials/passkeys/finish`: registers it with this device's user-verified proof.
+    func finishRecoveryPasskey(_ request: RecoveryPasskeyFinishRequest) async throws -> RecoveryPasskeyAdded
+
+    // MARK: Auth (passkey sign-in; passkey-first sign-up is kept for older flows)
     func beginRegistration(displayName: String) async throws -> PasskeyRegistrationOptions
     func finishRegistration(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession
     func beginLogin() async throws -> PasskeyAssertionOptions
@@ -68,9 +78,9 @@ public protocol ViadereAPI: Sendable {
     /// `POST /v1/recovery/{id}/cancel`: "Not you? Cancel". A trusted device.
     func cancelRecovery(_ id: RecoveryID) async throws -> RecoveryStatus
     func recoveryInfo() async throws -> RecoveryInfo
-    /// `POST /v1/recovery/codes/begin`: passkey assertion options for regenerating codes (trusted device).
+    /// `POST /v1/recovery/codes/begin`: a single-use ceremony for new codes (its id is what this device's proof names).
     func beginRecoveryCodes() async throws -> PasskeyAssertionOptions
-    /// `POST /v1/recovery/codes/regenerate`: a fresh passkey assertion in, a new `RecoveryCodeSet` out (once).
+    /// `POST /v1/recovery/codes/regenerate`: this device's user-verified proof (or a passkey assertion) in, a new `RecoveryCodeSet` out (once).
     func regenerateRecoveryCodes(_ request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet
 
     // MARK: Phones & sessions

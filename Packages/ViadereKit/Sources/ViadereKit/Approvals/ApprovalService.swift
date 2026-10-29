@@ -81,7 +81,7 @@ public struct ApprovalService: Sendable {
         // New-device cool-down: pause what the server would refuse, before any Face ID prompt. If the server can't be asked
         // the attempt goes on and the server decides.
         if CoolDownPolicy.restricts(decision, on: interaction),
-           let device = try? await api.devices().first(where: { $0.id == record.deviceId }), device.isCoolingDown(at: now) {
+           let device = try? await api.devices().first(where: { $0.id == record.deviceId }), !device.approvesHighRisk(at: now) {
             throw ApprovalError.deviceCoolingDown(until: device.approvalsLockedUntil)
         }
 

@@ -1,11 +1,11 @@
 import Foundation
 import ViadereCore
 
-/// The new-device cool-down, as the client explains and pre-checks it (the server enforces it).
+/// Which approvals a device that is not approved yet may make, as the client explains and pre-checks it (the server decides, §2.5a).
 ///
-/// A device enrolled while the account already has another trusted device cannot approve **high or critical** requests until
-/// `Device.approvalsLockedUntil` (24 hours), unless another trusted device confirms it (`POST /v1/devices/{id}/confirm`).
-/// Deny, decline and report always work: they are the safe directions.
+/// Only a **D1** device (`Device.trustTier`) approves **high or critical** requests. A new device of an existing account, or any device
+/// after a recovery, is D0 until one of the account's trusted devices approves it (`POST /v1/devices/{id}/confirm`); for Approve v2 the
+/// business can also set it up again. **Waiting never changes that.** Deny, decline and report always work: they are the safe directions.
 public enum CoolDownPolicy {
     /// Decisions that are never paused.
     public static let alwaysAllowed: Set<Decision> = [.deny, .report, .decline]
@@ -45,12 +45,13 @@ public enum CoolDownPolicy {
         return "\(day.string(from: date)) at \(clock)"
     }
 
-    /// The calm explanation shown on Home and in the approval sheet.
+    /// The calm explanation shown on Home, in Settings and in the approval sheet. It never promises a time: trust comes from an approval.
+    public static let notApprovedMessage =
+        "For your security, this iPhone can't approve high-risk requests until one of your trusted devices approves it. A business can also set it up again for its own requests."
+
+    /// Kept for callers that pass the window's end; the answer no longer depends on it.
     public static func message(until lockedUntil: Date?, now: Date, calendar: Calendar = .current, locale: Locale = .current) -> String {
-        guard let lockedUntil, lockedUntil > now else {
-            return "For your security, this iPhone can't approve high-risk requests yet. Confirm it from your other device."
-        }
-        return "For your security, this iPhone can approve high-risk requests after \(timeText(lockedUntil, now: now, calendar: calendar, locale: locale)), or confirm it from your other device."
+        notApprovedMessage
     }
 
     /// What remains possible meanwhile.
@@ -58,10 +59,17 @@ public enum CoolDownPolicy {
 }
 
 extension ViadereServices {
-    /// This device's new-device cool-down end, or `nil` when it is trusted (or the server can't be asked right now).
+    /// This device's new-device window end, or `nil` when there is none (or the server can't be asked right now).
     public func approvalsLockedUntil() async -> Date? {
         guard let record = try? await records.load(), let devices = try? await api.devices() else { return nil }
         guard let lockedUntil = devices.first(where: { $0.id == record.deviceId })?.approvalsLockedUntil else { return nil }
         return CoolDownPolicy.isActive(until: lockedUntil, now: clock()) ? lockedUntil : nil
+    }
+
+    /// Whether the server says this device may approve high-risk requests (D1); `nil` when it can't be asked right now.
+    public func thisDeviceApprovesHighRisk() async -> Bool? {
+        guard let record = try? await records.load(), let devices = try? await api.devices(),
+              let device = devices.first(where: { $0.id == record.deviceId }) else { return nil }
+        return device.approvesHighRisk(at: clock())
     }
 }

@@ -13,8 +13,10 @@ public final class HomeViewModel {
 
     public private(set) var content: HomeContent = .empty
     public private(set) var phase: Phase = .idle
-    /// End of this iPhone's new-device cool-down (high-risk approvals are paused until then), or `nil` when it is trusted.
+    /// End of this iPhone's new-device window, or `nil`. Informational: it unlocks nothing (`highRiskPaused` is what counts).
     public private(set) var approvalsLockedUntil: Date?
+    /// The server says this iPhone is not approved for high-risk requests yet (not D1).
+    public private(set) var highRiskPaused = false
     private let services: ViadereServices
 
     public init(services: ViadereServices, initial: HomeContent = .empty) {
@@ -31,6 +33,7 @@ public final class HomeViewModel {
             content = HomeContent.build(interactions: page.items, relationships: rels, now: services.clock())
             phase = .loaded
             approvalsLockedUntil = await services.approvalsLockedUntil()
+            highRiskPaused = await services.thisDeviceApprovesHighRisk() == false
         } catch let error as APIError {
             phase = .failed(error.userMessage)
         } catch {
@@ -38,16 +41,15 @@ public final class HomeViewModel {
         }
     }
 
-    /// The calm explanation on Home while the new-device cool-down lasts.
+    /// The calm explanation on Home while this iPhone is not approved for high-risk requests.
     public var coolDownNotice: String? {
-        guard let until = approvalsLockedUntil, CoolDownPolicy.isActive(until: until, now: services.clock()) else { return nil }
-        return CoolDownPolicy.message(until: until, now: services.clock())
+        highRiskPaused ? CoolDownPolicy.notApprovedMessage : nil
     }
 
-    /// Whether `envelope` is one the cool-down pauses (a high or critical request): Home labels it.
+    /// Whether `envelope` is one this iPhone can't approve yet (a high or critical request): Home labels it.
     public func isPausedByCoolDown(_ envelope: InteractionEnvelope) -> Bool {
         let decision: Decision = envelope.interaction.kind == .confirm ? .confirm : .approve
-        return CoolDownPolicy.pauses(decision, on: envelope.interaction, until: approvalsLockedUntil, now: services.clock())
+        return highRiskPaused && CoolDownPolicy.restricts(decision, on: envelope.interaction)
     }
 
     /// Optimistically removes a decided request.

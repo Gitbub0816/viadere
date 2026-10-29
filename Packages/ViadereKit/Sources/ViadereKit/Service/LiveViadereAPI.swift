@@ -7,9 +7,19 @@ public struct LiveViadereAPI: ViadereAPI {
 
     public init(client: APIClient) { self.client = client }
 
+    // MARK: Device-first accounts
+    public func beginAccountEnrollment() async throws -> AccountEnrollBeginResponse { try await client.call(APIRoutes.accountEnrollBegin) }
+    public func createAccount(_ request: AccountCreateRequest) async throws -> AccountCreateResponse {
+        try await client.call(APIRoutes.accountCreate, body: request)
+    }
+    public func beginRecoveryPasskey() async throws -> PasskeyRegistrationOptions { try await client.call(APIRoutes.recoveryPasskeyBegin) }
+    public func finishRecoveryPasskey(_ request: RecoveryPasskeyFinishRequest) async throws -> RecoveryPasskeyAdded {
+        try await client.call(APIRoutes.recoveryPasskeyFinish, body: request)
+    }
+
     // MARK: Auth
     public func beginRegistration(displayName: String) async throws -> PasskeyRegistrationOptions {
-        try await client.call(APIRoutes.registerBegin, body: PasskeyRegistrationBeginRequest(displayName: displayName))
+        try await client.call(APIRoutes.registerBegin, body: PasskeyRegistrationBeginRequest(displayName: displayName.isEmpty ? nil : displayName))
     }
     public func finishRegistration(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession {
         try await client.call(APIRoutes.registerFinish, body: request)

@@ -221,13 +221,15 @@ struct SignedRefreshTests {
 @MainActor
 @Suite("Recovery codes at registration and in Settings")
 struct RecoveryCodesTests {
-    @Test func registrationShowsTheCodesOnceAndNeverStoresThem() async throws {
+    @Test func theProtectStepShowsTheCodesOnceAndNeverStoresThem() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api, signedIn: false)
         let model = OnboardingViewModel(services: services)
         model.begin()
-        model.displayName = "Ana"
-        await model.createAccount()
+        await model.enrollDevice()
+        model.skipNotifications()
+        #expect(model.step == .protect)
+        await model.makeRecoveryCodes()
         let set = try #require(model.recoveryCodes?.codes)
         #expect(model.step == .recoveryCodes && set.codes.count == RecoveryPolicy.codeCount)
         #expect(set.codes.allSatisfy { RecoveryCodeFormat.normalizeCode($0) != nil })
@@ -240,7 +242,7 @@ struct RecoveryCodesTests {
         #expect(model.step == .recoveryCodes)
         model.recoveryCodes?.confirmedSaved = true
         model.recoveryCodesSaved()
-        #expect(model.step == .device && model.recoveryCodes == nil)
+        #expect(model.step == .protect && model.recoveryCodes == nil)
         assertNeverStored(set.codes + [set.recoveryId], in: services)
         // The token store keeps tokens only.
         let stored = String(decoding: try ViadereJSON.encode(try #require(await services.sessions.tokens())), as: UTF8.self)
@@ -262,7 +264,7 @@ struct RecoveryCodesTests {
         #expect(RecoveryCodesViewModel.exportText(for: set).contains("ABCD-EFGH-JKMN"))
     }
 
-    @Test func settingsShowsStatusAndRegeneratesWithAFreshPasskeyAssertion() async throws {
+    @Test func settingsShowsStatusAndRegeneratesWithThisDevicesOwnProof() async throws {
         let api = MockViadereAPI(seed: false)
         let passkeys = RecordingPasskeys()
         var services = await ViadereServices.mock(api: api)
@@ -276,7 +278,7 @@ struct RecoveryCodesTests {
 
         await vm.regenerateRecoveryCodes()
         let fresh = try #require(vm.newRecoveryCodes?.codes)
-        #expect(passkeys.assertions == 1, "a fresh passkey assertion was required")
+        #expect(passkeys.assertions == 0, "no passkey is needed: this device's user-verified key proves it (§2.5a)")
         #expect(fresh.codes.count == RecoveryPolicy.codeCount && fresh.recoveryId != "AAAA-BBBB-CCCC")
         #expect(await api.activeRecoveryCodes == fresh, "the old codes died")
         #expect(vm.recoveryInfo?.remainingCodes == RecoveryPolicy.codeCount)

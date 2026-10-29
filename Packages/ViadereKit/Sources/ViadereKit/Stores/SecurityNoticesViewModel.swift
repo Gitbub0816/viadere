@@ -54,7 +54,7 @@ public final class SecurityNoticesViewModel {
         }
     }
 
-    public static let coolDownMessage = "This iPhone is new to your account, so it can't dismiss this yet. Use a device you already trust, or review your devices."
+    public static let coolDownMessage = "This iPhone hasn't been approved yet, so it can't dismiss this. Use a device you already trust, or review your devices."
 
     // MARK: Actions ("Not you? Cancel")
 
@@ -126,7 +126,7 @@ public final class SecurityNoticesViewModel {
     public static let recoveryCancelledMessage = "Recovery was cancelled. Its recovery codes no longer work, so generate new ones in Settings."
     public static let vaultReleaseCancelledMessage = "The request was cancelled. Nothing was released. If you didn't ask for it, replace your recovery key in Authenticator."
     public static let replacementCancelledMessage = "The new iPhone was removed. This one keeps working."
-    public static let coolDownActionMessage = "This iPhone is new to your account, so it can't do that yet. Use a device you already trust."
+    public static let coolDownActionMessage = "This iPhone hasn't been approved yet, so it can't do that. Use a device you already trust."
     public static let alreadyHandledMessage = "That was already taken care of."
 
     // MARK: Copy
@@ -160,6 +160,7 @@ public final class SecurityNoticesViewModel {
         case .approvalsUnfrozen: return "Approvals were unfrozen \(when)."
         case .approvalRequestsPaused: return "A business sent you several approval requests, so Viadere paused it \(when)."
         case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
+        case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
