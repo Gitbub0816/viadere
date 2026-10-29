@@ -25,3 +25,9 @@ Today an account is created by registering a passkey with a mandatory display na
 - The staging database has no accounts (2026-10-29), so the migration is schema-only and additive (`DeviceFirstAccounts.v1`); passkey-first accounts created in development keep working.
 - Household and passkey labels need a fallback when no display name exists.
 - App copy changes (no "nothing to phish"); marketing must not claim phishing resistance for push approvals (spec §7).
+
+## Implementation notes (2026-10-29, WP-A2/B4/B5)
+
+- The product owner chose a stricter rule than decision 4's "time alone does not elevate a device that belongs to an account with another D1 device or that was created by recovery": **no device is ever elevated by time** (the plan's O-7 single-device exception is not adopted). A single-device account that sets its device up again therefore gets a D0 device; high-risk approvals return through business re-enrollment.
+- To keep a sole D0 device (recovered, or unattested in `report`) from being locked out of its own account, account management (not high-risk approval) is allowed to a full-app device outside its notice window when the account has no D1 device (SECURITY.md §2.5a).
+- The audit chain version that covers `actor_ref` and `policy_version` is **4** (version 3 already existed for key epochs).

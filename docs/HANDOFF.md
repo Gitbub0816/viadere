@@ -1,12 +1,14 @@
 # Handoff — state of the build and what's next
 
-**Branch:** `claude/inspiring-cannon-t5hxfw` · **Last updated:** 2026-10-28
+**Branch:** `claude/inspiring-cannon-t5hxfw` · **Last updated:** 2026-10-29
 
 Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, working rules), then this file.
 
 ## Where things stand
 
 Built: the Swift stack in [`../README.md`](../README.md) — Core, Kit, BusinessSDK, Server (Vapor, Postgres 18), App (XcodeGen, iOS 17), Site (Swift static site), Infra (Fly.io, Cloudflare, Neon, Google Cloud KMS) — implementing [`COMPLETE-PRODUCT-SPEC.md`](COMPLETE-PRODUCT-SPEC.md), [`MESSAGING-GATEWAY-SPEC.md`](MESSAGING-GATEWAY-SPEC.md) and [`SECURITY-TRUST-PLATFORM-SPEC.md`](SECURITY-TRUST-PLATFORM-SPEC.md) per [`IMPLEMENTATION-PLAN-v2.md`](IMPLEMENTATION-PLAN-v2.md).
+
+**Security Architecture Expansion ([`IMPLEMENTATION-PLAN-v3.md`](IMPLEMENTATION-PLAN-v3.md)), WP-A2, B4, B5 built (2026-10-29):** accounts are created **device-first and pseudonymous** (`POST /v1/accounts/enroll/begin` + `POST /v1/accounts`; no name, email, phone or passkey), the protocol is platform-neutral (`IntegrityEvidence` with formats, Android verifier stub that never attests, `algorithm` on key registrations, `PushRegistration`), and device trust is a **server-decided tier D0/D1/D2 with no time-based elevation** (owner decision: a device becomes D1 only as a new account's attested first device or by approval from another D1 device; a business can re-enroll a D0 device of an account with no D1 device for its own Approve v2 requests). Passkeys and recovery codes are optional ("Protect your account", proven by the device's own user-verified key). Audit events carry `actor_ref` and `policy_version` (chain version 4). Normative text: [`SECURITY.md`](SECURITY.md) §2.5a; vectors: [`protocol/vectors/`](protocol/vectors/); migration `DeviceFirstAccounts.v1`. The app's onboarding is consent → set up this iPhone → notifications → protect (optional) → phone (optional); the App Clip creates a request-key-only D0 account. Not yet built from v3: everything else (A1, B1–B3, C*, D*, E*, F*); the App has not been built in Xcode with these changes (`swiftc -parse` only). Known consequence: a clip-created account is not taken over by the full app (no passkey to sign in with); the full app creates its own account.
 
 Independent release-gate reviews were run for Approve (Phase 2), Verify (Phase 3), the Authenticator (Phase 4) and the platform (Phases 0/1 and enterprise). **Every finding has been fixed and pushed** (commits prefixed `fix(approve-gate)`, `fix(verify-gate)`, `fix(vault-gate)`, `fix(platform-gate)`), each with targeted tests. Release flags stay off in production: `APPROVE_V2_ENABLED`, `VERIFY_ENABLED`, `VAULT_SYNC_ENABLED` (sync), Tier E connectivity.
 
