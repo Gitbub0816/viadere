@@ -24,6 +24,21 @@ public enum APIRoutes {
     public static let logout = Endpoint<EmptyBody, EmptyBody>(
         "auth.logout", .POST, "/v1/auth/logout", auth: .deviceSignedBearer)
 
+    // MARK: Device-first accounts (§2.5a)
+    /// Opens an account-creation ceremony: a single-use challenge and a reserved account id. Public; per-IP and global budgets; stopped by the
+    /// `signup.consumer` switch. Says nothing about existing accounts.
+    public static let accountEnrollBegin = Endpoint<EmptyBody, AccountEnrollBeginResponse>(
+        "accounts.enroll.begin", .POST, "/v1/accounts/enroll/begin", auth: .none)
+    /// Creates the pseudonymous account, its first device and a device-bound session (`201`). No personal field.
+    public static let accountCreate = Endpoint<AccountCreateRequest, AccountCreateResponse>(
+        "accounts.create", .POST, "/v1/accounts", auth: .none)
+    /// "Protect your account": options to create a passkey as an optional recovery credential (trusted device).
+    public static let recoveryPasskeyBegin = Endpoint<EmptyBody, PasskeyRegistrationOptions>(
+        "recoveryCredentials.passkeys.begin", .POST, "/v1/recovery-credentials/passkeys/begin", auth: .deviceSignedBearer)
+    /// Registers that passkey with a user-verified proof from this device (`RecoveryPasskeyFinishRequest`, `201`).
+    public static let recoveryPasskeyFinish = Endpoint<RecoveryPasskeyFinishRequest, RecoveryPasskeyAdded>(
+        "recoveryCredentials.passkeys.finish", .POST, "/v1/recovery-credentials/passkeys/finish", auth: .deviceSignedBearer)
+
     // MARK: Devices
     /// Returns the enrollment challenge **and** WebAuthn assertion options over that same challenge (`DeviceEnrollmentChallenge`).
     public static let deviceEnrollBegin = Endpoint<EmptyBody, DeviceEnrollmentChallenge>(
@@ -59,10 +74,11 @@ public enum APIRoutes {
         "recovery.cancel", .POST, "/v1/recovery/{recoveryId}/cancel", auth: .deviceSignedBearer)
     public static let recoveryInfo = Endpoint<EmptyBody, RecoveryInfo>(
         "recovery.info", .GET, "/v1/recovery", auth: .deviceSignedBearer)
-    /// Starts regeneration: returns passkey assertion options (`PasskeyAssertionOptions`). Trusted device.
+    /// Starts regeneration: a single-use ceremony (`ceremonyId`, the subject of the device's `recoveryCredential` proof) with passkey
+    /// assertion options over its challenge for clients that prove with a passkey instead. Trusted device.
     public static let recoveryCodesBegin = Endpoint<EmptyBody, PasskeyAssertionOptions>(
         "recovery.codes.begin", .POST, "/v1/recovery/codes/begin", auth: .deviceSignedBearer)
-    /// Issues a new `RecoveryCodeSet` (old codes die). Trusted device **and** a fresh user-verified passkey assertion.
+    /// Issues a new `RecoveryCodeSet` (old codes die). Trusted device **and** a user-verified proof from it (or a fresh passkey assertion).
     public static let recoveryCodesRegenerate = Endpoint<RecoveryCodesRegenerateRequest, RecoveryCodeSet>(
         "recovery.codes.regenerate", .POST, "/v1/recovery/codes/regenerate", auth: .deviceSignedBearer)
 
@@ -390,6 +406,7 @@ public enum APIRoutes {
     public static let all: [AnyEndpoint] = [
         registerBegin.descriptor, registerFinish.descriptor, loginBegin.descriptor, loginFinish.descriptor,
         authRefresh.descriptor, logout.descriptor,
+        accountEnrollBegin.descriptor, accountCreate.descriptor, recoveryPasskeyBegin.descriptor, recoveryPasskeyFinish.descriptor,
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, deviceConfirm.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
         deviceReplacementCancel.descriptor,
         recoveryBegin.descriptor, recoveryFinish.descriptor, recoveryComplete.descriptor, recoveryCancel.descriptor, recoveryInfo.descriptor,

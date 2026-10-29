@@ -167,14 +167,18 @@ public struct RecoveryInfo: Codable, Sendable, Hashable {
     public var pending: PendingRecovery?
     /// Every recovery waiting out its 72 h hold, oldest first. The source of truth for "Recovery in progress - Cancel": cancel each one.
     public var pendingRecoveries: [PendingRecovery]
-    public init(remainingCodes: Int, issuedAt: Date? = nil, pending: PendingRecovery? = nil, pendingRecoveries: [PendingRecovery]? = nil) {
+    /// How many passkeys the account has (an optional recovery credential since device-first accounts). `nil` from older servers.
+    public var passkeyCount: Int?
+    public init(remainingCodes: Int, issuedAt: Date? = nil, pending: PendingRecovery? = nil, pendingRecoveries: [PendingRecovery]? = nil,
+                passkeyCount: Int? = nil) {
+        self.passkeyCount = passkeyCount
         self.remainingCodes = remainingCodes
         self.issuedAt = issuedAt
         self.pending = pending ?? pendingRecoveries?.first
         self.pendingRecoveries = pendingRecoveries ?? pending.map { [$0] } ?? []
     }
 
-    private enum CodingKeys: String, CodingKey { case remainingCodes, issuedAt, pending, pendingRecoveries }
+    private enum CodingKeys: String, CodingKey { case remainingCodes, issuedAt, pending, pendingRecoveries, passkeyCount }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -184,17 +188,59 @@ public struct RecoveryInfo: Codable, Sendable, Hashable {
         let all = try container.decodeIfPresent([PendingRecovery].self, forKey: .pendingRecoveries)
         pending = single ?? all?.first
         pendingRecoveries = all ?? single.map { [$0] } ?? []
+        passkeyCount = try container.decodeIfPresent(Int.self, forKey: .passkeyCount)
     }
 }
 
-/// `POST /v1/recovery/codes/regenerate` (trusted device + a fresh passkey assertion over the challenge from
-/// `POST /v1/recovery/codes/begin`, which returns `PasskeyAssertionOptions`). Invalidates the old codes and returns a new
-/// `RecoveryCodeSet` once. Also the way to get codes for an account that predates recovery codes.
+/// `POST /v1/recovery/codes/regenerate` (trusted device; `POST /v1/recovery/codes/begin` first, whose `ceremonyId` names the single-use
+/// server challenge). Invalidates the old codes and returns a new `RecoveryCodeSet` once. Also the way to get the first set: recovery codes
+/// are optional and offered after account creation ("Protect your account").
+///
+/// Exactly one proof of the person:
+/// * `proof`: a `ConfirmationProof` with subject `recoveryCredential` and `subjectId` = `ceremonyId`, signed by **this** device's
+///   user-verified approval key (biometric, or the passcode key). Works for every account, with or without a passkey.
+/// * `assertion` (older clients): a fresh user-verified passkey assertion over the begin challenge.
 public struct RecoveryCodesRegenerateRequest: Codable, Sendable, Hashable {
     public var ceremonyId: CeremonyID
-    public var assertion: PasskeyAssertionCredential
+    public var assertion: PasskeyAssertionCredential?
+    public var proof: ConfirmationProof?
     public init(ceremonyId: CeremonyID, assertion: PasskeyAssertionCredential) {
         self.ceremonyId = ceremonyId
         self.assertion = assertion
+        proof = nil
+    }
+
+    public init(ceremonyId: CeremonyID, proof: ConfirmationProof) {
+        self.ceremonyId = ceremonyId
+        assertion = nil
+        self.proof = proof
+    }
+}
+
+/// `POST /v1/recovery-credentials/passkeys/finish` (device-signed): registers the passkey created from the options of
+/// `POST /v1/recovery-credentials/passkeys/begin`, with this device's user-verified `proof` (subject `recoveryCredential`, `subjectId` =
+/// `ceremonyId`). The passkey becomes an optional recovery and sign-in credential of the account; it never approves anything by itself.
+public struct RecoveryPasskeyFinishRequest: Codable, Sendable, Hashable {
+    public var ceremonyId: CeremonyID
+    public var credential: PasskeyRegistrationCredential
+    public var proof: ConfirmationProof
+
+    public init(ceremonyId: CeremonyID, credential: PasskeyRegistrationCredential, proof: ConfirmationProof) {
+        self.ceremonyId = ceremonyId
+        self.credential = credential
+        self.proof = proof
+    }
+}
+
+/// `201` from `POST /v1/recovery-credentials/passkeys/finish`.
+public struct RecoveryPasskeyAdded: Codable, Sendable, Hashable {
+    /// Whether the platform said the passkey can be synced (iCloud Keychain). When `false`, losing this device loses the passkey too, and the
+    /// app should offer recovery codes as well.
+    public var backupEligible: Bool
+    public var passkeyCount: Int
+
+    public init(backupEligible: Bool, passkeyCount: Int) {
+        self.backupEligible = backupEligible
+        self.passkeyCount = passkeyCount
     }
 }

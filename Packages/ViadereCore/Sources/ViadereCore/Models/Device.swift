@@ -55,8 +55,8 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
     public var revokedAt: Date?
     /// `app` or `appClip` (App Clip devices hold a request key only and never decide interactions).
     public var clientKind: DeviceClientKind
-    /// New-device cool-down: until this instant, `deny`/`report` work but the device may not approve **high or critical**
-    /// requests, unless another trusted device confirms it (`POST /v1/devices/{id}/confirm`). `nil` = trusted.
+    /// The new-device **notice window**: until this instant the account's other devices can cancel a pending replacement, and a phone
+    /// linked from this device is not used yet. It never makes a device trusted when it ends: trust is `trustTier` (§2.5a). `nil` = none.
     public var approvalsLockedUntil: Date?
     /// When the device stops working on its own (App Clips: 7 days after enrollment). `nil` = never.
     public var expiresAt: Date?
@@ -70,11 +70,15 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
     /// bound to this new device (the caller's own session stays bound to the old device, which keeps working). The app stores these
     /// tokens for the new device; there is no second passkey prompt.
     public var replacementSession: AuthSession?
+    /// The tier the server evaluated for this device (D0/D1; D2 is per claim and never shown here). Only D1 approves high-risk requests and
+    /// approves other devices. `nil` from servers that predate tiers. Informational: the server decides on every request.
+    public var trustTier: DeviceTrustTier?
 
     public init(id: DeviceID, consumerId: ConsumerID, name: String, platform: DevicePlatform, keys: [DeviceKey],
                 createdAt: Date, lastSeenAt: Date? = nil, revokedAt: Date? = nil, clientKind: DeviceClientKind = .app,
                 approvalsLockedUntil: Date? = nil, expiresAt: Date? = nil, pendingReplacementBy: DeviceID? = nil,
-                pendingReplacementAt: Date? = nil, replacementSession: AuthSession? = nil) {
+                pendingReplacementAt: Date? = nil, replacementSession: AuthSession? = nil, trustTier: DeviceTrustTier? = nil) {
+        self.trustTier = trustTier
         self.id = id
         self.consumerId = consumerId
         self.name = name
@@ -94,7 +98,7 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, consumerId, name, platform, keys, maxAssurance, createdAt, lastSeenAt, revokedAt, clientKind, clipDevice, approvalsLockedUntil, expiresAt
-        case pendingReplacementBy, pendingReplacementAt, replacementSession
+        case pendingReplacementBy, pendingReplacementAt, replacementSession, trustTier
     }
 
     public init(from decoder: any Decoder) throws {
@@ -115,6 +119,7 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         pendingReplacementBy = try c.decodeIfPresent(DeviceID.self, forKey: .pendingReplacementBy)
         pendingReplacementAt = try c.decodeIfPresent(Date.self, forKey: .pendingReplacementAt)
         replacementSession = try c.decodeIfPresent(AuthSession.self, forKey: .replacementSession)
+        trustTier = try c.decodeIfPresent(DeviceTrustTier.self, forKey: .trustTier)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -135,10 +140,18 @@ public struct Device: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(pendingReplacementBy, forKey: .pendingReplacementBy)
         try c.encodeIfPresent(pendingReplacementAt, forKey: .pendingReplacementAt)
         try c.encodeIfPresent(replacementSession, forKey: .replacementSession)
+        try c.encodeIfPresent(trustTier, forKey: .trustTier)
     }
 
-    /// Whether the device is inside its new-device cool-down at `now`.
+    /// Whether the device is inside its new-device notice window at `now`.
     public func isCoolingDown(at now: Date) -> Bool { approvalsLockedUntil.map { now < $0 } ?? false }
+
+    /// Whether the server says this device may approve high-risk requests (D1 or above). A server that predates tiers (`trustTier == nil`)
+    /// is read the old way: trusted unless inside its window.
+    public func approvesHighRisk(at now: Date) -> Bool {
+        if let trustTier { return trustTier >= .d1 }
+        return !isCoolingDown(at: now)
+    }
 
     /// Whether the device has passed its own lifetime.
     public func isExpired(at now: Date) -> Bool { expiresAt.map { now >= $0 } ?? false }

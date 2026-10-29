@@ -3,11 +3,11 @@ import Foundation
 
 // MARK: - Passkeys (WebAuthn). Binary fields are base64url strings.
 
-/// Begin consumer registration.
+/// Begin consumer registration (legacy passkey-first sign-up; new accounts are created device-first, `AccountCreateRequest`).
 public struct PasskeyRegistrationBeginRequest: Codable, Sendable, Hashable {
-    /// Display name shown in the passkey sheet (≤ 64).
-    public var displayName: String
-    public init(displayName: String) { self.displayName = displayName }
+    /// Optional name shown in the passkey sheet (≤ 64). No personal field is required: without one the sheet shows a neutral label.
+    public var displayName: String?
+    public init(displayName: String? = nil) { self.displayName = displayName }
 }
 
 /// Options for `ASAuthorizationPlatformPublicKeyCredentialProvider.createCredentialRegistrationRequest`.
@@ -272,12 +272,27 @@ public struct DeviceKeyRegistration: Codable, Sendable, Hashable {
     public var hardwareBacked: Bool
     /// base64url raw r||s signature over `DeviceEnrollment.proofMessage(…)`.
     public var proof: String
+    /// The key's signature algorithm. Only `ES256` is accepted (anything else is `400`); absent on the wire from older clients, which
+    /// means `ES256`. Not part of the proof message or the App Attest key list (both formats are unchanged).
+    public var algorithm: DeviceKeyAlgorithm
 
-    public init(purpose: DeviceKeyPurpose, publicKey: DevicePublicKey, hardwareBacked: Bool, proof: String) {
+    public init(purpose: DeviceKeyPurpose, publicKey: DevicePublicKey, hardwareBacked: Bool, proof: String, algorithm: DeviceKeyAlgorithm = .es256) {
         self.purpose = purpose
         self.publicKey = publicKey
         self.hardwareBacked = hardwareBacked
         self.proof = proof
+        self.algorithm = algorithm
+    }
+
+    enum CodingKeys: String, CodingKey { case purpose, publicKey, hardwareBacked, proof, algorithm }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        purpose = try c.decode(DeviceKeyPurpose.self, forKey: .purpose)
+        publicKey = try c.decode(DevicePublicKey.self, forKey: .publicKey)
+        hardwareBacked = try c.decode(Bool.self, forKey: .hardwareBacked)
+        proof = try c.decode(String.self, forKey: .proof)
+        algorithm = try c.decodeIfPresent(DeviceKeyAlgorithm.self, forKey: .algorithm) ?? .es256
     }
 }
 
@@ -294,8 +309,10 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
     public var clientKind: DeviceClientKind
     /// Wire alias used by the app: `true` for an App Clip enrollment (omitted otherwise). `true` means `clientKind == .appClip`.
     public var clipDevice: Bool?
-    /// App Attest evidence (recorded; not yet trusted).
+    /// App Attest evidence (the original, Apple-only field). New clients send `integrity` instead; both are accepted.
     public var appAttest: AppAttestEvidence?
+    /// Platform-neutral integrity evidence (`IntegrityEvidence`, §2.5a). Takes the place of `appAttest`.
+    public var integrity: IntegrityEvidence?
     /// "Set up again": the caller's own device (or one revoked within the last 30 days) that this enrollment replaces.
     /// * An old device that is already **revoked** is replaced at once (the session moves to the new device).
     /// * A **live** old device is not revoked yet: it is marked `Device.pendingReplacementBy`, keeps working, and is revoked when the
@@ -307,7 +324,8 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
 
     public init(name: String, platform: DevicePlatform, challenge: String, keys: [DeviceKeyRegistration],
                 assertion: PasskeyAssertionCredential? = nil, clientKind: DeviceClientKind = .app, appAttest: AppAttestEvidence? = nil,
-                clipDevice: Bool? = nil, replacesDeviceId: DeviceID? = nil) {
+                clipDevice: Bool? = nil, replacesDeviceId: DeviceID? = nil, integrity: IntegrityEvidence? = nil) {
+        self.integrity = integrity
         self.clipDevice = clipDevice
         self.replacesDeviceId = replacesDeviceId
         self.name = name
@@ -319,10 +337,19 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
         self.appAttest = appAttest
     }
 
-    enum CodingKeys: String, CodingKey { case name, platform, challenge, keys, assertion, clientKind, appAttest, clipDevice, replacesDeviceId }
+    enum CodingKeys: String, CodingKey { case name, platform, challenge, keys, assertion, clientKind, appAttest, clipDevice, replacesDeviceId, integrity }
 
     /// The effective client kind: `clipDevice == true` or `clientKind == .appClip` both mean App Clip.
     public var effectiveClientKind: DeviceClientKind { clipDevice == true || clientKind == .appClip ? .appClip : .app }
+
+    /// The evidence to evaluate: `integrity`, or the legacy `appAttest` wrapped as `apple-app-attest`.
+    public var effectiveIntegrity: IntegrityEvidence? { integrity ?? appAttest.map(IntegrityEvidence.init(appleAppAttest:)) }
+
+    /// Both fields are present and say different things: the server refuses the request (`400`) rather than pick one.
+    public var hasConflictingIntegrity: Bool {
+        guard let integrity, let appAttest else { return false }
+        return integrity != IntegrityEvidence(appleAppAttest: appAttest)
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -335,6 +362,7 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
         appAttest = try c.decodeIfPresent(AppAttestEvidence.self, forKey: .appAttest)
         clipDevice = try c.decodeIfPresent(Bool.self, forKey: .clipDevice)
         replacesDeviceId = try c.decodeIfPresent(DeviceID.self, forKey: .replacesDeviceId)
+        integrity = try c.decodeIfPresent(IntegrityEvidence.self, forKey: .integrity)
     }
 }
 
@@ -346,7 +374,9 @@ public struct DeviceEnrollRequest: Codable, Sendable, Hashable {
 /// (raw r‖s, base64url) over `signingInput()`, made with its
 /// `approvalBiometric` key (`assurance` = biometric); a passcode or request key cannot confirm.
 public struct ConfirmationProof: Codable, Sendable, Hashable {
-    public enum Subject: String, Codable, Sendable { case device, phoneLink }
+    /// `recoveryCredential`: adding an optional recovery credential (a passkey or a new set of recovery codes) to the account; `subjectId` is
+    /// the single-use, server-generated ceremony id the proof is for (§2.5a), so the proof is bound to a server nonce.
+    public enum Subject: String, Codable, Sendable { case device, phoneLink, recoveryCredential }
 
     public static let domain = "VIADERE-CONFIRM-V1\n"
     /// A proof older than this (or more than `allowedFutureSkew` in the future) is rejected.
@@ -396,12 +426,14 @@ public struct ConfirmationProof: Codable, Sendable, Hashable {
         case wrongSubject, assuranceTooLow, malformedSignature, signedInFuture, tooOld, badSignature, replayed
     }
 
-    /// The key purpose that must have signed this proof. Only `biometric` assurance confirms: a device passcode is known to a
-    /// shoulder-surfer or thief, and a request key never counts, so those are `nil` (`Failure.assuranceTooLow`).
+    /// The key purpose that must have signed this proof. Confirming a device or a phone needs `biometric` assurance: a device passcode is
+    /// known to a shoulder-surfer or thief, and a request key never counts, so those are `nil` (`Failure.assuranceTooLow`). Adding a recovery
+    /// credential also accepts the passcode-protected approval key (the same bar as the passkey assertion it replaces, whose user
+    /// verification a passcode satisfies); a request key never does.
     public var requiredKeyPurpose: DeviceKeyPurpose? {
         switch assurance {
         case .none: nil
-        case .devicePasscode: nil
+        case .devicePasscode: subject == .recoveryCredential ? .approvalUserPresence : nil
         case .biometric: .approvalBiometric
         }
     }
@@ -602,6 +634,8 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused
     /// Approve v2: a key was created but the business never confirmed it in time; Viadere removed it.
     case approvalKeyUnconfirmed
+    /// An optional recovery credential (a passkey) was added to the account from one of its devices.
+    case recoveryCredentialAdded
     case unknown
 
     public init(from decoder: any Decoder) throws {
@@ -681,6 +715,44 @@ public struct SecurityNotice: Codable, Sendable, Hashable, Identifiable {
 }
 
 // MARK: - Push
+
+/// Platform-neutral push token registration (`POST /v1/push/apns-token`, which also accepts the older `APNsTokenRegistration` body). The server
+/// accepts `apns` today; `fcm` is reserved for the Android client and refused (`422`) until an FCM sender exists. A token registered for one
+/// provider is only ever sent through that provider.
+public struct PushRegistration: Codable, Sendable, Hashable {
+    public enum Provider: String, Codable, Sendable, CaseIterable {
+        case apns, fcm, unknown
+
+        public init(from decoder: any Decoder) throws {
+            self = Provider(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    public var provider: Provider
+    /// The provider's device token (APNs: hex).
+    public var token: String
+    /// APNs: `sandbox` or `production`. Not used by FCM.
+    public var environment: String?
+    /// The app's identifier on the platform (iOS bundle id, Android application id).
+    public var appId: String
+
+    public init(provider: Provider, token: String, environment: String?, appId: String) {
+        self.provider = provider
+        self.token = token
+        self.environment = environment
+        self.appId = appId
+    }
+
+    public init(_ apns: APNsTokenRegistration) {
+        self.init(provider: .apns, token: apns.token, environment: apns.environment.rawValue, appId: apns.bundleId)
+    }
+
+    /// The APNs registration this describes, or `nil` for another provider (or an unknown APNs environment).
+    public var apnsRegistration: APNsTokenRegistration? {
+        guard provider == .apns, let raw = environment, let environment = APNsTokenRegistration.Environment(rawValue: raw) else { return nil }
+        return APNsTokenRegistration(token: token, environment: environment, bundleId: appId)
+    }
+}
 
 public struct APNsTokenRegistration: Codable, Sendable, Hashable {
     public enum Environment: String, Codable, Sendable { case sandbox, production }
