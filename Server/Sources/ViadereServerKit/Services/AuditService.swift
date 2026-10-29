@@ -54,6 +54,17 @@ struct AuditKeyring: Sendable {
     var current: SymmetricKey { keys[currentEpoch] ?? keys.values.first! }
 }
 
+/// The audit pseudonym of an account (spec §3 `AuditEvent.actor pseudonym`, SECURITY.md §2.22): `act_` + the first 32 hex characters of
+/// `HMAC-SHA256(SERVER_PEPPER, "audit-actor-ref\n{consumerId}")`. Stable for an account (so its events can be followed), not reversible without the
+/// pepper, and different from every external identifier (`subject_ref` uses another key and domain). Rotating the pepper starts new pseudonyms.
+struct AuditPseudonym {
+    let ctx: ServerContext
+
+    func ref(for consumerId: UUID) -> String {
+        "act_" + ctx.hasher.hmacHex("audit-actor-ref", consumerId.uuidString.lowercased()).prefix(32)
+    }
+}
+
 /// Appends to the hash-chained audit log. Each event's hash covers the previous event's hash and the
 /// canonical JSON of the event, so any later modification or deletion breaks the chain.
 ///
@@ -99,9 +110,13 @@ struct AuditService {
                     record.correlationId = correlationId
                     record.metadataJSON = metadataJSON
                     record.prevHash = head?.hash ?? Self.genesisHash
+                    // Version 4: the actor pseudonym (when a person or their device acted) and the policy version are part of the MAC.
+                    if let consumerId, actor.kind == .consumer || actor.kind == .device {
+                        record.actorRef = AuditPseudonym(ctx: ctx).ref(for: consumerId.uuid)
+                    }
+                    record.policyVersion = TrustTierPolicy.version
                     let keyring = AuditKeyring(config: ctx.config)
-                    // Epoch 1 keeps the version 2 form; a rotated key records its epoch (version 3).
-                    record.chainVersion = keyring.currentEpoch > 1 ? 3 : 2
+                    record.chainVersion = 4
                     record.keyEpoch = keyring.currentEpoch > 1 ? keyring.currentEpoch : nil
                     record.hash = try Self.hash(of: record, key: keyring.current)
                     try await record.create(on: tx)
@@ -143,6 +158,10 @@ struct AuditService {
         if record.chainVersion >= 2 {
             object["v"] = .integer(Int64(record.chainVersion))
             if record.chainVersion >= 3, let epoch = record.keyEpoch { object["ke"] = .integer(Int64(epoch)) }
+            if record.chainVersion >= 4 {
+                if let ref = record.actorRef { object["ar"] = .string(ref) }
+                if let version = record.policyVersion { object["pv"] = .integer(Int64(version)) }
+            }
             if let id = record.id { object["id"] = .string(id.uuidString.lowercased()) }
             let mac = HMAC<SHA256>.authenticationCode(for: try CanonicalJSON.serialize(.object(object)), using: key)
             return Hex.encode(mac)
@@ -173,12 +192,18 @@ struct AuditService {
         var expectedSeq = (checkpoint?.seq ?? 0) + 1
         var sawKeyed = checkpoint != nil
         var lastEpoch = checkpoint?.keyEpoch ?? 1
+        var sawVersion4 = false
         for event in events {
             if event.chainVersion >= 2 { sawKeyed = true } else if sawKeyed || event.seq > legacyThroughSeq {
                 // Only the pre-upgrade prefix may be unkeyed, and a keyed event can never be followed by an unkeyed one: a downgrade.
                 return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
             }
-            let epoch = event.chainVersion >= 3 ? (event.keyEpoch ?? 0) : 1
+            // Once version 4 (actor pseudonym, policy version) appears, no later event may drop back to a form that does not cover them.
+            if event.chainVersion >= 4 { sawVersion4 = true } else if sawVersion4 {
+                return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
+            }
+            // Version 3 always names its epoch; version 4 names it when it is not 1.
+            let epoch = event.chainVersion >= 4 ? (event.keyEpoch ?? 1) : (event.chainVersion >= 3 ? (event.keyEpoch ?? 0) : 1)
             guard let key = keyring.keys[epoch], epoch >= lastEpoch else {
                 return ChainVerification(valid: false, checked: expectedSeq - 1, firstBrokenSeq: event.seq)
             }

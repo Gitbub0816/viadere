@@ -131,7 +131,7 @@ struct ConsumerExports {
         guard let consumer = try await ConsumerRecord.find(consumerId, on: db) else { throw APIError.notFound }
         let iso = { (date: Date?) -> Any in date.map { ViadereDate.format($0) } ?? NSNull() }
         var out: [String: Any] = ["format": "viadere-export-v1", "generatedAt": ViadereDate.format(ctx.now)]
-        out["account"] = ["id": consumerId.uuidString.lowercased(), "displayName": consumer.displayName, "createdAt": iso(consumer.createdAt), "status": consumer.status]
+        out["account"] = ["id": consumerId.uuidString.lowercased(), "displayName": consumer.displayName as Any? ?? NSNull(), "createdAt": iso(consumer.createdAt), "status": consumer.status]
         let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumerId).all()
         out["devices"] = devices.map { ["id": $0.id?.uuidString.lowercased() ?? "", "name": $0.name, "createdAt": iso($0.createdAt), "lastSeenAt": iso($0.lastSeenAt), "revokedAt": iso($0.revokedAt)] }
         let links = try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == consumerId).all()

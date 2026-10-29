@@ -395,7 +395,8 @@ final class ApproveEnrollmentTests: XCTestCase {
             let f = try await h.approveFixture()
             // A second device with its own key for the same relationship.
             let second = try await h.enrollDevice(f.phone.consumer)
-            try await DeviceRecord.query(on: h.db).filter(\.$id == second.device!.id.uuid).set(\.$approvalsLockedUntil, to: nil).update()
+            // The owner's trusted phone approves it (time alone never would).
+            try await eq(try await h.confirm(second, from: f.phone.consumer).status, .ok)
             let secondPhone = try await h.enrollApproval(second, business: f.business, keys: f.keys)
             XCTAssertNotEqual(secondPhone.kid, f.phone.kid)
             let (created, _) = try await h.createRequest(f)

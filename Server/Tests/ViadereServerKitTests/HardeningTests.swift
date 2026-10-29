@@ -235,7 +235,8 @@ final class HardeningTests: XCTestCase {
         }
     }
 
-    func testCoolDownEndsOnItsOwnAfter24Hours() async throws {
+    /// Owner decision (2026-10-29, WP-B5): the window ending no longer makes a device trusted; only an approval from a trusted device does.
+    func testTheWindowEndingDoesNotMakeTheDeviceTrusted() async throws {
         try await withHarness { h in
             let b = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let first = try await h.readyConsumer()
@@ -251,7 +252,12 @@ final class HardeningTests: XCTestCase {
             renewed.session = try refreshed.json(AuthSession.self)
             let late = try await highAuthorize(h, b, rel)
             let real2 = try await h.consumerInteraction(renewed, id: late.id)
-            try await eq(try await h.decide(renewed, id: late.id, signed: try await h.decision(renewed, interaction: real2)).status, .ok)
+            try await eq(try await h.decide(renewed, id: late.id, signed: try await h.decision(renewed, interaction: real2)).errorCode, .deviceCoolDown)
+            // An approval from the first (trusted) device is what makes it trusted.
+            try await eq(try await h.confirm(renewed, from: try await h.renewed(first)).status, .ok)
+            let approved = try await highAuthorize(h, b, rel)
+            let real3 = try await h.consumerInteraction(renewed, id: approved.id)
+            try await eq(try await h.decide(renewed, id: approved.id, signed: try await h.decision(renewed, interaction: real3)).status, .ok)
         }
     }
 
@@ -795,7 +801,7 @@ final class HardeningTests: XCTestCase {
             let key = h.ctx.config.auditChainKey
             try await isTrue(try await AuditService.verifyChain(on: h.db, key: key).valid)
             let events = try await AuditEventRecord.query(on: h.db).sort(\.$seq).all()
-            XCTAssertTrue(events.allSatisfy { $0.chainVersion == 2 })
+            XCTAssertTrue(events.allSatisfy { $0.chainVersion == 4 }, "new events use chain version 4 (actor pseudonym and policy version covered)")
             // The wrong key (an attacker who guesses one) does not verify.
             try await isFalse(try await AuditService.verifyChain(on: h.db, key: SymmetricKey(data: Data(repeating: 1, count: 32))).valid)
             // Exploit: with write access, edit an event and recompute the whole chain with plain SHA-256 (the old, unkeyed design).

@@ -29,20 +29,23 @@ struct AuthService {
 
     // MARK: Passkey registration
 
+    /// Legacy passkey-first sign-up (kept for older apps; new accounts are device-first, `AccountEnrollmentService`). The name is optional.
     func registerBegin(_ request: PasskeyRegistrationBeginRequest) async throws -> PasskeyRegistrationOptions {
-        let name = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 64, !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-            throw APIError.validation("A display name of up to 64 characters is required.", details: ["displayName": "invalid"])
+        let trimmed = (request.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count <= 64, !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw APIError.validation("A display name can have up to 64 characters.", details: ["displayName": "invalid"])
         }
+        let name: String? = trimmed.isEmpty ? nil : trimmed
         let challenge = ctx.passkeys.makeChallenge()
         let consumerId = UUID()
         let handle = SecureToken.generate(byteCount: 32)
         let ceremony = PasskeyCeremonyRecord(kind: "register", challenge: Base64URL.encode(challenge), consumerId: consumerId,
                                              displayName: name, userHandle: handle, now: ctx.now, ttl: Self.ceremonyTTL)
         try await ceremony.create(on: db)
+        let label = name ?? ConsumerRecord.neutralLabel
         return PasskeyRegistrationOptions(
             ceremonyId: CeremonyID(ceremony.id!), challenge: Base64URL.encode(challenge), relyingPartyId: ctx.config.relyingPartyID,
-            relyingPartyName: ctx.config.relyingPartyName, userId: handle, userName: name, userDisplayName: name,
+            relyingPartyName: ctx.config.relyingPartyName, userId: handle, userName: label, userDisplayName: label,
             timeoutMilliseconds: Int(Self.ceremonyTTL * 1000))
     }
 
@@ -58,7 +61,8 @@ struct AuthService {
     func registerFinish(_ request: PasskeyRegistrationFinishRequest) async throws -> AuthSession {
         let ceremony = try await consumeCeremony(request.ceremonyId, kind: "register")
         guard let challenge = Base64URL.decode(ceremony.challenge), let consumerId = ceremony.consumerId,
-              let name = ceremony.displayName, let handle = ceremony.userHandle else { throw APIError.unauthorized }
+              let handle = ceremony.userHandle else { throw APIError.unauthorized }
+        let name = ceremony.displayName
         let verified: VerifiedPasskeyRegistration
         let database = db
         do {
@@ -111,7 +115,7 @@ struct AuthService {
             throw failure
         }
         // For discoverable credentials the authenticator returns the user handle; it must match the credential's owner.
-        if let handle = request.credential.userHandle, !ConstantTime.equals(handle, consumer.userHandle) { throw failure }
+        if let handle = request.credential.userHandle, !ConstantTime.equals(handle, consumer.userHandle ?? "") { throw failure }
         do {
             let result = try ctx.passkeys.verifyAssertion(request.credential, challenge: challenge, publicKey: publicKey,
                                                          signCount: UInt32(clamping: credential.signCount))
@@ -191,6 +195,10 @@ struct AuthService {
     }
 
     func deviceDTO(_ device: DeviceRecord, keys: [DeviceKeyRecord], pendingReplacementAt: Date? = nil) -> Device {
+        Self.deviceDTO(device, keys: keys, pendingReplacementAt: pendingReplacementAt, now: ctx.now)
+    }
+
+    static func deviceDTO(_ device: DeviceRecord, keys: [DeviceKeyRecord], pendingReplacementAt: Date? = nil, now: Date) -> Device {
         let keyDTOs: [DeviceKey] = keys.compactMap { key in
             guard let purpose = DeviceKeyPurpose(rawValue: key.purpose), let publicKey = try? DevicePublicKey(base64URL: key.publicKey),
                   let id = key.id else { return nil }
@@ -202,7 +210,30 @@ struct AuthService {
                       lastSeenAt: device.lastSeenAt, revokedAt: device.revokedAt, clientKind: device.kind,
                       approvalsLockedUntil: device.approvalsLockedUntil, expiresAt: device.expiresAt,
                       pendingReplacementBy: device.revokedAt == nil ? device.pendingReplacementBy.map { DeviceID($0) } : nil,
-                      pendingReplacementAt: device.revokedAt == nil ? pendingReplacementAt : nil)
+                      pendingReplacementAt: device.revokedAt == nil ? pendingReplacementAt : nil, trustTier: DeviceTrust.tier(device, at: now))
+    }
+
+    /// `400` unless every key is `ES256` and the integrity fields do not contradict each other (§2.5a).
+    static func validateKeysAndEvidence(_ keys: [DeviceKeyRegistration], conflictingIntegrity: Bool) throws {
+        guard keys.allSatisfy({ $0.algorithm.isSupported }) else {
+            throw APIError(.badRequest, .badRequest, "Only ES256 (P-256) keys are supported.", details: ["algorithm": "unsupported"])
+        }
+        guard !conflictingIntegrity else {
+            throw APIError(.badRequest, .badRequest, "Send integrity evidence once (integrity or appAttest, not two different ones).", details: ["integrity": "conflict"])
+        }
+    }
+
+    /// The tier a device starts with (`TrustTierPolicy.initialElevation`), from the server's own records.
+    static func initialElevation(consumerId: UUID, kind: DeviceClientKind, purposes: [DeviceKeyPurpose], attested: Bool, mode: AppAttestMode,
+                                 db: any Database) async throws -> TrustElevation? {
+        let hadAppDevice = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumerId)
+            .filter(\.$clientKind == DeviceClientKind.app.rawValue).count() > 0
+        let recovered = try await AccountRecoveryRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$state == "activated").count() > 0
+        let facts = DeviceTrustFacts(isFullApp: kind == .app, revoked: false, expired: false,
+                                     hasUserVerifiedApprovalKey: purposes.contains(.approvalBiometric) || purposes.contains(.approvalUserPresence),
+                                     integrityVerified: attested, integrityRequired: mode != .off, firstAppDeviceOfAccount: !hadAppDevice,
+                                     accountRecovered: recovered)
+        return TrustTierPolicy.initialElevation(facts)
     }
 
     private func enrollmentFailure(_ principal: ConsumerPrincipal, _ reason: String, purpose: String? = nil) async -> Never? {
@@ -219,6 +250,7 @@ struct AuthService {
         guard !name.isEmpty, name.count <= 64, !DisplayTextSanitizer.containsDisallowedScalars(name) else {
             throw APIError.validation("A device name of up to 64 characters is required.", details: ["name": "invalid"])
         }
+        try Self.validateKeysAndEvidence(request.keys, conflictingIntegrity: request.hasConflictingIntegrity)
         let purposes = request.keys.map(\.purpose)
         guard purposes.contains(.request), Set(purposes).count == purposes.count, request.keys.count <= DeviceKeyPurpose.allCases.count else {
             throw APIError.validation("Provide exactly one key per purpose, including a request key.", details: ["keys": "invalid"])
@@ -271,7 +303,8 @@ struct AuthService {
         let now = ctx.now
         let kind = request.effectiveClientKind
         // App Attest: the attestation must vouch for this exact challenge, account and key list (AppAttestBinding).
-        let verifiedAttestation = await ctx.integrity.verifyEnrollment(request.appAttest, consumerId: principal.consumerId, challenge: request.challenge,
+        let evidence = request.effectiveIntegrity
+        let verifiedAttestation = await ctx.integrity.verifyEnrollment(integrity: evidence, consumerId: principal.consumerId, challenge: request.challenge,
                                                                         keys: request.keys, clientKind: kind)
         // An App Attest key can vouch for one device only.
         let keyReused: Bool
@@ -290,13 +323,14 @@ struct AuthService {
         guard try await DB.swap(db, table: DeviceEnrollChallengeRecord.schema, id: challengeRecord.id!, column: "state", expected: "open", newValue: "used")
         else { throw APIError(.unauthorized, .unauthorized, "The enrollment challenge is invalid or expired.") }
 
-        // Cool-down: an account that has EVER had an app device (revoked or expired ones included, however long ago, so deleting the
-        // owner's devices or waiting does not make a thief's device the "first") cannot approve high-risk requests from this new
-        // device for 24 h (72 h if it could not be attested in report mode), unless confirmed. Only a brand-new account's first device
-        // is exempt: there is nobody to confirm it. It applies whatever keys the device registers: a request-key-only device must not
-        // count as trusted (DeviceTrust) on day one.
+        // Trust tier (§2.5a): only a brand-new, never-recovered account's first app device with a user-verified key and verified integrity
+        // starts at D1. Every other device is D0 until a D1 device approves it (`confirm`); time never elevates it. The notice window
+        // (24 h, 72 h unattested in report mode) for an account that has EVER had an app device (revoked or expired ones included, however
+        // long ago) is when the other devices can cancel a replacement; its end does not make the device trusted.
         let hadAppDevice = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid)
             .filter(\.$clientKind == DeviceClientKind.app.rawValue).count() > 0
+        let elevation = try await Self.initialElevation(consumerId: principal.consumerId.uuid, kind: kind, purposes: purposes,
+                                                        attested: attestation.attested, mode: mode, db: db)
         let unattestedInReport = mode == .report && !attestation.attested
         let coolDown = kind == .app && hadAppDevice
         let coolDownLength = unattestedInReport ? Self.unattestedCoolDown : Self.newDeviceCoolDown
@@ -307,7 +341,14 @@ struct AuthService {
         device.enrollmentMethod = method
         device.approvalsLockedUntil = coolDown ? now.addingTimeInterval(coolDownLength) : nil
         device.expiresAt = kind == .appClip ? now.addingTimeInterval(Self.appClipLifetime) : nil
-        device.attestationStatus = attestation.attested ? "attested" : (request.appAttest == nil ? "unattested" : "rejected")
+        device.attestationStatus = attestation.attested ? "attested" : (evidence == nil ? "unattested" : "rejected")
+        device.integrityFormat = evidence?.format.rawValue
+        device.keyAlgorithm = DeviceKeyAlgorithm.es256.rawValue
+        if let elevation {
+            device.trustTier = DeviceTrustTier.d1.rawValue
+            device.elevatedAt = now
+            device.elevatedBy = elevation.rawValue
+        }
         // `hardwareBacked` is recorded as claimed; `attested` is true only if App Attest verified it.
         let keyRecords = request.keys.map { DeviceKeyRecord(deviceId: device.id!, purpose: $0.purpose, publicKey: $0.publicKey,
                                                            hardwareBacked: $0.hardwareBacked, now: now, attested: attestation.attested) }
@@ -328,7 +369,8 @@ struct AuthService {
                 for key in keyRecords { try await key.create(on: tx) }
                 if attestation.attested, let keyId = attestation.keyId, let publicKey = attestation.publicKey {
                     try await AppAttestKeyRecord(deviceId: device.id!, consumerId: principal.consumerId.uuid, keyId: keyId, publicKey: publicKey,
-                                                 counter: attestation.counter, environment: attestation.environment ?? "production", now: now).create(on: tx)
+                                                 counter: attestation.counter, environment: attestation.environment ?? "production", now: now,
+                                                 format: evidence?.format ?? .appleAppAttest).create(on: tx)
                 }
                 if replacingLive, let replaced, let oldId = replaced.id {
                     // The old device keeps working, and so does the caller's session. The new device takes over when it is confirmed or its
@@ -351,7 +393,7 @@ struct AuthService {
                                 "method": method, "client_kind": kind.rawValue, "cool_down": coolDown ? "true" : "false",
                                 "cool_down_hours": coolDown ? String(Int(coolDownLength / 3600)) : "0",
                                 "attested": attestation.attested ? "true" : "false", "attestation": attestation.reason,
-                                "attest_mode": mode.rawValue]
+                                "attest_mode": mode.rawValue, "tier": device.trustTier, "integrity_format": evidence?.rawFormat ?? "none"]
                 if unattestedInReport { metadata["flagged"] = "unattested" }
                 _ = try await AuditService(db: tx, ctx: ctx).record("device.enrolled", actor: AuditActor(kind: .consumer, id: principal.consumerId.description),
                     consumerId: principal.consumerId, subjectType: "device", subjectId: DeviceID(device.id!).description, metadata: metadata)
@@ -391,7 +433,7 @@ struct AuthService {
                 _ = await enrollmentFailure(principal, "unknown_credential")
                 throw required
             }
-            if let handle = assertion.userHandle, !ConstantTime.equals(handle, consumer.userHandle) {
+            if let handle = assertion.userHandle, !ConstantTime.equals(handle, consumer.userHandle ?? "") {
                 _ = await enrollmentFailure(principal, "user_handle_mismatch")
                 throw required
             }
@@ -468,8 +510,10 @@ struct AuthService {
         }
     }
 
-    /// Lifts the new-device cool-down of `target`. Signed by **another**, trusted device of the same account with a user-verified
-    /// approval key (`ConfirmationProof`), so a stolen bearer token plus the new (attacker) device cannot confirm itself.
+    /// Approves `target` (§2.17, §2.5a): **another** D1 device of the same account signs a user-verified (biometric) `ConfirmationProof`, so a
+    /// stolen bearer token plus the new (attacker) device cannot approve itself, and a device nobody approved cannot approve others. It ends the
+    /// target's notice window and, when the target meets every D1 condition (a full-app device with a user-verified approval key and verified
+    /// integrity where it is evaluated), makes it D1. This is the only way an existing account's device becomes D1.
     func confirm(_ principal: ConsumerPrincipal, target: DeviceID, proof: ConfirmationProof) async throws -> Device {
         try await ctx.limiter.enforce("device-confirm", key: principal.consumerId.description, rule: .perHour(30, burst: 10))
         let now = ctx.now
@@ -478,7 +522,8 @@ struct AuthService {
               confirmer.isTrusted(at: now),
               let device = try await DeviceRecord.query(on: db).filter(\.$id == target.uuid)
                   .filter(\.$consumerId == principal.consumerId.uuid).first(), device.revokedAt == nil else { throw APIError.forbidden }
-        if device.approvalsLockedUntil != nil {
+        var keys = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == target.uuid).all()
+        if device.approvalsLockedUntil != nil || !device.isTrusted(at: now) {
             guard let purpose = proof.requiredKeyPurpose,
                   let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == confirmerId.uuid)
                       .filter(\.$purpose == purpose.rawValue).first(), let publicKey = try? DevicePublicKey(base64URL: keyRecord.publicKey) else {
@@ -496,17 +541,28 @@ struct AuthService {
                                                                     subjectType: "device", subjectId: target.description)
                 throw APIError.signatureInvalid
             }
+            let purposes = Set(keys.compactMap { DeviceKeyPurpose(rawValue: $0.purpose) })
+            let facts = DeviceTrustFacts(isFullApp: device.kind == .app, revoked: false, expired: device.isExpired(at: now),
+                                         hasUserVerifiedApprovalKey: purposes.contains(.approvalBiometric) || purposes.contains(.approvalUserPresence),
+                                         integrityVerified: device.attestationStatus == "attested", integrityRequired: ctx.config.appAttestMode != .off)
+            let elevate = !device.isTrusted(at: now) && TrustTierPolicy.mayElevate(target: facts, approverTier: DeviceTrust.tier(confirmer, at: now))
             device.approvalsLockedUntil = nil
             device.confirmedAt = now
+            if elevate {
+                device.trustTier = DeviceTrustTier.d1.rawValue
+                device.elevatedAt = now
+                device.elevatedBy = TrustElevation.trustedDeviceApproval.rawValue
+            }
             try await db.transaction { tx in
                 try await device.update(on: tx)
                 _ = try await AuditService(db: tx, ctx: ctx).record("device.confirmed", principal: principal, subjectType: "device",
-                    subjectId: target.description, metadata: ["assurance": proof.assurance.rawValue])
+                    subjectId: target.description, metadata: ["assurance": proof.assurance.rawValue, "tier": device.trustTier,
+                                                              "elevated": elevate ? "true" : "false", "by_device": confirmerId.description])
             }
         }
         // Confirming the new device completes any "Set up again" that was waiting on it: the replaced device goes now.
         try await IdentityMaintenance(db: db, ctx: ctx).finalizeReplacements(forNewDevice: target.uuid)
-        let keys = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == target.uuid).all()
+        keys = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == target.uuid).all()
         return deviceDTO(device, keys: keys)
     }
 }

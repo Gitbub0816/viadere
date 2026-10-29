@@ -17,6 +17,15 @@ enum AuthRoutes {
             let body: PasskeyRegistrationFinishRequest = try req.decodeBody()
             return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).registerFinish(body), status: .created)
         }
+        // Device-first accounts (§2.5a). The begin body, if any, is ignored: nothing a client sends can name an account.
+        signup.api(APIRoutes.accountEnrollBegin, limiter: ceremony) { req in
+            try req.jsonResponse(try await AccountEnrollmentService(db: req.db, ctx: req.ctx).begin())
+        }
+        signup.api(APIRoutes.accountCreate, limiter: ceremony) { req in
+            let body: AccountCreateRequest = try req.decodeBody()
+            let ip = ClientIP.resolve(req, trustedProxies: req.ctx.config.trustedProxyCount)
+            return try req.jsonResponse(try await AccountEnrollmentService(db: req.db, ctx: req.ctx).create(body, clientIP: ip), status: .created)
+        }
         routes.api(APIRoutes.loginBegin, limiter: ceremony) { req in
             _ = try? req.decodeBody(PasskeyLoginBeginRequest.self)
             return try req.jsonResponse(try await AuthService(db: req.db, ctx: req.ctx).loginBegin())
@@ -113,7 +122,18 @@ enum DeviceRoutes {
             return try req.emptyOK()
         }
         routes.api(APIRoutes.apnsTokenRegister) { req in
-            let body: APNsTokenRegistration = try req.decodeBody()
+            // The platform-neutral body (`PushRegistration`, with `provider`) or the original APNs one. Only APNs is delivered today: an FCM
+            // (or unknown) provider's token is refused, never stored where the APNs sender would use it.
+            let body: APNsTokenRegistration
+            if (try? req.decodeBody(PushProviderProbe.self))?.provider != nil {
+                let neutral: PushRegistration = try req.decodeBody()
+                guard let apns = neutral.apnsRegistration else {
+                    throw APIError.validation("This push provider is not supported yet.", details: ["provider": "unsupported"])
+                }
+                body = apns
+            } else {
+                body = try req.decodeBody()
+            }
             let principal = try req.consumer
             guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
             let token = body.token.lowercased()
@@ -143,3 +163,6 @@ enum DeviceRoutes {
         }
     }
 }
+
+/// Reads only whether a push registration body names a provider.
+private struct PushProviderProbe: Decodable { var provider: String? }

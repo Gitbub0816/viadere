@@ -362,10 +362,11 @@ struct InteractionService {
             try await deny("malformed", error: .badRequest("The decision could not be read."))
         }
         guard claimed.deviceId == deviceId else { try await deny("device_mismatch", error: .forbidden) }
-        if device.isCoolingDown(at: now), interaction.effectiveSensitivity >= .high,
+        // High and critical approvals need a D1 device (§2.5a); a device that is not approved yet never becomes one by waiting.
+        if !DeviceTrust.isTrusted(device, at: now), interaction.effectiveSensitivity >= .high,
            ![Decision.deny, .report, .decline].contains(claimed.decision) {
-            try await deny("device_cool_down", error: APIError(.forbidden, .deviceCoolDown,
-                "This device was added recently. Confirm it from another device you trust before approving this request."))
+            try await deny("device_not_trusted", error: APIError(.forbidden, .deviceCoolDown,
+                "This device hasn't been approved yet. Approve it from a device you already trust before approving this request."))
         }
         // A delegate can never approve authenticate/authorize, and only a manager may confirm, decline or choose. Server-enforced.
         if let delegation {

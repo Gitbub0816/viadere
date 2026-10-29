@@ -42,6 +42,10 @@ final class AuditEventRecord: Model, @unchecked Sendable {
     @Field(key: "chain_version") var chainVersion: Int
     /// The `AUDIT_CHAIN_KEY` epoch that authenticates this event (chain version 3 and later; `nil` = epoch 1).
     @OptionalField(key: "key_epoch") var keyEpoch: Int?
+    /// Pseudonym of the account whose person (or device) acted: `act_` + HMAC (`AuditPseudonym`). Covered by the chain from version 4.
+    @OptionalField(key: "actor_ref") var actorRef: String?
+    /// The trust policy version in force when the event was written (`TrustTierPolicy.version`). Covered by the chain from version 4.
+    @OptionalField(key: "policy_version") var policyVersion: Int?
 
     init() {}
 }

@@ -76,9 +76,11 @@ final class VaultSyncTests: XCTestCase {
         return b
     }
 
-    /// Ends the new-device cool-down (as 24 hours passing, or a confirmation from another device, would) without moving the clock, so tokens stay valid.
+    /// Makes the device trusted (D1) as an approval from another trusted device of the account would (§2.5a; time never does), without the
+    /// ceremony, so tests about the vault stay about the vault. The approval itself is covered in `TrustTierExploitTests` and `RecoveryCredentialTests`.
     func trust(_ h: TestHarness, _ who: TestConsumer) async throws {
-        try await DeviceRecord.query(on: h.db).filter(\.$id == who.device!.id.uuid).set(\.$approvalsLockedUntil, to: nil).update()
+        try await DeviceRecord.query(on: h.db).filter(\.$id == who.device!.id.uuid).set(\.$approvalsLockedUntil, to: nil)
+            .set(\.$trustTier, to: DeviceTrustTier.d1.rawValue).set(\.$elevatedBy, to: TrustElevation.trustedDeviceApproval.rawValue).update()
     }
 
     func notices(_ h: TestHarness, _ who: TestConsumer) async throws -> [SecurityNotice] {

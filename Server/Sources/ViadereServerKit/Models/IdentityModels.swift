@@ -19,10 +19,14 @@ final class AppAttestKeyRecord: Model, @unchecked Sendable {
     @Field(key: "environment") var environment: String
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "last_assertion_at") var lastAssertionAt: Date?
+    /// The integrity evidence format (`apple-app-attest`); the table is format-neutral so another platform's attested key fits too.
+    @Field(key: "format") var format: String
 
     init() {}
 
-    init(deviceId: UUID, consumerId: UUID, keyId: String, publicKey: String, counter: Int, environment: String, now: Date) {
+    init(deviceId: UUID, consumerId: UUID, keyId: String, publicKey: String, counter: Int, environment: String, now: Date,
+         format: IntegrityEvidenceFormat = .appleAppAttest) {
+        self.format = format.rawValue
         id = UUID()
         self.deviceId = deviceId
         self.consumerId = consumerId
@@ -138,5 +142,28 @@ final class BusinessIdempotencyRecord: Model, @unchecked Sendable {
         self.requestHash = requestHash
         self.resourceId = resourceId
         createdAt = now
+    }
+}
+
+/// A device-first account-creation ceremony (§2.5a): the reserved account id and the single-use challenge (stored as a hash).
+final class AccountEnrollCeremonyRecord: Model, @unchecked Sendable {
+    static let schema = "account_enroll_ceremonies"
+    @ID(key: .id) var id: UUID?
+    @Field(key: "reserved_account_id") var reservedAccountId: UUID
+    @Field(key: "challenge_hash") var challengeHash: String
+    /// `open` → `used` (compare-and-swap, exactly once).
+    @Field(key: "state") var state: String
+    @Field(key: "expires_at") var expiresAt: Date
+    @Field(key: "created_at") var createdAt: Date
+
+    init() {}
+
+    init(reservedAccountId: UUID, challengeHash: String, now: Date, ttl: TimeInterval) {
+        id = UUID()
+        self.reservedAccountId = reservedAccountId
+        self.challengeHash = challengeHash
+        state = "open"
+        createdAt = now
+        expiresAt = now.addingTimeInterval(ttl)
     }
 }

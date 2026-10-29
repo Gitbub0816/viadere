@@ -5,21 +5,32 @@ import ViadereCore
 final class ConsumerRecord: Model, @unchecked Sendable {
     static let schema = "consumers"
     @ID(key: .id) var id: UUID?
-    @Field(key: "display_name") var displayName: String
-    /// Opaque WebAuthn user handle (random, no PII).
-    @Field(key: "user_handle") var userHandle: String
+    /// Optional: device-first accounts have none (§2.5a). Never required, never shown to businesses.
+    @OptionalField(key: "display_name") var displayName: String?
+    /// Opaque WebAuthn user handle (random, no PII). Assigned when the account gets its first passkey; `nil` until then.
+    @OptionalField(key: "user_handle") var userHandle: String?
     @Field(key: "status") var status: String
     @Field(key: "created_at") var createdAt: Date
+    /// The trust-tier policy version the account was created under (`TrustTierPolicy.version`).
+    @Field(key: "policy_version") var policyVersion: Int
+    /// `device` (device-first, `POST /v1/accounts`) or `passkey` (legacy registration).
+    @Field(key: "created_via") var createdVia: String
 
     init() {}
 
-    init(id: UUID, displayName: String, userHandle: String, now: Date) {
+    init(id: UUID, displayName: String?, userHandle: String?, now: Date, createdVia: String = "passkey") {
         self.id = id
         self.displayName = displayName
         self.userHandle = userHandle
         status = "active"
         createdAt = now
+        policyVersion = TrustTierPolicy.version
+        self.createdVia = createdVia
     }
+
+    /// What to call the account where a label is unavoidable (the passkey sheet, a household member) and no name was given.
+    static let neutralLabel = "Viadere account"
+    var label: String { displayName ?? Self.neutralLabel }
 
     var consumerID: ConsumerID { ConsumerID(id ?? UUID()) }
 
@@ -39,10 +50,13 @@ final class PasskeyCredentialRecord: Model, @unchecked Sendable {
     @Field(key: "backup_eligible") var backupEligible: Bool
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "last_used_at") var lastUsedAt: Date?
+    /// `active`. (Recovery credentials, spec §3 `RecoveryCredential.status`; a passkey that is removed is deleted.)
+    @Field(key: "status") var status: String
 
     init() {}
 
     init(consumerId: UUID, credentialId: String, publicKey: String, signCount: Int, backupEligible: Bool, now: Date) {
+        status = "active"
         id = UUID()
         self.consumerId = consumerId
         self.credentialId = credentialId
@@ -155,8 +169,17 @@ final class DeviceRecord: Model, @unchecked Sendable {
     /// `attested` (App Attest verified), `unattested` (none provided or it failed; flagged under `APP_ATTEST_MODE=report`) or `none`
     /// (enrolled before attestation existed).
     @Field(key: "attestation_status") var attestationStatus: String
-    /// Set on a LIVE device that "Set up again" is replacing: the new device that takes over once confirmed or out of its cool-down.
+    /// Set on a LIVE device that "Set up again" is replacing: the new device that takes over once confirmed or out of its notice window.
     @OptionalField(key: "pending_replacement_by") var pendingReplacementBy: UUID?
+    /// `ES256` (the only algorithm accepted).
+    @Field(key: "key_algorithm") var keyAlgorithm: String
+    /// The stored trust decision, `d0` or `d1` (`DeviceTrustTier`). Read only through `DeviceTrust.tier`, which caps it by live facts.
+    @Field(key: "trust_tier") var trustTier: String
+    /// The integrity evidence format the device enrolled with (`apple-app-attest`, `android-key-attestation`, `none`, `unknown`), or `nil`.
+    @OptionalField(key: "integrity_format") var integrityFormat: String?
+    /// When and why it became D1 (`TrustElevation`). Never a time-based reason.
+    @OptionalField(key: "elevated_at") var elevatedAt: Date?
+    @OptionalField(key: "elevated_by") var elevatedBy: String?
 
     init() {}
 
@@ -169,7 +192,11 @@ final class DeviceRecord: Model, @unchecked Sendable {
         self.clientKind = clientKind.rawValue
         enrollmentMethod = "legacy"
         attestationStatus = "none"
+        keyAlgorithm = DeviceKeyAlgorithm.es256.rawValue
+        trustTier = DeviceTrustTier.d0.rawValue
     }
+
+    var storedTier: DeviceTrustTier { DeviceTrustTier(rawValue: trustTier) ?? .d0 }
 
     var kind: DeviceClientKind { DeviceClientKind(rawValue: clientKind) ?? .app }
 

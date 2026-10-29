@@ -135,8 +135,8 @@ final class Round3Tests: XCTestCase {
             _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let a = try await h.readyConsumer()
             let b = try await h.enrollDevice(a)
-            // Device B is trusted (confirmed): then the delay is the short one.
-            try await DeviceRecord.query(on: h.db).filter(\.$id == b.device!.id.uuid).set(\.$approvalsLockedUntil, to: nil).update()
+            // Device B is trusted (approved by A): then the delay is the short one.
+            try await eq(try await h.confirm(b, from: a).status, .ok)
             let phone = "+14805550123"
             let token = try await requestLinkToken(h, from: phone)
             let link = try await redeem(h, a, token: token, last4: "0123")

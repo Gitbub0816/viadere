@@ -371,6 +371,9 @@ final class AppAttestEnrollmentTests: XCTestCase {
         XCTAssertEqual(try config(["ENVIRONMENT": "production", "APP_ATTEST_MODE": "report"]).appAttestMode, .report)
         XCTAssertEqual(try config(["APP_ATTEST_MODE": "REQUIRE"]).appAttestMode, .require)
         XCTAssertThrowsError(try config(["APP_ATTEST_MODE": "maybe"]))
+        // `off` waives integrity as a D1 condition (§2.5a): it never boots in staging or production.
+        XCTAssertThrowsError(try config(["ENVIRONMENT": "production", "APP_ATTEST_MODE": "off"]))
+        XCTAssertEqual(try config(["APP_ATTEST_MODE": "off"]).appAttestMode, .off)
         XCTAssertEqual(try config(["APP_ATTEST_ENVIRONMENT": "development"]).appAttestEnvironment, .development)
         XCTAssertThrowsError(try config(["APP_ATTEST_ENVIRONMENT": "sandbox"]))
         // The full loader wires it up and refuses a typo.

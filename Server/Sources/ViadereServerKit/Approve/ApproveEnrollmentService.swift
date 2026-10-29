@@ -149,8 +149,8 @@ struct ApproveEnrollmentService {
 
     func complete(principal: ConsumerPrincipal, enrollmentId: UUID, request: CompleteApproveEnrollmentRequest) async throws -> ApproveKey {
         let now = ctx.now
-        // Only a trusted device (not in its new-device cool-down) can bind a key: a device a thief just enrolled cannot start approving.
-        let device = try await DeviceTrust.require(principal, db: db, now: now)
+        guard let deviceId = principal.deviceId, let device = try await DeviceRecord.find(deviceId.uuid, on: db),
+              device.consumerId == principal.consumerId.uuid else { throw APIError.signatureInvalid }
         let audit = AuditService(db: db, ctx: ctx)
         func reject(_ reason: String, _ error: APIError) async throws -> Never {
             _ = try? await audit.record("approve.enrollment_rejected", outcome: .denied, principal: principal, subjectType: "approve_enrollment",
@@ -159,6 +159,11 @@ struct ApproveEnrollmentService {
         }
         guard let record = try await ApproveEnrollmentRecord.find(enrollmentId, on: db), record.consumerId == principal.consumerId.uuid,
               record.claimedDeviceId == device.id else { throw APIError.notFound }
+        // Only a D1 device binds a key, or the business re-enrolls a D0 device of an account with no D1 device (a recovered account) with
+        // an enrollment it opened after the device existed. A device nobody approved, on an account that has a trusted phone, cannot.
+        guard try await DeviceTrust.mayCompleteBusinessEnrollment(device, enrollmentCreatedAt: record.createdAt, db: db, now: now) else {
+            try await reject("device_not_trusted", DeviceTrust.notTrustedError(device, at: now))
+        }
         guard record.statusValue == .pending else { try await reject("not_pending", .conflict("This enrollment is no longer open.")) }
         guard record.expiresAt > now else { try await reject("expired", .gone("This enrollment has expired.")) }
         try await ApproveFreezeService(db: db, ctx: ctx).requireNotFrozen(consumerId: record.consumerId, relationshipId: record.relationshipId)

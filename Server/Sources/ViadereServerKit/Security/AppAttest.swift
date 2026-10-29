@@ -226,11 +226,14 @@ public struct AppAttestVerifier: DeviceIntegrityVerifier {
 }
 
 extension ServerConfig {
-    /// `APP_ATTEST_MODE` (`off`, `report`, `require`; default `require` in production and staging, otherwise `off`) and
+    /// `APP_ATTEST_MODE` (`off`, `report`, `require`; default `require` in production and staging, otherwise `off`; `off` refuses to boot in
+    /// production and staging) and
     /// `APP_ATTEST_ENVIRONMENT` (`development` or `production`; default `production` in production, otherwise `development`).
     mutating func applyIdentityEnvironment(_ env: [String: String], production: Bool) throws {
         if let raw = env["APP_ATTEST_MODE"], !raw.isEmpty {
             guard let mode = AppAttestMode(rawValue: raw.lowercased()) else { throw ServerConfigError.invalid("APP_ATTEST_MODE (off, report or require)") }
+            // `off` does not evaluate integrity, so integrity stops being a D1 condition (§2.5a): development and tests only.
+            guard !(production && mode == .off) else { throw ServerConfigError.invalid("APP_ATTEST_MODE (off is not allowed in staging or production)") }
             appAttestMode = mode
         } else {
             appAttestMode = production ? .require : .off

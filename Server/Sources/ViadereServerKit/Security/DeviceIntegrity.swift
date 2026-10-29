@@ -15,8 +15,12 @@ public struct AttestationResult: Sendable, Equatable {
     public var counter: Int
     /// `production` or `development`: which AAGUID the attestation carried.
     public var environment: String?
+    /// The evidence format that was evaluated (`IntegrityEvidenceFormat.rawValue`), or `nil` when none was sent.
+    public var format: String?
 
-    public init(attested: Bool, reason: String, keyId: String? = nil, publicKey: String? = nil, counter: Int = 0, environment: String? = nil) {
+    public init(attested: Bool, reason: String, keyId: String? = nil, publicKey: String? = nil, counter: Int = 0, environment: String? = nil,
+                format: String? = nil) {
+        self.format = format
         self.attested = attested
         self.reason = reason
         self.keyId = keyId
@@ -66,7 +70,12 @@ public enum AppAttestEnvironment: String, Sendable, CaseIterable {
 /// (`AppAttestVerifier`: certificate chain to Apple's App Attestation Root CA, the nonce, the app id hash, the credential id, the
 /// counter, the AAGUID).
 public protocol DeviceIntegrityVerifier: Sendable {
-    /// Verifies the attestation sent with an enrollment. Called once per enrollment; the result is stored per key.
+    /// Verifies the platform-neutral evidence of an enrollment (§2.5a). The default implementation dispatches on `format`: only
+    /// `apple-app-attest` reaches the Apple verifier below; `android-key-attestation` goes to `AndroidKeyAttestationVerifier` (a stub that
+    /// never attests); `none` and unknown formats are unattested. A verifier must never read one format's fields as another's.
+    func verifyEnrollment(integrity evidence: IntegrityEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration],
+                          clientKind: DeviceClientKind) async -> AttestationResult
+    /// Verifies the Apple attestation sent with an enrollment. Called once per enrollment; the result is stored per key.
     func verifyEnrollment(_ evidence: AppAttestEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration],
                           clientKind: DeviceClientKind) async -> AttestationResult
     /// Older entry point without the account and client kind (kept for verifiers written against the first protocol).
@@ -79,6 +88,25 @@ public protocol DeviceIntegrityVerifier: Sendable {
 }
 
 extension DeviceIntegrityVerifier {
+    public func verifyEnrollment(integrity evidence: IntegrityEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration],
+                                 clientKind: DeviceClientKind) async -> AttestationResult {
+        guard let evidence else { return AttestationResult(attested: false, reason: "not_provided") }
+        var result: AttestationResult
+        switch evidence.format {
+        case .appleAppAttest:
+            guard let apple = evidence.appleAppAttest else { return AttestationResult(attested: false, reason: "malformed_object", format: evidence.rawFormat) }
+            result = await verifyEnrollment(apple, consumerId: consumerId, challenge: challenge, keys: keys, clientKind: clientKind)
+        case .androidKeyAttestation:
+            result = await AndroidKeyAttestationVerifier().verify(evidence.androidKeyAttestation, consumerId: consumerId, challenge: challenge, keys: keys)
+        case .none:
+            result = AttestationResult(attested: false, reason: "not_provided")
+        case .unknown:
+            result = AttestationResult(attested: false, reason: "unknown_format")
+        }
+        result.format = evidence.format.rawValue
+        return result
+    }
+
     public func verifyEnrollment(_ evidence: AppAttestEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration],
                                  clientKind: DeviceClientKind) async -> AttestationResult {
         await verifyEnrollment(evidence, challenge: challenge, keys: keys)
@@ -98,4 +126,17 @@ public struct UnconfiguredDeviceIntegrityVerifier: DeviceIntegrityVerifier {
     public init() {}
 
     public func assessSensitiveRequest(deviceId: DeviceID, purpose: String) async -> IntegrityVerdict { .unverified }
+}
+
+/// Android hardware key attestation (+ Play Integrity) verifier: **a stub**. It never returns `attested`, whatever it is given, until the real
+/// verifier exists (key attestation chain to Google's roots with the revocation list, Play Integrity verdict decoded server-side, nonce =
+/// SHA-256 of the same binding as App Attest; WP-E1). Until then an Android enrollment is unattested: refused under `APP_ATTEST_MODE=require`,
+/// D0 under `report`.
+public struct AndroidKeyAttestationVerifier: Sendable {
+    public init() {}
+
+    public func verify(_ evidence: AndroidKeyAttestationEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration]) async -> AttestationResult {
+        AttestationResult(attested: false, reason: evidence == nil ? "malformed_object" : "verifier_not_implemented",
+                          format: IntegrityEvidenceFormat.androidKeyAttestation.rawValue)
+    }
 }

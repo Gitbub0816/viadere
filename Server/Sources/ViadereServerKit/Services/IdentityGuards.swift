@@ -93,6 +93,8 @@ struct IdentityMaintenance {
         try await RecoveryService(db: db, ctx: ctx).sweep()
         if await ctx.limiter.allow("idempotency-purge", key: "all", rule: .perMinute(1, burst: 1)) {
             try await BusinessIdempotency(db: db, ctx: ctx).purge()
+            // Account-creation ceremonies (§2.5a) are single use and live 5 minutes; nothing needs them a day later.
+            try await AccountEnrollCeremonyRecord.query(on: db).filter(\.$expiresAt < ctx.now.addingTimeInterval(-86_400)).delete()
         }
     }
 

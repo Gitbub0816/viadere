@@ -383,6 +383,12 @@ public struct RateLimitSettings: Sendable {
     public var walletWebServicePerIP: RateRule = .perMinute(120, burst: 60)
     /// Failed PassKit authentications per pass.
     public var walletAuthFailurePerPass: RateRule = .perMinute(10, burst: 10)
+    /// Device-first sign-up (§2.5a): ceremonies opened across the platform (`POST /v1/accounts/enroll/begin`; per IP: `authCeremony`).
+    public var accountEnrollGlobal: RateRule = .perHour(6000, burst: 600)
+    /// Accounts created across the platform (`POST /v1/accounts`).
+    public var accountCreateGlobal: RateRule = .perHour(3000, burst: 300)
+    /// Accounts created per App Attest environment (or "unattested") and network (/24 IPv4, /64 IPv6) per hour: the anti-farming budget.
+    public var accountCreatePerBucket: RateRule = .perHour(20, burst: 10)
 
     public static let standard = RateLimitSettings(
         globalIP: .perMinute(300), authCeremony: .perMinute(20, burst: 10), refresh: .perMinute(30, burst: 10),

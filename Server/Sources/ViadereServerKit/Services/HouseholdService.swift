@@ -50,8 +50,11 @@ struct HouseholdService {
 
     private func name(of consumer: UUID) async throws -> String {
         guard let record = try await ConsumerRecord.find(consumer, on: db), record.status == "active" else { return "Deleted account" }
-        return record.displayName
+        // Device-first accounts have no name: households show a neutral label (the inviter's own label for the person is separate).
+        return record.displayName ?? Self.unnamedMember
     }
+
+    static let unnamedMember = "Household member"
 
     /// A grant has the id of the invitation it came from, so the label's ciphertext (bound to that id) is valid on both rows.
     private func label(_ ciphertext: String?, rowId: UUID?) -> String {
@@ -398,7 +401,7 @@ struct HouseholdService {
         let grantById = Dictionary(grants.compactMap { g in g.id.map { ($0, g) } }, uniquingKeysWith: { a, _ in a })
         let consumerIds = Set(events.compactMap { $0.actorId.flatMap { UUID(uuidString: $0) } } + events.compactMap(\.consumerId))
         let consumers = try await ConsumerRecord.query(on: db).filter(\.$id ~~ Array(consumerIds)).all()
-        let consumerNames = Dictionary(consumers.compactMap { c in c.id.map { ($0, c.status == "active" ? c.displayName : "Deleted account") } }, uniquingKeysWith: { a, _ in a })
+        let consumerNames = Dictionary(consumers.compactMap { c in c.id.map { ($0, c.status == "active" ? (c.displayName ?? Self.unnamedMember) : "Deleted account") } }, uniquingKeysWith: { a, _ in a })
         let businessIds = Array(Set(events.compactMap(\.businessId)))
         let businesses = businessIds.isEmpty ? [] : try await BusinessRecord.query(on: db).filter(\.$id ~~ businessIds).all()
         let businessNames = Dictionary(businesses.compactMap { b in b.id.map { ($0, b.displayName) } }, uniquingKeysWith: { a, _ in a })

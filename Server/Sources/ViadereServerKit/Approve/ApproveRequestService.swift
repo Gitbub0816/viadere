@@ -419,8 +419,15 @@ struct ApproveRequestService {
             if let by = try await ApproveFreezeService(db: db, ctx: ctx).frozenBy(consumerId: request.consumerId, relationshipId: request.relationshipId) {
                 try await reject("frozen", APIError(.conflict, .approvalsFrozen, "Approvals are frozen.", details: ["frozen_by": by]))
             }
-            if device.isCoolingDown(at: now), (capability.definition?.sensitivity ?? .critical) >= .high {
-                try await reject("device_cool_down", APIError(.forbidden, .deviceCoolDown, "This device was added recently. Confirm it from another device you trust before approving this request."))
+            // High-risk approval needs a D1 device, or a key the business itself enrolled for this (D0) device after it existed (business
+            // re-enrollment, `DeviceTrust.mayCompleteBusinessEnrollment`). Never time.
+            if (capability.definition?.sensitivity ?? .critical) >= .high, !DeviceTrust.isTrusted(device, at: now) {
+                let enrollment = try await ApproveEnrollmentRecord.find(key.enrollmentId, on: db)
+                let businessEnrolled = enrollment.map { $0.statusValue == .confirmed && $0.createdAt >= device.createdAt } ?? false
+                if !businessEnrolled {
+                    try await reject("device_not_trusted", APIError(.forbidden, .deviceCoolDown,
+                        "This device hasn't been approved yet. Approve it from a device you already trust, or ask the business to set it up again."))
+                }
             }
         }
         let resultRef = ApproveIdentifiers.newResultRef()

@@ -158,11 +158,11 @@ final class WP6RotationTests: XCTestCase {
             first.outcome = "success"; first.metadataJSON = "{}"; first.prevHash = AuditService.genesisHash; first.chainVersion = 2
             first.hash = try AuditService.hash(of: first, key: epoch1)
             try await first.create(on: h.db)
-            // Everything the application writes now is epoch 2 (version 3, with the epoch inside the MAC).
+            // Everything the application writes now is epoch 2 (version 4: the epoch, actor pseudonym and policy version inside the MAC).
             _ = try await AuditService(db: h.db, ctx: h.ctx).record("after.rotation", actor: AuditActor(kind: .system))
             _ = try await AuditService(db: h.db, ctx: h.ctx).record("after.rotation.again", actor: AuditActor(kind: .system))
             let events = try await AuditEventRecord.query(on: h.db).sort(\.$seq, .ascending).all()
-            XCTAssertEqual(events.map(\.chainVersion), [2, 3, 3])
+            XCTAssertEqual(events.map(\.chainVersion), [2, 4, 4])
             XCTAssertEqual(events.map(\.keyEpoch), [nil, 2, 2])
             let ring = AuditKeyring(config: h.ctx.config)
             let valid = try await AuditService.verifyChain(on: h.db, keyring: ring)

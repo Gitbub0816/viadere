@@ -525,8 +525,10 @@ final class RecoveryTests: XCTestCase {
             XCTAssertEqual(begun.status, .ok, begun.text)
             let options = try begun.json(PasskeyAssertionOptions.self)
             XCTAssertEqual(options.userVerification, "required")
+            // Neither this device's proof nor a passkey assertion: refused (401), and nothing is consumed.
             let noAssertion = try await h.signed(owner, .POST, "/v1/recovery/codes/regenerate", body: Data(#"{"ceremonyId":"\#(options.ceremonyId)"}"#.utf8))
-            XCTAssertEqual(noAssertion.status, .badRequest)
+            XCTAssertEqual(noAssertion.status, .unauthorized)
+            XCTAssertEqual(noAssertion.errorCode, .passkeyAssertionRequired)
             func assertion(_ id: String, _ challenge: String, signature: String = "valid") -> PasskeyAssertionCredential {
                 PasskeyAssertionCredential(id: id, rawId: id, authenticatorData: "AA", clientDataJSON: challenge, signature: signature, userHandle: nil)
             }

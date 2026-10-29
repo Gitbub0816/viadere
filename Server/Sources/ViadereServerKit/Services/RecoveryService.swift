@@ -113,7 +113,9 @@ struct RecoveryService {
             throw await fail()
         }
         let challenge = Base64URL.encode(ctx.passkeys.makeChallenge())
-        let recovery = AccountRecoveryRecord(consumerId: consumerId, challenge: challenge, userHandle: consumer.userHandle, now: now)
+        // A device-first account gets its WebAuthn user handle here if it never added a passkey.
+        let userHandle = try await RecoveryCredentialService.ensureUserHandle(consumerId, db: db)
+        let recovery = AccountRecoveryRecord(consumerId: consumerId, challenge: challenge, userHandle: userHandle, now: now)
         // Spending the code and opening the recovery are one transaction: losing the race for the single open-recovery slot (unique
         // index violation) rolls the code back, so a competing begin burns nothing.
         enum Outcome { case started, wrongCode, inProgress }
@@ -142,8 +144,8 @@ struct RecoveryService {
         await ctx.limiter.refund("recovery-begin-id", key: idHash, rule: Self.perIdRule)
         await audit("recovery.code_accepted", consumer: consumerId, subject: recovery.id)
         return PasskeyRegistrationOptions(ceremonyId: CeremonyID(recovery.id!), challenge: challenge, relyingPartyId: ctx.config.relyingPartyID,
-                                          relyingPartyName: ctx.config.relyingPartyName, userId: consumer.userHandle, userName: consumer.displayName,
-                                          userDisplayName: consumer.displayName, timeoutMilliseconds: Int(RecoveryPolicy.passkeyWindow * 1000))
+                                          relyingPartyName: ctx.config.relyingPartyName, userId: userHandle, userName: consumer.label,
+                                          userDisplayName: consumer.label, timeoutMilliseconds: Int(RecoveryPolicy.passkeyWindow * 1000))
     }
 
     /// Counts a wrong code atomically; at the cap the account locks for a day and its devices are told.
@@ -343,10 +345,12 @@ struct RecoveryService {
             guard let id = row.id, let until = row.holdUntil else { return nil }
             return PendingRecovery(id: RecoveryID(id), startedAt: row.createdAt, activatesAt: until)
         }
-        return RecoveryInfo(remainingCodes: remaining, issuedAt: profile?.issuedAt, pending: pending.first, pendingRecoveries: pending)
+        let passkeys = try await PasskeyCredentialRecord.query(on: db).filter(\.$consumerId == consumerId).count()
+        return RecoveryInfo(remainingCodes: remaining, issuedAt: profile?.issuedAt, pending: pending.first, pendingRecoveries: pending, passkeyCount: passkeys)
     }
 
-    /// Step 1 of regeneration: assertion options over a fresh single-use challenge. Needs a trusted device.
+    /// Step 1 of regeneration: a single-use ceremony (its id is what the device's `recoveryCredential` proof names) with passkey assertion
+    /// options over its challenge for older apps. Needs a device that may manage the account.
     func regenerateBegin(_ principal: ConsumerPrincipal) async throws -> PasskeyAssertionOptions {
         try await ctx.limiter.enforce("recovery-regen", key: principal.consumerId.description, rule: .perHour(20, burst: 10))
         _ = try await DeviceTrust.require(principal, db: db, now: ctx.now)
@@ -359,29 +363,36 @@ struct RecoveryService {
                                        allowCredentialIds: credentialIds, timeoutMilliseconds: Int(AuthService.ceremonyTTL * 1000))
     }
 
-    /// Step 2: a trusted device **and** a fresh user-verified passkey assertion over the step-1 challenge. The old codes die; the new
-    /// set is returned once.
+    /// Step 2: a device that may manage the account **and** a user-verified proof from it over the step-1 ceremony id (or, from older apps, a
+    /// fresh user-verified passkey assertion over its challenge). The old codes die; the new set is returned once.
     func regenerate(_ principal: ConsumerPrincipal, request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet {
         try await ctx.limiter.enforce("recovery-regen", key: principal.consumerId.description, rule: .perHour(20, burst: 10))
         let now = ctx.now
-        _ = try await DeviceTrust.require(principal, db: db, now: now)
-        let required = APIError(.unauthorized, .passkeyAssertionRequired, "Confirm with your passkey to make new recovery codes.")
+        let device = try await DeviceTrust.require(principal, db: db, now: now)
+        let required = APIError(.unauthorized, .passkeyAssertionRequired, "Confirm with Face ID, Touch ID or your passcode to make new recovery codes.")
         guard let ceremony = try await PasskeyCeremonyRecord.find(request.ceremonyId.uuid, on: db), ceremony.kind == "recovery_codes", ceremony.state == "open",
               ceremony.expiresAt > now, ceremony.consumerId == principal.consumerId.uuid, let challenge = Base64URL.decode(ceremony.challenge),
-              request.assertion.id.count <= 1024,
-              let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId == request.assertion.id)
-                  .filter(\.$consumerId == principal.consumerId.uuid).first(), let publicKey = Base64URL.decode(credential.publicKey),
               let consumer = try await ConsumerRecord.find(principal.consumerId.uuid, on: db), consumer.status == "active" else { throw required }
-        if let handle = request.assertion.userHandle, !ConstantTime.equals(handle, consumer.userHandle) { throw required }
-        guard try await DB.swap(db, table: PasskeyCeremonyRecord.schema, id: request.ceremonyId.uuid, column: "state", expected: "open", newValue: "used") else { throw required }
-        do {
-            let result = try ctx.passkeys.verifyAssertion(request.assertion, challenge: challenge, publicKey: publicKey, signCount: UInt32(clamping: credential.signCount))
-            credential.signCount = Int(result.newSignCount)
-            credential.lastUsedAt = now
-            try await credential.update(on: db)
-        } catch {
-            _ = try? await AuditService(db: db, ctx: ctx).record("recovery.codes_failed", outcome: .failure, principal: principal, subjectType: "recovery")
-            throw required
+        if let proof = request.proof {
+            // This device's user-verified approval key over the ceremony id (§2.5a): no passkey needed.
+            try await RecoveryCredentialService(db: db, ctx: ctx).verifyProof(proof, ceremonyId: request.ceremonyId.uuid, principal: principal, device: device)
+            guard try await DB.swap(db, table: PasskeyCeremonyRecord.schema, id: request.ceremonyId.uuid, column: "state", expected: "open", newValue: "used") else { throw required }
+        } else {
+            // Older apps: a fresh user-verified passkey assertion over the ceremony's challenge.
+            guard let assertion = request.assertion, assertion.id.count <= 1024,
+                  let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId == assertion.id)
+                      .filter(\.$consumerId == principal.consumerId.uuid).first(), let publicKey = Base64URL.decode(credential.publicKey) else { throw required }
+            if let handle = assertion.userHandle, !ConstantTime.equals(handle, consumer.userHandle ?? "") { throw required }
+            guard try await DB.swap(db, table: PasskeyCeremonyRecord.schema, id: request.ceremonyId.uuid, column: "state", expected: "open", newValue: "used") else { throw required }
+            do {
+                let result = try ctx.passkeys.verifyAssertion(assertion, challenge: challenge, publicKey: publicKey, signCount: UInt32(clamping: credential.signCount))
+                credential.signCount = Int(result.newSignCount)
+                credential.lastUsedAt = now
+                try await credential.update(on: db)
+            } catch {
+                _ = try? await AuditService(db: db, ctx: ctx).record("recovery.codes_failed", outcome: .failure, principal: principal, subjectType: "recovery")
+                throw required
+            }
         }
         // Whoever started a recovery held a code of the old set. A trusted device that makes a new set closes every recovery still waiting
         // (the old codes die, and so must what they started).

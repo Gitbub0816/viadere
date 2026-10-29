@@ -37,6 +37,13 @@ enum IdentityRoutes {
             let body: RecoveryCodesRegenerateRequest = try req.decodeBody()
             return try req.jsonResponse(try await RecoveryService(db: req.db, ctx: req.ctx).regenerate(try req.consumer, request: body), status: .created)
         }
+        routes.api(APIRoutes.recoveryPasskeyBegin) { req in
+            try req.jsonResponse(try await RecoveryCredentialService(db: req.db, ctx: req.ctx).passkeyBegin(try req.consumer))
+        }
+        routes.api(APIRoutes.recoveryPasskeyFinish) { req in
+            let body: RecoveryPasskeyFinishRequest = try req.decodeBody()
+            return try req.jsonResponse(try await RecoveryCredentialService(db: req.db, ctx: req.ctx).passkeyFinish(try req.consumer, request: body), status: .created)
+        }
         routes.api(APIRoutes.deviceReplacementCancel) { req in
             let id: DeviceID = try req.uuidParameter("deviceId")
             try await AuthService(db: req.db, ctx: req.ctx).cancelReplacement(try req.consumer, newDeviceId: id)
