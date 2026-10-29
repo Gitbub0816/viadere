@@ -3,8 +3,9 @@ import Logging
 import Vapor
 import ViadereServerKit
 
-// Structured JSON logs with redaction of tokens, secrets and phone numbers.
-let level = Logger.Level(rawValue: (ProcessInfo.processInfo.environment["LOG_LEVEL"] ?? "info").lowercased()) ?? .info
+// Structured JSON logs with redaction of tokens, secrets and phone numbers; never below info in staging/production.
+let level = LogLevelPolicy.effective(logLevel: ProcessInfo.processInfo.environment["LOG_LEVEL"],
+                                     environment: ProcessInfo.processInfo.environment["ENVIRONMENT"])
 LoggingSystem.bootstrap { label in StructuredLogHandler(label: label, level: level) }
 
 var environment = try Environment.detect()

@@ -56,7 +56,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   VERIFY_REQUIRE_E2EE_IDENTITY = "false"
   # ---- runtime / mode -------------------------------------------------------------------------------
   ENVIRONMENT = "staging"               # production rules: every secret mandatory, https only, `seed` refused
-  LOG_LEVEL = "debug"
+  LOG_LEVEL = "info"                   # never debug outside development: debug logs SQL with its bound values (the server clamps it anyway)
   PORT = "8080"
   BIND_HOST = "0.0.0.0"
   # Migrations are run by the release command, never at boot (a boot-time migration would race across machines).
