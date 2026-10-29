@@ -16,10 +16,11 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 
 | Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
 |---|---|---|---|---|---|---|
-| `consumers` | display name, passkey user handle, status | OPS | P | none beyond DB | Until account deletion (`DELETE /v1/account`, docs/SECURITY.md §2.20) | display name is user-chosen |
+| `consumers` | optional display name (none for device-first accounts), passkey user handle (only once a passkey exists), status, policy version, how it was created | OPS | P | none beyond DB | Until account deletion (`DELETE /v1/account`, docs/SECURITY.md §2.20) | display name is user-chosen and never required (§2.5a) |
+| `account_enroll_ceremonies` | reserved account id, challenge hash, state, times | SEC | none | hash only | Purged a day after expiry (`IdentityMaintenance`) | |
 | `passkey_credentials` | WebAuthn public keys, sign count | SEC | P | public keys | Deleted with the account | public keys only; private keys on device |
 | `passkey_ceremonies` | challenges, state | SEC | | | Purged 1 h after expiry (job loop) | |
-| `devices` | name, platform, kind, cool-down, expiry, replacement state | SEC | P | none | Revoked/expired devices are revoked by `DeviceLifecycle.revokeExpired`; rows kept (cool-down proof, `docs/SECURITY.md` §2.5); names blanked on account deletion | rows of deleted accounts: confirm deletion scope `[counsel]` |
+| `devices` | name, platform, kind, notice window, expiry, replacement state, trust tier and why, integrity format, key algorithm | SEC | P | none | Revoked/expired devices are revoked by `DeviceLifecycle.revokeExpired`; rows kept (cool-down proof, `docs/SECURITY.md` §2.5); names blanked on account deletion | rows of deleted accounts: confirm deletion scope `[counsel]` |
 | `device_keys` | device public keys per purpose, attested flag | SEC | P | public keys | With device / account | |
 | `app_attest_keys` | App Attest key id, public key, counter | SEC | P | public key | With device / account | |
 | `device_enroll_challenges` | hashed challenges | SEC | | H | expires with challenge (no explicit purge) | gap: add purge |
@@ -46,7 +47,7 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 | `interactions` | request payload JSON (kind, purpose, display text), status, outcome JSON | SMP | P | payload erased on deletion | Payload/outcome erased on account deletion; no age-based purge | payload can contain business text; classify per kind `[counsel]` |
 | `interaction_challenges` | challenge nonce hash | SEC | | H | no purge | gap |
 | `decisions` | **signed decision** (device-signed canonical JSON), signature, assurance | SEC | P | integrity | **Append-only.** Kept pseudonymous for disputes; free-text `reply` payload erased on deletion (§2.20) | dispute-retention period `[counsel]` |
-| `audit_events` | actor, action, outcome, ids, redacted metadata, hash chain | SEC | P (ids) | HMAC chain (`AUDIT_CHAIN_KEY`) | **Append-only, no purge** | retention/erasure policy `[counsel]`; chain head exported to write-once storage Verify detail (attempts, reasons, methods, consent) is in the platform-only trail (no `business_id`); the business-facing views and export are a projection (`BusinessAuditProjection`): consumer actors shown as the business's `subject_ref` |
+| `audit_events` | actor, actor pseudonym (`actor_ref`, HMAC of the account id), policy version, action, outcome, ids, redacted metadata, hash chain | SEC | P (ids) | HMAC chain (`AUDIT_CHAIN_KEY`) | **Append-only, no purge** | retention/erasure policy `[counsel]`; chain head exported to write-once storage Verify detail (attempts, reasons, methods, consent) is in the platform-only trail (no `business_id`); the business-facing views and export are a projection (`BusinessAuditProjection`): consumer actors shown as the business's `subject_ref` |
 | `replay_nonces` | replay-guard nonces | SEC | | | Purged at expiry (job loop) | |
 | `rate_limit_buckets` | limiter keys (IP /64, hashes), tokens | OPS | P (IP) | | Purged when refilled/expired (job loop) | keys hold client IPs |
 | `security_notices` | in-app security notices | SEC | P | none | Until account deletion | |
