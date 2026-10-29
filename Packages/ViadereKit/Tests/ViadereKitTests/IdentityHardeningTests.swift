@@ -287,6 +287,20 @@ struct RecoveryCodesTests {
         #expect(vm.newRecoveryCodes == nil)
     }
 
+    @Test func settingsAddsAPasskeyOnlyWhenThereIsNone() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api)
+        let vm = SecuritySettingsViewModel(services: services)
+        await vm.load()
+        await vm.loadRecovery()
+        #expect(vm.canAddPasskey)
+        await vm.addRecoveryPasskey()
+        #expect(vm.recoveryMessage == nil)
+        #expect(await api.passkeyCount == 1)
+        #expect(vm.recoveryInfo?.passkeyCount == 1)
+        #expect(!vm.canAddPasskey, "one is enough to offer from Settings")
+    }
+
     @Test func settingsShowsEveryPendingRecoveryAndCancelsAllOfThemWithoutAHomeNotice() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)

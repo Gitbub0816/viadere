@@ -400,6 +400,15 @@ struct RecoveryCodesSettingsView: View {
             Button(vm.isRegeneratingCodes ? "Working…" : "Generate new codes") { confirming = true }
                 .buttonStyle(.viadere(.primary))
                 .disabled(vm.isRegeneratingCodes || !vm.canRegenerateRecoveryCodes)
+            if let note = vm.passkeyNote { ViadereNotice(note, kind: .warning) }
+            if vm.canAddPasskey {
+                Text("A passkey saved to iCloud Keychain lets a new iPhone find your account. It never approves anything on its own.")
+                    .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(vm.isAddingPasskey ? "Adding…" : "Add a passkey") { Task { await vm.addRecoveryPasskey() } }
+                    .buttonStyle(.viadere(.secondary))
+                    .disabled(vm.isAddingPasskey)
+            }
         }
         .task { await vm.loadRecovery() }
         .confirmationDialog("Generate new codes?", isPresented: $confirming, titleVisibility: .visible) {

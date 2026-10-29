@@ -36,6 +36,9 @@ public final class SecuritySettingsViewModel {
     public private(set) var recoveryInfo: RecoveryInfo?
     public private(set) var recoveryAvailable = true
     public private(set) var isRegeneratingCodes = false
+    public private(set) var isAddingPasskey = false
+    /// After adding a passkey that can't be synced: keep recovery codes too.
+    public private(set) var passkeyNote: String?
     public private(set) var isCancellingRecovery = false
     public private(set) var recoveryMessage: String?
     /// New codes from "Generate new codes", on screen once.
@@ -162,6 +165,30 @@ public final class SecuritySettingsViewModel {
             recoveryMessage = error.code == .deviceCoolDown ? SecurityNoticesViewModel.coolDownActionMessage : error.userMessage
         } catch {
             recoveryMessage = "Couldn't generate new codes. Try again in a moment."
+        }
+    }
+
+    /// Whether to offer "Add a passkey": the account has none (device-first accounts start without one) and this device may add one.
+    public var canAddPasskey: Bool { recoveryInfo?.passkeyCount == 0 && canRegenerateRecoveryCodes }
+
+    /// "Add a passkey" (an optional recovery credential, §2.5a), proven with this device's Face ID / passcode key.
+    public func addRecoveryPasskey() async {
+        guard !isAddingPasskey, canAddPasskey else { return }
+        isAddingPasskey = true
+        recoveryMessage = nil
+        defer { isAddingPasskey = false }
+        do {
+            let added = try await services.account.addRecoveryPasskey()
+            passkeyNote = added.backupEligible ? nil : "This passkey isn't synced, so it would be lost with this iPhone. Keep your recovery codes too."
+            await loadRecovery()
+        } catch let error as PasskeyError {
+            if error != .cancelled { recoveryMessage = error.userMessage }
+        } catch let error as ConfirmationError {
+            if error != .userCancelled { recoveryMessage = error.userMessage }
+        } catch let error as APIError {
+            recoveryMessage = error.code == .deviceCoolDown ? SecurityNoticesViewModel.coolDownActionMessage : error.userMessage
+        } catch {
+            recoveryMessage = "Couldn't add a passkey. Try again in a moment."
         }
     }
 
