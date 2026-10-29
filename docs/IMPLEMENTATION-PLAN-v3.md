@@ -566,6 +566,30 @@ Prices from the Azure Retail Prices API on 2026-10-29 (meter effective dates in 
 
 The largest production line is Service Bus Premium (private endpoint requirement). A cheaper production variant (Standard + Entra-only + IP firewall to the NAT IP) saves ~USD 665/month at the cost of a public Service Bus endpoint: owner decision O-9.
 
+### 5.8a Lean testing profile (the default until launch; owner decision 2026-10-29: about $30/month)
+
+The product owner capped testing infrastructure at roughly $30/month. The testing environment therefore uses the **lean profile** below; the
+staging/production profile in 5.1 and 5.8 stays defined in the OpenTofu modules (`profile = "lean" | "standard"`) and is applied only when the
+owner approves the spend. The server code is identical in both profiles: every difference is a SKU or a network setting, never a code path.
+
+| Piece | Lean profile | ≈ USD/month (Retail Prices API, `eastus`, 2026-10-29) |
+|---|---|---|
+| PostgreSQL Flexible Server | Burstable **B1ms** ($0.017/h), 32 GiB, PostgreSQL 18, VNet integration (no private endpoint needed), 7-day PITR, **no HA** | ≈ $16 (free for 12 months on a new Azure account) |
+| Container Apps | **Consumption-only** environment with VNet; `api` app 0.25 vCPU / 0.5 GiB, min 1 replica (min 0 accepted for testing); `migrate` as a Container Apps Job | ≈ $3–8 (idle $3e-6/vCPU-s and /GiB-s after the monthly free grant) |
+| Service Bus | **Basic** (queues + dead-letter queues; no topics, sessions or duplicate detection, which the transactional outbox and idempotency keys already cover); local SAS auth disabled, Entra RBAC only | ≈ $0.05 per million operations |
+| Key Vault | **Standard** (software-protected keys, same REST API and key types as Premium); RBAC, purge protection, no private endpoint | < $1 (operations only) |
+| Monitoring | Log Analytics + Application Insights within the 5 GB/month free ingestion; daily cap set | $0 |
+| Images | GitHub Container Registry (pull credential in Key Vault) instead of Azure Container Registry | $0 |
+| Edge | Cloudflare Tunnel (free) to the internal-only ingress, plus `EDGE_TOKEN` | $0 |
+| **Total** | | **≈ $20–26** |
+
+Exceptions this creates (recorded in CLAUDE.md's exceptions table when the lean environment is deployed; remove when the standard profile is applied):
+- Service Bus and Key Vault are reached over **authenticated public endpoints** (Entra tokens only, local auth disabled), not private endpoints.
+  Private endpoints (~$7.30/month each) and Service Bus Premium (~$677/month, the only tier with private networking) come with the standard profile.
+- Server keys are **software-protected** (Key Vault Standard), not HSM-backed. ADR-0012 (Key Vault Premium) applies to the standard profile.
+- PostgreSQL has **no HA standby** and 7-day PITR (standard: zone-redundant HA, 35 days, geo-redundant backup).
+- No data in the lean environment is production data: real customers are onboarded only on the standard profile.
+
 ### 5.9 How migrations run
 `job-viadere-migrate` (manual trigger, parallelism 1, timeout 10 min) runs the same image digest as the release with `migrate --yes --env production` under `id-viadere-migrator`. The release workflow: update the job image → start → poll the execution until `Succeeded` → only then update `ca-viadere-api`/`ca-viadere-worker` to the new digest (new revisions). Migrations stay forward-only and expand/contract, so the previous revision keeps working during rollout and rollback. The serving apps never receive migrator credentials; `DatabaseRoles.mustVerifyRuntimeRole` (`RuntimeRoleGrants.swift:51-55`) keeps refusing to serve with DDL rights.
 
