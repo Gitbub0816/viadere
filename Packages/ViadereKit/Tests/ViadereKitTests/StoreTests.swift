@@ -266,6 +266,8 @@ struct OnboardingTests {
         #expect(model.step == .notifications)
         #expect(await api.accountCreateRequests.isEmpty, "an existing account is not created again")
         #expect(await api.enrollmentLog.count == 1)
+        model.skipNotifications()
+        #expect(model.step == .phone, "the protect step is for new accounts")
     }
 
     @Test func aFailedAccountCreationLeavesNothingBehind() async throws {

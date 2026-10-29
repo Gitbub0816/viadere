@@ -117,6 +117,9 @@ public final class OnboardingViewModel {
     public func signIn() async {
         await run {
             try await services.account.signIn()
+            // An existing account already has its recovery credentials (and this new iPhone may not manage them until it is approved):
+            // the protect step is for new accounts.
+            services.preferences.setBool(true, for: .protectionPromptShown)
             // A returning person may already have a device record on this phone.
             if let record = try? await services.records.load() { enrolled = record; step = .notifications } else { step = .device }
         }
@@ -230,13 +233,15 @@ public final class OnboardingViewModel {
     public func allowNotifications() async {
         _ = await services.notificationPermission.request()
         services.preferences.setBool(true, for: .notificationPrimingShown)
-        step = .protect
+        step = afterNotifications
     }
 
     public func skipNotifications() {
         services.preferences.setBool(true, for: .notificationPrimingShown)
-        step = .protect
+        step = afterNotifications
     }
+
+    private var afterNotifications: OnboardingStep { services.preferences.bool(.protectionPromptShown) ? .phone : .protect }
 
     public func sendCode() async {
         guard let phone = phoneNumber else { return }
