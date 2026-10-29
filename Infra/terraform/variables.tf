@@ -207,3 +207,42 @@ variable "neon_allowed_ips" {
   type        = list(string)
   default     = []
 }
+
+# ---- Azure origin through Cloudflare Tunnel (cloudflare_tunnel.tf; docs/ops/AZURE-SETUP.md section 9) ------------------------------
+variable "enable_azure_tunnel" {
+  description = "Create the Cloudflare Tunnel for the Azure Container Apps origin (Infra/azure). Off until the Azure environment exists."
+  type        = bool
+  default     = false
+}
+
+variable "azure_test_hostname_label" {
+  description = "Label of a test hostname routed through the tunnel before cutover (e.g. viadere-api-az). Empty = none."
+  type        = string
+  default     = ""
+}
+
+variable "api_origin" {
+  description = "Where the api (and Tier E mTLS) hostname points: fly (today) or azure (Cloudflare Tunnel; needs enable_azure_tunnel). Cutover and rollback are a change of this value."
+  type        = string
+  default     = "fly"
+  validation {
+    condition     = contains(["fly", "azure"], var.api_origin)
+    error_message = "api_origin must be fly or azure."
+  }
+}
+
+variable "azure_tunnel_origin_service" {
+  description = "Origin service the tunnel forwards to: Infra/azure output tunnel_origin_service (the api by app name inside the Container Apps environment)."
+  type        = string
+  default     = "http://ca-viadere-api"
+  validation {
+    condition     = can(regex("^https?://[a-z0-9.-]+(:[0-9]+)?$", var.azure_tunnel_origin_service))
+    error_message = "azure_tunnel_origin_service must be an http(s) URL without a path."
+  }
+}
+
+variable "azure_tunnel_origin_host_header" {
+  description = "Host header cloudflared sends to the origin (Container Apps routes environment-internal traffic by the app name)."
+  type        = string
+  default     = "ca-viadere-api"
+}

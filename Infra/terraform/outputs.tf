@@ -32,3 +32,12 @@ output "mtls_hostname" {
   description = "Tier E enterprise hostname (empty unless enable_mtls)."
   value       = var.enable_mtls ? local.mtls_host : ""
 }
+
+output "azure_tunnel_id" {
+  description = "Cloudflare Tunnel id (empty unless enable_azure_tunnel). Fetch its token once for Key Vault: docs/ops/AZURE-SETUP.md section 9."
+  value       = var.enable_azure_tunnel ? cloudflare_zero_trust_tunnel_cloudflared.azure[0].id : ""
+}
+
+output "azure_tunnel_hostnames" {
+  value = local.tunnel_hostnames
+}

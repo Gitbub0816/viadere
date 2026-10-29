@@ -5,8 +5,13 @@ locals {
   api_host = "${var.api_hostname_label}.${var.apex_domain}"
   # Enterprise hostname (Tier E, API Shield mTLS). Same Fly origin, same API layer: only the edge asks for a client certificate here.
   mtls_host = "${var.mtls_hostname_label}.${var.apex_domain}"
+  # Azure test hostname served through the Cloudflare Tunnel (migration phase 1, cloudflare_tunnel.tf); empty when not used.
+  azure_test_host = var.enable_azure_tunnel && var.azure_test_hostname_label != "" ? "${var.azure_test_hostname_label}.${var.apex_domain}" : ""
+  # Hosts that serve the API (edge rate limits, cache bypass). With one host the expression keeps its original `eq` form.
+  api_hosts            = compact([local.api_host, local.azure_test_host])
+  api_hosts_expression = length(local.api_hosts) == 1 ? "http.host eq \"${local.api_host}\"" : "http.host in {${join(" ", [for h in local.api_hosts : "\"${h}\""])}}"
   # Hosts whose requests reach the API origin; the origin headers below are set (and client-supplied copies overwritten) on all of them.
-  origin_hosts = var.enable_mtls ? [local.api_host, local.mtls_host] : [local.api_host]
+  origin_hosts            = concat(var.enable_mtls ? [local.api_host, local.mtls_host] : [local.api_host], local.azure_test_host == "" ? [] : [local.azure_test_host])
   origin_hosts_expression = "http.host in {${join(" ", [for h in local.origin_hosts : "\"${h}\""])}}"
   # Zone-wide settings only exist once per zone: staging and production zones are separate (staging.<apex> is a child zone or
   # its own domain in the staging workspace). This module is applied once per environment with its own zone id and state.
@@ -98,10 +103,17 @@ resource "cloudflare_dns_record" "api" {
   zone_id = var.cloudflare_zone_id
   name    = local.api_host
   type    = "CNAME"
-  content = var.fly_origin_hostname
+  content = local.api_origin_target
   proxied = true
   ttl     = 1 # automatic
-  comment = "Fly.io origin (Infra/fly). Proxied: all traffic passes the WAF and rate limits."
+  comment = var.api_origin == "azure" ? "Azure Container Apps through Cloudflare Tunnel (Infra/azure). Proxied: WAF and rate limits apply." : "Fly.io origin (Infra/fly). Proxied: all traffic passes the WAF and rate limits."
+
+  lifecycle {
+    precondition {
+      condition     = var.api_origin == "fly" || var.enable_azure_tunnel
+      error_message = "api_origin = \"azure\" needs enable_azure_tunnel = true (the CNAME points at the tunnel)."
+    }
+  }
 }
 
 resource "cloudflare_dns_record" "api_acme_challenge" {
@@ -268,10 +280,10 @@ resource "cloudflare_dns_record" "api_mtls" {
   zone_id = var.cloudflare_zone_id
   name    = local.mtls_host
   type    = "CNAME"
-  content = var.fly_origin_hostname
+  content = local.api_origin_target
   proxied = true
   ttl     = 1 # automatic
-  comment = "Tier E: API Shield mTLS hostname (same Fly origin). Add its certificate on Fly: fly certs add."
+  comment = var.api_origin == "azure" ? "Tier E: API Shield mTLS hostname (same Azure origin through the tunnel)." : "Tier E: API Shield mTLS hostname (same Fly origin). Add its certificate on Fly: fly certs add."
 }
 
 resource "cloudflare_ruleset" "mtls_enforce" {
@@ -299,7 +311,7 @@ resource "cloudflare_ruleset" "api_cache_bypass" {
     action_parameters = {
       cache = false
     }
-    expression  = "http.host eq \"${local.api_host}\" and not starts_with(http.request.uri.path, \"/connect-button/v1/\")"
+    expression  = "${local.api_hosts_expression} and not starts_with(http.request.uri.path, \"/connect-button/v1/\")"
     description = "No caching of API, dashboard and operator responses"
     enabled     = true
   }]
@@ -395,7 +407,7 @@ resource "cloudflare_ruleset" "rate_limits" {
   phase   = "http_ratelimit"
   rules = [for name, r in local.rate_limits : {
     action      = "block"
-    expression  = "http.host eq \"${local.api_host}\" and (${r.expression})"
+    expression  = "${local.api_hosts_expression} and (${r.expression})"
     description = "${name}: ${r.description}"
     enabled     = true
     ratelimit = {

@@ -88,3 +88,12 @@ or child zone, KMS key ring, and Neon project. Nothing is shared, so a staging m
 * **Audit-head bucket (`audit_bucket.tf`).** `google_storage_bucket.audit_heads` with `retention_policy` (7 years default) and `is_locked = local.audit_bucket_locked` (**irreversible**; `audit_bucket_lock` defaults to `null`, which means **locked in production, unlocked in staging**: agree the retention period with counsel before the first production apply), `roles/storage.objectCreator` for the server's service account (create only: no read, overwrite or delete) and an auditor viewer list. Outputs `audit_head_bucket` and `audit_head_kms_key` feed
   `AUDIT_HEAD_EXPORT_TARGET` and `AUDIT_HEAD_KMS_KEY`. Cloudflare R2 with Object Lock is the documented alternative (`AUDIT_HEAD_EXPORT=r2`); it needs no resource here.
 * **Roles.** `neon.tf` documents the two database roles; the grants are applied by the `migrate` release command (`GrantRuntimeRolePrivileges`).
+
+## Azure origin through Cloudflare Tunnel (WP-B1, 2026-10-29)
+
+`cloudflare_tunnel.tf` creates a remotely managed Cloudflare Tunnel for the Azure Container Apps origin (`Infra/azure`, ADR-0010) when
+`enable_azure_tunnel = true`. Phase 1: `azure_test_hostname_label` (e.g. `viadere-api-az`) adds a test hostname on the tunnel, with the edge
+token, cache bypass and edge rate limits applied to it. Cutover: `api_origin = "azure"` points the api (and Tier E mTLS) CNAMEs at
+`<tunnel-id>.cfargotunnel.com`; rollback is `api_origin = "fly"`. With the defaults (tunnel off, `api_origin = "fly"`) the plan is unchanged.
+The tunnel token is never read into state: the owner fetches it once and stores it in Key Vault (`docs/ops/AZURE-SETUP.md` section 9). The
+API token additionally needs Account → Cloudflare Tunnel: Edit.

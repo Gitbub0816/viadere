@@ -1,0 +1,102 @@
+# Copy to terraform.tfvars (gitignored) for a local plan/apply. In CI the same values come from GitHub environment variables
+# (docs/ops/AZURE-SETUP.md section 5). Nothing here is secret: secrets live in Key Vault and are set by the owner (section 7).
+profile         = "lean" # lean (testing, ~USD 27-31/month) | standard (production-grade)
+environment     = "staging"
+subscription_id = "00000000-0000-0000-0000-000000000000" # viadere-staging
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+location        = "eastus"
+name_suffix     = "REPLACE" # 3-6 lowercase letters/digits, makes global names unique
+
+github_repository = "OWNER/viadere"
+
+db_admin_group_object_id                   = "00000000-0000-0000-0000-000000000000" # grp-viadere-db-admins
+db_admin_group_display_name                = "grp-viadere-db-admins"
+key_vault_crypto_officers_group_object_id  = "" # grp-viadere-kv-crypto-officers (optional)
+key_vault_secrets_officers_group_object_id = ""
+key_vault_allowed_ip_ranges                = [] # lean: your admin IP for `az keyvault secret set`, e.g. ["203.0.113.7"]
+
+# First apply only (afterwards the deploy workflow owns the image): the current release image from GHCR, by digest.
+image              = "ghcr.io/OWNER/viadere/viadere-server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns the read:packages token in Key Vault (ghcr-pull-token)
+
+api_min_replicas = 0 # first apply only (no replica starts before secrets and database roles exist); then remove the line (lean default 1)
+
+# Non-secret server configuration: Infra/fly/fly.staging.toml [env] minus the keys the module sets itself (ENVIRONMENT, PORT, BIND_HOST,
+# AUTO_MIGRATE, RATE_LIMIT_STORE, RUN_BACKGROUND_JOBS, DATABASE_APP_ROLE) and the GCP_* variables Azure retires.
+# TRUSTED_PROXY_COUNT: client -> Cloudflare -> cloudflared -> Container Apps ingress -> app; keep 2 (one X-Forwarded-For entry per proxy
+# that appends) until WP-B2 re-measures it on Azure staging. Lower is safe, higher lets clients spoof their address.
+app_env = {
+  APPROVE_V2_ENABLED                       = "false"
+  KEY_DIRECTORY_LOG_ID                     = "viadere.key-directory.v1"
+  VERIFY_ENABLED                           = "false"
+  DIDIT_NEW_SESSIONS_ENABLED               = "true"
+  VERIFY_GATE_REFERENCE                    = ""
+  WALLET_MERCHANT_ID                       = ""
+  WALLET_IACA_DIR                          = "/app/trust/iaca"
+  WALLET_IACA_SHA256                       = ""
+  DIDIT_API_BASE                           = "https://verification.didit.me"
+  DIDIT_WORKFLOW_ID_IDENTITY               = ""
+  VAULT_SYNC_ENABLED                       = "true"
+  WEBHOOK_OWNERSHIP_VERIFICATION           = "required"
+  API_KEY_MAX_OVERLAP_DAYS                 = "30"
+  DOMAIN_RECHECK_DAYS                      = "30"
+  ASSURANCE_GRACE_DAYS                     = "14"
+  SUPPORT_NOTIFY_EMAIL                     = ""
+  METRICS_PORT                             = ""
+  DATA_ENCRYPTION_KEY_ID                   = ""
+  SERVER_PEPPER_ID                         = ""
+  AUDIT_CHAIN_KEY_EPOCH                    = "1"
+  CONNECT_LINK_SIGNING_KEY_ID              = ""
+  AUDIT_HEAD_EXPORT                        = ""
+  AUDIT_HEAD_EXPORT_TARGET                 = ""
+  AUDIT_HEAD_EXPORT_PREFIX                 = "audit-heads/"
+  AUDIT_HEAD_EXPORT_INTERVAL_HOURS         = "6"
+  AUDIT_HEAD_EXPORT_ENDPOINT               = ""
+  AUDIT_HEAD_KMS_KEY                       = ""
+  VERIFY_REQUIRE_E2EE_IDENTITY             = "false"
+  LOG_LEVEL                                = "info"
+  JOB_INTERVAL_SECONDS                     = "5"
+  MAX_BODY_BYTES                           = "65536"
+  FREE_DAILY_INTERACTION_QUOTA             = "1000"
+  TRUSTED_PROXY_COUNT                      = "2"
+  CORS_ALLOWED_ORIGINS                     = ""
+  ALLOW_INSECURE_WEBHOOKS                  = "false"
+  PUBLIC_BASE_URL                          = "https://viadere-api.cksites.dev"
+  RP_ID                                    = "viadere.cksites.dev"
+  RP_NAME                                  = "Viadere"
+  RP_ORIGIN                                = "https://viadere.cksites.dev"
+  DASHBOARD_ORIGIN                         = ""
+  DASHBOARD_IDLE_MINUTES                   = "30"
+  DASHBOARD_ABSOLUTE_HOURS                 = "12"
+  APPLE_TEAM_ID                            = "M669H43X63"
+  APP_STORE_ID                             = ""
+  APP_ATTEST_MODE                          = "report"
+  APP_ATTEST_ENVIRONMENT                   = "development"
+  APNS_ENVIRONMENT                         = "sandbox"
+  APNS_TOPIC                               = "com.viadere.app"
+  APNS_KEY_ID                              = "NH9V2KR4LK"
+  APNS_TEAM_ID                             = "M669H43X63"
+  PASS_TYPE_IDENTIFIER                     = ""
+  EMAIL_API_URL                            = "https://api.mailersend.com/v1/email"
+  EMAIL_API_FORMAT                         = "mailersend"
+  EMAIL_FROM_ADDRESS                       = "Viadere Staging <no-reply@viadere.cksites.dev>"
+  SMS_PROVIDER                             = "mailersend"
+  MAILERSEND_SMS_FROM_NUMBER               = "+15555550100"
+  RCS_PROVIDER_BASE_URL                    = ""
+  RCS_AGENT_ID                             = ""
+  FEATURE_APPLE_MESSAGES_FOR_BUSINESS      = "false"
+  OTP_ALLOWED_COUNTRIES                    = "US,CA"
+  SMS_MENU_RACE_SECONDS                    = "3"
+  WEBHOOK_RETENTION_DAYS                   = "30"
+  OUTBOUND_RETENTION_DAYS                  = "30"
+  LINK_TOKEN_RETENTION_DAYS                = "7"
+  ABUSE_COMPLAINT_RATE                     = "0.02"
+  ABUSE_OPTOUT_RATE                        = "0.10"
+  ABUSE_MIN_SAMPLE                         = "20"
+  ABUSE_WINDOW_DAYS                        = "7"
+  ABUSE_THROTTLE_FACTOR                    = "0.25"
+  BILLING_INCLUDED_INTERACTIONS            = "1000"
+  BILLING_PLATFORM_MICROS_PER_INTERACTION  = "5000"
+  BILLING_TRANSPORT_MICROS_PER_SMS_SEGMENT = "0"
+  BILLING_TRANSPORT_MICROS_PER_RCS_MESSAGE = "0"
+}

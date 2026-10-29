@@ -1,0 +1,365 @@
+# Azure landing zone (WP-B1, Infra/azure) and the Azure deploy path (docs/ops/AZURE-SETUP.md).
+#
+#  static  (every PR/push touching Azure IaC): tofu fmt/validate, `tofu test` with mocked providers (both profiles, no credentials), the
+#          policy checker's unit tests and fixtures.
+#  plan    (push to main / manual; only when the repository variable AZURE_IAC_ENABLED is "true"): OIDC login as the read-only plan identity,
+#          `tofu plan`, then policy_check.py on the plan. The plan file never leaves the job (it is not uploaded).
+#  apply   (manual, input apply=true): GitHub environment `azure-infra-<env>` (required reviewers), same plan + policy check, then apply.
+#  deploy  (manual or workflow_call from release.yml after cutover): verify the GHCR image signature (and provenance for production),
+#          lean: run it from GHCR by digest; standard: `az acr import` by digest into ACR; then start the migrate job, wait for success,
+#          then update ca-viadere-api to the same digest and wait for the new revision to be ready.
+#
+# No long-lived cloud credential exists anywhere: OpenTofu uses the providers' native GitHub OIDC support (ARM_USE_OIDC) and the deploy
+# job logs in with `az login --federated-token` (Azure CLI is Python and preinstalled on the runner). The third-party `azure/login`
+# JavaScript action is NOT used (CLAUDE.md rule 4); the only actions are GitHub's own checkout, pinned to a full SHA. OpenTofu and cosign
+# are checksum-pinned downloads. Fly workflows stay untouched until cutover (plan section 4).
+name: Azure
+
+on:
+  pull_request:
+    paths:
+      - "Infra/azure/**"
+      - ".github/workflows/azure.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Infra/azure/**"
+      - ".github/workflows/azure.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "staging or production"
+        type: choice
+        options: [staging, production]
+        default: staging
+      apply:
+        description: "Apply the infrastructure plan (needs approval in the azure-infra-<env> environment)"
+        type: boolean
+        default: false
+      deploy_digest:
+        description: "Deploy this release image digest (sha256:...) instead; empty = no deploy"
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      image:
+        description: "ghcr.io/<owner>/<repo>/viadere-server (no tag)"
+        type: string
+        required: true
+      digest:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-${{ github.workflow }}-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false # never cancel a half-finished apply or deploy
+
+env:
+  TOFU_VERSION: 1.13.2
+  # SHA-256 of tofu_1.13.2_linux_amd64.zip (official release, matches tofu_1.13.2_SHA256SUMS; verified 2026-10-29).
+  TOFU_SHA256: 723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5
+  # Minimum Azure CLI (2.91.0, PyPI azure-cli, 2026-10-05): core `az containerapp job` commands; no dynamic extension installs.
+  AZ_MIN_VERSION: 2.91.0
+
+jobs:
+  static:
+    name: OpenTofu fmt/validate/test and policy checker tests
+    if: github.event_name != 'workflow_call' && inputs.deploy_digest == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Format
+        run: tofu fmt -check -recursive Infra/azure
+      - name: Validate
+        working-directory: Infra/azure
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+      - name: Plan-time tests of both profiles (mocked providers, no credentials)
+        working-directory: Infra/azure
+        run: tofu test
+      - name: Policy checker unit tests
+        run: python3 -I -m unittest discover -s Infra/azure/tests -t Infra/azure/tests -v
+      - name: Policy checker on the fixture plans
+        run: |
+          python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json
+          python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/standard_plan.json
+
+  plan:
+    name: Plan and policy check (${{ inputs.environment || 'staging' }})
+    needs: static
+    # Credentials exist only after the owner's bootstrap (AZURE-SETUP.md section 4) sets AZURE_IAC_ENABLED; forks never get an OIDC token.
+    if: vars.AZURE_IAC_ENABLED == 'true' && github.event_name != 'pull_request' && !inputs.apply && inputs.deploy_digest == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: azure-plan-${{ inputs.environment || 'staging' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_INFRA_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      TF_VAR_environment: ${{ inputs.environment || 'staging' }}
+      TF_VAR_profile: ${{ vars.AZURE_PROFILE }}
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_db_admin_group_object_id: ${{ vars.AZURE_DB_ADMIN_GROUP_ID }}
+      TF_VAR_key_vault_crypto_officers_group_object_id: ${{ vars.AZURE_KV_CRYPTO_OFFICERS_GROUP_ID }}
+      TF_VAR_image: ${{ vars.AZURE_BOOTSTRAP_IMAGE }}
+      TF_VAR_ghcr_pull_username: ${{ vars.AZURE_GHCR_PULL_USERNAME }}
+      TF_VAR_app_env: ${{ vars.AZURE_APP_ENV_JSON }}
+      TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Init (Azure Storage backend with Entra auth over OIDC)
+        working-directory: Infra/azure
+        run: |
+          tofu init -input=false \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${ARM_TENANT_ID}" \
+            -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}" \
+            -backend-config="client_id=${ARM_CLIENT_ID}" \
+            -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=viadere/azure/${TF_VAR_environment}.tfstate"
+      - name: Plan (read-only identity, so no state lock)
+        working-directory: Infra/azure
+        run: tofu plan -lock=false -out=tfplan
+      - name: Policy check
+        working-directory: Infra/azure
+        run: |
+          tofu show -json tfplan > "$RUNNER_TEMP/plan.json"
+          python3 -I policy_check.py "$RUNNER_TEMP/plan.json"
+          rm -f "$RUNNER_TEMP/plan.json" tfplan
+
+  apply:
+    name: Apply (${{ inputs.environment }})
+    needs: static
+    if: vars.AZURE_IAC_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Required reviewers on this environment; its federated credential is the only way to obtain the apply identity's token.
+    environment:
+      name: azure-infra-${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_INFRA_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      TF_VAR_environment: ${{ inputs.environment || 'staging' }}
+      TF_VAR_profile: ${{ vars.AZURE_PROFILE }}
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_db_admin_group_object_id: ${{ vars.AZURE_DB_ADMIN_GROUP_ID }}
+      TF_VAR_key_vault_crypto_officers_group_object_id: ${{ vars.AZURE_KV_CRYPTO_OFFICERS_GROUP_ID }}
+      TF_VAR_image: ${{ vars.AZURE_BOOTSTRAP_IMAGE }}
+      TF_VAR_ghcr_pull_username: ${{ vars.AZURE_GHCR_PULL_USERNAME }}
+      TF_VAR_app_env: ${{ vars.AZURE_APP_ENV_JSON }}
+      TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Init
+        working-directory: Infra/azure
+        run: |
+          tofu init -input=false \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${ARM_TENANT_ID}" \
+            -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}" \
+            -backend-config="client_id=${ARM_CLIENT_ID}" \
+            -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=viadere/azure/${TF_VAR_environment}.tfstate"
+      - name: Plan, policy check, apply exactly the checked plan
+        working-directory: Infra/azure
+        run: |
+          tofu plan -out=tfplan
+          tofu show -json tfplan > "$RUNNER_TEMP/plan.json"
+          python3 -I policy_check.py "$RUNNER_TEMP/plan.json"
+          rm -f "$RUNNER_TEMP/plan.json"
+          tofu apply -input=false tfplan
+          rm -f tfplan
+
+  deploy:
+    name: Deploy to Azure (${{ inputs.environment }})
+    if: github.event_name == 'workflow_call' || (github.event_name == 'workflow_dispatch' && inputs.deploy_digest != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      IMAGE: ${{ inputs.image || format('ghcr.io/{0}/viadere-server', github.repository) }}
+      DIGEST: ${{ inputs.digest || inputs.deploy_digest }}
+      TARGET_ENV: ${{ inputs.environment }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_PROFILE: ${{ vars.AZURE_PROFILE }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_SMOKE_HOST: ${{ vars.AZURE_SMOKE_HOST }}
+      API_APP: ca-viadere-api
+      MIGRATE_JOB: job-viadere-migrate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check inputs
+        run: |
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "digest must be sha256:<64 hex>" >&2; exit 1; }
+          [[ "${TARGET_ENV}" =~ ^(staging|production)$ ]] || { echo "environment must be staging or production" >&2; exit 1; }
+          [[ "${IMAGE,,}" == "ghcr.io/${GITHUB_REPOSITORY,,}/viadere-server" ]] || { echo "only this repository's GHCR image is deployable" >&2; exit 1; }
+          if [ -z "${AZURE_CLIENT_ID}" ] || [ -z "${AZURE_RESOURCE_GROUP}" ]; then
+            echo "environment variables missing (AZURE-SETUP.md section 5)" >&2
+            exit 1
+          fi
+      - run: .github/scripts/install-tools.sh cosign
+      - name: Verify the signature and the workflow identity
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/(tags/v.*|heads/main)$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE,,}@${DIGEST}" > /dev/null
+      - name: Verify the SLSA provenance attestation (production)
+        if: inputs.environment == 'production'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify "oci://${IMAGE,,}@${DIGEST}" --repo "${GITHUB_REPOSITORY}" --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml"
+      - name: Azure CLI login (workload identity federation, no secret)
+        run: |
+          az config set extension.use_dynamic_install=no core.only_show_errors=true > /dev/null
+          python3 -I - "$(az version --query '"azure-cli"' -o tsv)" "${AZ_MIN_VERSION}" <<'PY'
+          import sys
+          have, need = (tuple(int(p) for p in v.split(".")[:3]) for v in sys.argv[1:3])
+          sys.exit(0 if have >= need else f"Azure CLI {sys.argv[1]} is older than {sys.argv[2]}")
+          PY
+          token="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          echo "::add-mask::${token}"
+          az login --service-principal --username "${AZURE_CLIENT_ID}" --tenant "${AZURE_TENANT_ID}" --federated-token "${token}" --output none
+          az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+      - name: Resolve the image reference (lean GHCR, standard ACR import by digest)
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${AZURE_PROFILE}" = "standard" ]; then
+            [ -n "${AZURE_ACR_NAME}" ] || { echo "AZURE_ACR_NAME missing" >&2; exit 1; }
+            az acr import --name "${AZURE_ACR_NAME}" --source "${IMAGE,,}@${DIGEST}" \
+              --image "viadere-server:sha-${GITHUB_SHA::12}" --username "${GITHUB_ACTOR}" --password "${GH_TOKEN}" --force
+            # Import copies the manifest unchanged, so the digest is the one verified above; deploying by that digest fails closed otherwise.
+            echo "image=${AZURE_ACR_NAME}.azurecr.io/viadere-server@${DIGEST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${IMAGE,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run migrations (job-viadere-migrate, migrator identity) and wait
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+        run: |
+          az containerapp job update --name "${MIGRATE_JOB}" --resource-group "${AZURE_RESOURCE_GROUP}" --image "${REF}" --output none
+          execution="$(az containerapp job start --name "${MIGRATE_JOB}" --resource-group "${AZURE_RESOURCE_GROUP}" --query name -o tsv)"
+          echo "migration execution: ${execution}"
+          for _ in $(seq 1 90); do
+            status="$(az containerapp job execution show --name "${MIGRATE_JOB}" --resource-group "${AZURE_RESOURCE_GROUP}" \
+              --job-execution-name "${execution}" --query properties.status -o tsv)"
+            case "${status}" in
+              Succeeded) echo "migrations succeeded"; exit 0 ;;
+              Failed|Stopped|Degraded) echo "migrations ${status}: the api is NOT updated" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "migrations did not finish in 15 minutes" >&2
+          exit 1
+      - name: Update the api to the same digest and wait for the new revision
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+        run: |
+          suffix="r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          az containerapp update --name "${API_APP}" --resource-group "${AZURE_RESOURCE_GROUP}" --image "${REF}" \
+            --revision-suffix "${suffix}" --output none
+          revision="${API_APP}--${suffix}"
+          for _ in $(seq 1 60); do
+            ready="$(az containerapp show --name "${API_APP}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.latestReadyRevisionName -o tsv)"
+            if [ "${ready}" = "${revision}" ]; then echo "revision ${revision} is ready"; exit 0; fi
+            state="$(az containerapp revision show --name "${API_APP}" --resource-group "${AZURE_RESOURCE_GROUP}" --revision "${revision}" \
+              --query properties.runningState -o tsv 2>/dev/null || true)"
+            case "${state}" in Failed|Degraded) echo "revision ${revision} ${state}; traffic stays on the previous revision" >&2; exit 1 ;; esac
+            sleep 10
+          done
+          echo "revision ${revision} not ready in 10 minutes; traffic stays on the previous revision" >&2
+          exit 1
+      - name: Update the worker (when it exists, WP-B3)
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+        run: |
+          if az containerapp show --name ca-viadere-worker --resource-group "${AZURE_RESOURCE_GROUP}" --output none 2>/dev/null; then
+            az containerapp update --name ca-viadere-worker --resource-group "${AZURE_RESOURCE_GROUP}" --image "${REF}" --output none
+          else
+            echo "no worker app yet"
+          fi
+      - name: Smoke test through Cloudflare and the tunnel
+        if: vars.AZURE_SMOKE_HOST != ''
+        run: |
+          for path in healthz readyz; do
+            curl --proto '=https' --tlsv1.2 -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://${AZURE_SMOKE_HOST}/${path}"
+          done
+      - name: Log out
+        if: always()
+        run: az logout || true

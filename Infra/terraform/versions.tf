@@ -26,7 +26,8 @@ terraform {
 
 provider "cloudflare" {
   # Token from CLOUDFLARE_API_TOKEN (env). Scope it to: Zone:Edit, DNS:Edit, Zone Settings:Edit, Firewall Services:Edit,
-  # Transform Rules:Edit, Workers Scripts:Edit, SSL and Certificates:Edit, for this account and zone only.
+  # Transform Rules:Edit, Workers Scripts:Edit, SSL and Certificates:Edit, and (account) Cloudflare Tunnel:Edit when enable_azure_tunnel is
+  # on, for this account and zone only.
 }
 
 provider "google" {

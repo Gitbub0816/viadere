@@ -1,0 +1,1250 @@
+{
+ "configuration": {
+  "provider_config": {},
+  "root_module": {
+   "resources": [
+    {
+     "address": "azurerm_postgresql_flexible_server.this",
+     "expressions": {
+      "delegated_subnet_id": {
+       "references": [
+        "azurerm_subnet.pg.id",
+        "azurerm_subnet.pg"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "this",
+     "type": "azurerm_postgresql_flexible_server"
+    },
+    {
+     "address": "azurerm_role_assignment.gh_deploy_container_apps",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azurerm_resource_group.this[\"app\"].id",
+        "azurerm_resource_group.this[\"app\"]",
+        "azurerm_resource_group.this"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "gh_deploy_container_apps",
+     "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.secret_user",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azapi_resource.kv_secret",
+        "each.value.secret",
+        "each.value"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "secret_user",
+     "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.key_user",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azapi_resource.kv_key",
+        "each.value.key",
+        "each.value"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "key_user",
+     "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.sb_sender",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azurerm_servicebus_namespace.this.id",
+        "azurerm_servicebus_namespace.this"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "sb_sender",
+     "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.audit_writer",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azurerm_storage_container.audit_heads[0].id",
+        "azurerm_storage_container.audit_heads[0]",
+        "azurerm_storage_container.audit_heads"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "audit_writer",
+     "type": "azurerm_role_assignment"
+    }
+   ]
+  }
+ },
+ "format_version": "1.2",
+ "planned_values": {
+  "root_module": {}
+ },
+ "resource_changes": [
+  {
+   "address": "azurerm_resource_group.this[\"net\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "location": "eastus",
+     "name": "rg-viadere-stg-net"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "net",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_resource_group"
+  },
+  {
+   "address": "azurerm_resource_group.this[\"app\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "location": "eastus",
+     "name": "rg-viadere-stg-app"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "app",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_resource_group"
+  },
+  {
+   "address": "azurerm_resource_group.this[\"data\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "location": "eastus",
+     "name": "rg-viadere-stg-data"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "data",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_resource_group"
+  },
+  {
+   "address": "azurerm_resource_group.this[\"sec\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "location": "eastus",
+     "name": "rg-viadere-stg-sec"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "sec",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_resource_group"
+  },
+  {
+   "address": "azurerm_resource_group.this[\"ops\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "location": "eastus",
+     "name": "rg-viadere-stg-ops"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "ops",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_resource_group"
+  },
+  {
+   "address": "azurerm_postgresql_flexible_server.this",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "administrator_password_wo": null,
+     "authentication": [
+      {
+       "active_directory_auth_enabled": true,
+       "password_auth_enabled": true,
+       "tenant_id": "t"
+      }
+     ],
+     "backup_retention_days": 35,
+     "geo_redundant_backup_enabled": true,
+     "high_availability": [
+      {
+       "mode": "ZoneRedundant",
+       "standby_availability_zone": "2"
+      }
+     ],
+     "name": "psql-viadere-stgabc1s",
+     "public_network_access_enabled": false,
+     "sku_name": "GP_Standard_D2ds_v5",
+     "storage_mb": 131072,
+     "version": "18"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "delegated_subnet_id": true,
+     "fqdn": true,
+     "id": true,
+     "private_dns_zone_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_postgresql_flexible_server"
+  },
+  {
+   "address": "azurerm_key_vault.this",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "kv-vdr-stgabc1s",
+     "network_acls": [
+      {
+       "bypass": "None",
+       "default_action": "Deny",
+       "ip_rules": [],
+       "virtual_network_subnet_ids": []
+      }
+     ],
+     "public_network_access_enabled": false,
+     "purge_protection_enabled": true,
+     "rbac_authorization_enabled": true,
+     "sku_name": "premium",
+     "soft_delete_retention_days": 90
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "access_policy": true,
+     "id": true,
+     "vault_uri": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_key_vault"
+  },
+  {
+   "address": "azapi_resource.kv_key[\"audit-head-signing\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "curveName": "P-256",
+       "keyOps": [
+        "sign",
+        "verify"
+       ],
+       "kty": "EC-HSM"
+      }
+     },
+     "name": "audit-head-signing",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "audit-head-signing",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_key[\"kd-log-signing\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "curveName": "P-256",
+       "keyOps": [
+        "sign",
+        "verify"
+       ],
+       "kty": "EC-HSM"
+      }
+     },
+     "name": "kd-log-signing",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "kd-log-signing",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_key[\"link-descriptor\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "curveName": "P-256",
+       "keyOps": [
+        "sign",
+        "verify"
+       ],
+       "kty": "EC-HSM"
+      }
+     },
+     "name": "link-descriptor",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "link-descriptor",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_key[\"kek-data\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "keyOps": [
+        "wrapKey",
+        "unwrapKey"
+       ],
+       "keySize": 3072,
+       "kty": "RSA-HSM"
+      }
+     },
+     "name": "kek-data",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "kek-data",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_secret[\"database-url\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true
+       },
+       "contentType": "text/plain"
+      }
+     },
+     "name": "database-url",
+     "type": "Microsoft.KeyVault/vaults/secrets@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "database-url",
+   "mode": "managed",
+   "name": "kv_secret",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_secret[\"edge-token\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true
+       },
+       "contentType": "text/plain"
+      }
+     },
+     "name": "edge-token",
+     "type": "Microsoft.KeyVault/vaults/secrets@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "edge-token",
+   "mode": "managed",
+   "name": "kv_secret",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_secret[\"cloudflared-tunnel-token\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true
+       },
+       "contentType": "text/plain"
+      }
+     },
+     "name": "cloudflared-tunnel-token",
+     "type": "Microsoft.KeyVault/vaults/secrets@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "cloudflared-tunnel-token",
+   "mode": "managed",
+   "name": "kv_secret",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_secret[\"database-migration-url\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true
+       },
+       "contentType": "text/plain"
+      }
+     },
+     "name": "database-migration-url",
+     "type": "Microsoft.KeyVault/vaults/secrets@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "database-migration-url",
+   "mode": "managed",
+   "name": "kv_secret",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azurerm_servicebus_namespace.this",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "capacity": 1,
+     "local_auth_enabled": false,
+     "minimum_tls_version": "1.2",
+     "name": "sb-viadere-stgabc1s",
+     "public_network_access_enabled": false,
+     "sku": "Premium"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_servicebus_namespace"
+  },
+  {
+   "address": "azurerm_servicebus_queue.this[\"push\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "max_delivery_count": 5,
+     "name": "push",
+     "requires_duplicate_detection": true
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "namespace_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "push",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_servicebus_queue"
+  },
+  {
+   "address": "azapi_resource.cae",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "appLogsConfiguration": {
+        "destination": "azure-monitor"
+       },
+       "peerTrafficConfiguration": {
+        "encryption": {
+         "enabled": true
+        }
+       },
+       "publicNetworkAccess": "Disabled",
+       "vnetConfiguration": {
+        "internal": true
+       },
+       "workloadProfiles": [
+        {
+         "name": "Consumption",
+         "workloadProfileType": "Consumption"
+        }
+       ],
+       "zoneRedundant": true
+      }
+     },
+     "name": "cae-viadere-stg",
+     "type": "Microsoft.App/managedEnvironments@2026-01-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "body": {
+      "properties": {
+       "vnetConfiguration": {
+        "infrastructureSubnetId": true
+       }
+      }
+     },
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "cae",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azurerm_container_app.api",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "ingress": [
+      {
+       "allow_insecure_connections": true,
+       "external_enabled": false,
+       "target_port": 8080
+      }
+     ],
+     "name": "ca-viadere-api"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "container_app_environment_id": true,
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "api",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_container_app"
+  },
+  {
+   "address": "azurerm_container_app.cloudflared",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "ingress": [],
+     "name": "ca-cloudflared"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "cloudflared",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_container_app"
+  },
+  {
+   "address": "azurerm_container_app_job.migrate",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "job-viadere-migrate"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "migrate",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_container_app_job"
+  },
+  {
+   "address": "azurerm_log_analytics_workspace.this",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "daily_quota_gb": -1,
+     "local_authentication_enabled": false,
+     "name": "log-viadere-stg"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_log_analytics_workspace"
+  },
+  {
+   "address": "azurerm_private_dns_zone.this[\"postgres\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "viadere-stg.private.postgres.database.azure.com"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "postgres",
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_private_dns_zone"
+  },
+  {
+   "address": "azurerm_user_assigned_identity.workload[\"api\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "id-viadere-api"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "client_id": true,
+     "id": true,
+     "principal_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "api",
+   "mode": "managed",
+   "name": "workload",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_user_assigned_identity"
+  },
+  {
+   "address": "azurerm_user_assigned_identity.workload[\"worker\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "id-viadere-worker"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "client_id": true,
+     "id": true,
+     "principal_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "worker",
+   "mode": "managed",
+   "name": "workload",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_user_assigned_identity"
+  },
+  {
+   "address": "azurerm_user_assigned_identity.workload[\"migrator\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "id-viadere-migrator"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "client_id": true,
+     "id": true,
+     "principal_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "migrator",
+   "mode": "managed",
+   "name": "workload",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_user_assigned_identity"
+  },
+  {
+   "address": "azurerm_user_assigned_identity.workload[\"cloudflared\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "id-viadere-cloudflared"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "client_id": true,
+     "id": true,
+     "principal_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "cloudflared",
+   "mode": "managed",
+   "name": "workload",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_user_assigned_identity"
+  },
+  {
+   "address": "azurerm_role_assignment.gh_deploy_container_apps",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "deploy:gh-deploy: update the api image",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Container Apps Contributor"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "gh_deploy_container_apps",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_role_assignment.secret_user[\"api/database-url\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: read secret database-url",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Key Vault Secrets User"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "api/database-url",
+   "mode": "managed",
+   "name": "secret_user",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_role_assignment.key_user[\"api/kek-data\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: use key kek-data",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Key Vault Crypto User"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "api/kek-data",
+   "mode": "managed",
+   "name": "key_user",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_role_assignment.sb_sender[\"api\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: send queue messages",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Azure Service Bus Data Sender"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "api",
+   "mode": "managed",
+   "name": "sb_sender",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_role_assignment.telemetry[\"api\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: send telemetry",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Monitoring Metrics Publisher",
+     "scope": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-viadere-stg-ops/providers/Microsoft.Insights/components/appi-viadere-stg"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "api",
+   "mode": "managed",
+   "name": "telemetry",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_storage_account.audit[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "allow_nested_items_to_be_public": false,
+     "min_tls_version": "TLS1_2",
+     "name": "stvdrauditstgabc1s",
+     "public_network_access": "Disabled",
+     "shared_access_key_enabled": false
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "audit",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_storage_account"
+  },
+  {
+   "address": "azurerm_container_registry.this[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "admin_enabled": false,
+     "anonymous_pull_enabled": false,
+     "name": "crviaderestgabc1s",
+     "public_network_access_enabled": false,
+     "sku": "Premium"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "login_server": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_container_registry"
+  },
+  {
+   "address": "azurerm_private_endpoint.key_vault[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "pe-key_vault"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "subnet_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "key_vault",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_private_endpoint"
+  },
+  {
+   "address": "azurerm_private_endpoint.service_bus[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "pe-service_bus"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "subnet_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "service_bus",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_private_endpoint"
+  },
+  {
+   "address": "azurerm_private_endpoint.acr[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "pe-acr"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "subnet_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "acr",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_private_endpoint"
+  },
+  {
+   "address": "azurerm_private_endpoint.audit_blob[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "pe-audit_blob"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "subnet_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "audit_blob",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_private_endpoint"
+  },
+  {
+   "address": "azurerm_nat_gateway.this[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "ng-viadere-prd",
+     "sku_name": "Standard"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "this",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_nat_gateway"
+  },
+  {
+   "address": "azurerm_public_ip.nat[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "name": "pip-viadere-prd-nat",
+     "sku": "Standard"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "ip_address": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "nat",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_public_ip"
+  },
+  {
+   "address": "azurerm_role_assignment.audit_writer[0]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:worker: create audit-head blobs",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Storage Blob Data Contributor"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": 0,
+   "mode": "managed",
+   "name": "audit_writer",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  }
+ ],
+ "terraform_version": "1.13.2",
+ "variables": {
+  "environment": {
+   "value": "production"
+  },
+  "profile": {
+   "value": "standard"
+  }
+ }
+}
