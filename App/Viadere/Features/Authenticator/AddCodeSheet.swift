@@ -124,9 +124,9 @@ struct AuthenticatorQRScanner: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ScannerController, context: Context) {}
 
     final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
-        var onCode: ((String) -> Void)?
-        private let session = AVCaptureSession()
-        private var delivered = false
+        nonisolated(unsafe) var onCode: ((String) -> Void)?
+        nonisolated(unsafe) private let session = AVCaptureSession()
+        nonisolated(unsafe) private var delivered = false
 
         override func viewDidLoad() {
             super.viewDidLoad()
@@ -164,7 +164,7 @@ struct AuthenticatorQRScanner: UIViewControllerRepresentable {
             Task.detached { session.stopRunning() }
         }
 
-        func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        nonisolated func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
             guard !delivered, let text = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue else { return }
             delivered = true
             onCode?(text)

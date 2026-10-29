@@ -499,7 +499,9 @@ public struct ViadereEntryField: View {
                     .tint(ViadereColor.accent)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    #if os(iOS)
                     .keyboardType(.asciiCapable)
+                    #endif
                     .submitLabel(.go)
                     .focused($focused)
                     .onSubmit(onSubmit)
@@ -554,7 +556,9 @@ public struct ViadereOTPField: View {
     public var body: some View {
         ZStack {
             TextField("", text: $code)
+                #if os(iOS)
                 .keyboardType(.numberPad)
+                #endif
                 .textContentType(.oneTimeCode)
                 .focused($focused)
                 .foregroundStyle(.clear)

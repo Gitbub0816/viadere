@@ -45,19 +45,20 @@ public enum ViadereColor {
 extension Color {
     /// Dynamic colour that resolves per light / dark appearance.
     init(viadereLight light: UInt32, dark: UInt32, lightOpacity: Double = 1, darkOpacity: Double = 1) {
-        #if canImport(UIKit)
+        #if canImport(UIKit) && !os(watchOS)
         self.init(uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
                 ? UIColor(viadereHex: dark, alpha: darkOpacity)
                 : UIColor(viadereHex: light, alpha: lightOpacity)
         })
         #else
-        self.init(viadereHex: light, opacity: lightOpacity)
+        // watchOS has no light appearance, so use the dark palette directly.
+        self.init(viadereHex: dark, opacity: darkOpacity)
         #endif
     }
 }
 
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(watchOS)
 extension UIColor {
     convenience init(viadereHex hex: UInt32, alpha: Double = 1) {
         self.init(red: CGFloat((hex >> 16) & 0xFF) / 255,

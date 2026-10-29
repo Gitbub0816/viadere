@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import ViadereCore
 import ViadereKit
 
 /// Builds an in-memory world (mock API seeded with loyalty, Wallet, orders, travel, events and household; software keys)

@@ -43,6 +43,7 @@ extension View {
             case .completed: DocumentVerificationLauncher.shared.finish(.finished)
             case .cancelled: DocumentVerificationLauncher.shared.finish(.cancelled)
             case .failed: DocumentVerificationLauncher.shared.finish(.failed)
+            @unknown default: DocumentVerificationLauncher.shared.finish(.failed)
             }
         }
     }

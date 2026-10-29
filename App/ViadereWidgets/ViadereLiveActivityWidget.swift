@@ -159,24 +159,31 @@ private enum PreviewStates {
 #Preview("Lock screen", as: .content, using: ViadereActivityAttributes.preview) {
     ViadereLiveActivityWidget()
 } contentStates: {
-    [PreviewStates.flight, PreviewStates.order, PreviewStates.delivery, PreviewStates.appointment]
+    PreviewStates.flight
+    PreviewStates.order
+    PreviewStates.delivery
+    PreviewStates.appointment
 }
 
 #Preview("Dynamic Island · expanded", as: .dynamicIsland(.expanded), using: ViadereActivityAttributes.preview) {
     ViadereLiveActivityWidget()
 } contentStates: {
-    [PreviewStates.flight, PreviewStates.order, PreviewStates.appointment]
+    PreviewStates.flight
+    PreviewStates.order
+    PreviewStates.appointment
 }
 
 #Preview("Dynamic Island · compact", as: .dynamicIsland(.compact), using: ViadereActivityAttributes.preview) {
     ViadereLiveActivityWidget()
 } contentStates: {
-    [PreviewStates.order, PreviewStates.flight, PreviewStates.delivery]
+    PreviewStates.order
+    PreviewStates.flight
+    PreviewStates.delivery
 }
 
 #Preview("Dynamic Island · minimal", as: .dynamicIsland(.minimal), using: ViadereActivityAttributes.preview) {
     ViadereLiveActivityWidget()
 } contentStates: {
-    [PreviewStates.order]
+    PreviewStates.order
 }
 #endif

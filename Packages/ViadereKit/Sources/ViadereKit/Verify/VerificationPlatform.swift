@@ -76,7 +76,12 @@ public struct PassKitWalletIdentity: WalletIdentityService {
 
     public func availability(for request: WalletElementPlan.Request) async -> WalletAvailability {
         let controller = PKIdentityAuthorizationController()
-        return await controller.checkCanRequestDocument(descriptor(for: request)) ? .available : .unavailable
+        let canRequest = await withCheckedContinuation { continuation in
+            controller.checkCanRequestDocument(descriptor(for: request)) { canRequest in
+                continuation.resume(returning: canRequest)
+            }
+        }
+        return canRequest ? .available : .unavailable
     }
 
     public func present(_ plan: WalletElementPlan.Request, nonce: Data, merchantIdentifier: String) async throws -> Data {
@@ -86,7 +91,17 @@ public struct PassKitWalletIdentity: WalletIdentityService {
         request.merchantIdentifier = merchantIdentifier
         request.nonce = nonce
         do {
-            return try await controller.requestDocument(request).encryptedData
+            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                controller.requestDocument(request) { document, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let document {
+                        continuation.resume(returning: document.encryptedData)
+                    } else {
+                        continuation.resume(throwing: WalletPresentationError.unavailable)
+                    }
+                }
+            }
         } catch let error as PKIdentityError {
             switch error.code {
             case .cancelled: throw WalletPresentationError.cancelled

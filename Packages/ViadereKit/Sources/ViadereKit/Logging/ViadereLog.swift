@@ -19,14 +19,14 @@ public struct ViadereLog: Sendable {
         #endif
     }
 
-    public func info(_ event: StaticString, detail: @autoclosure () -> String = "") {
+    public func info(_ event: StaticString, detail: @autoclosure @escaping () -> String = "") {
         #if canImport(os)
         let name = String(describing: event)
         logger.info("\(name, privacy: .public) \(detail(), privacy: .private)")
         #endif
     }
 
-    public func error(_ event: StaticString, detail: @autoclosure () -> String = "") {
+    public func error(_ event: StaticString, detail: @autoclosure @escaping () -> String = "") {
         #if canImport(os)
         let name = String(describing: event)
         logger.error("\(name, privacy: .public) \(detail(), privacy: .private)")
