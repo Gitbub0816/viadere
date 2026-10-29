@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ViadereCore
 import ViadereKit
 
 /// Owns the onboarding view model for the lifetime of the flow.
@@ -33,16 +34,16 @@ struct OnboardingView: View {
                 } else {
                     WelcomeStep(vm: vm)
                 }
-            case .account: AccountStep(vm: vm)
+            case .device: DeviceStep(vm: vm)
+            case .notifications: NotificationsStep(vm: vm)
+            case .protect: ProtectStep(vm: vm)
             case .recoveryCodes:
                 if let codes = vm.recoveryCodes {
                     RecoveryCodesView(model: codes) { vm.recoveryCodesSaved() }
                 } else {
-                    // The codes were released (the app locked while they were showing): they can't come back.
-                    DeviceStep(vm: vm)
+                    // The codes were released (the app locked while they were showing): they can't come back. New ones can be made.
+                    ProtectStep(vm: vm)
                 }
-            case .device: DeviceStep(vm: vm)
-            case .notifications: NotificationsStep(vm: vm)
             case .phone, .done: PhoneStep(vm: vm)
             }
         }
@@ -151,57 +152,122 @@ private struct WelcomeStep: View {
     }
 }
 
-private struct AccountStep: View {
-    @Bindable var vm: OnboardingViewModel
-
-    var body: some View {
-        OnboardingScaffold(
-            index: 0, title: "Create your account",
-            message: "Viadere uses a passkey: nothing to remember, nothing to phish. Your iPhone will ask for Face ID or your passcode."
-        ) {
-            VStack(alignment: .leading, spacing: ViadereSpace.m) {
-                ViadereTextField("Your name", text: $vm.displayName, prompt: "Ana Rivera",
-                                 message: "Shown to businesses you connect with.")
-                    .textContentType(.name)
-                    .textInputAutocapitalization(.words)
-                ErrorLine(message: vm.errorMessage)
-            }
-        } actions: {
-            Button(vm.isWorking ? "Creating…" : "Create passkey") { Task { await vm.createAccount() } }
-                .buttonStyle(.viadere(.primary))
-                .disabled(!vm.canCreateAccount)
-            Button("Sign in instead") { Task { await vm.signIn() } }
-                .buttonStyle(.viadere(.quiet))
-                .disabled(vm.isWorking)
-            Button("Lost your devices?") { vm.beginRecovery() }
-                .buttonStyle(.viadere(.quiet))
-                .disabled(vm.isWorking)
-        }
-    }
-}
-
+/// Consent and account creation in one place: what registering this iPhone stores, then "Agree and set up". No name, email, phone or
+/// passkey is asked for (§2.5a). After a passkey sign-in the same step adds this iPhone to the existing account.
 private struct DeviceStep: View {
     @Bindable var vm: OnboardingViewModel
 
     var body: some View {
         OnboardingScaffold(
-            index: 1, title: "Set up this iPhone",
-            message: "Approvals are signed by a key created inside this iPhone's Secure Enclave. It can't be copied, exported or used on another device."
+            index: 0, title: "Set up this iPhone",
+            message: "Viadere doesn't ask for your name, email or phone number. This iPhone becomes your account, protected by its own Secure Enclave."
         ) {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
-                ViadereTextField("Device name", text: $vm.deviceName, prompt: "Ana's iPhone",
-                                 message: "You'll see this in your list of trusted devices.")
+                ViadereTextField("Device name", text: $vm.deviceName, prompt: "iPhone",
+                                 message: "Only you see this, in your list of devices.")
+                Text("What registering this iPhone stores")
+                    .font(ViadereType.subhead)
+                    .foregroundStyle(ViadereColor.textSecondary)
+                    .accessibilityAddTraits(.isHeader)
                 ViadereRowGroup {
-                    FactRow(symbol: "faceid", title: "Face ID for approvals", detail: "Required for purchases and high-risk sign-ins.")
+                    FactRow(symbol: "iphone", title: "A device record", detail: "The name above, the kind of device and when it was added.")
                     ViadereHairline(inset: 50)
-                    FactRow(symbol: "key", title: "A key that never leaves", detail: "Only a signature is ever sent, never the key.")
+                    FactRow(symbol: "key", title: "Public keys only",
+                            detail: "Approval keys are made in the Secure Enclave and never leave this iPhone. Viadere keeps the public half.")
+                    ViadereHairline(inset: 50)
+                    FactRow(symbol: "checkmark.circle", title: "A genuine-app check",
+                            detail: "Apple confirms this is the real Viadere app on a real iPhone. It says nothing about who you are.")
+                    ViadereHairline(inset: 50)
+                    FactRow(symbol: "faceid", title: "Face ID stays on your iPhone", detail: "Viadere never sees your face or passcode, only that you approved.")
+                }
+                ConsentLine()
+                ErrorLine(message: vm.errorMessage)
+            }
+        } actions: {
+            Button(vm.isWorking ? "Setting up…" : "Agree and set up") { Task { await vm.enrollDevice() } }
+                .buttonStyle(.viadere(.primary))
+                .disabled(!vm.canCreateAccount || vm.deviceName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+}
+
+/// The terms and the privacy notice, as links. Continuing is the agreement.
+private struct ConsentLine: View {
+    private static let terms = URL(string: "https://\(ViadereCore.domain)/legal/consumer-terms/")
+    private static let privacy = URL(string: "https://\(ViadereCore.domain)/legal/privacy-notice/")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+            Text("By continuing you agree to the Consumer Terms and confirm you've read the Privacy Notice.")
+                .font(ViadereType.subhead)
+                .foregroundStyle(ViadereColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: ViadereSpace.m) {
+                if let terms = Self.terms { Link("Consumer Terms", destination: terms) }
+                if let privacy = Self.privacy { Link("Privacy Notice", destination: privacy) }
+            }
+            .font(ViadereType.subhead)
+            .tint(ViadereColor.textPrimary)
+        }
+    }
+}
+
+/// "Protect your account": optional recovery credentials. Skipping is allowed, after an honest warning.
+private struct ProtectStep: View {
+    @Bindable var vm: OnboardingViewModel
+
+    var body: some View {
+        OnboardingScaffold(
+            index: 2, title: "Protect your account",
+            message: "Optional. This iPhone is your account. Add a way back in case it's lost, reset or replaced."
+        ) {
+            VStack(alignment: .leading, spacing: ViadereSpace.m) {
+                ViadereRowGroup {
+                    FactRow(symbol: "person.badge.key", title: vm.hasPasskey ? "Passkey added" : "A passkey",
+                            detail: vm.hasPasskey ? "A new iPhone on the same Apple Account can find your account with it."
+                                                  : "Saved to iCloud Keychain, so a new iPhone can find your account.")
+                    ViadereHairline(inset: 50)
+                    FactRow(symbol: "list.number", title: vm.hasRecoveryCodes ? "Recovery codes saved" : "Recovery codes",
+                            detail: "Ten one-time codes to print or keep in a password manager. They work without any of your devices.")
+                }
+                if vm.passkeyNotSynced, !vm.hasRecoveryCodes {
+                    ViadereNotice("This passkey isn't synced, so it would be lost with this iPhone. Make recovery codes too.", kind: .warning)
+                }
+                Text("A new device, or one set up after a recovery, can't approve high-risk requests until one of your trusted devices approves it, or the business sets it up again.")
+                    .font(ViadereType.subhead)
+                    .foregroundStyle(ViadereColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if vm.showsSkipWarning {
+                    ViadereNotice(OnboardingViewModel.skipWarning, kind: .warning)
                 }
                 ErrorLine(message: vm.errorMessage)
             }
         } actions: {
-            Button(vm.isWorking ? "Setting up…" : "Set up this iPhone") { Task { await vm.enrollDevice() } }
-                .buttonStyle(.viadere(.primary))
-                .disabled(vm.isWorking || vm.deviceName.trimmingCharacters(in: .whitespaces).isEmpty)
+            if vm.showsSkipWarning {
+                Button("Go back") { vm.cancelSkip() }
+                    .buttonStyle(.viadere(.primary))
+                Button("Skip anyway") { vm.confirmSkipProtection() }
+                    .buttonStyle(.viadere(.quiet))
+            } else {
+                if !vm.hasPasskey {
+                    Button(vm.isWorking ? "Working…" : "Add a passkey") { Task { await vm.addPasskey() } }
+                        .buttonStyle(.viadere(vm.isProtected ? .secondary : .primary))
+                        .disabled(vm.isWorking)
+                }
+                if !vm.hasRecoveryCodes {
+                    Button("Make recovery codes") { Task { await vm.makeRecoveryCodes() } }
+                        .buttonStyle(.viadere(.secondary))
+                        .disabled(vm.isWorking)
+                }
+                if vm.isProtected {
+                    Button("Continue") { vm.continueFromProtection() }
+                        .buttonStyle(.viadere(vm.hasPasskey && vm.hasRecoveryCodes ? .primary : .quiet))
+                } else {
+                    Button("Not now") { vm.skipProtection() }
+                        .buttonStyle(.viadere(.quiet))
+                        .disabled(vm.isWorking)
+                }
+            }
         }
     }
 }
@@ -211,7 +277,7 @@ private struct NotificationsStep: View {
 
     var body: some View {
         OnboardingScaffold(
-            index: 2, title: "Only when it matters",
+            index: 1, title: "Only when it matters",
             message: "Viadere interrupts you only when action is required: a sign-in to approve, a purchase to confirm. Nothing promotional unless you ask for it."
         ) {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
@@ -318,6 +384,18 @@ struct FactRow: View {
 #Preview("Onboarding · welcome") {
     PreviewHost(signedIn: false) { services in
         OnboardingView(vm: OnboardingViewModel(services: services))
+    }
+}
+
+#Preview("Onboarding · set up") {
+    PreviewHost(signedIn: false) { services in
+        OnboardingView(vm: OnboardingViewModel(services: services, start: .device))
+    }
+}
+
+#Preview("Onboarding · protect") {
+    PreviewHost(signedIn: false) { services in
+        OnboardingView(vm: OnboardingViewModel(services: services, start: .protect))
     }
 }
 

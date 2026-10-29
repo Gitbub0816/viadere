@@ -103,8 +103,8 @@ struct SettingsView: View {
                     Spacer()
                 }
             }
-            if let until = vm.thisDeviceLockedUntil {
-                ViadereNotice("\(CoolDownPolicy.message(until: until, now: Date())) \(CoolDownPolicy.stillAvailable)", kind: .info)
+            if let notice = vm.thisDeviceTrustNotice {
+                ViadereNotice("\(notice) \(CoolDownPolicy.stillAvailable)", kind: .info)
                     .padding(.top, ViadereSpace.s)
             }
         }
@@ -324,7 +324,7 @@ struct DevicesView: View {
                             }
                         }
                         if vm.canConfirm(device) {
-                            Button(vm.confirmingId == device.id.description ? "Confirming…" : "Confirm this device") { Task { await vm.confirm(device) } }
+                            Button(vm.confirmingId == device.id.description ? "Approving…" : "Approve this device") { Task { await vm.confirm(device) } }
                                 .buttonStyle(.viadere(.secondary, fullWidth: false))
                                 .disabled(vm.confirmingId != nil)
                         }
@@ -344,7 +344,7 @@ struct DevicesView: View {
                     if index < vm.devices.count - 1 { ViadereHairline() }
                 }
             }
-            Text("A device added recently can't approve high-risk requests for 24 hours, unless you confirm it here with Face ID on a device you already trust. Removing a device stops it from approving requests immediately.")
+            Text("A new device can't approve high-risk requests until you approve it here with Face ID on a device you already trust. Waiting doesn't change that. Removing a device stops it from approving requests immediately.")
                 .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
         }
     }
@@ -385,13 +385,13 @@ struct RecoveryCodesSettingsView: View {
             }
             if let pending = vm.pendingRecoveries.first {
                 // Driven by `RecoveryInfo`, not by the Home notice: the way to stop a recovery you did not start is always here.
-                ViadereNotice("Recovery in progress. It finishes \(CoolDownPolicy.timeText(pending.activatesAt, now: Date())) and would replace your passkey and sign out every device. If it wasn't you, cancel it now.", kind: .warning)
+                ViadereNotice("Recovery in progress. It finishes \(CoolDownPolicy.timeText(pending.activatesAt, now: Date())) and would sign out every device. If it wasn't you, cancel it now.", kind: .warning)
                 Button(vm.isCancellingRecovery ? "Cancelling…" : "Recovery in progress — Cancel") { Task { await vm.cancelPendingRecoveries() } }
                     .buttonStyle(.viadere(.primary))
                     .disabled(vm.isCancellingRecovery || !vm.isTrustedDevice)
                     .accessibilityHint("Stops the account recovery that was started and makes its recovery codes stop working")
             }
-            Text("Each code works once, together with your recovery ID. Generating new codes makes the old ones stop working. You'll confirm with your passkey, and the new codes are shown only once.")
+            Text("Each code works once, together with your recovery ID. Generating new codes makes the old ones stop working. You'll confirm with Face ID or your passcode on this iPhone, and the new codes are shown only once.")
                 .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !vm.canRegenerateRecoveryCodes {

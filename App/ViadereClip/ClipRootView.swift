@@ -1,5 +1,6 @@
 import SwiftUI
 import StoreKit
+import ViadereCore
 import ViadereKit
 
 struct ClipRootView: View {
@@ -8,20 +9,15 @@ struct ClipRootView: View {
 
     var body: some View {
         Group {
-            if flow.step == .recoveryCodes, let codes = flow.recoveryCodes {
-                // Shown once, full screen, with its own pinned actions.
-                RecoveryCodesView(model: codes) { Task { await flow.recoveryCodesSaved() } }
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                        ViadereLockup(.horizontal, ribbonHeight: 26).padding(.top, ViadereSpace.l)
-                        content
-                    }
-                    .padding(.horizontal, ViadereSpace.screen)
-                    .padding(.bottom, ViadereSpace.xl)
+            ScrollView {
+                VStack(alignment: .leading, spacing: ViadereSpace.l) {
+                    ViadereLockup(.horizontal, ribbonHeight: 26).padding(.top, ViadereSpace.l)
+                    content
                 }
-                .scrollIndicators(.hidden)
+                .padding(.horizontal, ViadereSpace.screen)
+                .padding(.bottom, ViadereSpace.xl)
             }
+            .scrollIndicators(.hidden)
         }
         .viadereScreenBackground()
         .passkeyExplanation(flow.passkeyGate)
@@ -37,8 +33,6 @@ struct ClipRootView: View {
         switch flow.step {
         case .account:
             accountStep
-        case .recoveryCodes:
-            EmptyView()   // full screen: see `body`
         case .working:
             ViadereLoading(height: 36).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
         case .done(let name):
@@ -68,15 +62,25 @@ struct ClipRootView: View {
 
     private var accountStep: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.m) {
-            Text("Create your account").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
-            Text("A passkey keeps it safe: no password to remember or steal.")
+            Text("Set up this iPhone").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
+            Text("No name, email or phone number. This iPhone gets a key that lets it connect and receive messages for 7 days. It can't approve anything; the Viadere app does that.")
                 .font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
-            ViadereTextField("Your name", text: $flow.displayName, prompt: "Ana Rivera")
-                .textContentType(.name)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Viadere stores this iPhone's public key, the kind of device, and Apple's check that this is the genuine App Clip. Never your face, passcode or contacts.")
+                .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("By continuing you agree to the Consumer Terms and confirm you've read the Privacy Notice.")
+                .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: ViadereSpace.m) {
+                if let terms = URL(string: "https://\(ViadereCore.domain)/legal/consumer-terms/") { Link("Consumer Terms", destination: terms) }
+                if let privacy = URL(string: "https://\(ViadereCore.domain)/legal/privacy-notice/") { Link("Privacy Notice", destination: privacy) }
+            }
+            .font(ViadereType.subhead)
+            .tint(ViadereColor.textPrimary)
             if let error = flow.accountError { ViadereNotice(error, kind: .danger) }
-            Button("Create passkey and connect") { Task { await flow.createAccountAndConnect() } }
+            Button("Agree and connect") { Task { await flow.createAccountAndConnect() } }
                 .buttonStyle(.viadere(.primary))
-                .disabled(flow.displayName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
 }

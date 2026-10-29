@@ -3,16 +3,17 @@ import Observation
 import ViadereCore
 import ViadereKit
 
-/// The clip's tiny state machine: resolve the code, review consent, (create an account), connect, done.
+/// The clip's tiny state machine: resolve the code, review consent, (set up this iPhone), connect, done.
+///
+/// A new person gets a **device-first, pseudonymous account** (§2.5a): no name, email, phone or passkey. The clip's device holds a request
+/// key only, so it is D0, can never approve anything, and stops working after 7 days. Recovery credentials need a user-verified key, which a
+/// clip never has, so there is no recovery step here: the full app is where a person sets up approvals and protection.
 @MainActor @Observable
 final class ClipFlowModel {
-    enum Step: Equatable { case idle, account, recoveryCodes, working, done(String) }
+    enum Step: Equatable { case idle, account, working, done(String) }
 
     private(set) var step: Step = .idle
     private(set) var accountError: String?
-    var displayName = ""
-    /// The new account's recovery codes, on screen once and never stored (the same screen as the app's onboarding).
-    private(set) var recoveryCodes: RecoveryCodesViewModel?
     let connect: ConnectViewModel
     /// The explanation shown before the passkey sheet when the clip's device enrollment needs an assertion.
     let passkeyGate = PasskeyExplanationGate()
@@ -44,30 +45,21 @@ final class ClipFlowModel {
         }
     }
 
-    /// Passkey account, then the one-time recovery codes, then this device's keys, then connect.
+    /// This iPhone creates the account (a request-key-only App Clip device), then connects. A session left from an earlier clip launch that
+    /// has no device yet enrolls one instead.
     func createAccountAndConnect() async {
         step = .working
         accountError = nil
         do {
             if !(await services.sessions.isSignedIn) {
-                if let codes = try await services.account.signUp(displayName: displayName) {
-                    recoveryCodes = RecoveryCodesViewModel(codes: codes)
-                    step = .recoveryCodes
-                    return
-                }
+                _ = try await services.account.createAccount(deviceName: nil)
+                await finish()
+                return
             }
             await enrollAndConnect()
         } catch {
             report(error)
         }
-    }
-
-    /// "I saved these": releases the codes and carries on.
-    func recoveryCodesSaved() async {
-        guard let recoveryCodes, recoveryCodes.finish() else { return }
-        self.recoveryCodes = nil
-        step = .working
-        await enrollAndConnect()
     }
 
     private func enrollAndConnect() async {
