@@ -121,13 +121,17 @@ public struct DeviceRecord: Codable, Sendable, Equatable {
     /// Key purposes registered with the server at enrollment.
     public var purposes: [DeviceKeyPurpose]
     public var enrolledAt: Date
+    /// The App Attest key this device was enrolled with (the identifier `generateKey` returned), for assertions on approval results and link
+    /// completions. `nil` for a device enrolled without attestation (and for records written before it existed: decoded as absent).
+    public var appAttestKeyId: String?
 
-    public init(deviceId: DeviceID, consumerId: ConsumerID, name: String, purposes: [DeviceKeyPurpose], enrolledAt: Date) {
+    public init(deviceId: DeviceID, consumerId: ConsumerID, name: String, purposes: [DeviceKeyPurpose], enrolledAt: Date, appAttestKeyId: String? = nil) {
         self.deviceId = deviceId
         self.consumerId = consumerId
         self.name = name
         self.purposes = purposes
         self.enrolledAt = enrolledAt
+        self.appAttestKeyId = appAttestKeyId
     }
 
     /// Highest decision assurance this device can sign with.

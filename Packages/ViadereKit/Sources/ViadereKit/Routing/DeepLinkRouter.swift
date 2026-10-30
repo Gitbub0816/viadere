@@ -19,6 +19,9 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/a/{CODE}?rk={root key id}#es={secret}` (QR or button the business shows in its own session): start an Approve enrollment.
     /// The fragment never reaches a server; log nothing of this link.
     case approveEnrollment(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret?)
+    /// `https://{link domain}/k/{CODE}#es={secret}` (QR or button a business shows in its own signed-in session, right after it authenticated the
+    /// customer): link this app to the business's customer record (WP-C1). The fragment never reaches a server; log nothing of this link.
+    case linkSession(code: String, secret: LinkSessionSecret?)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -57,6 +60,11 @@ public enum DeepLinkRouter {
             guard components.user == nil, components.password == nil, components.port == nil || components.port == 443,
                   let parsed = ApprovalEnrollmentCode.parse(link: url, domain: domain) else { return nil }
             return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid, secret: parsed.secret)
+        }
+        if components.path.hasPrefix(APIRoutes.Web.linkSessionPrefix) {
+            // Strict: the exact link domain, `/k/{CODE}`, no query, and a fragment that is exactly `es=` plus 43 characters (or none).
+            guard let parsed = LinkSessionLink.parse(url, domain: domain) else { return nil }
+            return .linkSession(code: parsed.code, secret: parsed.secret)
         }
         // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
         guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,

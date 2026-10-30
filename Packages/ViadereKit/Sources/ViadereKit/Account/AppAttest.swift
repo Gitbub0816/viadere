@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 import ViadereCore
 #if canImport(DeviceCheck)
@@ -15,6 +16,8 @@ public protocol AppAttestProviding: Sendable {
     func generateKey() async throws -> String
     /// `DCAppAttestService.attestKey(_:clientDataHash:)`: the CBOR attestation object.
     func attestKey(_ keyId: String, clientDataHash: Data) async throws -> Data
+    /// `DCAppAttestService.generateAssertion(_:clientDataHash:)`: the CBOR assertion made with the attested key (WP-C2).
+    func generateAssertion(_ keyId: String, clientDataHash: Data) async throws -> Data
 }
 
 public enum AppAttestError: Error, Equatable, Sendable {
@@ -42,6 +45,7 @@ public struct UnavailableAppAttest: AppAttestProviding {
     public var isSupported: Bool { false }
     public func generateKey() async throws -> String { throw AppAttestError.unsupported }
     public func attestKey(_ keyId: String, clientDataHash: Data) async throws -> Data { throw AppAttestError.unsupported }
+    public func generateAssertion(_ keyId: String, clientDataHash: Data) async throws -> Data { throw AppAttestError.unsupported }
 }
 
 /// A scriptable stand-in: records the `clientDataHash` of every attestation so tests can check what was vouched for.
@@ -69,6 +73,19 @@ public final class MockAppAttest: AppAttestProviding, @unchecked Sendable {
         if let failure { throw failure }
         record(keyId, clientDataHash)
         return Data("mock-attestation:".utf8) + clientDataHash
+    }
+
+    public func generateAssertion(_ keyId: String, clientDataHash: Data) async throws -> Data {
+        if let failure { throw failure }
+        recordAssertion(keyId, clientDataHash)
+        return Data("mock-assertion:".utf8) + clientDataHash
+    }
+
+    private var _asserted: [(keyId: String, clientDataHash: Data)] = []
+    public var asserted: [(keyId: String, clientDataHash: Data)] { lock.lock(); defer { lock.unlock() }; return _asserted }
+    private func recordAssertion(_ keyId: String, _ hash: Data) {
+        lock.lock(); defer { lock.unlock() }
+        _asserted.append((keyId, hash))
     }
 
     private func nextKeyId() -> String {
@@ -99,6 +116,11 @@ public struct DeviceCheckAppAttest: AppAttestProviding {
         guard DCAppAttestService.shared.isSupported else { throw AppAttestError.unsupported }
         do { return try await DCAppAttestService.shared.attestKey(keyId, clientDataHash: clientDataHash) } catch { throw AppAttestError.failed }
     }
+
+    public func generateAssertion(_ keyId: String, clientDataHash: Data) async throws -> Data {
+        guard DCAppAttestService.shared.isSupported else { throw AppAttestError.unsupported }
+        do { return try await DCAppAttestService.shared.generateAssertion(keyId, clientDataHash: clientDataHash) } catch { throw AppAttestError.failed }
+    }
 }
 #endif
 
@@ -127,4 +149,26 @@ public enum AppAttestPolicy {
     #else
     public static let skipsWhenUnsupported = false
     #endif
+}
+
+/// App Attest assertions for the requests that decide something (WP-C2): an approval result and a link completion. Uses the App Attest key this
+/// device was enrolled with (`DeviceRecord.appAttestKeyId`); `nil` when the device has none or the service fails (the server's
+/// `APP_ATTEST_ASSERTION_MODE` decides whether that is acceptable).
+public struct DeviceAssertions: Sendable {
+    let provider: any AppAttestProviding
+    let records: any DeviceRecordStore
+
+    public init(provider: any AppAttestProviding, records: any DeviceRecordStore) {
+        self.provider = provider
+        self.records = records
+    }
+
+    /// base64url of the CBOR assertion over `SHA-256(clientData)`.
+    public func assertion(over clientData: Data) async -> String? {
+        guard provider.isSupported, let keyId = try? await records.load()?.appAttestKeyId else { return nil }
+        guard let assertion = try? await provider.generateAssertion(keyId, clientDataHash: Data(SHA256.hash(data: clientData))) else { return nil }
+        return Base64URL.encode(assertion)
+    }
+
+    public var source: AssertionSource { { clientData in await assertion(over: clientData) } }
 }

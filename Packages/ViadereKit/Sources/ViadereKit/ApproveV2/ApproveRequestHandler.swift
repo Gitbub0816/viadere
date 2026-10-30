@@ -48,15 +48,17 @@ public struct ApproveRequestHandler: Sendable {
     private let directory: BusinessDirectoryClient
     private let policy: ApprovalPromptPolicy
     private let clock: @Sendable () -> Date
+    private let assertion: AssertionSource?
 
     public init(api: any ApproveAPI, vault: any ApprovalKeyVault, store: any ApproveLocalStore, directory: BusinessDirectoryClient,
-                policy: ApprovalPromptPolicy = .standard, clock: @escaping @Sendable () -> Date = { Date() }) {
+                policy: ApprovalPromptPolicy = .standard, clock: @escaping @Sendable () -> Date = { Date() }, assertion: AssertionSource? = nil) {
         self.api = api
         self.vault = vault
         self.store = store
         self.directory = directory
         self.policy = policy
         self.clock = clock
+        self.assertion = assertion
     }
 
     public struct Loaded: Sendable {
@@ -178,7 +180,9 @@ public struct ApproveRequestHandler: Sendable {
             }
         }
         let status: ApprovalRequestStatus
-        do { status = try await api.submitResult(id: prompt.id, result: jws).status } catch let error as APIError {
+        // An attested device asserts over exactly this result (WP-C2); the relay rebuilds the same client data from the route and the body.
+        let assertionValue = await assertion?(ApprovalAppAttest.clientData(deliveryId: prompt.id, result: jws))
+        do { status = try await api.submitResult(id: prompt.id, result: jws, appAttestAssertion: assertionValue).status } catch let error as APIError {
             switch error.code {
             case .approvalsFrozen?: throw ApproveError.frozen
             case .expired?, .gone?: throw ApproveError.expired

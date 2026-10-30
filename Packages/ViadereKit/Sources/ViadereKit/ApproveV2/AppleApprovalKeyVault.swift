@@ -63,5 +63,15 @@ extension ApproveEnvironment {
         return ApproveEnvironment(services: services, api: api, vault: AppleApprovalKeyVault(configuration: services.configuration),
                                   store: SecretApproveLocalStore(secrets: state))
     }
+
+    /// Business link sessions for the app (WP-C1): the same Approve graph, the build's pinned `link-descriptor` keys, completed links in the same
+    /// app-only Keychain group, and App Attest assertions from this device's attested key. `nil` without the Approve API or link API.
+    public static func liveLinkFlow(services: ViadereServices) -> LinkSessionFlow? {
+        guard let environment = live(services: services), let api = services.approveAPI as? any LinkSessionAPI else { return nil }
+        let state = KeychainSecretStore(service: services.configuration.keychainService + ".approve.state", accessGroup: services.configuration.approvalKeychainAccessGroup,
+                                        accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
+        return environment.linkFlow(api: api, descriptorKeys: services.configuration.parsedLinkDescriptorKeys, secrets: state,
+                                    assertion: DeviceAssertions(provider: services.appAttest, records: services.records).source, clock: services.clock)
+    }
 }
 #endif

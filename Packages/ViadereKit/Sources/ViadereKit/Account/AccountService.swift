@@ -78,7 +78,7 @@ public struct AccountService: Sendable {
         }
         try await store(created.session)
         let record = DeviceRecord(deviceId: created.device.id, consumerId: created.accountId, name: created.device.name,
-                                  purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
+                                  purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock(), appAttestKeyId: evidence?.keyId)
         try await records.save(record)
         return record
     }
@@ -162,7 +162,7 @@ public struct AccountService: Sendable {
         // response carries a session bound to the NEW device, which becomes this installation's session.
         if let replacement = device.replacementSession { try await store(replacement) }
         let record = DeviceRecord(deviceId: device.id, consumerId: tokens.consumerId, name: device.name,
-                                  purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock())
+                                  purposes: provisioned.registrations.map(\.purpose), enrolledAt: clock(), appAttestKeyId: attestation?.keyId)
         try await records.save(record)
         if !isAppClip { await revokeClipDevices(except: device.id) }
         return record

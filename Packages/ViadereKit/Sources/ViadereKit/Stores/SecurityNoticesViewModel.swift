@@ -161,6 +161,8 @@ public final class SecurityNoticesViewModel {
         case .approvalRequestsPaused: return "A business sent you several approval requests, so Viadere paused it \(when)."
         case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
         case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
+        case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
+        case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"
@@ -186,6 +188,8 @@ public final class SecurityNoticesViewModel {
         case .approvalsUnfrozen: return "Not you? Open Approvals and freeze them again."
         case .approvalRequestsPaused: return "Don't recognize it? Open Approvals and report the business."
         case .approvalKeyUnconfirmed: return "Didn't just set up approvals? Open Approvals and freeze them."
+        case .businessLinked: return "Not you? Disconnect the business in Businesses and contact it."
+        case .businessLinkUnconfirmed: return "Didn't just link a business? Review your businesses."
         default: return Self.prompt
         }
     }

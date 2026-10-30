@@ -16,14 +16,15 @@ public struct ApproveEnvironment: Sendable {
     public var isConfigured: Bool
 
     public init(api: any ApproveAPI, vault: any ApprovalKeyVault, store: any ApproveLocalStore, logKeys: [DevicePublicKey], logId: String = TransparencyLog.defaultLogId,
-                keys: any DeviceKeyStore, records: any DeviceRecordStore, policy: ApprovalPromptPolicy = .standard, clock: @escaping @Sendable () -> Date = { Date() }) {
+                keys: any DeviceKeyStore, records: any DeviceRecordStore, policy: ApprovalPromptPolicy = .standard, clock: @escaping @Sendable () -> Date = { Date() },
+                assertion: AssertionSource? = nil) {
         self.api = api
         self.vault = vault
         self.store = store
         let directory = BusinessDirectoryClient(api: api, store: store, logKeys: logKeys, logId: logId, clock: clock)
         self.directory = directory
         enrollment = ApproveEnrollmentFlow(api: api, vault: vault, store: store, directory: directory, clock: clock)
-        requests = ApproveRequestHandler(api: api, vault: vault, store: store, directory: directory, policy: policy, clock: clock)
+        requests = ApproveRequestHandler(api: api, vault: vault, store: store, directory: directory, policy: policy, clock: clock, assertion: assertion)
         freeze = ApproveFreezeFlow(api: api, keys: keys, records: records, clock: clock)
         rootChangeAuthorizer = DeviceBiometricAuthorizer(keys: keys)
         isConfigured = !logKeys.isEmpty
@@ -32,6 +33,14 @@ public struct ApproveEnvironment: Sendable {
     /// The environment for `services` with a given vault and local store (the app passes the Keychain-backed ones).
     public init(services: ViadereServices, api: any ApproveAPI, vault: any ApprovalKeyVault, store: any ApproveLocalStore) {
         self.init(api: api, vault: vault, store: store, logKeys: services.configuration.parsedKeyDirectoryLogKeys, logId: services.configuration.keyDirectoryLogId,
-                  keys: services.keys, records: services.records, clock: services.clock)
+                  keys: services.keys, records: services.records, clock: services.clock,
+                  assertion: DeviceAssertions(provider: services.appAttest, records: services.records).source)
+    }
+
+    /// Business link sessions on top of this environment (WP-C1): needs the link API and the build's pinned `link-descriptor` keys; `secrets` keeps the
+    /// completed links until the business confirms.
+    public func linkFlow(api: any LinkSessionAPI, descriptorKeys: [DevicePublicKey], secrets: any SecretStore, assertion: AssertionSource? = nil,
+                         clock: @escaping @Sendable () -> Date = { Date() }) -> LinkSessionFlow {
+        LinkSessionFlow(api: api, approve: self, descriptorKeys: descriptorKeys, secrets: secrets, assertion: assertion, clock: clock)
     }
 }

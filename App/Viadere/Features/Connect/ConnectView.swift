@@ -8,6 +8,9 @@ struct ConnectView: View {
     @Bindable var model: AppModel
     @State private var vm: ConnectViewModel
     @State private var showingScanner = false
+    /// A business link session (WP-C1) opened from a QR, a link, or typed codes.
+    @State private var linkSession: PendingLinkSession?
+    @State private var showingLinkCodeEntry = false
 
     init(model: AppModel) {
         self.model = model
@@ -46,11 +49,29 @@ struct ConnectView: View {
             model.pendingConnect = nil
             await vm.open(code: pending.code, link: pending.link, source: pending.source == .code ? .code : .qr)
         }
+        .task(id: model.pendingLinkSession) {
+            guard let pending = model.pendingLinkSession else { return }
+            model.pendingLinkSession = nil
+            linkSession = pending
+        }
         .fullScreenCover(isPresented: $showingScanner) {
             QRScannerScreen { payload in
                 showingScanner = false
+                // A business's link-session QR (`/k/…`) opens the link sheet; anything else is a connect code.
+                if case .linkSession(let code, let secret)? = DeepLinkRouter.route(payload) {
+                    linkSession = PendingLinkSession(code: code, secret: secret)
+                    return
+                }
                 Task { await vm.handleScanned(payload) }
             } onClose: { showingScanner = false }
+        }
+        .sheet(item: $linkSession) { pending in
+            LinkSessionSheet(controller: AppEnvironment.shared.link, pending: pending)
+                .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showingLinkCodeEntry) {
+            LinkCodeEntrySheet { pending in linkSession = pending }
+                .presentationDetents([.medium, .large])
         }
     }
 
@@ -105,6 +126,10 @@ struct ConnectView: View {
                 }
             }
             .buttonStyle(.viadere(.secondary))
+            if AppEnvironment.shared.link.isAvailable {
+                Button("Link with a code from a business") { showingLinkCodeEntry = true }
+                    .buttonStyle(.viadere(.quiet))
+            }
         }
         .padding(.top, ViadereSpace.xs)
         .task(id: vm.input) {

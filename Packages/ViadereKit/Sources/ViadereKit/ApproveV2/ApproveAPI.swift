@@ -15,25 +15,39 @@ public protocol ApproveAPI: Sendable {
     func setFreeze(_ request: ApproveFreezeRequest) async throws -> ApproveFreezeState
     /// `GET /v1/key-directory/businesses/{id}?since=`: public; the caller verifies everything in it.
     func keyDirectory(businessId: BusinessID, since: Int?) async throws -> KeyDirectoryResponse
+    /// The result with an App Attest assertion over it (WP-C2). Default: without one.
+    func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse
+}
+
+extension ApproveAPI {
+    public func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse {
+        try await submitResult(id: id, result: result)
+    }
 }
 
 /// `ApproveAPI` over HTTP through the app's signed `APIClient`.
 public struct LiveApproveAPI: ApproveAPI {
-    private let client: APIClient
+    let client: APIClient
     public init(client: APIClient) { self.client = client }
 
     public func lookupEnrollment(code: String) async throws -> ApproveEnrollmentPreview {
         try await client.call(APIRoutes.approveEnrollmentLookup, body: ApproveEnrollmentLookupRequest(code: code))
     }
     public func completeEnrollment(id: UUID, statement: SignedStatement, bindingTag: String?) async throws -> ApproveKey {
-        try await client.call(APIRoutes.approveEnrollmentComplete, params: ["enrollmentId": id.uuidString.lowercased()], body: CompleteApproveEnrollmentRequest(statement: statement))
+        // The binding tag is what lets the business tell this phone's statement from a forged one (§2.53): it must reach the relay.
+        try await client.call(APIRoutes.approveEnrollmentComplete, params: ["enrollmentId": id.uuidString.lowercased()],
+                              body: CompleteApproveEnrollmentRequest(statement: statement, bindingTag: bindingTag))
     }
     public func keys() async throws -> [ApproveKey] { try await client.call(APIRoutes.approveKeys) }
     public func revokeKey(kid: String) async throws -> ApproveKey { try await client.call(APIRoutes.approveKeyRevoke, params: ["kid": kid]) }
     public func requests() async throws -> [ApproveDeviceRequest] { try await client.call(APIRoutes.approveRequests) }
     public func request(id: UUID) async throws -> ApproveDeviceRequest { try await client.call(APIRoutes.approveRequestGet, params: ["approvalId": id.uuidString.lowercased()]) }
     public func submitResult(id: UUID, result: String) async throws -> SubmitApprovalResultResponse {
-        try await client.call(APIRoutes.approveRequestResult, params: ["approvalId": id.uuidString.lowercased()], body: SubmitApprovalResultRequest(result: result))
+        try await submitResult(id: id, result: result, appAttestAssertion: nil)
+    }
+    public func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse {
+        try await client.call(APIRoutes.approveRequestResult, params: ["approvalId": id.uuidString.lowercased()],
+                              body: SubmitApprovalResultRequest(result: result, appAttestAssertion: appAttestAssertion))
     }
     public func freezeState() async throws -> ApproveFreezeState { try await client.call(APIRoutes.approveFreezeGet) }
     public func setFreeze(_ request: ApproveFreezeRequest) async throws -> ApproveFreezeState { try await client.call(APIRoutes.approveFreezeSet, body: request) }

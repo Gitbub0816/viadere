@@ -27,9 +27,12 @@ final class AppEnvironment {
 
     /// Approve v2 (WP1): pairwise approval keys, the verified key directory, freeze. Closed (and says so) when the build pins no log key.
     let approve: ApproveController
+    /// "Add business" by a business's link-session QR (WP-C1). Closed when the build pins no link-descriptor key.
+    let link: LinkController
 
     private init() {
         approve = ApproveController(environment: ApproveEnvironment.live(services: Self.services))
+        link = LinkController(flow: ApproveEnvironment.liveLinkFlow(services: Self.services))
         model = AppModel(services: Self.services, walletLibrary: PassKitWalletLibrary())
         liveActivities = LiveActivityManager(services: Self.services)
         watchBridge = WatchBridge(services: Self.services)

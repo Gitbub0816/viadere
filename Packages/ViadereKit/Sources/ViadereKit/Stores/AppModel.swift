@@ -28,6 +28,8 @@ public final class AppModel {
     public var pendingAccountLinkToken: String?
     /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
     public var pendingApproveEnrollment: PendingApproveEnrollment?
+    /// A business link session opened from a QR or link (`/k/…`); the Connect tab presents it.
+    public var pendingLinkSession: PendingLinkSession?
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
     public var toast: String?
@@ -147,6 +149,7 @@ public final class AppModel {
         pendingConnect = nil
         pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
+        pendingLinkSession = nil
         conversationToOpen = nil
         businessToOpen = nil
         toast = nil
@@ -216,6 +219,9 @@ public final class AppModel {
         case .approveEnrollment(let code, let rootKid, let secret):
             pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid, secret: secret)
             selectedTab = .settings
+        case .linkSession(let code, let secret):
+            pendingLinkSession = PendingLinkSession(code: code, secret: secret)
+            selectedTab = .connect
         }
     }
 
@@ -305,6 +311,7 @@ public final class AppModel {
         pendingConnect = nil
         pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
+        pendingLinkSession = nil
         conversationToOpen = nil
         businessToOpen = nil
         lockedQueue.removeAll()
@@ -317,6 +324,19 @@ public final class AppModel {
 }
 
 /// An enrollment code (and the business root key id it carried) opened from a link or QR.
+/// A link session to present: the code, and the business's secret from the link's fragment (`nil` when the person types the code; then the business's
+/// check code is typed too).
+public struct PendingLinkSession: Sendable, Equatable {
+    public var code: String
+    public var secret: LinkSessionSecret?
+    public var checkCode: String?
+    public init(code: String, secret: LinkSessionSecret? = nil, checkCode: String? = nil) {
+        self.code = code
+        self.secret = secret
+        self.checkCode = checkCode
+    }
+}
+
 public struct PendingApproveEnrollment: Sendable, Equatable {
     public var code: String
     public var rootKid: String?
