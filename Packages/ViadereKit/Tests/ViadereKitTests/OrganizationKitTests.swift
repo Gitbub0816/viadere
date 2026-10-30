@@ -30,7 +30,7 @@ struct OrganizationKitTests {
 
     // MARK: IA
 
-    @Test func theBarIsMessagesAlertsBenefitsBusinessesAndSettingsIsSecondary() async {
+    @Test func theBarIsMessagesAlertsBenefitsBusinessesAndSettingsIsSecondary() async throws {
         #expect(AppTab.allCases == [.messages, .alerts, .benefits, .businesses])
         #expect(AppTab.allCases.map(\.destination) == OrganizationDestination.primary)
         let (model, _, _, _) = await world()
@@ -38,6 +38,13 @@ struct OrganizationKitTests {
         await model.handle(.settings)
         #expect(model.settingsPresented)
         #expect(model.selectedTab == .alerts)
+        // A connect code opens Add business in the Businesses destination (there is no Connect tab any more).
+        await model.handle(.connect(code: try #require(BusinessCode(parsing: "AF2345")), link: nil))
+        #expect(model.selectedTab == .businesses)
+        #expect(model.addBusinessPresented)
+        #expect(model.pendingConnect != nil)
+        model.lock()
+        #expect(!model.addBusinessPresented && !model.settingsPresented)
     }
 
     @Test func bootstrapLoadsBusinessesAndTheAlertsReadModel() async {

@@ -32,7 +32,7 @@ struct PreferenceService {
 
     static let blockedMessage = "You blocked this business. Unblock it in Viadere to connect again."
 
-    /// Applies an update. Blocking runs the normal disconnect first (pending requests cancelled, conversations closed, approval keys revoked,
+    /// Applies an update. Blocking also runs the normal disconnect (pending requests cancelled, conversations closed, approval keys revoked,
     /// the business told), so a block is never weaker than a disconnect.
     func update(principal: ConsumerPrincipal, business: BusinessID, update: BusinessPreferencesUpdate) async throws -> BusinessPreferences {
         let consumer = principal.consumerId
@@ -47,9 +47,6 @@ struct PreferenceService {
             }
         }
         let relationship = try await ownedRelationship(consumer: consumer, business: business)
-        if update.blocked == true, relationship.isActive {
-            try await RelationshipService(db: db, ctx: ctx).disconnect(consumer: consumer, relationshipId: RelationshipID(relationship.id!))
-        }
         let result: BusinessPreferences = try await db.transaction { tx in
             let row = try await record(consumer: consumer.uuid, business: business.uuid, on: tx)
                 ?? BusinessPreferenceRecord(consumerId: consumer.uuid, businessId: business.uuid, now: now)
@@ -71,6 +68,11 @@ struct PreferenceService {
                                                               principal: principal, businessId: business, subjectType: "relationship",
                                                               subjectId: relationship.id?.uuidString.lowercased(), metadata: metadata)
             return row.dto(business)
+        }
+        // The block is written first, so a connect racing this call is already refused; then the normal disconnect ends the connection
+        // (it re-reads the relationship and does nothing when it already ended).
+        if update.blocked == true {
+            try await RelationshipService(db: db, ctx: ctx).disconnect(consumer: consumer, relationshipId: RelationshipID(relationship.id!))
         }
         return result
     }
