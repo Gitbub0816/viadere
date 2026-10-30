@@ -29,3 +29,9 @@ The protocol and its cryptography live in one shared Swift package, `ViadereCore
 - Container Apps does not verify image signatures at pull time; signature and provenance verification stays a CI gate before the image is copied to ACR.
 - The tunnel connector is a new availability dependency (min 2 replicas in production) and its token a new secret (Key Vault).
 - The spec's "separate identity, approval, messaging and business APIs" is met first by separate workloads and identities for HTTP and messaging; further splitting of the HTTP surface is deferred until measured need.
+
+## Implementation notes (2026-10-30, WP-B2)
+
+- Process roles by configuration: `ROLE=api` (HTTP; publishes the transactional outbox right after commits), `ROLE=worker` (queue consumers and the publisher; serves only `/healthz` and `/readyz`), `ROLE=migrate` (a database-only configuration with no service secret, refused for anything but `ViadereServer migrate`); unset `ROLE` keeps the single combined process for Fly and development. Scheduled jobs run `ViadereServer maintenance <maintenance|hourly|audit-export>`.
+- The managed-identity client is the only code that may reach `IDENTITY_ENDPOINT`; every other outbound client goes through `OutboundDestinationGuard` (SECURITY.md §2.92). REST api-versions are pinned in code and in CLAUDE.md: identity `2019-08-01`, Key Vault keys `2025-07-01`, Blob `x-ms-version 2026-10-06`; the Service Bus runtime REST operations take no api-version.
+- `HEALTH_PEER_NETWORKS` replaces the hard-coded Fly health peers (default kept until cutover); `METRICS_BIND_HOST` replaces `FLY_PRIVATE_IP` (still read on Fly). The server never reads the `Host` header, so cloudflared's `Host: ca-viadere-api` changes nothing (a test scans the sources). `TRUSTED_PROXY_COUNT` still has to be re-measured on Azure staging (owner task, needs the running environment).

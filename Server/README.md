@@ -371,8 +371,15 @@ with nine roles (`docs/ops/CONSOLE-ROLES.md`, generated from `DashboardPermissio
 **New configuration** (all in `.env.example`, mapped to Fly by `Infra/fly/check_env_coverage.py`): `EDGE_TOKEN` (required in staging/production), `EDGE_TOKEN_PREVIOUS`, `METRICS_TOKEN`, `METRICS_PORT`,
 `WEBHOOK_OWNERSHIP_VERIFICATION` (default required, cannot be `off` in staging/production), `API_KEY_MAX_OVERLAP_DAYS`, `DOMAIN_RECHECK_DAYS`, `ASSURANCE_GRACE_DAYS`, `SUPPORT_NOTIFY_EMAIL`, the key-rotation set
 (`DATA_ENCRYPTION_KEY_ID`/`_KEYS_PREVIOUS`, `SERVER_PEPPER_ID`/`SERVER_PEPPERS_PREVIOUS`, `AUDIT_CHAIN_KEY_EPOCH`/`AUDIT_CHAIN_KEYS_PREVIOUS`, `CONNECT_LINK_SIGNING_KEY_ID`/`_KEYS_PREVIOUS`),
-`DATABASE_MIGRATION_URL` and `DATABASE_APP_ROLE`, and the audit-head export (`AUDIT_HEAD_EXPORT`, `_TARGET`, `_PREFIX`, `_INTERVAL_HOURS`, `_ENDPOINT`, `AUDIT_HEAD_KMS_KEY`, `GCP_WORKLOAD_IDENTITY_AUDIENCE`,
-`GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_SUBJECT_TOKEN_FILE`, R2 keys). Invalid or inconsistent values stop the server at start and name the variable, never the value.
+`DATABASE_MIGRATION_URL` and `DATABASE_APP_ROLE`, and the audit-head export (`AUDIT_HEAD_EXPORT`, `_TARGET`, `_PREFIX`, `_INTERVAL_HOURS`). Invalid or inconsistent values stop the server at start and
+name the variable, never the value.
+
+**Azure (WP-B2/B3; `docs/ops/AZURE-SETUP.md` section 11, SECURITY.md §2.91-§2.92):** `ROLE` (`api`, `worker`, `migrate`; unset = one combined process), `QUEUE_TRANSPORT` (`database` or `servicebus`) with
+`AZURE_SERVICEBUS_FQDN`, the managed identity `AZURE_CLIENT_ID` / `AZURE_TENANT_ID`, Key Vault (`AZURE_KEY_VAULT_URL` and the key names `AZURE_KEY_VAULT_KEK_KEY`, `_KD_LOG_KEY`, `_LINK_DESCRIPTOR_KEY`,
+`_AUDIT_HEAD_KEY`), the audit container (`AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER`), Entra database authentication (`DATABASE_AUTH=entra`, `DATABASE_HOST`, `DATABASE_PORT`,
+`DATABASE_NAME`, `DATABASE_USER`, `DATABASE_CA_FILE`, `DATABASE_WORKER_ROLE`), `METRICS_BIND_HOST` and `HEALTH_PEER_NETWORKS`, and envelope-wrapped service keys (`<NAME>_WRAPPED`). The Google Cloud
+and R2 export settings are retired and refused. `ViadereServer maintenance <maintenance|hourly|audit-export>` runs one maintenance task group (the Azure scheduled jobs). The Azure coverage of
+`.env.example` is checked by `python3 -I Infra/azure/check_env_coverage.py`.
 
 **Migrations (`CreatePlatformWP6Schema`, `CreateRetentionDeleteGate`, `GrantRuntimeRolePrivileges`).** Run `ViadereServer migrate` before rolling out (the release command does). Existing `admin`/`support` members become
 `org_admin`/`messaging_operator`; every existing business gets an onboarding row marked grandfathered (verified businesses keep production keys and have 60 days to accept the current agreements); existing API keys keep

@@ -37,13 +37,14 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
 9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
 
-### Current versions (checked 2026-10-29)
+### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then)
 
 | Component | Required | Notes |
 |---|---|---|
 | Swift toolchain | 6.4.1 | `swift-tools-version` stays at the lowest version that supports the features used; the toolchain itself is current |
 | Vapor | 4.122.3 | Vapor 5 is pre-release (see exceptions) |
-| Fluent / postgres driver / sqlite driver | 4.13.0 / 2.14.0 / 4.9.0 | |
+| Fluent / postgres driver / sqlite driver | 4.13.0 / 2.14.0 / 4.9.0 | fluent-postgres-driver 2.14.0 re-checked 2026-10-30 (latest tag) |
+| PostgresNIO / postgres-kit | 1.33.2 / 2.17.0 | Latest tags 2026-10-30; both still take a static password only, so Entra token auth is the server's own connection source (`Core/TokenAuthPostgres.swift`, ADR-0011) |
 | swift-crypto | 5.0.3 | |
 | swift-certificates / swift-asn1 / swift-nio-ssl | 1.21.1 / 1.7.3 / 2.37.5 | |
 | async-http-client | 1.36.2 | |
@@ -56,6 +57,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | OpenTofu | 1.13.2 | `Infra/terraform`, `Infra/azure`; CI downloads it checksum-pinned (`get.opentofu.org/tofu/api.json`) |
 | hashicorp/azurerm / azure/azapi (OpenTofu providers) | 5.12.0 / 2.13.0 | `Infra/azure/versions.tf`, exact pins; both served by `registry.opentofu.org` on 2026-10-29 |
 | Azure API versions (control plane) | Key Vault `2026-02-01`, Container Apps environment `2026-01-01`, Consumption budgets `2024-08-01` | Newest GA in the azapi 2.13.0 schema set; `Infra/azure`, `docs/ops/AZURE-SETUP.md` |
+| Azure data-plane REST (server, WP-B2/B3) | managed identity `api-version=2019-08-01`; Key Vault keys `2025-07-01`; Blob `x-ms-version: 2026-10-06`; Service Bus runtime REST (no api-version) | Checked 2026-10-30 on Microsoft Learn: Key Vault keys default moniker `rest-keyvault-keys-2025-07-01`; Blob `2026-10-06` is the GA Storage SDKs' default, deployed in every region except two canary regions (`eastus` included). Pinned in `AzureManagedIdentity`, `AzureKeyVaultKMS`, `AzureBlobObjectStore`, `Infra/azure/kv_tool.py` |
 | Azure CLI (CI deploy, owner) | ≥ 2.91.0 | Preinstalled on GitHub runners; `.github/workflows/azure.yml` fails below this floor and disables dynamic extension installs |
 | Azure Database for PostgreSQL Flexible Server | 18 (Azure creates 18.6; minors applied by Azure in monthly maintenance) | `Infra/azure/postgres.tf`; CI keeps testing the community `postgres:18` image |
 | cloudflared (Cloudflare Tunnel connector) | 2026.10.6, digest-pinned | `Infra/azure` variable `cloudflared_image`; Go binary image |
@@ -72,7 +74,6 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Azure lean profile: public endpoints for Service Bus and Key Vault | Service Bus **Basic** (no private networking exists below Premium) with local SAS auth disabled; Key Vault **Standard** with RBAC only, purge protection and a firewall that admits only the Container Apps subnet (+ listed admin IPs). Entra tokens are the only way in | Testing budget of about USD 30/month (plan 5.8a): private endpoints cost USD 7.30/month each and Service Bus Premium USD 677/month. `Infra/azure/policy_check.py` records them as `SB-PUBLIC` / `KV-PUBLIC` and fails them in `standard` | The lean environment is replaced by the `standard` profile (private endpoints, public access disabled), before any real customer data |
 | Azure lean profile: software-protected keys | Key Vault Standard keys (EC P-256, RSA 3072) instead of HSM-backed keys (ADR-0012) | Same budget; same REST API and key types, so the server code does not change | The `standard` profile (Key Vault Premium, EC-HSM / RSA-HSM) is applied; lean keys are never reused |
 | Azure lean profile: PostgreSQL without HA | Burstable B1ms, no standby, 7-day PITR, locally redundant backup (standard: zone-redundant HA, 35 days, geo-redundant) | Same budget; Burstable has no HA; no production data in lean | The `standard` profile is applied |
-| PostgreSQL password authentication (Azure, both profiles) | Password roles `viadere_app` / `viadere_migrator`; URLs in Key Vault secrets `database-url` / `database-migration-url`; the migrate job also references every server secret because `migrate` loads the full strict configuration | PostgresNIO takes a static password only; the Entra token connection source and a database-only `migrate` configuration are WP-B2 | WP-B2 ships Entra token auth: create Entra principal roles, set `postgres_password_auth_enabled = false`, delete both secrets |
 | OpenTofu state storage on a public endpoint (Azure, both profiles) | Storage account with shared keys disabled, Entra auth only, versioning, soft delete, lock | GitHub-hosted runners have no fixed address or VNet path | CI runs OpenTofu from a VNet-integrated runner (then disable public access) |
 
 ## Working in this repo

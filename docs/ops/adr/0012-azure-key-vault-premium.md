@@ -31,3 +31,9 @@ Key Vault Premium offers HSM-protected EC keys (P-256, P-384, P-521, P-256K) and
 - Signing adds a network round trip; audit heads and tree heads are low-rate, so latency is acceptable.
 - Rotation: asymmetric keys rotate by new key version with overlapping public keys published; wrapped symmetric keys rotate by the existing key-id scheme (KEY-ROTATION.md updated).
 - Cost ≈ USD 22 to 25 per month per environment for four HSM keys plus operations; GCP KMS and its workload-identity federation are removed at decommission (key rings cannot be deleted in GCP; versions are disabled).
+
+## Implementation notes (2026-10-30, WP-B2)
+
+- `KeyManagementService` (`sign(keyRef:digest:)` returning raw low-S `r ‖ s`, `publicKey`, `wrap`/`unwrap` with RSA-OAEP-256, `resolveVersion`) has two implementations: `AzureKeyVaultKMS` (keys REST API `2025-07-01`, the same for Standard and Premium vaults) and `LocalKMS` (development and tests; refused in staging and production). Every Key Vault signature is checked against the published public key of the exact version that made it before it is used.
+- Service keys arrive as `<NAME>_WRAPPED` = `kms1:<kek>/<version>:<base64url>` and are unwrapped once at boot (SECURITY.md §2.92); plain variables keep working on Fly and in tests. `Infra/azure`'s default secret map still names the plain variables; storing wrapped values (and renaming the map entries to `*_WRAPPED`) is an owner step in AZURE-SETUP.md section 7.
+- `kd-log-signing` replaces `KEY_DIRECTORY_LOG_KEY` on Azure (both together refuse the boot); `audit-head-signing` signs exported audit heads, written create-only to the immutable `audit-heads` container (the GCS/R2 sinks and the Google workload-identity code are removed). The Wallet key unwrapper (HANDOFF open item) is `KMSWalletKeyUnwrapper` on `kek-data`.

@@ -28,3 +28,9 @@ Azure Database for PostgreSQL Flexible Server supports PostgreSQL 18 and creates
 - HA failover and planned maintenance cause short connection drops; the existing transient-retry helper (`DB.retryingTransient`) and fail-closed limiters must be exercised in the F1 drills.
 - Neon's branch-based workflows go away; restore tests use PITR to a new server instead.
 - Cost: staging ≈ USD 16/month (B1ms), production ≈ USD 285/month (D2ds_v5 with HA and 128 GiB), from the Azure Retail Prices API on 2026-10-29.
+
+## Implementation notes (2026-10-30, WP-B2)
+
+- `DATABASE_AUTH=entra` (with `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER`) selects `TokenAuthPostgresConnectionSource`: a Fluent driver whose pool asks the managed identity for a token for **every new connection** and connects with TLS `verify-full`. PostgresNIO 1.33.2, postgres-kit 2.17.0 and fluent-postgres-driver 2.14.0 are the current releases (checked 2026-10-30) and still take only a static password, so the driver adapts the small internal pieces of fluent-postgres-driver (MIT). A token failure refuses the connection; there is no password fallback. Tested against PostgreSQL 18.6 with a counting password source.
+- `Infra/azure` now defaults to Entra-only (`postgres_password_auth_enabled = false`): no process references `database-url` or `database-migration-url`, and the migrate job references no secret at all. Password authentication remains an opt-in fallback that needs the CLAUDE.md exception row again.
+- `GrantWorkerRolePrivileges.v1` grants `DATABASE_WORKER_ROLE` (`viadere_worker`) the same data-only set as the api role. A narrower per-table worker grant waits for the handler inventory to settle (the sweeps still touch most tables); recorded as a follow-up.
