@@ -212,6 +212,14 @@ gh variable set AZURE_PROFILE --body lean
 
 ## 6. First apply (lean)
 
+**Azure Cloud Shell (also ephemeral sessions).** `Infra/azure/cloudshell/apply-staging.sh` does the steps below in one run: it installs OpenTofu (checksum-verified), writes `backend.staging.hcl` and `terraform.tfvars`, plans, runs `policy_check.py` and applies. `teardown-staging.sh` removes a lean environment (not the state storage) for a rebuild, deleting diagnostic settings first because Azure re-attaches an orphaned one to a new resource with the same ID. Neither uses `set -e`, which closes an interactive Cloud Shell on the first error. A rebuild needs a new `name_suffix`: the purge-protected Key Vault keeps its name while soft-deleted.
+
+```sh
+git clone --depth 1 -b <branch> https://github.com/<owner>/viadere.git && cd viadere
+SUB_ID=... STATE_SA=... SUFFIX=... DB_ADMINS_ID=... CRYPTO_OFFICERS_ID=... GHCR_USER=... IMAGE=ghcr.io/...@sha256:... \
+  bash Infra/azure/cloudshell/apply-staging.sh 2>&1 | tee ~/apply.log
+```
+
 **(owner)** From your machine, as subscription Owner (CI applies come later). The PostgreSQL local administrator password is used once (password authentication must exist until WP-B2), never stored in state, and discarded.
 
 ```sh
