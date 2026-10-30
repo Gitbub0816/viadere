@@ -401,9 +401,11 @@ final class AzurePlatformTests: XCTestCase {
             _ = try await sql.raw("SELECT 1 AS one").first(decoding: One.self)
             XCTAssertEqual(source.count, 1, "a pooled connection is reused without a new token")
             XCTAssertTrue(DB.isPostgres(app.db), "the dialect is PostgreSQL")
-            // Fluent works through it (models, transactions).
-            let found = try await app.db.transaction { tx in try await BusinessRecord.query(on: tx).limit(1).all() }
-            _ = found
+            // Transactions work through it (BEGIN/COMMIT on one pooled connection).
+            let inTransaction = try await app.db.transaction { tx -> Int in
+                try await (tx as! any SQLDatabase).raw("SELECT 1 AS one").first(decoding: One.self)?.one ?? 0
+            }
+            XCTAssertEqual(inTransaction, 1)
         } catch {
             try? await app.asyncShutdown()
             throw error

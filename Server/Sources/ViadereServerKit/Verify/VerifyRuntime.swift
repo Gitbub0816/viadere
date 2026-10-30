@@ -116,10 +116,5 @@ enum VerifyRegistration {
         // The client exists whenever credentials do, even with new sessions switched off or the workflow unset: it is the purge client.
         if let key = settings.diditAPIKey, !key.isEmpty, runtime.didit == nil {
             runtime.didit = VaporDiditAPI(client: GuardedClient(base: app.client, guard: .fromEnvironment()), apiKey: key, base: settings.diditAPIBase)
-        }
-        // Wallet identity-encryption keys wrapped under the Key Vault key-encryption key (plan 5.6).
-        if runtime.keyUnwrapper == nil, let kms = app.ctx.kms, let kek = config.azure.kekKey, let name = KMSKeyRef.parse(kek)?.name {
-            runtime.keyUnwrapper = KMSWalletKeyUnwrapper(kms: kms, kekName: name)
-        }
-    }
+        }    }
 }

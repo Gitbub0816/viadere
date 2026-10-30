@@ -141,6 +141,10 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     }
     PolicyRegistration.configure(app, config: config)
     VerifyRegistration.configure(app, config: config)
+    // Wallet identity-encryption keys wrapped under the Key Vault key-encryption key (plan 5.6).
+    if app.verify.keyUnwrapper == nil, let kms, let kek = config.azure.kekKey, let name = KMSKeyRef.parse(kek)?.name {
+        app.verify.keyUnwrapper = KMSWalletKeyUnwrapper(kms: kms, kekName: name)
+    }
     if !config.hasDatabase || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
 
     // MARK: HTTP
