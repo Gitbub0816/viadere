@@ -56,3 +56,4 @@ The previous session ran out of its disk allowance (the container restarted five
 | Risk register, runbooks, kill switches, data inventory | [`ops/`](ops/) |
 | Business API | [`openapi.yaml`](openapi.yaml), [`BUSINESS-INTEGRATION.md`](BUSINESS-INTEGRATION.md) |
 | Architecture decisions | [`ops/adr/`](ops/adr/), [`IMPLEMENTATION-PLAN-v2.md`](IMPLEMENTATION-PLAN-v2.md) |
+| Loops, Brand Kits, Organization (spec and plan) | [`FEATURE-EXPANSION-v4.md`](FEATURE-EXPANSION-v4.md), [`FEATURE-EXPANSION-PLAN-v4.md`](FEATURE-EXPANSION-PLAN-v4.md) |
