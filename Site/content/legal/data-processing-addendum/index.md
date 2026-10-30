@@ -2,11 +2,12 @@
 title: Data Processing Addendum
 order: 5
 description: "Terms for personal data Viadere processes on behalf of a business, with annexes for processing details, security measures, subprocessors and international transfers."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "Privacy lead [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete processor terms (instructions, confidentiality, security, subprocessors, transfers, assistance, breach, audit, deletion), annexes for processing details, technical and organisational measures, subprocessors, and SCC and UK addendum module selection."
+health_prohibition: true
+change_summary: "Third draft: Customer Personal Data excludes Health Information and Viadere is not a business associate and does not sign a business-associate agreement (new section 2.6); Business Workflow (\"Loop\") input and Shopify order-status data added as processing activities with minimization and retention (section 2.7, Annex I); Shopify described as a service the Customer chooses, not a Viadere subprocessor (section 6.5); related cross-references. Counsel choices remain bracketed."
 ---
 ::: draft-notice
 **Draft for counsel review.** This addendum is not in force. Values in square brackets are choices or facts still to be filled in or confirmed.
@@ -20,8 +21,11 @@ This Data Processing Addendum (the "**DPA**") forms part of the [Business Servic
 - "**Controller**", "**Processor**", "**Data Subject**", "**Personal Data**", "**Personal Data Breach**", "**Processing**", "**Supervisory Authority**" have the meanings in the GDPR, and include the equivalent terms under other Applicable Data Protection Law, and "**Business**", "**Service Provider**", "**Contractor**", "**Sell**", "**Share**" and "**Consumer**" have the meanings in the CCPA.
 - "**Customer Personal Data**" means Personal Data that Viadere processes on behalf of Customer in connection with the Services, as described in Annex I. It does not include Personal Data that Viadere processes as an independent Controller (section 2.4).
 - "**EEA**" means the European Economic Area. "**Restricted Transfer**" means a transfer of Customer Personal Data that is subject to Applicable Data Protection Law of the EEA, UK or Switzerland to a country that has not been recognized as providing an adequate level of protection.
+- "**Health Information**" has the meaning given in the [Business Services Agreement](/legal/business-services-agreement/) (the "**Agreement**"), which includes protected health information under HIPAA.
+- "**Order-Status Data**" means the minimized order information that Viadere receives from Customer's Shopify Store as section 2.7 describes.
 - "**SCCs**" means the standard contractual clauses annexed to Commission Implementing Decision (EU) 2021/914. "**UK Addendum**" means the International Data Transfer Addendum to the SCCs issued by the UK Information Commissioner under section 119A of the Data Protection Act 2018, version B1.0.
 - "**Security Incident**" means a breach of security leading to the accidental or unlawful destruction, loss, alteration, unauthorized disclosure of or access to Customer Personal Data in Viadere's or its subprocessors' possession or control. It does not include unsuccessful attempts or activities that do not compromise security, such as unsuccessful log-in attempts, pings, port scans, denial-of-service attacks that do not lead to access, and similar events.
+- "**Shopify**" and "**Shopify Store**" have the meanings given in the Agreement.
 - "**Subprocessor**" means a third party engaged by Viadere to process Customer Personal Data.
 
 ## 2. Scope and roles
@@ -36,7 +40,7 @@ The subject matter, duration, nature and purpose of the processing, the types of
 
 ### 2.3 Customer's obligations
 
-Customer will: (a) comply with Applicable Data Protection Law in its use of the Services, including by providing notices and obtaining consents and having a lawful basis for the processing it instructs; (b) give instructions that comply with law; (c) be responsible for the accuracy, quality and lawfulness of the Personal Data and the means by which it acquired it; and (d) not send to Viadere special categories of data or any other data that the Services are not designed to process, except as Annex I or an addendum allows.
+Customer will: (a) comply with Applicable Data Protection Law in its use of the Services, including by providing notices and obtaining consents and having a lawful basis for the processing it instructs; (b) give instructions that comply with law; (c) be responsible for the accuracy, quality and lawfulness of the Personal Data and the means by which it acquired it; and (d) not send to Viadere Health Information (section 2.6), special categories of data or any other data that the Services are not designed to process, except as Annex I or an addendum allows.
 
 ### 2.4 Viadere as independent Controller
 
@@ -45,6 +49,26 @@ Viadere is an independent Controller, and not Customer's Processor, for the foll
 ### 2.5 Duration
 
 This DPA applies for as long as Viadere processes Customer Personal Data, and after the Agreement ends for as long as Viadere retains Customer Personal Data as section 11 allows.
+
+### 2.6 No Health Information; no business-associate role
+
+(a) The Services are not designed for, and Customer will not send, request or collect through them, Health Information, whether in a message, a Business Workflow ("Loop"), a form field, an attachment, display text or any other Business Content. Health Information is not Customer Personal Data under this DPA, and Customer has no instruction authority over it.
+
+(b) Healthcare Providers, and any business whose use would involve Health Information, may not use the Services (Agreement section 5.10).
+
+(c) Viadere is not a "business associate" of Customer, does not act as one and will not sign a business-associate agreement or any similar agreement for Health Information. No term of this DPA or the Agreement makes Viadere a business associate or accepts Health Information, and none of Viadere's security measures should be read as a representation that the Services are suitable for it. [COUNSEL: confirm wording and the position under HIPAA and state health-data laws.]
+
+(d) If Viadere learns or reasonably suspects that Health Information has been sent, it may delete it, suspend the activity, and apply Agreement section 5.10. Viadere will tell Customer where practical. Deleting Health Information under this section is not a breach of this DPA.
+
+### 2.7 Business Workflows and Shopify order status
+
+(a) **Business Workflows ("Loops").** When a Consumer who has opted in uses one of Customer's Loops, Viadere processes what the Consumer chooses or enters in the Loop, the Loop's state, and the outcome, for Customer as Processor, to run the Loop and pass the Consumer's action to Customer. Customer decides which fields a Loop uses within the options Viadere permits, and is responsible for the lawfulness of that collection and for its own operations after it receives the data. Viadere reviews every Loop and revision before publication as a platform safeguard; this review is not an instruction from, or advice to, Customer.
+
+(b) **Shopify order status.** If Customer connects a Shopify Store, Customer instructs Viadere to receive order-status information from Shopify so that Viadere can show a Consumer the status of an order placed at Customer's own checkout. Viadere requests the narrowest read access Shopify offers for this, does not request customer names, addresses, phone numbers or email addresses from Shopify, and drops any personal fields that arrive before storage. Viadere keeps only: an order reference, order and fulfilment status, line-item titles, the carrier and tracking number, and timestamps, and links an order to a Consumer only through an opaque reference that Viadere created when it handed the Consumer to Customer's checkout. Viadere keeps Order-Status Data for [90] days after the order is completed or cancelled, then deletes it, or earlier on Customer's instruction or termination. Viadere also processes Shopify's required customer-data-request and redaction notices.
+
+(c) **No payment data.** Viadere does not accept, process or hold payments, card numbers, bank details or other payment credentials, and Order-Status Data does not include them. The sale, payment, refunds, taxes, shipping and disputes are between Customer and the Consumer (Agreement section 3.9).
+
+(d) **Role of Shopify.** Customer chooses Shopify and has its own agreement with Shopify, in which Shopify processes data for Customer. Viadere receives Order-Status Data from Shopify on Customer's instruction. Viadere does not engage Shopify to process Customer Personal Data on Viadere's behalf, so Shopify is a service Customer chooses and not a Subprocessor (section 6.5). [COUNSEL: confirm this characterization, including whether Shopify is an independent controller or Customer's processor for the cart data Viadere sends to it, and the effect on notices to Consumers.]
 
 ## 3. Instructions
 
@@ -99,6 +123,10 @@ Viadere will give Customer at least [30] days' notice before it authorizes a new
 ### 6.4 Copies of contracts
 
 On request, and subject to confidentiality, Viadere will give a summary of the data-protection terms of its Subprocessor agreements, with commercial terms removed.
+
+### 6.5 Services that Customer chooses
+
+A third-party service that Customer elects to connect to the Services, such as Customer's Shopify Store, or Customer's own support platform or CRM, is not a Subprocessor, because Viadere does not engage it. Viadere lists such connectors on the [Subprocessors](/legal/subprocessors/) page for transparency. Customer is responsible for its agreement with that service, for what that service does with data Customer sends to it, and for how it appears in Customer's own notices. Viadere will connect to that service only as Customer instructs and only with the narrowest permissions it supports.
 
 ## 7. International transfers
 
@@ -211,7 +239,7 @@ Privacy notices to Viadere under this DPA: [PRIVACY-CONTACT-PLACEHOLDER]. Data p
 
 | Item | Detail |
 |---|---|
-| Subject matter | Provision of the Services to Customer: delivering requests and messages to Consumers who have connected to Customer, carrying their decisions and replies back, and related account, consent, rewards, pass and verification services |
+| Subject matter | Provision of the Services to Customer: delivering requests and messages to Consumers who have connected to Customer, carrying their decisions and replies back, and related account, consent, rewards, pass and verification services, optional Business Workflows, and optional display of Customer's Shopify order status |
 | Duration | The term of the Agreement and the period in section 11 |
 | Nature of processing | Receiving, storing (including field-level encryption), transmitting, routing, displaying, rendering for a channel (app, push, SMS, RCS), recording, deleting |
 | Purpose | To provide the Services as the Agreement describes; to follow Customer's instructions; to secure the Services and prevent abuse as processor |
@@ -223,7 +251,7 @@ Privacy notices to Viadere under this DPA: [PRIVACY-CONTACT-PLACEHOLDER]. Data p
 
 | Data subjects | Personal Data | Sensitive data |
 |---|---|---|
-| Consumers who have connected to Customer | Pairwise reference, consent state by purpose, request content (purpose, amount, merchant, approximate location and device or browser details Customer supplies), decisions and replies, message content and attachments, delivery and status records, loyalty and reward records, Wallet pass data, phone number in transit for SMS and RCS delivery | Message content might contain sensitive information that a Consumer chooses to send. The Services are not designed to process special categories of data or financial account numbers, and Customer must not request them in a message. If Verify is used, the minimized result of an identity or age check (see the Verification Services Addendum) |
+| Consumers who have connected to Customer | Pairwise reference, consent state by purpose, request content (purpose, amount, merchant, approximate location and device or browser details Customer supplies), decisions and replies, message content and attachments, delivery and status records, loyalty and reward records, Wallet pass data, phone number in transit for SMS and RCS delivery, inputs and outcomes of Business Workflows ("Loops") a Consumer has opted into, and minimized Shopify Order-Status Data (order reference, status, line-item titles, carrier and tracking, timestamps) | Health Information is prohibited and is not processed under this DPA (section 2.6). A message might still contain information a Consumer chooses to send. The Services are not designed to process special categories of data or financial account numbers, and Customer must not request them in a message or a Loop. If Verify is used, the minimized result of an identity or age check (see the Verification Services Addendum) |
 | Customer's personnel who use the Dashboard | Name, work email (stored encrypted), passkey public key, role, session details (hashed and masked network details, country), security contacts, actions in the audit log | None |
 
 ### D. Retention of Customer Personal Data (platform defaults)
@@ -233,6 +261,8 @@ Privacy notices to Viadere under this DPA: [PRIVACY-CONTACT-PLACEHOLDER]. Data p
 | Interaction content (request text, reply, signed decision of finished interactions) | 400 | Yes |
 | Conversation content (message bodies) | 730 | Yes |
 | Webhook deliveries and their attempts | 30 | Yes |
+| Business Workflow instance data (inputs, state, outcome) | [COUNSEL AND PRODUCT: set, for example 400] | Yes |
+| Shopify Order-Status Data | [90] after the order completes or is cancelled | Yes |
 | Outbound messages (finished SMS and channel sends) | 30 | No |
 | Signed decisions | 730 | No |
 | Audit events (business-scoped projection) | 2,555 | No |
@@ -318,7 +348,7 @@ Viadere maintains at least the following. Items marked "planned" are not yet in 
 
 ## Annex III. Authorized Subprocessors
 
-The list below is as of this draft. The current list is on the [Subprocessors](/legal/subprocessors/) page.
+The list below is as of this draft. The current list is on the [Subprocessors](/legal/subprocessors/) page. Shopify is not listed, because it is a service Customer chooses and not a Subprocessor (section 6.5).
 
 | Subprocessor | Service | Personal Data | Location |
 |---|---|---|---|

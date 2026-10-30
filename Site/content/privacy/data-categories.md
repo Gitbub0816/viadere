@@ -2,6 +2,7 @@
 title: Data categories
 order: 1
 description: The kinds of data Viadere handles, where each comes from, why, who receives it and how it is protected.
+health_prohibition: true
 ---
 This page lists the data Viadere handles. The [Privacy Notice](/legal/privacy-notice/) is the binding version. Retention periods are in [Retention](/privacy/retention/).
 
@@ -33,6 +34,8 @@ Viadere sorts data into classes and sets a default treatment for each.
 | Delivery records | Provider message ID, status, channel, time | Providers | Retry, order and troubleshoot delivery | SMS, RCS and email providers |
 | Push and Live Activity | APNs token, activity token | Your device | Deliver notifications | Apple |
 | Rewards and passes | Program membership, points, redemption code hash, Wallet pass serial and token hash | Businesses, you, Apple | Run rewards and passes you use | The business; Apple for Wallet |
+| Loops (optional) | Whether Loops are on, businesses you allowed, what you chose or entered in a Loop, its state and outcome | You, businesses | Run a Loop you chose to use, show its history, keep evidence of your choices | The business that built the Loop |
+| Shopify order status (optional) | Order reference, status, item titles, carrier and tracking number, timestamps. No name, address, phone or email from Shopify | A business's Shopify store | Show you where your order is | The business concerned |
 | Household access | Grants, sealed labels, invitation code hash | You | Share the access you choose | The person you invite |
 | Security and audit | Actor, action, outcome, internal IDs, redacted metadata | Our systems | Detect fraud, investigate incidents, show you notices | Businesses see a projection with only their own pseudonym for you |
 | Network and abuse data | IP address (as a /64 range for IPv6), rate-limit counters, abuse counters | Automatic | Stop abuse and attacks | Cloudflare and Fly.io |
@@ -44,6 +47,7 @@ Viadere sorts data into classes and sets a default treatment for each.
 - A **pairwise reference**: a value computed for each business and you, stable for that business and unrelated to any other business's reference.
 - Your **decisions** and replies, with the time, channel and assurance level. For approvals, a compact signed result from a key your device created for that business.
 - **Messages** you send it and your **consent state** for its purposes.
+- If you turned on Loops and allowed the business: what you choose or enter in its **Loops** and the outcome.
 - For Verify (planned): only the **attribute** you agreed to share, with its provenance and validity.
 
 A business does not receive your Viadere identity, phone number, other connections or device identifiers, unless you tell it.
@@ -55,6 +59,8 @@ A business does not receive your Viadere identity, phone number, other connectio
 - No private keys.
 - No plaintext phone numbers or message bodies at rest.
 - No email address or password for consumer accounts.
+- No payments: Viadere does not accept, process or hold payments or card details, and is never the seller. A business that uses Shopify sends you to its own checkout.
+- No health information requested: healthcare providers may not use Viadere, and no business may use it to collect health information. Please do not send health details through Viadere.
 
 ## Biometrics
 

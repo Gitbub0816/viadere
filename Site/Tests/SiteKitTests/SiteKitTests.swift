@@ -341,3 +341,97 @@ struct SiteBuildTests {
         #expect(SHA256.hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     }
 }
+
+@Suite("Healthcare ban and payment claims (WP-0.6)")
+struct HealthAndPaymentLintTests {
+    static let healthTerms = ["HIPAA", "patient", "patients", "medical", "diagnosis", "PHI", "clinic", "doctor"]
+
+    @Test func healthTermsFailOnMarketingPagesThatDescribeLoops() throws {
+        for term in Self.healthTerms {
+            let p = try page("/products/loops/", "title: T\nstatus: planned", "Loops let a \(term) team collect answers.")
+            #expect(rules(p).contains("health-term"), "\(term) should fail on a Loop page")
+        }
+        // Business Workflows is the defined term for Loops.
+        #expect(rules(try page("/businesses/", "title: T", "Business Workflows for every clinic.")).contains("health-term"))
+    }
+
+    @Test func healthTermsAreNotCheckedOnPagesThatDoNotDescribeLoops() throws {
+        #expect(rules(try page("/status/", "title: T", "Service health and medical-grade uptime.")).contains("health-term") == false)
+    }
+
+    @Test func negatedHealthTermsPassOnMarketingPages() throws {
+        let p = try page("/products/loops/", "title: T\nstatus: planned", "Loops are not for any clinic. Viadere never handles PHI and does not accept patient data.")
+        #expect(!rules(p).contains("health-term"))
+    }
+
+    @Test func approvedClaimAllowsAHealthTerm() throws {
+        let p = try page("/products/loops/", "title: T\nstatus: planned\nclaims:\n  - phrase: medical\n    feature: Loops\n    evidence: docs/SECURITY.md\n    approved_by: Trust lead", "Loops show a medical glossary.")
+        let findings = IntegrityLint(repoRoot: siteRoot.deletingLastPathComponent()).check(p, assembledText: p.body)
+        #expect(!findings.contains { $0.rule == "health-term" })
+    }
+
+    static let prohibitionText = """
+        Healthcare Providers may not use Viadere, and Loops may not collect Health Information.
+        Viadere is not a business associate and will not sign a HIPAA business-associate agreement.
+        "Healthcare Provider" means a physician practice, clinic, hospital or pharmacy.
+        | Use | Status |
+        |---|---|
+        | Healthcare, and protected health information | Prohibited |
+        """
+
+    @Test func legalAndPrivacyPagesMayStateTheProhibition() throws {
+        let front = "title: T\nhealth_prohibition: true"
+        #expect(!rules(try page("/legal/acceptable-use-policy/", front, Self.prohibitionText)).contains("health-term"))
+        #expect(!rules(try page("/legal/business-services-agreement/versions/0.2.0/", front, Self.prohibitionText)).contains("health-term"))
+        #expect(!rules(try page("/privacy/data-categories/", front, Self.prohibitionText)).contains("health-term"))
+        // Without the flag the same text fails, even on a legal page.
+        #expect(rules(try page("/legal/acceptable-use-policy/", "title: T", Self.prohibitionText)).contains("health-term"))
+    }
+
+    @Test func marketingPagesCannotUseTheAllowance() throws {
+        let front = "title: T\nhealth_prohibition: true"
+        for url in ["/businesses/", "/products/loops/", "/developers/", "/legaleze/", "/privacyish/"] {
+            let p = try page(url, front, Self.prohibitionText)
+            #expect(rules(p).contains("health-term"), "\(url) must not be able to use the allowance")
+        }
+        // The same text on a marketing page without the flag fails too.
+        #expect(rules(try page("/businesses/", "title: T", "Healthcare Providers may not use Loops. A patient may not use the clinic Loop.")).contains("health-term"))
+    }
+
+    @Test func aFlaggedPageMustActuallyStateTheProhibition() throws {
+        let p = try page("/legal/consumer-terms/", "title: T\nhealth_prohibition: true", "Loops are optional workflows built by businesses.")
+        #expect(rules(p).contains("health-prohibition"))
+    }
+
+    @Test func legalPagesWithoutTheFlagStillFail() throws {
+        let p = try page("/legal/consumer-terms/", "title: T", "Loops include a patient check-in form with diagnosis notes.")
+        #expect(rules(p).contains("health-term"))
+    }
+
+    @Test func paymentClaimsFail() throws {
+        for phrase in IntegrityLint.paymentClaims {
+            let p = try page("/x/", "title: T", "Use \(phrase) for every order.")
+            #expect(rules(p).contains("payment-claim"), "\(phrase) should fail")
+        }
+        #expect(rules(try page("/x/", "title: T", "Tap to PAY WITH VIADERE.")).contains("payment-claim"))
+    }
+
+    @Test func negatedPaymentStatementsPass() throws {
+        let p = try page("/legal/business-services-agreement/", "title: T", "There is no Viadere checkout. Viadere is never the merchant of record and does not offer secure payment by Viadere.")
+        #expect(!rules(p).contains("payment-claim"))
+    }
+
+    @Test func paymentClaimsHaveNoLegalPageAllowance() throws {
+        let p = try page("/legal/consumer-terms/", "title: T", "Customers may pay with Viadere. Prohibited uses are listed elsewhere.")
+        #expect(rules(p).contains("payment-claim"))
+    }
+
+    @Test func theRealLegalAndPrivacyDraftsPass() throws {
+        let pages = try ContentLoader(root: siteRoot.appendingPathComponent("content")).load()
+        let lint = IntegrityLint(repoRoot: siteRoot.deletingLastPathComponent())
+        let bad = pages.filter { $0.url.hasPrefix("/legal/") || $0.url.hasPrefix("/privacy/") }
+            .flatMap { lint.check($0, assembledText: $0.body, allPages: pages) }
+            .filter { $0.rule == "health-term" || $0.rule == "payment-claim" }
+        #expect(bad.isEmpty, "\(bad)")
+    }
+}

@@ -3,6 +3,7 @@ title: Privacy Center
 nav_title: Overview
 order: 0
 description: What Viadere handles, where it lives, what you control and how to ask. Plain-language answers that match the Privacy Notice.
+health_prohibition: true
 ---
 ::: callout
 The binding statement is the [Privacy Notice](/legal/privacy-notice/), which is a draft pending counsel review. This center explains it in plain language and may be ahead of what the product does today. Messaging and Approve are in beta. Verify and Authenticator are planned and not available. Bracketed items are decisions not yet made.
@@ -64,6 +65,9 @@ Who processes data for us, where and for what. [Subprocessors](/privacy/subproce
 | Use analytics or crash-reporting SDKs | None in the app or on the website |
 | Keep your ID images, selfie or birthdate | If Verify launches, evidence goes from your device to the verification provider, and we keep only a minimal result |
 | Hold your private keys | Approval and passkey private keys stay on your device |
+| Take payments | Viadere never accepts, processes or holds a payment and is never the seller. A business that uses Shopify sends you to its own Shopify checkout |
+| Allow health information or healthcare providers | Healthcare providers may not use Viadere, and no business may use it to collect health information |
+| Turn on Loops for you | Optional business workflows are off until you turn them on and allow each business. Every one shows who built it |
 | Track you on the website | The site sets no cookies and loads nothing from other companies |
 
 ## Who we are

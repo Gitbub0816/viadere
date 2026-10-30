@@ -2,18 +2,19 @@
 title: Consumer Terms of Service
 order: 1
 description: "The terms between Viadere and the people who use the Viadere app, the Viadere text number and related consumer services."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "General Counsel [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete clause set including definitions, eligibility, accounts and recovery, service nature, beta and planned features, messaging, verified badges, conduct, disclaimers, liability, arbitration, governing law and state notices. Counsel choices remain bracketed inside the clauses."
+health_prohibition: true
+change_summary: "Third draft: adds Business Workflows (\"Loops\"), which are third-party-authored, optional, off by default and opt-in per business; Shopify checkout described as the Business's own sale in which Viadere takes no payment and is not the seller; Approvals for estimates are records of consent, not payments; Business appearance settings; a rule against sharing health information and a statement that healthcare providers may not use Viadere. Counsel choices remain bracketed."
 disclosures: [business_verification, encryption, device_custody]
 ---
 ::: draft-notice
 **Draft for counsel review.** These terms are not in force. Values in square brackets are choices or facts still to be filled in or confirmed.
 :::
 
-**Effective date:** [EFFECTIVE DATE, set only after counsel approval]. **Version:** 0.2.0.
+**Effective date:** [EFFECTIVE DATE, set only after counsel approval]. **Version:** 0.3.0.
 
 These Consumer Terms of Service (the "**Terms**") are a binding agreement between you and [COUNSEL: LEGAL ENTITY NAME], a [STATE] [corporation], with its registered office at [ADDRESS] ("**Viadere**", "**we**", "**us**" or "**our**"). They govern your access to and use of the Viadere app for iPhone, Apple Watch and App Clip, the Viadere text-messaging number, the viadere.com website and any other consumer product we offer that links to these Terms (together, the "**Services**").
 
@@ -27,6 +28,7 @@ By creating an account, tapping "Agree", texting the Viadere number after seeing
 - "**Approval**" means a decision you make (such as approve or deny) in response to a request from a Business, including a sign-in, an authorization of a transaction or an acknowledgment.
 - "**Business**" means a company, organization or individual that has enrolled in Viadere and that sends you requests or messages through the Services. A Business is a separate party from Viadere.
 - "**Business Content**" means anything a Business sends through the Services, including requests, messages, offers, rewards, passes, orders, status updates and attachments.
+- "**Loop**" means an optional interactive workflow that a Business builds from components and actions Viadere provides, which Viadere reviews before publication and which you can open only if you have turned on Loops and allowed that Business (section 28). "Loop" is a working name. [COUNSEL: pending trademark clearance.]
 - "**Connection**" means your decision to connect to a Business, and the purposes (security, account service, transactional, support, marketing, rewards) you have allowed for it.
 - "**Device**" means an iPhone, Apple Watch or other device on which you use the app or that you register to your Account.
 - "**Beta Feature**" means a feature we label as beta, preview or early access. At the date of these Terms, Messaging and Approve are Beta Features.
@@ -96,7 +98,7 @@ A Business sees a reference to you that differs for every Business, your Approva
 
 ### 4.4 Approvals
 
-An Approval you make is your decision, made for the Business that asked. Check the Business name, the details shown and the expiry before you approve. If something is unfamiliar, deny it and report it as suspicious. Viadere delivers and records the Approval; the Business decides whether to grant access, complete a transaction or take any other action, and is responsible for verifying the evidence it receives. Viadere does not process payments and is not a party to your transaction.
+An Approval you make is your decision, made for the Business that asked. Check the Business name, the details shown and the expiry before you approve. If something is unfamiliar, deny it and report it as suspicious. Viadere delivers and records the Approval; the Business decides whether to grant access, complete a transaction or take any other action, and is responsible for verifying the evidence it receives. Viadere does not accept, process or hold payments and is not a party to your transaction. An Approval of an estimate, quote or similar request records your consent to it. It does not charge you or move money.
 
 A simple approve or deny prompt does not by itself give phishing-resistant protection. We apply limits (for example, a maximum number of requests per hour, pausing a Business after repeated denials and a freeze control), but you remain the final judge of whether a request is genuine.
 
@@ -184,10 +186,11 @@ You agree not to, and not to help others to:
 10. Reproduce, resell or commercially exploit the Services without our written permission.
 11. Use the Services to collect information about other people or to correlate people across Businesses.
 12. Use the Services for a high-risk activity where failure could lead to death, injury or serious damage.
+13. Send health information, such as medical conditions, treatment, prescriptions or insurance details, in a message, a Loop or any other part of the Services. Viadere is not designed for it.
 
 ## 12. Third-Party Services
 
-The Services rely on and interoperate with Third-Party Services. These include Apple (the App Store, iOS, push, Wallet and App Attest), your wireless carrier, text-messaging and RCS providers and the Businesses you connect to. They are governed by their own terms and privacy policies, and we are not responsible for them. Apple's terms apply to your use of the app (see section 26.2). Links to Third-Party Services are for convenience; we do not endorse them.
+The Services rely on and interoperate with Third-Party Services. These include Apple (the App Store, iOS, push, Wallet and App Attest), your wireless carrier, text-messaging and RCS providers, the Businesses you connect to, and Shopify where a Business uses it for its store (section 28). They are governed by their own terms and privacy policies, and we are not responsible for them. Apple's terms apply to your use of the app (see section 26.2). Links to Third-Party Services are for convenience; we do not endorse them.
 
 ## 13. Fees
 
@@ -354,6 +357,27 @@ A Business may offer you rewards, coupons, loyalty points, tickets or other pass
 ### Orders, status and Live Activities
 
 Businesses may send order, delivery, appointment, travel and event updates, and may start a Live Activity on your lock screen for an eligible ongoing event. Updates reflect information the Business supplies and can be delayed, wrong or incomplete. Check with the Business before you rely on a time-sensitive update.
+
+### Loops
+
+A Loop is an interactive workflow, such as a pickup-time check-in or a callback request, that a Business has built. Loops are written by Businesses, not by Viadere. Please note:
+
+- **Off by default, and your choice.** Loops are off until you turn them on in Settings and separately allow each Business. You can turn Loops off, or stop allowing a Business, at any time. Turning them off hides Loop entry points and may cancel Loops that are still open; messages, Approvals and other features keep working.
+- **Built by the Business.** Every Loop shows "Built by" and the Business's name. The Business, not Viadere, decides what the Loop asks, how it uses your answers, and whether and how it follows through, including appointments, orders, replies and any promise it makes.
+- **Reviewed by Viadere, but not endorsed.** Viadere reviews each Loop, and each change, before it is published, and may refuse, pause or remove a Loop or a Business at its discretion. Review is a safeguard for you. It is not a promise that a Loop is accurate, that the Business will act, or that a result will occur, and a Loop cannot guarantee delivery or an outcome outside Viadere. Viadere is responsible for running its platform, and the Business is responsible for its Loops and its own operations. Nothing in these Terms limits any right that the law gives you and that cannot be waived.
+- **Never share sensitive details.** Do not enter health information, passwords, one-time codes, payment card numbers or government identifiers in a Loop. Viadere never asks for them in one. Report a Loop that does from its screen.
+
+### Shopping through a Business's Shopify store
+
+Some Businesses connect their own Shopify store so that you can browse products, see order status and go to their checkout. When you tap Checkout, Viadere tells you that you are leaving Viadere to pay the Business on Shopify. The sale is between you and the Business. The Business is the seller and the merchant of record. Price, payment, refunds, returns, taxes, shipping, delivery, warranty and any dispute are the Business's responsibility under its own terms and Shopify's terms, and Viadere does not see, process or hold your payment or card details and cannot refund or reverse a purchase. Prices and availability come from the Business's store and are confirmed at its checkout. An order status in Viadere is only as accurate as the information Shopify and the Business provide.
+
+### Business appearance
+
+A Business may choose colors and a logo that appear on its screens in Viadere. These cannot change the text or controls of an Approval or any security screen, and Viadere may override them. A Business's name and logo are its own and are not endorsed by Viadere.
+
+### Health information and healthcare providers
+
+Healthcare providers, and any Business whose use would involve health information, are not permitted to use Viadere. Viadere does not request health information and is not a "business associate" of any Business. If a Business asks you for health information through Viadere, do not provide it and report it from the Business's screen. Viadere may remove the Business.
 
 ### Household and delegated access
 

@@ -2,11 +2,12 @@
 title: Messaging Consent and Content Policy Addendum
 order: 7
 description: "Consent, opt-out, content and sender-responsibility rules for messages sent through Viadere on the app, SMS and RCS channels."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "Trust and Safety lead [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete addendum covering scope, sender roles, consent by purpose, keywords and suppression, content and identity rules, channel limits, registration and carrier rules, quiet hours, complaint thresholds, records, enforcement and a consumer-facing summary."
+health_prohibition: true
+change_summary: "Third draft: health information is prohibited on every channel and is no longer allowed by secure link or in-app request (section 5.5); cross-references to the new Business Workflow (\"Loops\"), Shopify and healthcare-ban terms in the Agreement and the Acceptable Use Policy; messages about Shopify orders and Loops stay within the consented purpose. Counsel choices remain bracketed."
 ---
 ::: draft-notice
 **Draft for counsel review.** This addendum is not in force. Values in square brackets are choices or facts still to be filled in or confirmed.
@@ -33,7 +34,7 @@ This addendum does not cover Customer's own communications to its customers outs
 
 ### 1.3 Relationship to other documents
 
-This addendum is subject to the Agreement and supplements the [Acceptable Use Policy](/legal/acceptable-use-policy/). If they conflict, the stricter rule for Consumer protection applies.
+This addendum is subject to the Agreement and supplements the [Acceptable Use Policy](/legal/acceptable-use-policy/). If they conflict, the stricter rule for Consumer protection applies. Healthcare Providers may not use the Services, and no Health Information may be sent through any channel (Agreement section 5.10; Acceptable Use Policy section 3.4). Business Workflows ("Loops") and commerce through Shopify are governed by Agreement sections 3.7 and 3.9. Messages that relate to a Loop or to a Shopify order must fit a purpose the Consumer has allowed and follow this addendum like any other message.
 
 ## 2. Roles and responsibility for each message
 
@@ -137,7 +138,7 @@ Customer will not use public link shorteners, or links that hide the destination
 
 ### 5.5 Sensitive information
 
-Customer will not use text messages to ask for or send sensitive information, including government identifiers, financial account numbers, health information, authentication secrets or precise location. Where a task needs it, Customer must use a secure link or a request in the app.
+Customer will not use text messages, or any other channel of the Services, to ask for or send Health Information. Health Information is prohibited and there is no secure link or in-app alternative for it (Agreement section 5.10). Customer will not use text messages to ask for or send other sensitive information, including government identifiers, financial account numbers, authentication secrets or precise location. Where a task needs such other information, Customer must use a secure link or a request in the app. Customer will not ask for or accept payment card or bank details through the Services, because Viadere does not process payments.
 
 ### 5.6 Message limits
 

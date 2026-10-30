@@ -2,11 +2,12 @@
 title: Privacy Notice
 order: 2
 description: "What Viadere collects, why, who receives it, how long it is kept, and the rights you have over it."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "Privacy lead [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete layered notice with data tables, legal bases, retention by class, subprocessors, rights by region, biometric and California notices. Counsel decisions remain bracketed."
+health_prohibition: true
+change_summary: "Third draft: adds optional Business Workflows (\"Loops\", off by default, opt-in per business), Shopify order status shown without Viadere handling payment, business appearance settings, and a clear statement that health information is not requested and healthcare providers may not use Viadere; new rows in the data tables and roles table. Counsel decisions remain bracketed."
 disclosures: [encryption, device_custody, age_verification]
 ---
 This notice explains how Viadere handles personal information when you use the Viadere app, text the Viadere number, or connect to a business through Viadere. It is written to be read. A plain-language companion with the same facts is in the [Privacy Center](/privacy/).
@@ -23,6 +24,9 @@ This notice explains how Viadere handles personal information when you use the V
 - **Consumer accounts have no email address and no password.** You sign in with a passkey. Your phone number is optional and is needed only to use Viadere by text.
 - **Text messages are not private from carriers.** SMS is not end-to-end encrypted. Carriers and the messaging providers we use can read ordinary text messages. Anything that needs real assurance is moved into the app.
 - **Identity and age checks are planned and optional.** If Verify launches, document images, selfies and liveness video go from your device directly to our verification provider, not to Viadere. Viadere keeps only the minimal result and asks the provider to erase the session.
+- **Loops are optional and off by default.** A Loop is an interactive workflow a business builds from components Viadere provides and Viadere reviews before publication. You turn Loops on yourself and allow each business separately, and every Loop shows who built it (section 6.1).
+- **Viadere does not take payments.** If a business uses Shopify, Viadere can show you products and order status and send you to the business's own Shopify checkout. The sale and payment are between you and the business (section 6.2).
+- **No health information.** Healthcare providers may not use Viadere, and Viadere does not ask for health information. Please do not send it through Viadere (section 6.3).
 - **Retention is set by data class.** Message text, interaction details and most records have stated maximum periods (section 12). Deleted data can remain in encrypted backups for up to 30 days.
 - **You are in control.** You can download your data and delete your account from the app, disconnect from a business, change consent per purpose, reply STOP to texts, and contact us about any other right (section 16).
 
@@ -41,6 +45,8 @@ Our role depends on the activity. This is the working position of the product te
 | Signed approval decisions kept for disputes | Controller for the copy Viadere keeps; the business is a separate controller of the result it receives | [COUNSEL: confirm.] |
 | Verify (planned): identity and age checks | Controller of the verification attempt and consent record; verification provider is our processor; the requesting business is a separate controller of the result it receives | [COUNSEL: confirm, and confirm joint controller analysis.] |
 | Authenticator vault (planned) | Controller of account and sync metadata; we hold vault contents only as ciphertext we cannot open | [COUNSEL: confirm.] |
+| Loops a business builds and you use | Processor or service provider for the business for what you enter; controller of the review, safety, consent and abuse records | [COUNSEL: confirm the split. The business decides what its Loop asks and what it does with the answer.] |
+| Shopify order status shown to you | Processor or service provider for the business | [COUNSEL: confirm. Shopify is the business's own service, not one Viadere engages.] |
 | Business dashboard users (people who work for a business) | Controller | Covered by the same notice; see section 5. |
 
 Businesses are independent of Viadere. When a business sends you a message or a request, the business is responsible for what it says, why it contacted you and what it does with your reply. Read the business's own privacy notice for how it handles data it holds about you.
@@ -72,6 +78,8 @@ We do not ask for your location. A business may include an approximate location 
 
 - **Requests and context.** What the business wants you to approve or answer: purpose, amount, merchant, approximate location, device or browser of the sign-in, expiry and similar details the business chooses to include.
 - **Messages and updates.** Replies, order and delivery status, appointment and travel updates, ticket and pass content, reward offers and redemptions.
+- **Loop activity.** If you have turned on Loops and allowed a business, what you choose or enter in one of its Loops, and the outcome (section 6.1).
+- **Order status.** If the business has connected its Shopify store, the status of an order you placed at its checkout: a reference, status, item titles, carrier and tracking number, and timestamps (section 6.2).
 - **A reference to you.** Businesses address you by the pairwise reference (section 6), not by your Viadere identity.
 
 ### 3.4 What comes from our providers
@@ -108,6 +116,8 @@ The table is by category. "Retention" gives the longest period Viadere's system 
 | Outbound delivery records | Phone ciphertext, channel, delivery status, provider message ID | Providers | Retry, order and troubleshoot delivery | Finished rows 30 days | SMS, RCS and email providers |
 | SMS consent and opt-out | Phone hash, keyword (STOP and similar), time | You | Honor opt-outs and prove consent | Kept as suppression evidence. [COUNSEL: evidence period under TCPA and carrier rules] | None |
 | Push and Live Activity tokens | APNs tokens | Your device | Deliver notifications | Removed when APNs reports the token invalid, and with the account | Apple |
+| Loops and Loop settings | Whether Loops are on for you, which businesses you allowed, the Loop you used, what you chose or entered, state and outcome | You, business | Run the Loop you chose to use, show you its history, keep evidence of your choices | Settings until account deletion. Loop activity [COUNSEL AND PRODUCT: period, for example 400 days] | The business that built the Loop |
+| Shopify order status | Order reference, order and fulfilment status, item titles, carrier and tracking number, timestamps. No name, address, phone or email from Shopify | Business's Shopify store | Show you where your order is | [90] days after the order completes or is cancelled | The business concerned |
 | Rewards and loyalty | Program membership, points ledger, reward claims, redemption code hash | Business, you | Run rewards you joined | Until account deletion. Ledger entries kept for accounting [COUNSEL: period] | The business |
 | Wallet passes | Pass serial, hashed token, registration, push token | Business, Apple | Issue and update passes | Until the pass is voided or you delete the account. Pass logs 7 days | Apple |
 | Household and delegation | Grants, sealed labels, invitation code hash | You | Share access you choose to share | Until revoked, expired or account deleted | The household member you invite |
@@ -134,6 +144,9 @@ Each statement below was checked against the product's specifications and code a
 - **No biometric templates held by Viadere.** Face ID and Touch ID run in the operating system.
 - **No private keys.** We never hold your approval private keys or passkey private keys.
 - **No plaintext phone numbers or message bodies at rest.** They are encrypted at the field level with row-bound keys.
+- **No payments.** Viadere does not accept, process or hold payments or card details, and is not the seller in any purchase.
+- **No health information requested.** Viadere does not ask for health information, does not offer features for it and does not let healthcare providers use the service (section 6.3).
+- **No Loops without your choice.** Loops are off until you turn them on and allow a business.
 - **No promotional messages that bypass consent.** Marketing is a separate consent from security and service messages.
 
 ## 6. What businesses receive
@@ -146,6 +159,22 @@ A business that you connect to receives:
 - **For Verify (planned):** only the attribute you agreed to share, such as "meets the age threshold", with its provenance, validity period and the business as audience. Names and addresses are shared only if you explicitly approve that exact request.
 
 A business does not receive your Viadere account identity, your phone number, your other connections, or your device identifiers, unless you tell it. What a business does with what it receives is governed by that business's own notice and its agreement with Viadere. Your business-facing audit views, exports and webhooks use the same pseudonym.
+
+### 6.1 Loops
+
+A Loop (our working name for a business workflow, [COUNSEL: pending trademark clearance]) is an optional interactive flow, such as a pickup-time check-in, that a business builds only from components and actions Viadere provides. Viadere reviews each Loop, and each change to it, before anyone can use it, and can pause or remove it. Loops are off for you until you turn them on, and a business's Loops are available only after you allow that business. Every Loop shows "Built by" and the business's name. The business is responsible for its Loop and for what it does with your answers; Viadere carries your input and the outcome to it. If you complete an action in a Loop, the business receives what you entered and your pairwise reference, not your Viadere identity. You can turn Loops or a business off at any time, and you can report a Loop from its screen. Do not enter health details, passwords, payment cards or other sensitive information in a Loop.
+
+### 6.2 Shopping with a business that uses Shopify
+
+A business can connect its own Shopify store. Viadere can then show you its products and the status of your orders, and can send you to the business's Shopify checkout. Before you leave, Viadere tells you that you are going to the business's checkout to pay the business on Shopify. Viadere does not see or process your payment. The business is the seller, and the sale, payment, refunds, taxes, shipping and disputes are between you and the business under Shopify's and the business's terms and privacy notices. Viadere receives order-status information from Shopify for the business, keeps only the minimal fields in the table in section 4, and does not ask Shopify for your name, address, phone number or email address. When you tap Checkout, Viadere sends Shopify a cart that carries a reference that Viadere created and does not identify you. Shopify is a service the business chooses; it is not a service provider that Viadere engages. [COUNSEL: confirm the roles and notices for Shopify.] An approval you give for an estimate or similar request records your consent; it does not charge you or move money.
+
+### 6.3 Health information
+
+Viadere is not a place for health information. Healthcare providers, and any business whose use would involve health information, may not use Viadere, and Viadere will refuse or remove them. Viadere does not ask for health information, has no feature for it and is not a "business associate" of any business. If you send health details in a message or a Loop, they are handled like any other message content: delivered to the business you chose, retained as section 13 describes, and not used by Viadere for any other purpose. Please do not send them, and tell us if a business asks you to (section 22).
+
+### 6.4 Business appearance
+
+A business can choose how its name looks inside Viadere, such as its colors and logo. Viadere re-encodes uploaded images, can override these settings for readability or safety, and never lets them change the text or controls of a security screen.
 
 ## 7. What stays on your device and what the server sees
 
@@ -301,6 +330,7 @@ We share personal information only as described here.
 - **Businesses you connect to**, as described in section 6.
 - **Service providers (subprocessors)** that process data for us under contract. They may use it only to provide their service to us. The current list follows and is also on the [Subprocessors](/legal/subprocessors/) page.
 - **Apple**, for push delivery, Wallet and App Attest, under Apple's terms.
+- **Shopify**, when you tap Checkout at a business that uses it: you go to the business's Shopify checkout, where Shopify and the business handle your payment and order under their terms. Shopify is chosen by the business and is not on our subprocessor list.
 - **Carriers and messaging networks**, which carry text messages.
 - **Legal and safety.** To comply with law or valid legal process, to protect rights, safety and security, and to enforce our terms. See the [Law-Enforcement Request Policy](/legal/law-enforcement-request-policy/).
 - **Corporate transactions.** If Viadere merges, is acquired or sells assets, your information may transfer under commitments no weaker than this notice. [COUNSEL: confirm wording.]
@@ -451,8 +481,8 @@ This section is the notice at collection for California residents, and supplemen
 | Government identifiers (driver licence, ID number) | Planned, Verify only. Read in memory from Wallet or by Didit. Viadere stores none | Verify an attribute you choose to share | Didit; Apple (Wallet) | Not stored by Viadere |
 | Biometric information for identification | Planned, Verify document method only, held by Didit. Viadere receives none | Verify | Didit | Session erased after the result is read |
 | Precise geolocation | No | Not applicable | Not applicable | Not applicable |
-| Racial or ethnic origin, religious beliefs, union membership, health, sex life, genetic data | Not requested. A message you send a business could contain such information; we do not use it for any purpose other than delivering it | Delivery only | The business; providers | As messages |
-| Financial account details | Not collected by us. A business may show an amount or merchant in a request | Show you the request | Your device; hosting providers | With the interaction |
+| Racial or ethnic origin, religious beliefs, union membership, health, sex life, genetic data | Not requested. Healthcare providers may not use Viadere and businesses may not use it to collect health information. A message you send a business could still contain such information; we do not use it for any purpose other than delivering it | Delivery only | The business; providers | As messages |
+| Financial account details | Not collected by us, and Viadere does not process payments. A business may show an amount or merchant in a request | Show you the request | Your device; hosting providers | With the interaction |
 
 We use sensitive personal information only to provide the services you request, to detect security incidents and resist fraud, to ensure safety, to carry out the functions described and for the other purposes California regulations (11 CCR 7027(m)) permit. We do not use or disclose it to infer characteristics about you. Because of this, we do not offer a "Limit the Use of My Sensitive Personal Information" link. [COUNSEL: confirm.]
 

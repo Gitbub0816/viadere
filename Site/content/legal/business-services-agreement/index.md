@@ -2,11 +2,12 @@
 title: Business Services Agreement
 order: 3
 description: "The agreement between Viadere and a business that uses the Business API, the dashboard and Viadere's messaging, approval and verification services."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "General Counsel [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete commercial agreement with order forms, onboarding, customer responsibilities, API terms, fees, confidentiality, data protection, warranties, indemnities, liability, term and termination, compliance, insurance, general terms and exhibits for order form, support and fees."
+health_prohibition: true
+change_summary: "Third draft: healthcare and Health Information are prohibited platform-wide (new section 5.10, termination right in 18.3, no business-associate agreement); new terms for Business Workflows (\"Loops\", a working name pending trademark clearance) with mandatory Viadere review, Brand Kits, and Shopify-only commerce in which Viadere never accepts payments and is never the merchant of record; related definitions, licences, third-party service, accountability and indemnity text. Counsel choices remain bracketed."
 disclosures: [business_verification, mfa]
 ---
 ::: draft-notice
@@ -22,18 +23,24 @@ This Business Services Agreement (the "**Agreement**") is between [COUNSEL: LEGA
 - "**Applicable Law**" means all laws, regulations, binding guidance and industry rules that apply to a party's performance or use of the Services, including privacy, data-protection, consumer-protection, telemarketing and anti-spam laws.
 - "**Approval Services**" or "**Approve**" means Viadere's services for delivering authentication and transaction-authorization requests to Customers' end users and returning their signed decisions.
 - "**Business API**" means the application programming interfaces, SDKs, webhooks and related documentation that Viadere makes available at the Developer Portal, including the sandbox.
-- "**Business Content**" means all content, data and materials Customer submits or transmits through the Services, including requests, messages, offers, attachments, templates, display text and metadata.
+- "**Brand Kit**" means the optional appearance settings (colours, logo and artwork, frames and similar styling chosen from options Viadere provides) that Customer configures for how its name appears in Viadere-owned screens, as described in section 3.8.
+- "**Business Content**" means all content, data and materials Customer submits or transmits through the Services, including requests, messages, offers, attachments, templates, display text and metadata, and including Loop Content and Brand Kit assets.
+- "**Business Workflow**" or "**Loop**" means an optional interactive workflow that Customer designs from components and registered actions that Viadere provides and that, once Viadere has approved and published it, a Consumer who has opted in can open, as described in section 3.7. [COUNSEL: "Loops" is a working name pending trademark and marketplace clearance; the defined term "Business Workflow" may replace it throughout.]
 - "**Capability**" means a typed function of the Services, such as message.send, auth.challenge, transaction.approve, age.minimum or identity.verified, each with its own policy and entitlement.
 - "**Consumer**" means an individual who uses the Viadere app or the Viadere text number.
 - "**Consumer Data**" means personal information about a Consumer that Viadere processes on Customer's behalf or that Customer receives through the Services.
 - "**Dashboard**" means Viadere's web console for Customer's workspace.
 - "**Documentation**" means the developer documentation, specifications (including the OpenAPI definition), policies and guides at the Developer Portal, as updated.
 - "**Fees**" means the charges in the Order Form and Exhibit C.
+- "**Health Information**" means any information that relates to the past, present or future physical or mental health or condition of an individual, to the provision of health care to an individual, or to the payment for health care, and any information that is protected health information under the U.S. Health Insurance Portability and Accountability Act of 1996 and its regulations ("**HIPAA**") or is health or medical data under another Applicable Law. [COUNSEL: confirm the definition, including state consumer-health-data laws.]
+- "**Healthcare Provider**" means a person or organization that provides, arranges, bills for or is paid for health care, including a physician or dental practice, clinic, hospital, pharmacy, laboratory, telehealth service, health plan or health-care clearinghouse, a business associate of any of them, and any other business whose use of the Services would involve Health Information. [COUNSEL: confirm the scope, including wellness and fitness businesses.]
+- "**Loop Content**" means everything Customer places in, or collects or sends through, a Loop, including text, labels, options, fields, attachments, images, the data Consumers enter, and the actions Customer connects to it.
 - "**Messaging Policy**" means the [Messaging Consent and Content Policy Addendum](/legal/messaging-consent-content-policy-addendum/).
 - "**Order Form**" means an ordering document or Dashboard plan selection that references this Agreement.
 - "**Personal Data**" has the meaning given in the [Data Processing Addendum](/legal/data-processing-addendum/) (the "**DPA**").
 - "**Security Incident**" has the meaning given in the DPA.
-- "**Services**" means the Business API, the Dashboard, the Approval Services, the Verification Services, the messaging services and any other Viadere service ordered by Customer or made available to it.
+- "**Services**" means the Business API, the Dashboard, Business Workflows, Brand Kits, the commerce features described in section 3.9, the Approval Services, the Verification Services, the messaging services and any other Viadere service ordered by Customer or made available to it.
+- "**Shopify**" means Shopify Inc. and its affiliates, and "**Shopify Store**" means a store that Customer operates on Shopify's platform under Customer's own agreement with Shopify.
 - "**Verification Services**" or "**Verify**" means Viadere's services for confirming an attribute about a Consumer at Customer's request, as set out in the [Verification Services Addendum](/legal/verification-services-addendum/).
 
 ## 2. Structure and order of precedence
@@ -58,7 +65,7 @@ Subject to this Agreement, Viadere grants Customer a non-exclusive, non-transfer
 
 ### 3.2 Nature of the Services
 
-Viadere is a connection and delivery layer. Viadere does not decide whether a Consumer may access Customer's systems, complete a purchase or receive a benefit. Customer remains the authoritative system of record for its customers and is solely responsible for its access, risk, fraud and transaction decisions. Viadere does not process payments. Viadere is not Customer's agent and does not give legal, financial or compliance advice.
+Viadere is a connection and delivery layer. Viadere does not decide whether a Consumer may access Customer's systems, complete a purchase or receive a benefit. Customer remains the authoritative system of record for its customers and is solely responsible for its access, risk, fraud and transaction decisions. Viadere does not accept, process or hold payments, and is not the merchant of record for any sale (section 3.9). An approval that a Consumer gives through the Services is a record of the Consumer's consent and does not charge or move money. Viadere is not Customer's agent and does not give legal, financial or compliance advice.
 
 ### 3.3 Product status
 
@@ -76,11 +83,59 @@ Viadere may improve, change or discontinue features. Viadere will use reasonable
 
 Fees buy quotas and plan features only. Payment never changes the priority of a message, never allows a business to override a Consumer's consent and never buys priority over security or authorization requests. Urgent priority is reserved for security sign-in and authorization requests. Marketing and rewards are never given more than normal priority.
 
+### 3.7 Business Workflows ("Loops")
+
+(a) **What they are.** A Business Workflow is optional. Customer builds it only from the components and registered actions that Viadere provides; Customer cannot add code, scripts, markup or links of its own. Core features of the Services do not depend on a Loop.
+
+(b) **Viadere review before publication.** Every Loop, and every revision of a Loop, is reviewed by Viadere before it is published. Review includes automated checks and review by Viadere personnel, and a second reviewer for higher-risk actions. A Loop that has not been approved is not shown to any Consumer. Approval is not a representation that a Loop is lawful, accurate or suitable, and does not shift any responsibility under this Agreement from Customer to Viadere.
+
+(c) **Viadere's discretion.** Viadere may refuse to approve, decline to publish, pause, suspend or remove any Loop, or suspend Customer's ability to use Loops, at its discretion and at any time, including where Viadere believes the Loop or its use conflicts with the Acceptable Use Policy, creates risk for Consumers, or draws Consumer reports. Viadere will where practical tell Customer why. Section 8.3 (appeal) applies, but Viadere may keep a Loop paused while an appeal is pending.
+
+(d) **Customer is accountable for its Loops.** Customer is responsible for all Loop Content, for what it promises or asks of Consumers through a Loop, and for everything that happens after a Consumer completes an action in a Loop, including fulfilment, appointments, orders, follow-up communications, record-keeping, and its handling of any data it receives (together, "**Downstream Operations**"). Viadere delivers the Loop and records the Consumer's action; Customer performs the service. Customer will be named to Consumers as the author of each Loop (section 3.7(f)).
+
+(e) **Consumer opt-in.** Loops are off by default. A Consumer must turn on Loops in the Viadere app and separately authorize Customer's Loops before any of Customer's Loops is available to that Consumer, and may withdraw either choice at any time. Customer will not request or imply that a Consumer must use a Loop to receive a core service, and will not circumvent or pressure a Consumer's choice.
+
+(f) **Attribution.** Every Loop displays "Built by" followed by Customer's verified business name. Customer will not alter, hide or imitate that attribution or any Viadere security language, and will not present a Loop as made or endorsed by Viadere.
+
+(g) **No Health Information, no payments.** Customer will not use a Loop to ask for, collect, send or act on Health Information (section 5.10), and will not use a Loop to accept, request or process payment or card details. A Loop may refer a Consumer to Customer's own Shopify checkout only through the feature described in section 3.9.
+
+(h) **Viadere's role.** Viadere is accountable for operating the Business Workflow platform as this Agreement describes. Viadere is not responsible for Customer's Downstream Operations or for the accuracy or legality of Loop Content. Nothing in this section 3.7 excludes or limits an obligation or liability that cannot be excluded or limited under Applicable Law. [COUNSEL: confirm allocation and consumer-law carve-outs.]
+
+### 3.8 Brand Kits
+
+(a) A Brand Kit is optional and changes only how Customer's name and surfaces look in Viadere-owned screens. It cannot change the text, buttons or security indicators of an approval, sign-in or other security screen.
+
+(b) Customer may upload logos and artwork only as PNG or JPEG files. Viadere re-encodes every upload, removes embedded metadata, may resize it, and may reject a file that fails its checks. Other file types, including SVG, are not accepted.
+
+(c) Viadere may override, limit, replace or disable any part of a Brand Kit at any time, including to maintain readable contrast and accessibility, to protect Consumers from confusion or deception, or for safety or security reasons, and may show Customer's surfaces in Viadere's neutral style instead.
+
+(d) Customer represents and warrants that it owns, or has all rights necessary to use and to license, every mark, name, image and other material in its Brand Kit, and that their use through the Services does not infringe or violate the rights of any person or any Applicable Law.
+
+(e) Customer grants Viadere a worldwide, non-exclusive, royalty-free licence during the Term (and afterwards as needed to complete deletion and legal duties) to host, store, re-encode, reproduce, cache and display Brand Kit materials to Consumers and in the Dashboard as part of the Services.
+
+(f) Viadere may remove Brand Kit materials on a good-faith complaint of infringement or other harm, and will handle notices under section 6 of the Acceptable Use Policy. Customer will provide any information Viadere reasonably asks for in a complaint.
+
+### 3.9 Commerce through Shopify
+
+(a) **Shopify only.** Customer may connect its own Shopify Store to the Services. Viadere supports no other commerce connector.
+
+(b) **What Viadere does.** Through the connection Viadere may show a Consumer Customer's products and the status of the Consumer's orders, and may hand the Consumer over to Customer's own Shopify checkout page. Viadere does not offer a checkout of its own.
+
+(c) **Viadere never accepts or holds payment and is never the merchant of record.** Viadere does not accept, process, transmit or hold payments, payment credentials or funds, and is not a party to any sale between Customer and a Consumer. Customer is the seller and the merchant of record. The sale, the price (as Customer sets it in Shopify), payment, refunds, returns, taxes, shipping, fulfilment, warranty and disputes are matters between Customer and the Consumer, and for payment, Shopify and its payment providers apply. Customer is solely responsible for them and for compliance with all consumer-protection, tax and commerce laws that apply to its sales.
+
+(d) **Shopify terms.** Customer's use of Shopify is governed by Customer's agreement with Shopify and Shopify's terms, which Customer must follow. Viadere is not a party to them and is not responsible for Shopify's services, availability or acts. Customer authorizes Viadere to access its Shopify Store with the read permissions Customer grants in the connection flow and may revoke that authorization in Shopify or in the Dashboard.
+
+(e) **Data.** Viadere receives order-status information from Shopify as set out in the [DPA](/legal/data-processing-addendum/). Customer is responsible for the lawfulness of making that information available and for telling Consumers about it.
+
+(f) **Digital goods and in-app products.** Customer will use the commerce features only for physical goods and for services that are used outside the Viadere app, and not for digital content or functionality used in the app. [COUNSEL AND PRODUCT: confirm against current app-store rules.]
+
+(g) **Estimates and approvals.** An approval of an estimate, quote or terms through the Services is a record of the Consumer's consent. It is not a payment, does not charge or move money, and does not make Viadere a party to the transaction.
+
 ## 4. Onboarding, verification and ongoing assurance
 
 ### 4.1 Application and business verification
 
-Customer starts as pending. To obtain a handle, a permanent business code and production access, Customer must complete Viadere's onboarding and provide accurate and complete information. Onboarding includes (a) creating an Organization with a verified work email address and passkey sign-in; (b) proving control of its domain by a DNS record or a file at a well-known address; (c) validating its legal entity by supplying a registry number, jurisdiction and references to the evidence; (d) additional review for sensitive categories such as banking, healthcare and government; (e) accepting this Agreement and the applicable addenda; (f) configuring and testing an integration in the sandbox; and (g) a go-live review that considers the use case, security posture and abuse limits. Viadere may request more information at any time and may refuse an application, or limit or condition access, at its discretion. A category label alone is not an access decision.
+Customer starts as pending. To obtain a handle, a permanent business code and production access, Customer must complete Viadere's onboarding and provide accurate and complete information. Onboarding includes (a) creating an Organization with a verified work email address and passkey sign-in; (b) proving control of its domain by a DNS record or a file at a well-known address; (c) validating its legal entity by supplying a registry number, jurisdiction and references to the evidence; (d) additional review for sensitive categories such as banking and government, and a screen that refuses businesses in the categories listed in section 5.10; (e) accepting this Agreement and the applicable addenda; (f) configuring and testing an integration in the sandbox; and (g) a go-live review that considers the use case, security posture and abuse limits. Viadere may request more information at any time and may refuse an application, or limit or condition access, at its discretion. A category label alone is not an access decision.
 
 ::: disclosure
 A verified business has completed Viadere's business-identity checks. Verification does not constitute an endorsement, guarantee of legitimacy, or confirmation of regulatory licensing.
@@ -142,7 +197,21 @@ Customer will provide reasonable cooperation to Viadere in investigating abuse, 
 
 ### 5.9 Regulated and high-risk use
 
-Customer will not use the Services for a regulated or high-risk purpose, including financial services, healthcare, gambling, age-restricted goods and services, or services to children, unless the relevant Capability, tier and addendum have been approved in writing for that purpose. Verification does not by itself satisfy Customer's know-your-customer, anti-money-laundering, sanctions, age-assurance or other regulatory duties. Customer will not use the Services to handle protected health information unless Viadere has agreed in writing and a business-associate agreement is in place. [COUNSEL: HIPAA position.]
+Customer will not use the Services for a regulated or high-risk purpose, including financial services, gambling, age-restricted goods and services, or services to children, unless the relevant Capability, tier and addendum have been approved in writing for that purpose. Verification does not by itself satisfy Customer's know-your-customer, anti-money-laundering, sanctions, age-assurance or other regulatory duties. Healthcare is not a use that can be approved: section 5.10 applies.
+
+### 5.10 Healthcare and Health Information are prohibited
+
+(a) **Healthcare Providers may not use the Services.** No Healthcare Provider, and no other business whose use of the Services would involve Health Information, may use the Services for any purpose, including messaging, approvals, verification, rewards, Business Workflows, Brand Kits and commerce features. Customer represents that it is not, and will promptly tell Viadere if it becomes, a Healthcare Provider or a business whose use involves Health Information.
+
+(b) **No Health Information through any feature.** Customer will not collect, request, store, send or act on Health Information through the Services, including in any Business Content, message, Loop, form field, attachment, template, display text or metadata, and will not design any workflow that invites a Consumer to supply it. Customer will tell Consumers not to share health details through the Services where a free-text field or message could otherwise invite them to.
+
+(c) **No business-associate role.** Viadere does not want, and is not authorized to receive, Health Information. Viadere is not a "business associate" of Customer, does not act as one, and will not enter into a business-associate agreement or any similar agreement for Health Information with Customer. Nothing in this Agreement, any Order Form or any other document creates such a role, and no statement to the contrary by any person is effective unless it is in a document signed by an authorized officer of Viadere that expressly refers to this section 5.10. [COUNSEL: confirm wording and HIPAA position.]
+
+(d) **Screening and refusal.** Viadere may screen applications, Business Content and use, automatically and by review, for Healthcare Providers and Health Information, and may refuse an application, decline to approve a Loop or other content, or reclassify a Customer on that basis. Viadere is not obliged to find a breach of this section.
+
+(e) **Offboarding.** If Viadere reasonably believes Customer is a Healthcare Provider, or that Customer or its Business Content involves Health Information, Viadere may immediately suspend the Services in whole or part and remove the Business Content concerned, and may terminate this Agreement under section 18.3, with or without notice where it considers delay would create risk. Viadere will where practical give Customer a short period to export its Business Content (other than Health Information, which Viadere may delete without return) and will end all Customer's Business Workflows. Fees prepaid for the period after termination under this section are refunded pro rata [COUNSEL: confirm].
+
+(f) **If it happens anyway.** If Health Information reaches the Services despite this section, Customer must tell Viadere at once, stop the activity, and cooperate in deleting it. Viadere may delete it, and any fee, loss or liability that results is Customer's responsibility to the extent the law allows.
 
 ## 6. API, credentials and endpoints
 
@@ -222,6 +291,10 @@ Customer may appeal a suspension or restriction by writing to [TRUST-CONTACT-PLA
 
 Viadere may disable a Capability globally or for a Customer, revoke a key or all keys without suspending the Customer, and send notices to Customers. It may do this to protect Consumers or the service.
 
+### 8.5 Business Workflows and Brand Kits
+
+Viadere may pause, suspend or remove a Loop, a Loop revision or a Brand Kit, or switch off Loops or Brand Kits for Customer, under sections 3.7(c) and 3.8(c), and under section 5.10(e). A pause shows Consumers a neutral message. It does not delete Customer's data.
+
 ## 9. Security
 
 ### 9.1 Viadere's security program
@@ -278,6 +351,10 @@ Each party will help the other to respond to Consumer requests under data-protec
 
 Viadere handles government requests as stated in the [Law-Enforcement Request Policy](/legal/law-enforcement-request-policy/).
 
+### 10.8 No Health Information; order-status data
+
+Customer will not send Health Information to Viadere, and the DPA does not cover it (section 5.10). Where Customer connects a Shopify Store, Viadere processes order-status data for Customer as the DPA describes, and Shopify is a service Customer chooses and contracts with directly, not a Viadere subprocessor. [COUNSEL: confirm roles for Shopify data.]
+
 ## 11. Compliance with laws
 
 ### 11.1 General
@@ -330,7 +407,7 @@ Viadere and its licensors own all rights in the Services, the Documentation, the
 
 ### 13.2 Customer's property
 
-Customer owns its Business Content and its marks and grants Viadere a worldwide, non-exclusive, royalty-free licence during the Term (and afterwards as needed to complete deletion and legal duties) to host, process, transmit, display and reproduce Business Content to provide, secure and support the Services and as this Agreement and the DPA allow, including making Business Content visible to Consumers.
+Customer owns its Business Content and its marks and grants Viadere a worldwide, non-exclusive, royalty-free licence during the Term (and afterwards as needed to complete deletion and legal duties) to host, process, transmit, display and reproduce Business Content to provide, secure and support the Services and as this Agreement and the DPA allow, including making Business Content visible to Consumers. Section 3.8(e) adds the licence for Brand Kit materials. Customer is responsible for having the rights to grant these licences, and Viadere does not acquire ownership of Customer's marks or Loop Content.
 
 ### 13.3 Usage data
 
@@ -346,7 +423,7 @@ Customer will not copy, modify, reverse engineer, decompile or attempt to derive
 
 ## 14. Third-party services and providers
 
-The Services depend on third-party services, including carriers, messaging and RCS providers, Apple and verification providers. Viadere is not responsible for those third parties' acts or omissions beyond its obligations in the DPA, and Customer acknowledges that their requirements, outages and changes may affect the Services. Viadere will use providers on commercially reasonable terms and will list its subprocessors on the [Subprocessors](/legal/subprocessors/) page. Customer is responsible for its own third-party services, including any customer-support platform or CRM that receives messages from Viadere.
+The Services depend on third-party services, including carriers, messaging and RCS providers, Apple and verification providers. Viadere is not responsible for those third parties' acts or omissions beyond its obligations in the DPA, and Customer acknowledges that their requirements, outages and changes may affect the Services. Viadere will use providers on commercially reasonable terms and will list its subprocessors on the [Subprocessors](/legal/subprocessors/) page. Customer is responsible for its own third-party services, including any customer-support platform or CRM that receives messages from Viadere. Shopify is a third-party service that Customer chooses to connect (section 3.9). Customer's agreement and relationship with Shopify are its own, and Shopify's own terms apply to Shopify's services.
 
 ## 15. Warranties and disclaimers
 
@@ -372,9 +449,11 @@ EXCEPT AS EXPRESSLY STATED IN THIS AGREEMENT, THE SERVICES, THE SANDBOX, BETA FE
 
 Viadere will defend Customer and its officers, directors and employees (the "**Customer Indemnitees**") against any third-party claim, suit or proceeding to the extent it alleges that the Services, as provided by Viadere and used in accordance with this Agreement, infringe or misappropriate a third party's patent, copyright, trademark or trade secret (an "**IP Claim**"), and will pay the damages, costs and reasonable legal fees finally awarded or agreed in settlement. Viadere has no obligation to the extent the claim arises from Business Content, from combination with items Viadere did not supply, from use not permitted by this Agreement or from Customer's specifications. If an IP Claim occurs or is likely, Viadere may procure the right to continue, modify the Services so they do not infringe, or terminate the affected Service and refund prepaid Fees for the remainder of the Term. This section states Viadere's entire liability and Customer's exclusive remedy for IP Claims.
 
+Viadere's review and approval of a Loop, a Brand Kit or any Business Content is a platform safeguard for Consumers and is not a warranty, an endorsement or an assumption of Customer's responsibilities. [COUNSEL: confirm placement.]
+
 ### 16.2 By Customer
 
-Customer will defend Viadere, its Affiliates and their officers, directors, employees and agents (the "**Viadere Indemnitees**") against any third-party claim, suit, investigation or proceeding (including by a Consumer, a regulator, a carrier or a provider) arising from: (a) Business Content; (b) Customer's breach of section 5 (including consent, lawful content, opt-out and carrier compliance), section 10.2 or 10.3 or the Acceptable Use Policy; (c) Customer's violation of Applicable Law; (d) a decision Customer makes about a Consumer, access, a transaction or an account, including one based on an Approval or Verify result; or (e) a fine, penalty or charge imposed by a carrier or provider because of Customer's content or conduct. Customer will pay the damages, fines, costs and reasonable legal fees finally awarded or agreed in settlement.
+Customer will defend Viadere, its Affiliates and their officers, directors, employees and agents (the "**Viadere Indemnitees**") against any third-party claim, suit, investigation or proceeding (including by a Consumer, a regulator, a carrier or a provider) arising from: (a) Business Content; (b) Customer's breach of section 5 (including consent, lawful content, opt-out and carrier compliance), section 10.2 or 10.3 or the Acceptable Use Policy; (c) Customer's violation of Applicable Law; (d) a decision Customer makes about a Consumer, access, a transaction or an account, including one based on an Approval or Verify result; (e) Loop Content or Customer's Downstream Operations; (f) Brand Kit materials, including any claim that they infringe or violate a third party's rights; (g) Customer's sales through Shopify, including payment, refunds, taxes, shipping and disputes, or Customer's breach of its agreement with Shopify; (h) Health Information sent through the Services in breach of section 5.10; or (i) a fine, penalty or charge imposed by a carrier or provider because of Customer's content or conduct. Customer will pay the damages, fines, costs and reasonable legal fees finally awarded or agreed in settlement.
 
 ### 16.3 Procedure
 
@@ -414,7 +493,7 @@ Either party may terminate this Agreement or an Order Form by notice if the othe
 
 ### 18.3 Termination by Viadere
 
-Viadere may terminate immediately by notice if: (a) Customer's use of the Services creates a material risk to Consumers, Viadere or other customers that is not resolved after a suspension; (b) Customer repeatedly or seriously breaches the Acceptable Use Policy or the Messaging Policy; (c) Customer provides materially false verification information; (d) a carrier, provider, Apple or a regulator requires Viadere to stop providing a Service to Customer; or (e) continuing the Services would violate law.
+Viadere may terminate immediately by notice if: (a) Customer's use of the Services creates a material risk to Consumers, Viadere or other customers that is not resolved after a suspension; (b) Customer repeatedly or seriously breaches the Acceptable Use Policy or the Messaging Policy; (c) Customer provides materially false verification information; (d) a carrier, provider, Apple or a regulator requires Viadere to stop providing a Service to Customer; (e) Customer is or becomes a Healthcare Provider, or Customer or its Business Content involves Health Information, in breach of section 5.10; or (f) continuing the Services would violate law.
 
 ### 18.4 Termination for a material change
 

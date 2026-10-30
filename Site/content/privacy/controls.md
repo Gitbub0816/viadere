@@ -25,6 +25,13 @@ Most choices are in the app. For anything else, see [requests](/privacy/requests
 - **Recovery codes.** Ten single-use recovery codes and a recovery ID are shown once at sign-up. We store only hashes. A recovery registers a new passkey that cannot sign in for 72 hours, while your existing devices are told and can cancel it.
 - **App lock.** You can require Face ID, Touch ID or your passcode to open the app.
 
+## Loops
+
+- Loops are optional workflows that a business builds and Viadere reviews before they are published. They are **off** until you turn them on in Settings.
+- Even with Loops on, a business's Loops are available only after you allow that business. You can stop allowing it, or turn Loops off, at any time. Messages and approvals keep working either way.
+- Every Loop shows "Built by" and the business's name. You can report a Loop from its screen.
+- Do not enter passwords, payment cards or health details in a Loop. Viadere never asks for them.
+
 ## Notifications
 
 - Viadere respects iOS notification settings and Focus. By default it interrupts you only when action is required.

@@ -19,6 +19,16 @@ public struct LintFinding: Sendable, CustomStringConvertible {
 /// - `sms-not-e2ee`: a page that mentions SMS fallback does not state that SMS is not end-to-end encrypted.
 /// - `fee-disclosure`: a `pricing: true` page does not disclose per-message, verification, carrier, provider and overage fees.
 /// - `disclosure-verbatim`: a page citing `disclosures:` does not contain the §11.5 text verbatim.
+/// - `health-term`: a page that describes Loops (or Business Workflows) uses a health term (HIPAA, PHI, patient, medical, diagnosis,
+///   clinic, doctor, healthcare, health information and similar) outside a negating sentence and without an approved `claims:` entry.
+///   Healthcare is banned platform-wide (docs/FEATURE-EXPANSION-PLAN-v4.md section 4.13), so no marketing page may use these terms
+///   for a feature. A page under `/legal/` or `/privacy/` that states the prohibition sets `health_prohibition: true` in its front
+///   matter: the terms are then allowed on that page (definitions, the ban, offboarding, the no-business-associate statement).
+///   The flag is honored only under those two prefixes (anywhere else it is an error), and a flagged page must actually contain
+///   a sentence with a health term and prohibition vocabulary or a negation (`health-prohibition`), so it cannot be a blanket pass.
+/// - `payment-claim`: any page claims that Viadere takes payment ("Viadere checkout", "pay with Viadere", "secure payment by Viadere",
+///   "Viadere processes payments" ...) outside a negating sentence and without an approved `claims:` entry. Viadere never accepts
+///   payments and is never the merchant of record (FX-5). There is no allowance for legal pages: they must negate.
 /// - `legal-metadata`, `legal-version`, `legal-draft`: legal pages need version, effective_date, owner, counsel_review,
 ///   cannot be in effect without approved counsel review, and versions must be unique and ordered.
 public struct IntegrityLint {
@@ -30,6 +40,38 @@ public struct IntegrityLint {
         "SOC 2", "SOC2", "ISO 27001", "PCI DSS", "FedRAMP", "HITRUST", "certified", "independently audited",
         "GDPR compliant", "CCPA compliant", "SOX compliant",
     ]
+    /// Health terms that may not appear on pages that describe Loops (healthcare is banned platform-wide).
+    public static let healthTerms: [String] = [
+        "HIPAA", "PHI", "protected health information", "health information", "health data", "healthcare", "health care",
+        "patient", "patients", "medical", "diagnosis", "diagnoses", "clinic", "clinics", "doctor", "doctors",
+    ]
+    /// Claims that Viadere accepts or processes payment. Viadere never does (FX-5).
+    public static let paymentClaims: [String] = [
+        "Viadere checkout", "pay with Viadere", "pay through Viadere", "checkout with Viadere", "secure payment by Viadere",
+        "secure payments by Viadere", "Viadere processes payments", "Viadere processes payment", "Viadere accepts payments",
+        "Viadere accepts payment",
+    ]
+    /// A page "describes Loops" when it mentions Loops or Business Workflows.
+    static let loopPage = try! NSRegularExpression(pattern: "\\bloops?\\b|\\bbusiness workflows?\\b", options: .caseInsensitive)
+    /// Prohibition vocabulary that a page flagged `health_prohibition: true` must use in a sentence with a health term.
+    static let prohibitionVocabulary = try! NSRegularExpression(
+        pattern: "\\b(prohibit\\w*|bans?|banned|may not|must not|not permitted|not allowed|refus\\w*|offboard\\w*|disallow\\w*|forbid\\w*|reject\\w*|not available|means|excluded?)\\b",
+        options: .caseInsensitive)
+    /// Only legal and privacy pages may state the prohibition: the allowance is not available to marketing pages.
+    static func mayStateProhibition(_ page: Page) -> Bool { page.url.hasPrefix("/legal/") || page.url.hasPrefix("/privacy/") }
+
+    /// True when some sentence uses a health term together with prohibition vocabulary or a negation.
+    static func statesHealthProhibition(_ text: String) -> Bool {
+        sentences(text, splitTables: false).contains { sentence in
+            let s = normalize(sentence)
+            let r = NSRange(location: 0, length: (s as NSString).length)
+            guard prohibitionVocabulary.firstMatch(in: s, range: r) != nil || negation.firstMatch(in: s, range: r) != nil else { return false }
+            return healthTerms.contains { term in
+                let n = normalize(term)
+                return s.range(of: "(?<![a-z0-9])" + NSRegularExpression.escapedPattern(for: n) + "(?![a-z0-9])", options: .regularExpression) != nil
+            }
+        }
+    }
     static let negation = try! NSRegularExpression(pattern: "\\b(not|never|no|isn't|aren't|don't|doesn't|cannot|can't|won't|without|nor|neither)\\b", options: .caseInsensitive)
     static let smsFallback = try! NSRegularExpression(pattern: "sms\\s+fallback|fall(?:s|ing)?\\s*back\\s+to\\s+sms|fallback\\s+to\\s+sms|text\\s+fallback", options: .caseInsensitive)
 
@@ -44,11 +86,11 @@ public struct IntegrityLint {
         return t.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
     }
 
-    static func sentences(_ text: String) -> [String] {
+    static func sentences(_ text: String, splitTables: Bool = true) -> [String] {
         var out: [String] = []
         var cur = ""
         for c in text {
-            if c == "." || c == "!" || c == "?" || c == "\n" || c == "|" { if !cur.trimmed.isEmpty { out.append(cur) }; cur = "" }
+            if c == "." || c == "!" || c == "?" || c == "\n" || (c == "|" && splitTables) { if !cur.trimmed.isEmpty { out.append(cur) }; cur = "" }
             else { cur.append(c) }
         }
         if !cur.trimmed.isEmpty { out.append(cur) }
@@ -98,6 +140,24 @@ public struct IntegrityLint {
             for term in terms where Self.occursUnnegated(term, in: text) && !approved.contains(Self.normalize(term)) {
                 err(rule, "\"\(term)\" is used without an approved claims: entry referencing documented evidence")
             }
+        }
+        // Healthcare is banned: health terms on pages that describe Loops, and payment claims anywhere.
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        let flagged = page.front["health_prohibition"]?.bool == true
+        if flagged && !Self.mayStateProhibition(page) {
+            err("health-term", "health_prohibition: true is honored only on pages under /legal/ and /privacy/")
+        }
+        if flagged && Self.mayStateProhibition(page) && !Self.statesHealthProhibition(text) {
+            err("health-prohibition", "page sets health_prohibition: true but no sentence states the prohibition (a health term with prohibit, ban, may not, refuse, offboard, means or a negation)")
+        }
+        let prohibitionAllowed = flagged && Self.mayStateProhibition(page)
+        if Self.loopPage.firstMatch(in: text, range: range) != nil && !prohibitionAllowed {
+            for term in Self.healthTerms where Self.occursUnnegated(term, in: text) && !approved.contains(Self.normalize(term)) {
+                err("health-term", "\"\(term)\" appears on a page that describes Loops: healthcare is banned on Viadere, so no health use case or example may be shown (state it only in a negating sentence, or on a legal or privacy page that sets health_prohibition: true)")
+            }
+        }
+        for term in Self.paymentClaims where Self.occursUnnegated(term, in: text) && !approved.contains(Self.normalize(term)) {
+            err("payment-claim", "\"\(term)\" claims Viadere takes payment: Viadere never accepts or processes payments and is never the merchant of record")
         }
         for c in claims where !c.phrase.isEmpty && !Self.occursUnnegated(c.phrase, in: text) {
             err("claim-evidence", "claims entry \"\(c.phrase)\" is not used on this page (remove stale approvals)", .warning)

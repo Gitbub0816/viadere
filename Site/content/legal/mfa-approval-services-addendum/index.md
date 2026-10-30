@@ -2,11 +2,12 @@
 title: MFA and Approval Services Addendum
 order: 9
 description: "Key enrollment, signature validation, request protection, fallback, dispute handling and responsibilities for Approve."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "General Counsel [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: complete addendum covering enrollment, request protection modes, signed results and mandatory validation, replay, assurance limits, fallback, fatigue and freeze controls, disputes and evidence, retention, availability, responsibility and liability."
+health_prohibition: true
+change_summary: "Third draft: cross-references only. An Approval is a record of the Consumer's consent and is not a payment; Viadere does not accept, process or hold payments and is not the merchant of record; Approval requests may not carry Health Information and healthcare providers may not use Approve; relationship to Business Workflows (\"Loops\"). Counsel choices remain bracketed."
 disclosures: [mfa]
 ---
 ::: draft-notice
@@ -38,7 +39,7 @@ Viadere delivers Approval Requests to the Consumer's registered devices, shows t
 Viadere delivers and records authentication approvals. The business remains responsible for account access decisions and for independently validating applicable approval evidence.
 :::
 
-Customer is authoritative for granting access, completing a transaction or taking any action. Customer is responsible for deciding what to request approval for, for the risk model around it, for the contents it displays, for validating the Approval Result itself, and for any decision it takes. Viadere does not process payments, does not hold the Consumer's funds or account and is not a party to the Consumer's transaction.
+Customer is authoritative for granting access, completing a transaction or taking any action. Customer is responsible for deciding what to request approval for, for the risk model around it, for the contents it displays, for validating the Approval Result itself, and for any decision it takes. Viadere does not accept, process or hold payments, does not hold the Consumer's funds or account, is not the merchant of record and is not a party to the Consumer's transaction. An Approval is a record of the Consumer's consent to the request shown, including an Approval of an estimate or quote: it does not charge or move money, and it does not open or complete a checkout (Agreement sections 3.2 and 3.9).
 
 ## 3. Key enrollment
 
@@ -180,7 +181,7 @@ Customer receives a Subject Reference and the decisions that the Consumer makes 
 
 ## 11. Marketing and statements
 
-Customer will describe Approve accurately. Customer will not say Approve is phishing-resistant unless Viadere's documentation says so for the mode and assurance level used, will not say that Viadere approves transactions or guarantees them, and will not make claims about certifications that Viadere has not made. Customer will not suggest that Viadere is an identity provider or issues sessions for Customer's users.
+Customer will not include Health Information in an Approval Request, and Healthcare Providers may not use Approve (Agreement section 5.10). An Approval Request that Customer starts from a Business Workflow ("Loop") follows this addendum in the same way as any other request, and Viadere's review of the Loop does not replace Customer's duties under section 5 to validate the signed result. Customer will describe Approve accurately. Customer will not say Approve is phishing-resistant unless Viadere's documentation says so for the mode and assurance level used, will not say that Viadere approves transactions or guarantees them, and will not make claims about certifications that Viadere has not made. Customer will not suggest that Viadere is an identity provider or issues sessions for Customer's users.
 
 ## 12. Fees
 

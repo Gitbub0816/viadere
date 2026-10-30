@@ -97,6 +97,9 @@ full-width body built from `::: section` bands; front matter `headline` with `*e
 |---|---|
 | `banned-claim` | "unhackable", "anonymous", "zero knowledge", "government certified", "bank compliant", "HIPAA compliant" or "end-to-end encrypted" appears (any hyphen or case variant) outside a negating sentence, without an approved `claims:` entry |
 | `unearned-attestation` | SOC 2, ISO 27001, PCI DSS, FedRAMP, HITRUST, "certified", "independently audited", GDPR/CCPA/SOX "compliant" appear the same way |
+| `health-term` | a page that describes Loops or Business Workflows uses HIPAA, PHI, patient, medical, diagnosis, clinic, doctor, healthcare, health information and similar terms outside a negating sentence, without an approved `claims:` entry. Healthcare is banned platform-wide. Pages under `/legal/` and `/privacy/` that state the ban set `health_prohibition: true` (honored only there; elsewhere an error) |
+| `health-prohibition` | a page sets `health_prohibition: true` but contains no sentence that pairs a health term with prohibition wording or a negation |
+| `payment-claim` | "Viadere checkout", "pay with Viadere", "secure payment by Viadere", "Viadere processes payments" and similar appear outside a negating sentence on any page (no legal-page allowance): Viadere never takes payments |
 | `claim-evidence` | a `claims:` entry lacks phrase, feature, evidence or approver, or cites a missing file (unused claims warn) |
 | `product-status` | a product page has no status, or a non-live product says "available now" and similar |
 | `sms-not-e2ee` | a page mentioning SMS fallback does not state that SMS is not end-to-end encrypted |

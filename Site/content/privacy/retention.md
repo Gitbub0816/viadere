@@ -16,6 +16,8 @@ There is no single retention period. Each class of data has a stated default and
 | Audit events | Events past the period and already covered by an exported integrity head | 2,555 (730 to 3,650) |
 | Business applications | Free text of decided applications | 730 (90 to 3,650) |
 | Usage records | Metering rows | 2,555 (365 to 3,650) |
+| Loop activity | Inputs, state and outcome of finished Loops | [Counsel and product to set] |
+| Shopify order status | Order reference, status, item titles, tracking, timestamps, after the order completes or is cancelled | 90 (set by the business within bounds) |
 | Webhook deliveries | Event deliveries and their attempts | 30 (1 to 365) |
 | Outbound messages | Finished text and channel sends | 30 (1 to 365) |
 | Link tokens | Used or expired account-link tokens | 7 (1 to 90) |

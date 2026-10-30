@@ -2,11 +2,11 @@
 title: Subprocessors
 order: 6
 description: "The companies that process data on Viadere's behalf, what they do, where, and how changes are announced."
-version: 0.2.0
+version: 0.3.0
 effective_date: ""
 owner: "Privacy lead [NAME PLACEHOLDER]"
 counsel_review: pending
-change_summary: "Second draft: the full provider list from the data inventory with purpose, data, location and safeguards, plus a change-notification and objection process."
+change_summary: "Third draft: states that Shopify, which a business may connect to show order status and hand customers to its own checkout, is a service the business chooses and not a Viadere subprocessor; no provider added."
 ---
 ::: draft-notice
 **Draft for counsel review.** This list reflects the providers named in the repository's data inventory at the date of drafting. Contracts, data processing terms and transfer mechanisms with each provider are counsel items and are shown in brackets until confirmed.
@@ -14,7 +14,7 @@ change_summary: "Second draft: the full provider list from the data inventory wi
 
 This page lists the third parties ("**subprocessors**") that Viadere engages to process personal data in providing its services, as referred to in the [Data Processing Addendum](/legal/data-processing-addendum/) and the [Privacy Notice](/legal/privacy-notice/). A plain-language version is in the [Privacy Center](/privacy/subprocessors/).
 
-**Last updated:** [DATE, set when the list takes effect]. **Version:** 0.2.0.
+**Last updated:** [DATE, set when the list takes effect]. **Version:** 0.3.0.
 
 ## 1. Current subprocessors
 
@@ -36,6 +36,7 @@ This page lists the third parties ("**subprocessors**") that Viadere engages to 
 - **Write-once audit storage.** The integrity head of the audit log (a hash and a sequence number) is exported on a schedule to write-once storage at Google Cloud Storage or Cloudflare R2. It contains no personal data.
 - **No advertising, analytics or crash-reporting vendors.** None is engaged.
 - **Business customers' own providers.** The services a business uses to receive Viadere webhooks, such as its support platform or CRM, are the business's own service providers, not Viadere's.
+- **Shopify.** A business can connect its own Shopify store so that Viadere can show order status and send a customer to the business's Shopify checkout. Shopify is a service the business chooses and contracts with directly, and Viadere receives minimized order-status data from it on the business's instruction. Viadere does not engage Shopify to process data on Viadere's behalf, so Shopify is not a subprocessor. Viadere lists it here for transparency. Viadere does not accept or process payments, and payment data never reaches Viadere. [COUNSEL: confirm this characterization.]
 - **Carriers.** Wireless carriers and messaging networks carry text messages. They are not Viadere's subprocessors: they act under their own terms with the sender and recipient. SMS is not end-to-end encrypted, and carriers can read ordinary text messages.
 - **Affiliates.** [COUNSEL: list any Viadere affiliate that processes personal data.]
 
@@ -61,7 +62,7 @@ A business that has accepted the Data Processing Addendum may object to a new su
 
 | Date | Change |
 |---|---|
-| [DATE] | First publication of this list (draft 0.2.0) |
+| [DATE] | First publication of this list (draft 0.3.0) |
 
 Earlier versions of this page stay at their own addresses under [Legal](/legal/).
 

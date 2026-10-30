@@ -21,6 +21,7 @@ The binding list, with its change-notification process, is the [Subprocessors](/
 
 - **Verify is planned.** Didit and Wallet identity services apply only if Verify is enabled.
 - **No advertising, analytics or crash-reporting providers.**
+- **Shopify** is chosen by a business that connects its store. Viadere receives minimized order status from it for that business and sends customers to the business's checkout. It is not a Viadere subprocessor, and payment data never reaches Viadere. [COUNSEL: confirm.]
 - **Carriers** carry text messages under their own terms. SMS is not end-to-end encrypted.
 - **Audit integrity heads** (a hash and a sequence number, no personal data) are exported to write-once storage.
 
