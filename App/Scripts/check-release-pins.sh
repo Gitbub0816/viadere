@@ -6,7 +6,7 @@
 #
 #   Release  the production pins live in ViadereConfiguration.productionPinning (marker: PinningConfiguration.placeholderPrefix,
 #            "REPLACE_ME").
-#   Staging  the pins for api-staging.viadere.com come from Configs/Staging.xcconfig (VIADERE_PIN_PRIMARY / VIADERE_PIN_BACKUP, exported
+#   Staging  the pins for viadere-api.cksites.dev come from Configs/Staging.xcconfig (VIADERE_PIN_PRIMARY / VIADERE_PIN_BACKUP, exported
 #            to this script as build settings): each must be base64 of exactly 32 bytes, and the two must differ. The staging API URL
 #            must be https.
 set -eu

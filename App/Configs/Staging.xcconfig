@@ -22,13 +22,18 @@ VIADERE_DISPLAY_NAME = Viadere Staging
 VIADERE_PLIST_DEFS =
 
 // ---- certificate pins for viadere-api.cksites.dev (SPKI SHA-256, base64) -----------------------------------------------------
-// MUST be filled before use: a Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
+// A Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
 // Compute them with App/Scripts/compute-spki-pins.py (docs/ops/STAGING-SETUP.md). Pin the CA intermediate(s) of the Cloudflare edge chain, not
 // the leaf: Cloudflare renews the edge certificate (and may switch CAs) without notice. Primary and backup must differ.
 // If a pin contains two slashes in a row, write one of them as $() so xcconfig does not read it as a comment.
-VIADERE_PIN_PRIMARY = REPLACE_ME_STAGING_PRIMARY_SPKI_SHA256_BASE64
-VIADERE_PIN_BACKUP = REPLACE_ME_STAGING_BACKUP_SPKI_SHA256_BASE64
-VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP)
+// Computed 2026-10-30 from the live Cloudflare edge chain of viadere-api.cksites.dev (App/Scripts/compute-spki-pins.py):
+// leaf CN=cksites.dev <- Google Trust Services WE1 <- GTS Root R4. Cloudflare Universal SSL may also issue from Let's Encrypt, so the
+// ISRG roots are pinned as well (keys published at letsencrypt.org/certs). Re-run the script if Cloudflare changes CA families.
+VIADERE_PIN_PRIMARY = kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=
+VIADERE_PIN_BACKUP = mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=
+VIADERE_PIN_ISRG_X1 = C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=
+VIADERE_PIN_ISRG_X2 = diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=
+VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP),$(VIADERE_PIN_ISRG_X1),$(VIADERE_PIN_ISRG_X2)
 
 // ---- push and App Attest ---------------------------------------------------------------------------------------------
 // Defaults match fly.staging.toml (APNS_ENVIRONMENT = sandbox, APP_ATTEST_ENVIRONMENT = development): builds run from Xcode on a device.
