@@ -90,6 +90,8 @@ struct AccountService {
             try await ApproveKeyService.wipe(consumer: id, on: tx, ctx: ctx)
             // Verification requests and results (WP3) are deleted; consent receipts and audit follow their own retention.
             try await VerifyService.wipe(consumer: id, on: tx)
+            // Organization rows (WP-1.1): per-business preferences, conversation archive/mute, alert seen marks.
+            try await PreferenceService.wipe(consumer: id, on: tx)
             // Phone numbers: unlink, and overwrite the encrypted number and masked display. Everything that holds the same number
             // (outbound queues, link tokens, SMS thread state) is found by its phone hash *before* the hash is replaced.
             let links = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == id).all()

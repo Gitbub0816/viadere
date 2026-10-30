@@ -19,13 +19,19 @@ struct BusinessOnboarding {
         case handleUnavailable
         case invalidHandle
         case invalidCeiling
+        /// FX-4 (WP-1.9): healthcare providers can't use Viadere.
+        case categoryBanned
     }
+
+    static let categoryBannedMessage = "Viadere can't be used by healthcare providers, and no health information may be collected through Viadere. If you are not a healthcare provider, choose the category that describes your business."
+
 
     // MARK: Apply
 
     /// Creates a pending organization, its application and the owner membership. Call inside the sign-up transaction.
     func createPending(businessId: UUID, ownerId: UUID, displayName: String, legalName: String?, category: BusinessCategory,
                        website: String?, requestedHandle: String?, description: String?) async throws -> BusinessRecord {
+        guard !OnboardingService.isBanned(category.rawValue) else { throw Failure.categoryBanned }
         let now = ctx.now
         let business = BusinessRecord(id: businessId, displayName: displayName, legalName: legalName, category: category, status: .pending,
                                       verifiedAt: nil, dailyQuota: ctx.config.freeDailyInteractionQuota, now: now)
@@ -59,6 +65,7 @@ struct BusinessOnboarding {
         guard let business = try await BusinessRecord.find(businessId, on: db), business.status == .pending,
               let application = try await BusinessApplicationRecord.query(on: db).filter(\.$businessId == businessId).first(),
               application.state == "rejected" else { throw Failure.notPending }
+        guard !OnboardingService.isBanned(business.category) else { throw Failure.categoryBanned }
         application.legalName = legalName
         application.website = website
         application.requestedHandle = requestedHandle
@@ -86,6 +93,8 @@ struct BusinessOnboarding {
             guard let business = try await BusinessRecord.find(businessId, on: tx) else { throw Failure.notFound }
             guard business.status == .pending, let application = try await BusinessApplicationRecord.query(on: tx).filter(\.$businessId == businessId).first(),
                   application.state == "pending" else { throw Failure.notPending }
+            // A record that predates the ban (or was created around the sign-up check) is never verified.
+            guard !OnboardingService.isBanned(business.category) else { throw Failure.categoryBanned }
             // Single decision: of two concurrent approvals only one flips pending → verified.
             guard try await DB.swap(tx, table: BusinessRecord.schema, id: businessId, column: "verification_status",
                                     expected: VerificationStatus.pending.rawValue, newValue: VerificationStatus.verified.rawValue,
@@ -130,6 +139,40 @@ struct BusinessOnboarding {
             _ = try await AuditService(db: tx, ctx: ctx).record("business.rejected", outcome: .denied,
                 actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()), businessId: BusinessID(businessId),
                 subjectType: "organization", subjectId: businessId.uuidString.lowercased())
+        }
+    }
+
+    // MARK: Category (WP-1.9)
+
+    /// The operator corrects a business's category (the "reclassify" action of plan 4.13 layer 1). Moving a business **into** a category banned
+    /// platform-wide revokes every entitlement it holds and suspends it (a verified business) or declines its application (a pending one); the
+    /// offboarding runbook (docs/ops/RUNBOOKS.md) covers the rest. Moving out of a banned category lifts nothing by itself.
+    func reclassify(businessId: UUID, category rawCategory: String, operatorId: UUID, note: String) async throws {
+        let category = rawCategory.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard (2...40).contains(category.count), category.allSatisfy({ $0.isLetter || $0 == "_" }) else {
+            throw APIError.validation("Choose a category.", details: ["category": "invalid"])
+        }
+        let reason = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...300).contains(reason.count) else { throw APIError.validation("Record why the category changes.", details: ["note": "required"]) }
+        guard let business = try await BusinessRecord.find(businessId, on: db) else { throw Failure.notFound }
+        let previous = business.category
+        guard previous != category else { return }
+        let actor = AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased())
+        try await BusinessRecord.query(on: db).filter(\.$id == businessId).set(\.$category, to: category).update()
+        _ = try await AuditService(db: db, ctx: ctx).record("business.reclassified", actor: actor, businessId: BusinessID(businessId), subjectType: "organization",
+                                                          subjectId: businessId.uuidString.lowercased(), metadata: ["from": previous, "to": category, "note": reason])
+        guard OnboardingService.isBanned(category) else { return }
+        try await EntitlementService(db: db, ctx: ctx).revokeAll(businessId: businessId, actor: .operatorUser(operatorId),
+                                                                 justification: "Reclassified into a category Viadere does not serve (healthcare): \(reason)")
+        switch business.status {
+        case .verified:
+            try await suspend(businessId: businessId, operatorId: operatorId, reason: Self.categoryBannedMessage)
+        case .pending:
+            if let application = try await BusinessApplicationRecord.query(on: db).filter(\.$businessId == businessId).first(), application.state == "pending" {
+                try await reject(businessId: businessId, operatorId: operatorId, note: Self.categoryBannedMessage)
+            }
+        case .suspended, .revoked:
+            break
         }
     }
 
@@ -184,6 +227,8 @@ struct BusinessOnboarding {
         try await db.transaction { tx in
             guard let business = try await BusinessRecord.find(businessId, on: tx) else { throw Failure.notFound }
             guard business.status == .suspended else { throw Failure.notSuspended }
+            // A business in a category banned platform-wide stays suspended until its category is corrected (WP-1.9).
+            guard !OnboardingService.isBanned(business.category) else { throw Failure.categoryBanned }
             guard try await DB.swap(tx, table: BusinessRecord.schema, id: businessId, column: "verification_status",
                                     expected: VerificationStatus.suspended.rawValue, newValue: VerificationStatus.verified.rawValue) else {
                 throw Failure.notSuspended

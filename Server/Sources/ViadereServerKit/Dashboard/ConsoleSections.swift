@@ -257,6 +257,7 @@ enum ConsoleRoutes {
     /// Registers every WP6 console page on the authenticated business group.
     static func register(_ pages: any RoutesBuilder) {
         ConsoleOrganization.register(pages)
+        ConsoleSurface.register(pages)
         ConsoleDevelopers.register(pages)
         ConsoleSecurity.register(pages)
         ConsoleCompliance.register(pages)

@@ -143,7 +143,26 @@ enum InteractionRoutes {
 enum ConversationRoutes {
     static func register(_ routes: any RoutesBuilder) {
         routes.api(APIRoutes.conversationsList) { req in
-            try req.jsonResponse(try await ConversationService(db: req.db, ctx: req.ctx).summaries(consumer: try req.consumer.consumerId))
+            let consumer = try req.consumer.consumerId
+            // Organization filters (WP-1.1): a selected business must be one the caller is connected to (`404` otherwise); archived threads
+            // are listed only on request.
+            let business = try OrganizationRoutes.businessFilter(req)
+            if let business {
+                guard try await RelationshipRecord.query(on: req.db).filter(\.$consumerId == consumer.uuid).filter(\.$businessId == business.uuid)
+                    .filter(\.$status == "active").first() != nil else { throw APIError.notFound }
+            }
+            let includeArchived = ["1", "true"].contains(req.query[String.self, at: "archived"] ?? "")
+            var summaries = try await ConversationService(db: req.db, ctx: req.ctx).summaries(consumer: consumer)
+            if let business { summaries = summaries.filter { $0.business.id == business } }
+            let states = try await PreferenceService(db: req.db, ctx: req.ctx).conversationStates(consumer: consumer.uuid, sessions: summaries.map(\.id.uuid))
+            summaries = summaries.compactMap { summary in
+                var summary = summary
+                let state = states[summary.id.uuid]
+                summary.archived = state?.archivedAt != nil
+                summary.muted = state?.muted ?? false
+                return summary.archived == true && !includeArchived ? nil : summary
+            }
+            return try req.jsonResponse(summaries)
         }
         routes.api(APIRoutes.conversationStart) { req in
             let body: StartConversationRequest = try req.decodeBody()

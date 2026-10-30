@@ -21,6 +21,7 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
             switch failure {
             case .handleUnavailable: message = "That handle is not available."
             case .invalidHandle: message = "That value is not valid."
+            case .categoryBanned: message = BusinessOnboarding.categoryBannedMessage
             case .invalidCeiling:
                 return DashboardUI.errorPage(principal(), status: .unprocessableEntity, title: "Not valid", message: "Choose low, normal, high or none. A ceiling can only lower priority.")
             default: message = "That action is not possible in the current state."

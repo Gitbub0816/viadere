@@ -44,6 +44,7 @@ private struct NoteForm: Content {
     var decision: String?
     var close: String?
     var scope: String?
+    var category: String?
 }
 
 /// Operator controls for the gaps in docs/ops/KILL-SWITCHES.md: maintenance mode, sign-up stops, webhook pause, messaging restriction, abuse
@@ -206,6 +207,15 @@ enum OperatorOps {
                     text: "Viadere revoked an API key of your organization (\(form.note ?? "security precaution")). Your organization stays active.", kind: "key-revoked")
             }
             return DashboardResponses.redirect("/operator/businesses/\(id.uuidString.lowercased())?m=revoked-all")
+        }
+        // WP-1.9: correct a business's category. Into a category banned platform-wide (healthcare) this revokes every entitlement and
+        // suspends the business (or declines its application); the offboarding runbook covers the rest.
+        base.post("category") { req -> Response in
+            let id = try req.uuid("id")
+            let p = try mutating(req, next: "/operator/businesses/\(id.uuidString.lowercased())")
+            let form = try req.content.decode(NoteForm.self)
+            try await BusinessOnboarding(db: req.db, ctx: req.ctx).reclassify(businessId: id, category: form.category ?? "", operatorId: p.user.id!, note: form.note ?? "")
+            return DashboardResponses.redirect("/operator/businesses/\(id.uuidString.lowercased())?m=reclassified")
         }
         base.post("legal-entity") { req -> Response in
             let id = try req.uuid("id")
@@ -408,6 +418,18 @@ enum OperatorOps {
             ["Assurance", row.assuranceFailure.map { "Failing: \(DashboardUI.esc($0))" } ?? "In good standing"],
         ]
         out += "<div class=\"card\"><h2>Onboarding (stage: \(state.stage.rawValue))</h2>\(DashboardFormat.table(["Item", "State"], facts, caption: "Onboarding facts"))</div>"
+        // WP-1.9: the category, with the reclassify action (healthcare is refused platform-wide).
+        let banned = OnboardingService.isBanned(business.category)
+        let options = (DashboardAuthService.categories + ["healthcare"]).map { c in
+            "<option value=\"\(c)\"\(c == business.category ? " selected" : "")>\(DashboardUI.esc(c.replacingOccurrences(of: "_", with: " ")))</option>"
+        }.joined()
+        let bannedNotice = banned ? "<div class=\"notice dg\" role=\"alert\">This business is in a category Viadere does not serve (healthcare). Follow the offboarding runbook.</div>" : ""
+        out += """
+        <div class="card"><h2>Category</h2>\(bannedNotice)<p class="mu sm">Current: \(DashboardUI.esc(business.category)). Reclassifying into healthcare revokes every entitlement and suspends the business.</p>\
+        <form method="post" action="\(base)/category">\(csrf)<label for="cat">Category</label><select id="cat" name="category">\(options)</select>\
+        <label for="catn">Reason (recorded in the audit log)</label><input id="catn" name="note" type="text" minlength="8" maxlength="300" required>\
+        <button class="btn" type="submit">Change category</button></form></div>
+        """
         if state.legalEntity == .submitted {
             out += """
             <div class="card"><h2>Legal entity review</h2><form method="post" action="\(base)/legal-entity">\(csrf)<label for="ln">Note (shown to the business if declined)</label><textarea id="ln" name="note" maxlength="500"></textarea>\

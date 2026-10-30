@@ -452,6 +452,20 @@ extension SurfaceLayout {
     }
 }
 
+extension SurfaceLayout {
+    /// The largest stored layout document.
+    public static let maxBytes = 4096
+
+    /// Strict parse of stored or submitted bytes (no floating point, size-capped) plus every layout rule.
+    public static func validate(data: Data, registry: ModuleRegistry = .v1, loopsEnabled: Bool = false) -> (layout: SurfaceLayout?, issues: [ContractIssue]) {
+        guard data.count <= maxBytes, let value = JSONValue.parseContract(data) else { return (nil, [ContractIssue(code: "invalid_json", path: "")]) }
+        return validate(value, registry: registry, loopsEnabled: loopsEnabled)
+    }
+
+    /// Canonical JSON (§2.2) of the layout document, as stored in `business_surfaces.layout_json`.
+    public func canonicalJSON() throws -> Data { try CanonicalJSON.serialize(jsonValue) }
+}
+
 // MARK: - Conversations (archive and mute, spec C4.3)
 
 /// `PUT /v1/conversations/{sessionId}/state`. Absent members are unchanged. Per account, never shared with the business.

@@ -108,6 +108,7 @@ struct TenantDataRequests {
             try await BusinessSecuritySettingsRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await SupportTicketRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await PendingChangeRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            try await BusinessSurfaceRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await OrgInviteRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$state == "open").set(\.$state, to: "revoked").update()
             let members = try await OrgMembershipRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$removedAt == nil).all()
             for member in members { member.removedAt = now; try await member.update(on: tx) }

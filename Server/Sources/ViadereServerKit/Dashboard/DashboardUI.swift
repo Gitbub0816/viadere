@@ -126,6 +126,7 @@ enum DashboardUI {
         NavSection(title: "Organization", path: "/dashboard/organization", permissions: [.viewOrganization, .viewTeam, .manageOrganization], children: [
             NavItem(title: "Profile and onboarding", path: "/dashboard/organization", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Domains", path: "/dashboard/organization/domains", permissions: [.viewOrganization, .manageOrganization]),
+            NavItem(title: "Your Viadere page", path: "/dashboard/organization/page", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Team", path: "/dashboard/team", permissions: [.viewTeam]),
         ]),
         NavSection(title: "Developers", path: "/dashboard/developers", permissions: [.viewAPIKeys, .viewWebhooks, .viewTemplates], children: [
