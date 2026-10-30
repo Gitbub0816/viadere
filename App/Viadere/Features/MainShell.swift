@@ -5,26 +5,26 @@ import ViadereKit
 extension AppTab {
     var title: String {
         switch self {
-        case .home: "Home"
-        case .activity: "Activity"
-        case .connect: "Connect"
         case .messages: "Messages"
-        case .settings: "Settings"
+        case .alerts: "Alerts"
+        case .benefits: "Benefits"
+        case .businesses: "Businesses"
         }
     }
 
     var symbol: String {
         switch self {
-        case .home: "house"
-        case .activity: "clock"
-        case .connect: "plus.circle"
         case .messages: "bubble.left"
-        case .settings: "slider.horizontal.3"
+        case .alerts: "bell"
+        case .benefits: "tag"
+        case .businesses: "building.2"
         }
     }
 }
 
-/// Four tabs on a hand-built bar. Each tab keeps its own `NavigationStack` (system bar hidden).
+/// The stable bar (spec C1; plan 4.8 variant A): Messages, Alerts, Benefits, Businesses on a hand-built bar, each tab with its own
+/// `NavigationStack` (system bar hidden). The business selector at the top of every tab filters Messages, Alerts and Benefits the same way;
+/// Settings and Add business open as sheets from it. The bar never grows with the number of businesses.
 struct MainShell: View {
     @Bindable var model: AppModel
 
@@ -32,11 +32,10 @@ struct MainShell: View {
         VStack(spacing: 0) {
             Group {
                 switch model.selectedTab {
-                case .home: HomeView(model: model)
-                case .activity: ActivityView(model: model)
-                case .connect: ConnectView(model: model)
                 case .messages: MessagesView(model: model)
-                case .settings: SettingsView(model: model)
+                case .alerts: AlertsView(model: model)
+                case .benefits: BenefitsView(model: model)
+                case .businesses: BusinessesView(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,14 +46,32 @@ struct MainShell: View {
         .viadereScreenBackground()
         .viadereDocumentVerification()
         .sheet(item: Binding(get: { AppEnvironment.shared.verification.presented.map(PresentedVerification.init) },
-                             set: { AppEnvironment.shared.verification.presented = $0?.id })) { presented in
+                             set: { value in
+                                 AppEnvironment.shared.verification.presented = value?.id
+                                 // The verification sheet always names its own recipient; the context was frozen while it was open.
+                                 if value == nil { model.organization.endSensitiveFlow() }
+                             })) { presented in
             VerificationSheetHost(id: presented.id)
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
+        .sheet(isPresented: $model.settingsPresented) {
+            SettingsView(model: model)
+                .presentationDetents([.large])
+                .presentationCornerRadius(ViadereRadius.sheet)
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(isPresented: $model.addBusinessPresented, onDismiss: {
+            Task { await model.businesses.load() }
+        }) {
+            ConnectView(model: model)
+                .presentationDetents([.large])
+                .presentationCornerRadius(ViadereRadius.sheet)
+                .presentationBackground(ViadereColor.background)
+        }
         .task { await model.messages.load() }
         .onChange(of: model.home.content, initial: true) { _, content in
-            // Keep the watch's pending list and any running Live Activities in step with Home.
+            // Keep the watch's pending list and any running Live Activities in step with the pending requests.
             let environment = AppEnvironment.shared
             environment.watchBridge.push(content)
             Task { await environment.liveActivities.sync(content.statuses) }
@@ -65,10 +82,10 @@ struct MainShell: View {
         }
     }
 
+    /// Alerts: what is actionable now (the server's read model, re-checked by the device clock). Messages: unread. Never both for one event.
     private func badge(for tab: AppTab) -> Int {
         switch tab {
-        case .home: model.home.content.pending.count
-        case .activity: model.activity.needsYouCount
+        case .alerts: model.alerts.badgeCount()
         case .messages: model.messages.unreadTotal
         default: 0
         }

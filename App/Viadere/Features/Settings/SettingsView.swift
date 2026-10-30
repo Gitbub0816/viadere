@@ -30,7 +30,9 @@ struct SettingsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ViadereHeader("Settings")
+                    ViadereHeader("Settings") {
+                        ViadereIconButton(systemName: "xmark", label: "Close settings") { model.settingsPresented = false }
+                    }
                     thisDevice
                     securitySection
                     trustSection

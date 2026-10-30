@@ -2,36 +2,26 @@ import SwiftUI
 import ViadereCore
 import ViadereKit
 
-/// Conversations with verified businesses. Every thread is attributed to exactly one business.
+/// Conversations with verified businesses (spec C4). Every thread is attributed to exactly one business; histories are never merged. In
+/// All, threads are grouped by business; the selector narrows to one business. Search runs on this device over the cached list (message
+/// bodies are encrypted at rest on the server, so there is no server-side search).
 struct MessagesView: View {
     @Bindable var model: AppModel
     @State private var path: [ConversationSummary] = []
 
     private var messages: MessagesViewModel { model.messages }
+    private var context: OrganizationContext { model.organization.effective }
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.s) {
-                    ViadereHeader("Messages", subtitle: messages.unreadTotal > 0 ? "\(messages.unreadTotal) unread" : nil)
-                    if messages.conversations.isEmpty {
-                        if messages.isLoading {
-                            ViadereLoading(height: 30).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
-                        } else {
-                            ViadereEmptyState("No conversations",
-                                              message: "Message a business you're connected to from its page. Replies arrive here and as notifications.",
-                                              actionTitle: "See your businesses") { model.selectedTab = .home }
-                                .padding(.top, ViadereSpace.xl)
-                        }
-                    } else {
-                        ViadereRowGroup {
-                            ForEach(Array(messages.conversations.enumerated()), id: \.element.id) { index, conversation in
-                                Button { path.append(conversation) } label: { ConversationRow(conversation: conversation) }
-                                    .buttonStyle(.plain)
-                                if index < messages.conversations.count - 1 { ViadereHairline(inset: 56) }
-                            }
-                        }
+                    OrganizationContextHeader(model: model)
+                    ViadereHeader("Messages", subtitle: subtitle)
+                    if messages.conversations.count > 3 {
+                        ViadereSearchField("Search conversations", text: Binding(get: { messages.searchQuery }, set: { messages.searchQuery = $0 }))
                     }
+                    content
                     if let error = messages.errorMessage {
                         ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m)
                     }
@@ -40,6 +30,7 @@ struct MessagesView: View {
                 .padding(.bottom, ViadereSpace.xl)
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .refreshable { await messages.load() }
             .viadereScreenBackground()
             .toolbar(.hidden, for: .navigationBar)
@@ -50,8 +41,72 @@ struct MessagesView: View {
             .task(id: model.conversationToOpen) {
                 guard let id = model.conversationToOpen else { return }
                 await messages.load()
-                if let match = messages.conversations.first(where: { $0.id == id }) { path = [match] }
+                if let match = messages.conversations.first(where: { $0.id == id }) {
+                    // A thread opened from a push or link for another business shows that business; the saved choice stays.
+                    model.organization.open(itemFrom: match.business.id)
+                    path = [match]
+                }
                 model.conversationToOpen = nil
+            }
+        }
+    }
+
+    private var subtitle: String? {
+        let unread = messages.unread(context: context)
+        return unread > 0 ? "\(unread) unread" : model.organization.selectedBusiness.map { "With \($0.safeName)" }
+    }
+
+    @ViewBuilder private var content: some View {
+        let groups = messages.groups(context: context)
+        if messages.conversations.isEmpty && messages.isLoading {
+            ViadereLoading(height: 30).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+        } else if groups.isEmpty {
+            if !messages.searchQuery.isEmpty {
+                Text("No conversation matches \u{201C}\(messages.searchQuery)\u{201D}.")
+                    .font(ViadereType.body)
+                    .foregroundStyle(ViadereColor.textSecondary)
+                    .padding(.top, ViadereSpace.m)
+            } else if let business = model.organization.selectedBusiness {
+                ViadereEmptyState("No messages with \(business.safeName)",
+                                  message: "Start a conversation from \(business.safeName)'s page. Replies arrive here and as notifications.",
+                                  actionTitle: "Message \(business.safeName)") {
+                    Task {
+                        if let started = await messages.start(with: business.id) { path = [started] }
+                    }
+                }
+                .padding(.top, ViadereSpace.xl)
+            } else {
+                ViadereEmptyState("No conversations",
+                                  message: "Message a business you're connected to from its page. Replies arrive here and as notifications.",
+                                  actionTitle: "See your businesses") { model.selectedTab = .businesses }
+                    .padding(.top, ViadereSpace.xl)
+            }
+        } else if context == .all {
+            ForEach(groups) { group in
+                ViadereSectionHeader(group.business.safeName)
+                threadList(group.threads)
+            }
+        } else {
+            threadList(groups.flatMap(\.threads))
+        }
+    }
+
+    private func threadList(_ threads: [ConversationSummary]) -> some View {
+        ViadereRowGroup {
+            ForEach(Array(threads.enumerated()), id: \.element.id) { index, conversation in
+                Button { path.append(conversation) } label: { ConversationRow(conversation: conversation) }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(conversation.muted == true ? "Unmute" : "Mute") {
+                            Task { await messages.setMuted(conversation.id, !(conversation.muted ?? false)) }
+                        }
+                        Button("Archive") { Task { await messages.setArchived(conversation.id, true) } }
+                    }
+                    .accessibilityAction(named: Text(conversation.muted == true ? "Unmute" : "Mute")) {
+                        Task { await messages.setMuted(conversation.id, !(conversation.muted ?? false)) }
+                    }
+                    .accessibilityAction(named: Text("Archive")) { Task { await messages.setArchived(conversation.id, true) } }
+                if index < threads.count - 1 { ViadereHairline(inset: 56) }
             }
         }
     }

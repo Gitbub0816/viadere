@@ -21,7 +21,9 @@ struct ConnectView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                    ViadereHeader("Connect", subtitle: subtitle)
+                    ViadereHeader("Add business", subtitle: subtitle) {
+                        ViadereIconButton(systemName: "xmark", label: "Close") { model.addBusinessPresented = false }
+                    }
                     switch vm.phase {
                     case .entry, .failed:
                         entry
@@ -48,6 +50,13 @@ struct ConnectView: View {
             guard let pending = model.pendingConnect else { return }
             model.pendingConnect = nil
             await vm.open(code: pending.code, link: pending.link, source: pending.source == .code ? .code : .qr)
+        }
+        .task(id: model.businessToOpen) {
+            // A business link (`@handle`) for a business the customer isn't connected to yet: review it here first.
+            guard let handle = model.businessToOpen else { return }
+            model.businessToOpen = nil
+            vm.setInput(handle.display)
+            await vm.submit()
         }
         .task(id: model.pendingLinkSession) {
             guard let pending = model.pendingLinkSession else { return }
@@ -204,14 +213,20 @@ private struct ConnectedState: View {
             VStack(spacing: ViadereSpace.xs) {
                 Button("Done") {
                     onDone()
-                    model.selectedTab = .home
-                    Task { await model.home.load() }
+                    model.selectedTab = .businesses
+                    model.addBusinessPresented = false
+                    Task {
+                        await model.home.load()
+                        await model.refreshOrganization()
+                    }
                 }
                 .buttonStyle(.viadere(.primary))
                 Button("Send a message") {
                     Task {
                         if await model.messages.start(with: relationship.business.id) != nil { model.selectedTab = .messages }
                         onDone()
+                        model.addBusinessPresented = false
+                        await model.refreshOrganization()
                     }
                 }
                 .buttonStyle(.viadere(.secondary))
