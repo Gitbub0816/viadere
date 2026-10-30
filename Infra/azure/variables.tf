@@ -47,9 +47,9 @@ variable "tenant_id" {
 }
 
 variable "location" {
-  description = "Azure region. eastus2: new subscriptions are refused PostgreSQL Flexible Server in eastus (no versions offered, checked 2026-10-30); eastus2 is adjacent and priced the same."
+  description = "Azure region. centralus: on 2026-10-30 this subscription was refused PostgreSQL Flexible Server in eastus (no versions offered) and eastus2 (SkuNotAvailable for B1ms at create time, although list-skus showed it); a test create succeeded in centralus."
   type        = string
-  default     = "eastus2"
+  default     = "centralus"
 }
 
 variable "name_suffix" {

@@ -22,7 +22,7 @@ Contents: [1 Profiles and design choices](#1-profiles-and-design-choices) · [2 
 | Monitoring | Log Analytics + App Insights, local auth off, daily cap 0.15 GB | same, no cap, 90-day retention |
 | Resource locks | none | CanNotDelete on the data and security resource groups |
 
-Common to both: region `eastus`; five resource groups `rg-viadere-<stg|prd>-{net,app,data,sec,ops}`; VNet 10.40.0.0/16 (staging) or 10.50.0.0/16 (production); user-assigned identities `id-viadere-{api,worker,migrator,cloudflared}` (+ `id-viadere-acrpull` in standard) with roles only on individual keys, secrets, the namespace or the container; deploy identity `id-gh-deploy-<env>` federated to the GitHub environment; no Managed HSM; no Azure Firewall (owner decision O-8).
+Common to both: region `centralus` (staging; `eastus` and `eastus2` refused PostgreSQL Flexible Server B1ms for the subscription on 2026-10-30 although `list-skus` offered it, so test a create before choosing a region; prices below are `eastus` list prices, `centralus` is within a few percent); five resource groups `rg-viadere-<stg|prd>-{net,app,data,sec,ops}`; VNet 10.40.0.0/16 (staging) or 10.50.0.0/16 (production); user-assigned identities `id-viadere-{api,worker,migrator,cloudflared}` (+ `id-viadere-acrpull` in standard) with roles only on individual keys, secrets, the namespace or the container; deploy identity `id-gh-deploy-<env>` federated to the GitHub environment; no Managed HSM; no Azure Firewall (owner decision O-8).
 
 Design decisions taken in WP-B1 (with reasons):
 
