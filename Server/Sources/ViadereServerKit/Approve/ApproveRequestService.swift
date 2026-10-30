@@ -1,4 +1,5 @@
 import Fluent
+import SQLKit
 import Foundation
 import ViadereCore
 
@@ -34,8 +35,12 @@ struct ApproveRequestService {
             throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
         }
         guard ApproveIdentifiers.isValidRequestId(body.requestId) else { throw APIError.validation("request_id is invalid.", details: ["request_id": "invalid"]) }
-        let lifetime = body.expiresInSeconds ?? Self.defaultLifetime
-        guard (30...600).contains(lifetime) else { throw APIError.validation("expires_in_seconds must be between 30 and 600.", details: ["expires_in_seconds": "invalid"]) }
+        // The registered action (spec v4 A4) fixes the allowed lifetime; a capability without one is never an approval.
+        guard let action = ActionRegistry.approval(for: body.capability), action.isLive else {
+            throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
+        }
+        let lifetime = body.expiresInSeconds ?? action.defaultTimeout
+        guard action.timeout.contains(lifetime) else { throw APIError.validation("expires_in_seconds must be between 30 and 600.", details: ["expires_in_seconds": "invalid"]) }
 
         // The shape: exactly one way to carry the details.
         let endToEnd = body.envelopes != nil
@@ -90,7 +95,12 @@ struct ApproveRequestService {
         try await ApproveFreezeService(db: db, ctx: ctx).requireNotFrozen(consumerId: relationship.consumerId, relationshipId: relationship.id!)
 
         let keyService = ApproveKeyService(db: db, ctx: ctx)
-        let active = try await keyService.activeKeys(relationshipId: relationship.id!)
+        let devicePolicy = try await keyService.devicePolicy(businessId: principal.businessId.uuid)
+        var active = try await keyService.activeKeys(relationshipId: relationship.id!)
+        // `single_device` (WP-C2): only the most recently confirmed key may answer, whatever older keys survived.
+        if devicePolicy == .singleDevice, let newest = active.max(by: { ($0.key.activatedAt ?? $0.key.createdAt) < ($1.key.activatedAt ?? $1.key.createdAt) }) {
+            active = [newest]
+        }
         guard !active.isEmpty else {
             throw APIError(.conflict, .conflict, "The customer has no active approval key for your business. Enroll one first.", details: ["reason": "no_active_key"])
         }
@@ -132,6 +142,8 @@ struct ApproveRequestService {
         record.capability = body.capability.rawValue
         record.protection = (endToEnd ? ApprovalProtection.endToEnd : .serverVisible).rawValue
         record.requestHash = hash
+        record.attempts = 0
+        record.devicePolicy = devicePolicy.rawValue
         record.challenge = endToEnd ? nil : body.challenge
         if let details {
             let stored = StoredDetails(transaction: body.transaction, authentication: body.authentication)
@@ -290,6 +302,8 @@ struct ApproveRequestService {
                 .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
         }
         try await ApproveEnrollmentService(db: db, ctx: ctx).expireUnconfirmed()
+        // Link sessions nobody completed, and completed ones the business never confirmed (WP-C1; the same job tick, no new job).
+        try await LinkSessionService(db: db, ctx: ctx).expireDue()
         if try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).count() > 0 {
             try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).delete()
         }
@@ -310,10 +324,23 @@ struct ApproveRequestService {
         var requests = 1
         var warn = false
         if case .allow(let count, let showWarning)? = verdict { requests = count; warn = showWarning }
-        return ApproveDeviceRequest(id: delivery.id!, requestId: request.requestId, business: business, subjectRef: subject, capability: Capability(rawValue: request.capability),
+        // The request as a durable alert (spec v4 C5): one event id for the request, whatever device or push asks; never actionable once expired.
+        let capability = Capability(rawValue: request.capability)
+        let action = ActionRegistry.approval(for: capability)
+        let alertStatus: AlertStatus
+        switch request.statusValue {
+        case .pending: alertStatus = request.expiresAt > ctx.now ? .pending : .expired
+        case .approved, .denied, .reported: alertStatus = .completed
+        case .expired: alertStatus = .expired
+        case .cancelled, .locked: alertStatus = .cancelled
+        case .unknown: alertStatus = .unknown
+        }
+        let alert = AlertDescriptor(eventId: AlertDescriptor.eventId(kind: "approve_request", id: request.id!), category: .approval, businessId: business.id,
+                                    urgency: AlertUrgency(risk: action?.risk ?? .high), status: alertStatus, expiresAt: request.expiresAt, action: action?.id, now: ctx.now)
+        return ApproveDeviceRequest(id: delivery.id!, requestId: request.requestId, business: business, subjectRef: subject, capability: capability,
                                     kid: key.kid, protection: request.protectionValue, status: request.statusValue, createdAt: request.createdAt, expiresAt: request.expiresAt,
                                     envelope: envelope, challenge: request.challenge, transaction: stored?.transaction, authentication: stored?.authentication,
-                                    requestsInWindow: requests, showFatigueWarning: warn)
+                                    requestsInWindow: requests, showFatigueWarning: warn, alert: alert)
     }
 
     /// Pending requests for the calling device's active keys.
@@ -357,6 +384,23 @@ struct ApproveRequestService {
                                  verdict: try await promptVerdictForDisplay(relationshipId: request.relationshipId, now: ctx.now))
     }
 
+    // MARK: Device: invalid submissions (WP-C2)
+
+    /// Reasons that count as an invalid submission: the result itself was wrong (malformed, signed by another key, for another request, too weak,
+    /// from the future) or the device's integrity assertion failed.
+    static let countedReasons: Set<String> = ["malformed", "kid_mismatch", "bad_signature", "signed_in_future", "context_mismatch", "insufficient_assurance",
+                                             "binding_mismatch", "assertion_failed"]
+
+    /// `attempts = attempts + 1` in one statement (no lost update under concurrency), then locks the request once it reaches the limit.
+    func countInvalidSubmission(_ request: ApproveRequestRecord) async throws {
+        guard let id = request.id, let sql = db as? any SQLDatabase else { return }
+        try await sql.update(ApproveRequestRecord.schema).set(SQLIdentifier("attempts"), to: SQLRaw("attempts + 1"))
+            .where("id", .equal, id).where("status", .equal, ApprovalRequestStatus.pending.rawValue).run()
+        guard let fresh = try await ApproveRequestRecord.find(id, on: db), fresh.statusValue == .pending,
+              fresh.attempts >= ctx.config.approve.maxInvalidSubmissions else { return }
+        _ = try await finish(fresh, status: .locked, reason: "too_many_invalid_submissions", notify: true)
+    }
+
     // MARK: Device: the signed result
 
     func submit(principal: ConsumerPrincipal, deliveryId: UUID, body: SubmitApprovalResultRequest) async throws -> SubmitApprovalResultResponse {
@@ -368,7 +412,13 @@ struct ApproveRequestService {
         func reject(_ reason: String, _ error: APIError) async throws -> Never {
             _ = try? await audit.record("approve.decision_rejected", outcome: .denied, principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",
                                         subjectId: request.id?.uuidString.lowercased(), metadata: ["reason": reason])
+            // An invalid result counts against the request (WP-C2): after `maxInvalidSubmissions` it locks and accepts nothing more. Refusals that are
+            // not the submitter's fault (expired, frozen, already decided, an untrusted device) do not count.
+            if Self.countedReasons.contains(reason) { try? await countInvalidSubmission(request) }
             throw error
+        }
+        guard request.statusValue != .locked else {
+            try await reject("locked", APIError(.locked, .requestLocked, "This request was locked after too many invalid answers. Ask the business to send a new one."))
         }
         guard request.statusValue == .pending else { try await reject("not_pending", .conflict("This request has already been resolved.")) }
         if request.expiresAt <= now {
@@ -383,6 +433,14 @@ struct ApproveRequestService {
             try await reject("device", APIError(.forbidden, .forbidden, "This device can't respond to requests."))
         }
         guard try await DirectoryService(db: db).verified(id: request.businessId) != nil else { try await reject("business_unavailable", .gone("This request is no longer available.")) }
+        // An attested device asserts over exactly this result (`APP_ATTEST_ASSERTION_MODE`, WP-C2).
+        do {
+            try await AppAttestAssertionPolicy(db: db, ctx: ctx).check(device: device, assertion: body.appAttestAssertion,
+                                                                       clientData: ApprovalAppAttest.clientData(deliveryId: deliveryId, result: body.result),
+                                                                       purpose: "approve_result", principal: principal)
+        } catch let error as APIError {
+            try await reject("assertion_failed", error)
+        }
 
         let parts: ApprovalResultJWS.Parts
         do { parts = try ApprovalResultJWS.parse(body.result) } catch { try await reject("malformed", .badRequest("The result could not be read.")) }
@@ -422,8 +480,12 @@ struct ApproveRequestService {
             // High-risk approval needs a D1 device, or a key the business itself enrolled for this (D0) device after it existed (business
             // re-enrollment, `DeviceTrust.mayCompleteBusinessEnrollment`). Never time.
             if (capability.definition?.sensitivity ?? .critical) >= .high, !DeviceTrust.isTrusted(device, at: now) {
+                // The key came from an Approve enrollment or from a link session (WP-C1; the key's enrollment id is the session id).
                 let enrollment = try await ApproveEnrollmentRecord.find(key.enrollmentId, on: db)
-                let businessEnrolled = enrollment.map { $0.statusValue == .confirmed && $0.createdAt >= device.createdAt } ?? false
+                var businessEnrolled = enrollment.map { $0.statusValue == .confirmed && $0.createdAt >= device.createdAt } ?? false
+                if enrollment == nil, let session = try await LinkSessionRecord.find(key.enrollmentId, on: db) {
+                    businessEnrolled = session.statusValue == .confirmed && session.createdAt >= device.createdAt && session.claimedDeviceId == device.id
+                }
                 if !businessEnrolled {
                     try await reject("device_not_trusted", APIError(.forbidden, .deviceCoolDown,
                         "This device hasn't been approved yet. Approve it from a device you already trust, or ask the business to set it up again."))

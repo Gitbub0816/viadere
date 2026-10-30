@@ -102,7 +102,8 @@ struct RelationshipService {
     }
 
     func list(consumer: ConsumerID) async throws -> [Relationship] {
-        let records = try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer.uuid)
+        // A connection waiting for a business's link confirmation is not a relationship yet (WP-C1).
+        let records = try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$status != RelationshipRecord.pendingLink)
             .sort(\.$connectedAt, .descending).all()
         let businesses = try await BusinessRecord.query(on: db).filter(\.$id ~~ records.map(\.businessId)).all()
         let summaries = try await DirectoryService(db: db).summaries(for: businesses)

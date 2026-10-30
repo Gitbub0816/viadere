@@ -12,7 +12,7 @@ enum BusinessRoutes {
             let principal = try req.business
             // Capability first (a key without it never learns whether a customer reference exists), then the customer addressing.
             try await req.requireCapability(Capability.required(forInteractionKind: body.kind))
-            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(&body, businessId: principal.businessId)
             let result = try await InteractionService(db: req.db, ctx: req.ctx).issue(principal: principal, request: body, headerKey: req.idempotencyHeader)
             if !principal.livemode { try? await OnboardingService(db: req.db, ctx: req.ctx).testEventSent(businessId: principal.businessId.uuid) }
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
@@ -36,7 +36,7 @@ enum BusinessRoutes {
             var body: BusinessSendMessageRequest = try req.decodeBody()
             let principal = try req.business
             try await req.requireCapability(.messageSend)
-            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(&body, businessId: principal.businessId)
             let result = try await ConversationService(db: req.db, ctx: req.ctx).businessSend(principal: principal, request: body, headerKey: req.idempotencyHeader)
             if !principal.livemode { try? await OnboardingService(db: req.db, ctx: req.ctx).testEventSent(businessId: principal.businessId.uuid) }
             return try req.jsonResponse(result.message, status: result.created ? .created : .ok)
@@ -45,7 +45,7 @@ enum BusinessRoutes {
             var body: BusinessStatusUpdateRequest = try req.decodeBody()
             let principal = try req.business
             try await req.requireCapability(.messageSend)
-            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(&body, businessId: principal.businessId)
             let result = try await InteractionService(db: req.db, ctx: req.ctx).updateStatus(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.interaction, status: result.created ? .created : .ok)
         }

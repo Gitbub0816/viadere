@@ -146,7 +146,9 @@ final class ApproveRequestTests: XCTestCase {
     }
 
     func testTheRelayRefusesResultsThatDoNotBindTheRequest() async throws {
-        try await withHarness { h in
+        // Fourteen distinct binding violations against one request: the attempt lock (WP-C2, five invalid submissions, tested in
+        // ApprovalHardeningTests) is raised here so every refusal reason is observed on the same request.
+        try await withHarness({ $0.approve.maxInvalidSubmissions = 100 }) { h in
             let f = try await h.approveFixture()
             let (body, _, request) = try await decide(h, f)
             let display: ApprovalSubject = .transaction(body.transaction!)

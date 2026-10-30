@@ -29,8 +29,12 @@ enum LegacyApproval {
 
     /// Throws `403 legacy_approval_not_entitled` unless the request may proceed.
     static func require(kind: InteractionKind, sensitivity: Sensitivity, principal: BusinessPrincipal, ctx: ServerContext, db: any Database) async throws {
-        guard ctx.config.approve.enabled, principal.livemode, isApproval(kind: kind, sensitivity: sensitivity) else { return }
-        if ctx.now < sunset, try await EntitlementService(db: db, ctx: ctx).snapshot(businessId: principal.businessId.uuid).legacyApproval { return }
+        guard principal.livemode, isApproval(kind: kind, sensitivity: sensitivity) else { return }
+        if ctx.now < sunset {
+            // Before the sunset the path is only restricted while Approve v2 exists; after it, it is closed whatever the gate says (WP-C2).
+            guard ctx.config.approve.enabled else { return }
+            if try await EntitlementService(db: db, ctx: ctx).snapshot(businessId: principal.businessId.uuid).legacyApproval { return }
+        }
         _ = try? await AuditService(db: db, ctx: ctx).record("interaction.legacy_approval_refused", outcome: .denied,
             actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()), businessId: principal.businessId,
             subjectType: "interaction_kind", subjectId: kind.rawValue)

@@ -10,7 +10,7 @@ What is generated (formats and minimum lengths come from Server/Sources/ViadereS
 
   CONNECT_LINK_SIGNING_KEY, SERVER_PEPPER, DATA_ENCRYPTION_KEY, AUDIT_CHAIN_KEY, SUBJECT_REF_KEY
       base64url (no padding) of 32 random bytes; the server needs at least 32 bytes and, in staging/production, five different values
-  KEY_DIRECTORY_LOG_KEY
+  KEY_DIRECTORY_LOG_KEY, LINK_DESCRIPTOR_SIGNING_KEY
       base64url of a 32-byte P-256 private scalar: 1 <= d < n (the curve order); candidates outside that range are rejected and redrawn
   EDGE_TOKEN
       the shared value of the Cloudflare header X-Viadere-Edge-Token: 32..256 printable ASCII characters, no spaces
@@ -39,6 +39,7 @@ GENERATED = {
     "AUDIT_CHAIN_KEY": "bytes32",
     "SUBJECT_REF_KEY": "bytes32",
     "KEY_DIRECTORY_LOG_KEY": "scalar",
+    "LINK_DESCRIPTOR_SIGNING_KEY": "scalar",
     "EDGE_TOKEN": "token",
     "METRICS_TOKEN": "token",
 }
@@ -80,7 +81,7 @@ def p256_scalar():
 def generate(include_log_key=True):
     values = {}
     for name, kind in GENERATED.items():
-        if name == "KEY_DIRECTORY_LOG_KEY" and not include_log_key:
+        if name in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY") and not include_log_key:
             continue
         while True:
             if kind == "bytes32":
@@ -101,7 +102,7 @@ def validate(values):
     for name, kind in GENERATED.items():
         value = values.get(name)
         if value is None:
-            if name != "KEY_DIRECTORY_LOG_KEY":
+            if name not in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY"):
                 problems.append("%s is missing" % name)
             continue
         if kind == "bytes32":
@@ -159,7 +160,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Generate Viadere server secrets.")
     parser.add_argument("--app", default="viadere-server-staging", help="Fly app name (default: %(default)s)")
     parser.add_argument("--env-file", metavar="PATH", help="write NAME=value lines to this new file (mode 600) instead of printing them")
-    parser.add_argument("--no-log-key", action="store_true", help="skip KEY_DIRECTORY_LOG_KEY (only needed once APPROVE_V2_ENABLED=true)")
+    parser.add_argument("--no-log-key", action="store_true", help="skip KEY_DIRECTORY_LOG_KEY and LINK_DESCRIPTOR_SIGNING_KEY (only needed once APPROVE_V2_ENABLED=true)")
     parser.add_argument("--check", nargs="?", const="", metavar="ENV_FILE",
                         help="validate ENV_FILE, or with no file generate a fresh set and validate it (self-check); prints nothing secret")
     args = parser.parse_args(argv)

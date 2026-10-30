@@ -43,6 +43,9 @@ public final class ServerContext: Sendable {
     public let integrity: any DeviceIntegrityVerifier
     /// Transactional email (dashboard verification codes and invitations).
     public let email: any EmailSender
+    /// Server signing keys whose private half the process should not hold (`link-descriptor`, WP-C1). `LocalKMS` from the environment until the
+    /// Key Vault adapter (WP-B2) is passed in instead.
+    public let kms: any KeyManagementService
     /// Security alerts (budget exhaustion, ...) that operators should be able to alert on.
     public let logger = Logger(label: "viadere.security")
 
@@ -52,7 +55,8 @@ public final class ServerContext: Sendable {
                 dashboardPasskeys: (any PasskeyVerifier)? = nil, passSigner: (any PassSigner)? = nil,
                 passPush: any PassPushSender = DisabledPassPushSender(),
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
-                email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil) {
+                email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil,
+                kms: (any KeyManagementService)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
@@ -73,6 +77,7 @@ public final class ServerContext: Sendable {
         self.email = email
         self.domains = domains ?? UnconfiguredDomainChecker()
         self.outbound = outbound ?? UnconfiguredOutboundHTTP()
+        self.kms = kms ?? LocalKMS(keys: [.linkDescriptor: config.approve.linkDescriptorKey])
     }
 
     public var now: Date { clock.now() }

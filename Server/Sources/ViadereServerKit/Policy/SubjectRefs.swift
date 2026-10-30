@@ -29,6 +29,17 @@ enum PolicyRegistration {
 struct SubjectResolver {
     let db: any Database
     let ctx: ServerContext
+    /// The HTTP request, when resolving a business API body: a deprecated `relationshipId` is flagged on it (`Deprecation` / `Sunset` headers).
+    var request: Request? = nil
+
+    /// `relationshipId` addressing is deprecated (WP-C2): headers until `BusinessAddressing.relationshipIdSunset`, `400 relationship_id_sunset` after.
+    func legacyAddressing() throws {
+        guard ctx.now < BusinessAddressing.relationshipIdSunset else {
+            throw APIError(.badRequest, .relationshipIdSunset, "relationshipId is no longer accepted. Address the customer with subjectRef (or connectionId).",
+                           details: ["use": "subjectRef"])
+        }
+        request?.storage[LegacyAddressingKey.self] = true
+    }
 
     /// The business-facing reference of `relationship`.
     func ref(for relationship: RelationshipRecord) -> SubjectRef {
@@ -45,6 +56,7 @@ struct SubjectResolver {
     /// Normalizes a request that names its customer: after this, `relationshipId` is the real relationship of the calling business and
     /// `subjectRef` is cleared, so the request hashes (and replays) identically however it was addressed.
     func resolve<R: SubjectAddressedRequest>(_ request: inout R, businessId: BusinessID) async throws {
+        if !request.relationshipId.isUnaddressed { try legacyAddressing() }
         guard let subjectRef = request.subjectRef else {
             guard !request.relationshipId.isUnaddressed else { throw APIError.badRequest("relationshipId or subjectRef is required.") }
             return
@@ -58,6 +70,7 @@ struct SubjectResolver {
 
     /// Optional addressing (reward issue): resolves `subjectRef` to `relationshipId` when given.
     func resolve(relationshipId: inout RelationshipID?, subjectRef: inout SubjectRef?, businessId: BusinessID) async throws {
+        if relationshipId != nil { try legacyAddressing() }
         guard let ref = subjectRef else { return }
         let found = try await relationship(businessId: businessId, subjectRef: ref)
         if let given = relationshipId, given.uuid != found.id { throw APIError.notFound }
@@ -74,5 +87,29 @@ struct SubjectResolver {
             row.subjectRef = ctx.subjects.subjectRef(businessId: BusinessID(row.businessId), consumerId: ConsumerID(row.consumerId)).rawValue
             try await row.update(on: db)
         }
+    }
+}
+
+/// Set on a request whose body addressed a customer by the deprecated `relationshipId`.
+struct LegacyAddressingKey: StorageKey { typealias Value = Bool }
+
+/// Adds `Deprecation: true` and `Sunset: <HTTP date>` (RFC 8594) to responses of requests that used `relationshipId`.
+struct LegacyAddressingHeadersMiddleware: AsyncMiddleware {
+    static let sunsetHTTPDate: String = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter.string(from: BusinessAddressing.relationshipIdSunset)
+    }()
+
+    func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
+        let response = try await next.respond(to: request)
+        if request.storage[LegacyAddressingKey.self] == true {
+            response.headers.replaceOrAdd(name: "Deprecation", value: "true")
+            response.headers.replaceOrAdd(name: "Sunset", value: Self.sunsetHTTPDate)
+            response.headers.replaceOrAdd(name: .link, value: "<https://\(ViadereCore.defaultDomain)/docs/business-api#subject-ref>; rel=\"deprecation\"")
+        }
+        return response
     }
 }

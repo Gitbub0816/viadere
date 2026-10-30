@@ -15,6 +15,7 @@ struct WebhookService {
         .interactionDecided, .interactionExpired, .interactionCancelled, .messageReceived, .relationshipConnected,
         .relationshipDisconnected, .consentUpdated, .rewardRedeemed, .verificationCompleted,
         .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
+        .linkCompleted, .linkExpired,
     ]
     static let rotationOverlap: TimeInterval = 24 * 3600
 
@@ -38,7 +39,7 @@ struct WebhookService {
             throw APIError.validation("The webhook URL must be a public https URL.", details: ["url": "invalid"])
         }
         let events = Array(Set(request.events.map(\.rawValue)))
-        guard !events.isEmpty, events.count <= 16, events.allSatisfy({ e in Self.knownEvents.contains { $0.rawValue == e } }) else {
+        guard !events.isEmpty, events.count <= 24, events.allSatisfy({ e in Self.knownEvents.contains { $0.rawValue == e } }) else {
             throw APIError.validation("Unknown or missing event types.", details: ["events": "invalid"])
         }
         // The opaque v2 envelope (spec 14.3) carries no payload, so a v2 subscription may only ask for events that have an opaque form.

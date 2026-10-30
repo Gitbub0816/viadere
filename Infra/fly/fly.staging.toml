@@ -23,6 +23,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
 [env]
   APPROVE_V2_ENABLED = "false"   # Phase 2 gate (independent assessment of enrollment, key substitution, replay) must pass first
   KEY_DIRECTORY_LOG_ID = "viadere.key-directory.v1"
+  APP_ATTEST_ASSERTION_MODE = "report"   # WP-C2: assertions on approval results and link completions; `require` once the shipping app attests
   VERIFY_ENABLED = "false"   # Phase 3 gate (legal validation per market, privacy assessment) must pass first
   DIDIT_NEW_SESSIONS_ENABLED = "true"   # "false" stops new document verifications; the purge of finished Didit sessions continues (KILL-SWITCHES E-18)
   VERIFY_GATE_REFERENCE = ""

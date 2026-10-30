@@ -16,6 +16,7 @@ struct SecurityNotices {
         case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRecoveryFetched, vaultRestored
         case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
         case recoveryCredentialAdded
+        case businessLinked, businessLinkUnconfirmed
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -44,6 +45,8 @@ struct SecurityNotices {
             case .approvalRequestsPaused: .approvalRequestsPaused
             case .approvalKeyUnconfirmed: .approvalKeyUnconfirmed
             case .recoveryCredentialAdded: .recoveryCredentialAdded
+            case .businessLinked: .businessLinked
+            case .businessLinkUnconfirmed: .businessLinkUnconfirmed
             }
         }
 
@@ -98,6 +101,10 @@ struct SecurityNotices {
                 "An approval key you set up was never confirmed by the business, so Viadere removed it. If you didn't just set up approvals with a business, open Viadere and freeze approvals."
             case .recoveryCredentialAdded:
                 "A passkey was added to your Viadere account. If this wasn't you, open Viadere, review your devices and make new recovery codes."
+            case .businessLinked:
+                "A business linked your Viadere account to your account with them. If this wasn't you, open Viadere, disconnect the business and contact it."
+            case .businessLinkUnconfirmed:
+                "A business never confirmed the link you started, so Viadere ended it. If you didn't just link a business, open Viadere and review your businesses."
             case .delegationEnded:
                 "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }

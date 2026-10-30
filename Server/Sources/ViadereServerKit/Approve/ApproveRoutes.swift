@@ -127,6 +127,33 @@ enum ApproveRoutes {
             return try req.jsonResponse(FreezeStatus(subjectRef: subject, frozen: frozenBy != nil))
         }
 
+        routes.api(APIRoutes.businessApproveSettingsGet, scope: Scope.approvalsManage) { req in
+            try ApproveGate.require(req.ctx)
+            let principal = try req.business
+            return try req.jsonResponse(ApproveBusinessSettings(devicePolicy: try await ApproveKeyService(db: req.db, ctx: req.ctx).devicePolicy(businessId: principal.businessId.uuid)))
+        }
+        routes.api(APIRoutes.businessApproveSettingsPut, scope: Scope.approvalsManage) { req in
+            try ApproveGate.require(req.ctx)
+            try await req.requireApprovalCapability()
+            let principal = try req.business
+            try Sandbox.requireLive(principal, "change Approve settings")
+            // Strict body (unknown members refused); the tenant is the API key's business, never a field.
+            let body: ApproveBusinessSettings = try req.decodeBody()
+            let businessId = principal.businessId.uuid
+            let existing = try await ApproveBusinessSettingsRecord.find(businessId, on: req.db)
+            let previous = existing?.devicePolicy ?? ApproveDevicePolicy.anyEnrolled.rawValue
+            let record = existing ?? ApproveBusinessSettingsRecord()
+            record.id = businessId
+            record.devicePolicy = body.devicePolicy.rawValue
+            record.updatedAt = req.ctx.now
+            record.updatedBy = principal.keyId.uuidString.lowercased()
+            try await record.save(on: req.db)
+            _ = try await AuditService(db: req.db, ctx: req.ctx).record("approve.settings_changed", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                businessId: principal.businessId, subjectType: "approve_settings", subjectId: principal.businessId.description,
+                metadata: ["device_policy": body.devicePolicy.rawValue, "previous": previous])
+            return try req.jsonResponse(body)
+        }
+
         // MARK: Devices
         routes.api(APIRoutes.approveEnrollmentLookup) { req in
             try ApproveGate.require(req.ctx)

@@ -25,7 +25,10 @@ enum BusinessAPIKeys {
         /// Registers and rotates the business root key and publishes operational keys in the key directory. Issue it to a dedicated,
         /// tightly held key: whoever holds it before the business registered its root could register their own.
         static let keyDirectoryManage = "keydirectory:manage"
-        static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage]
+        /// Business link sessions (WP-C1): create, read, confirm, cancel. The capabilities a session grants are checked as well.
+        static let linksManage = "links:manage"
+        static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
+                                    linksManage]
     }
 
     struct Issued {

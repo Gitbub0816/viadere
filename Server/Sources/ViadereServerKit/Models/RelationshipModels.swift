@@ -17,6 +17,17 @@ final class RelationshipRecord: Model, @unchecked Sendable {
     /// `subject_ref` of this (business, consumer) pair: the only customer identifier a business can address. Set when the row is
     /// created (`SubjectRefMiddleware`) or by the backfill job for older rows; unique per business.
     @OptionalField(key: "subject_ref") var subjectRef: String?
+    /// The link session that created or extended this connection, and the digest of the device statement the business confirmed (WP-C1).
+    @OptionalField(key: "link_session_id") var linkSessionId: UUID?
+    @OptionalField(key: "evidence_digest") var evidenceDigest: String?
+    /// Capabilities the customer granted through link sessions, comma-separated (spec v4 D2 `CustomerBusinessConnection.scopes`).
+    @OptionalField(key: "scopes") var scopes: String?
+    /// `ConnectionMethod` raw value (QR, handle, code, link session).
+    @OptionalField(key: "connection_method") var connectionMethod: String?
+    @OptionalField(key: "linked_at") var linkedAt: Date?
+    /// Per-business preferences (spec v4 C7). Marketing is the consent purpose, not a column.
+    @Field(key: "pref_muted") var prefMuted: Bool
+    @Field(key: "pref_favorite") var prefFavorite: Bool
 
     init() {}
 
@@ -28,9 +39,17 @@ final class RelationshipRecord: Model, @unchecked Sendable {
         self.source = source.rawValue
         connectedAt = now
         lastActivityAt = now
+        connectionMethod = ConnectionMethod(source: source).rawValue
+        prefMuted = false
+        prefFavorite = false
     }
 
+    /// Status of a connection created by a link session until the business confirms it: never active, listed or addressable.
+    static let pendingLink = "pending_link"
+
     var isActive: Bool { status == "active" }
+    var isPendingLink: Bool { status == Self.pendingLink }
+    var scopeList: [Capability] { (scopes ?? "").split(separator: ",").map { Capability(rawValue: String($0)) } }
 }
 
 /// Append-only consent history: every change is a new row with `version = previous + 1`.

@@ -32,7 +32,35 @@ public struct ApproveSettings: Sendable {
     /// Public directory reads per IP.
     public var directoryReadRate: RateRule = .perMinute(60, burst: 30)
 
+    // MARK: Hardening (WP-C2)
+
+    /// Invalid result submissions one request tolerates; the next one locks it (`locked`, nothing more is accepted).
+    public var maxInvalidSubmissions = 5
+    /// App Attest assertions on approval results and link completions (`APP_ATTEST_ASSERTION_MODE`): `report` records a missing or invalid
+    /// assertion and lets the request through, `require` refuses it (`401`). Only devices enrolled with an attested key are asked for one.
+    public var assertionMode: AppAttestAssertionMode = .off
+
+    // MARK: Link sessions (WP-C1)
+
+    /// Viadere's `link-descriptor` key (`LINK_DESCRIPTOR_SIGNING_KEY`, 32-byte P-256 scalar, base64url) behind `LocalKMS` until the Key Vault
+    /// adapter holds it. Its public key is pinned in the app (`VIADERE_LINK_DESCRIPTOR_KEYS`) and in business SDKs.
+    public var linkDescriptorKey: SoftwareP256SigningKey = SoftwareP256SigningKey()
+    /// Link sessions a business creates.
+    public var linkCreateRate: RateRule = .perMinute(60, burst: 30)
+    /// Link sessions per business customer reference (one person rarely needs more than a couple of tries).
+    public var linkPerCustomerRate: RateRule = .perHour(5, burst: 3)
+    /// Lookups per account (a wrong code burns one) and globally.
+    public var linkLookupRate: RateRule = .perHour(10, burst: 5)
+    public var linkLookupRateGlobal: RateRule = .perMinute(120, burst: 60)
+    /// Completions per account.
+    public var linkCompleteRate: RateRule = .perHour(10, burst: 5)
+
     public init() {}
+}
+
+/// `APP_ATTEST_ASSERTION_MODE`.
+public enum AppAttestAssertionMode: String, Sendable, CaseIterable {
+    case off, report, require
 }
 
 extension ServerConfig {
@@ -48,6 +76,23 @@ extension ServerConfig {
             guard id.utf8.count <= 64, id.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) else { throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_ID") }
             approve.logId = id
         }
+        switch env["APP_ATTEST_ASSERTION_MODE"].map({ $0.lowercased() }) {
+        case nil, "": approve.assertionMode = production ? .report : .off
+        case let raw?:
+            guard let mode = AppAttestAssertionMode(rawValue: raw) else { throw ServerConfigError.invalid("APP_ATTEST_ASSERTION_MODE (off, report or require)") }
+            // `off` would silently stop checking assertions on approvals: development and tests only.
+            guard !(production && mode == .off) else { throw ServerConfigError.invalid("APP_ATTEST_ASSERTION_MODE (off is not allowed in staging or production)") }
+            approve.assertionMode = mode
+        }
+        if let raw = env["LINK_DESCRIPTOR_SIGNING_KEY"], !raw.isEmpty {
+            guard let bytes = Base64URL.decode(raw), let key = try? SoftwareP256SigningKey(rawRepresentation: bytes) else {
+                throw ServerConfigError.invalid("LINK_DESCRIPTOR_SIGNING_KEY (base64url, 32-byte P-256 private scalar)")
+            }
+            approve.linkDescriptorKey = key
+        } else if approve.enabled, production || databaseURL != nil {
+            // An ephemeral key would make every descriptor and result already handed out unverifiable after a restart, and the app pins the key.
+            throw ServerConfigError.missing("LINK_DESCRIPTOR_SIGNING_KEY (required when Approve v2 is enabled with a database)")
+        }
         if let raw = env["KEY_DIRECTORY_LOG_KEY"], !raw.isEmpty {
             guard let bytes = Base64URL.decode(raw), let key = try? SoftwareP256SigningKey(rawRepresentation: bytes) else {
                 throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_KEY (base64url, 32-byte P-256 private scalar)")
@@ -56,6 +101,10 @@ extension ServerConfig {
         } else if approve.enabled, production || databaseURL != nil {
             // An ephemeral log key would make every tree head already signed unverifiable after a restart.
             throw ServerConfigError.missing("KEY_DIRECTORY_LOG_KEY (required when Approve v2 is enabled with a database)")
+        }
+        // One key, one role: the log key signs tree heads only, the link-descriptor key signs link descriptors and results only.
+        if approve.linkDescriptorKey.publicKey == approve.logKey.publicKey {
+            throw ServerConfigError.invalid("LINK_DESCRIPTOR_SIGNING_KEY and KEY_DIRECTORY_LOG_KEY must be different keys")
         }
     }
 

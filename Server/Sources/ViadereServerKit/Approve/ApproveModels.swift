@@ -113,6 +113,8 @@ final class ApproveKeyRecord: Model, @unchecked Sendable {
     @OptionalField(key: "revoked_at") var revokedAt: Date?
     @OptionalField(key: "revoked_by") var revokedBy: String?
     @OptionalField(key: "revoke_reason") var revokeReason: String?
+    /// `approve.device_policy` in force when the key was activated (WP-C2).
+    @OptionalField(key: "device_policy") var devicePolicy: String?
 
     init() {}
 
@@ -135,6 +137,10 @@ final class ApproveRequestRecord: Model, @unchecked Sendable {
     /// `end_to_end` or `server_visible`.
     @Field(key: "protection") var protection: String
     @Field(key: "request_hash") var requestHash: String
+    /// Invalid result submissions so far; at `ApproveSettings.maxInvalidSubmissions` the request locks (WP-C2).
+    @Field(key: "attempts") var attempts: Int
+    /// `approve.device_policy` in force when the request was created (WP-C2).
+    @OptionalField(key: "device_policy") var devicePolicy: String?
     /// Server-visible requests only: the business's nonce.
     @OptionalField(key: "challenge") var challenge: String?
     /// Server-visible requests only: the displayed details as AES-GCM-sealed JSON (row-bound). End-to-end requests hold nothing here.
@@ -228,4 +234,17 @@ final class KeyRootAuthorizationRecord: Model, @unchecked Sendable {
     @OptionalField(key: "consumed_at") var consumedAt: Date?
 
     init() {}
+}
+
+/// Per-business Approve settings (WP-C2). A business without a row uses the defaults (`any_enrolled`).
+final class ApproveBusinessSettingsRecord: Model, @unchecked Sendable {
+    static let schema = "approve_business_settings"
+    @ID(custom: "business_id", generatedBy: .user) var id: UUID?
+    @Field(key: "device_policy") var devicePolicy: String
+    @Field(key: "updated_at") var updatedAt: Date
+    @Field(key: "updated_by") var updatedBy: String
+
+    init() {}
+
+    var policy: ApproveDevicePolicy { ApproveDevicePolicy(rawValue: devicePolicy) ?? .anyEnrolled }
 }

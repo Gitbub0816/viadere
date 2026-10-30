@@ -922,7 +922,8 @@ final class HardeningTests: XCTestCase {
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(["ENVIRONMENT": "development"]))
         var withSecrets = ["ENVIRONMENT": "development", "DATABASE_URL": "postgres://u:p@localhost/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(),
                            "SERVER_PEPPER": SecureToken.generate(), "DATA_ENCRYPTION_KEY": SecureToken.generate(), "AUDIT_CHAIN_KEY": SecureToken.generate(),
-                           "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate()]
+                           "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(),
+                           "LINK_DESCRIPTOR_SIGNING_KEY": SecureToken.generate()]
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(withSecrets))
         // Reusing one value for two secrets is refused in strict environments.
         var reused = strictEnvironment("production")

@@ -74,7 +74,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
                             rateLimitStore: rateStore, rcs: rcs,
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
-                            domains: domains, outbound: overrides.outboundHTTP ?? VaporOutboundHTTP(client: app.client))
+                            domains: domains, outbound: overrides.outboundHTTP ?? VaporOutboundHTTP(client: app.client), kms: overrides.kms)
 
     // MARK: Database
     // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL); every other process uses the runtime role (DATABASE_URL).
@@ -111,6 +111,7 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     // Origin lock (G-10): before routing, authentication and any database access. It answers 421 itself, so it sits outside the error mapper.
     app.middleware.use(EdgeLockMiddleware())
     app.middleware.use(APIErrorMiddleware())
+    app.middleware.use(LegacyAddressingHeadersMiddleware())
     // Operator switches: read-only mode (G-1). The sign-up stops (G-15) are route-group middleware on the sign-up and invitation routes.
     app.middleware.use(MaintenanceMiddleware())
     app.middleware.use(CORSLockdownMiddleware())
@@ -142,6 +143,8 @@ public struct Overrides: Sendable {
     public var domainChecker: (any DomainChecker)?
     /// Cloud API calls of the audit-head export. `nil` = the real HTTPS client.
     public var outboundHTTP: (any OutboundHTTP)?
+    /// Server signing keys (`link-descriptor`). `nil` = `LocalKMS` from the configuration; the Key Vault adapter is passed here.
+    public var kms: (any KeyManagementService)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,

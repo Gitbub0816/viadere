@@ -63,6 +63,7 @@ enum Routes {
         PolicyOperatorRoutes.register(app)
         VerifyHTTPRoutes.register(api)
         ApproveRoutes.register(api)
+        LinkRoutes.register(api)
         KeyDirectoryRoutes.register(api)
         MetricsRoutes.register(app)
         ConsumerExportRoutes.register(api)

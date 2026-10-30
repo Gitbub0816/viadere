@@ -41,6 +41,25 @@ struct ApproveKeyService {
         return keys.compactMap { key in usable[key.deviceId].map { (key, $0) } }
     }
 
+    // MARK: Device policy (WP-C2, spec §13 item 2)
+
+    /// The business's `approve.device_policy` (default `any_enrolled`).
+    func devicePolicy(businessId: UUID) async throws -> ApproveDevicePolicy {
+        try await ApproveBusinessSettingsRecord.find(businessId, on: db)?.policy ?? .anyEnrolled
+    }
+
+    /// After `activated` became active: records the policy on it and, under `single_device`, revokes the customer's other keys for this business
+    /// (the newest confirmed device wins; the business is told by `approve.key.revoked`, the customer by a notice).
+    func applyDevicePolicy(activated: ApproveKeyRecord, policy: ApproveDevicePolicy) async throws {
+        try await ApproveKeyRecord.query(on: db).filter(\.$id == activated.id!).set(\.$devicePolicy, to: policy.rawValue).update()
+        guard policy == .singleDevice else { return }
+        let others = try await ApproveKeyRecord.query(on: db).filter(\.$relationshipId == activated.relationshipId).filter(\.$id != activated.id!)
+            .filter(\.$status != ApprovalKeyStatus.revoked.rawValue).all()
+        for key in others {
+            try await revoke(key, by: .system, reason: "single_device_policy", actor: AuditActor(kind: .system, id: "approve-device-policy"))
+        }
+    }
+
     // MARK: Revocation
 
     enum Target {

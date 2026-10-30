@@ -275,6 +275,8 @@ struct ApproveEnrollmentService {
         }
         _ = try await audit.record("approve.key_activated", actor: actor, consumerId: ConsumerID(record.consumerId), businessId: principal.businessId,
                                    subjectType: "approve_key", subjectId: kid, metadata: ["assurance": key.assurance])
+        let keys = ApproveKeyService(db: db, ctx: ctx)
+        try await keys.applyDevicePolicy(activated: key, policy: try await keys.devicePolicy(businessId: principal.businessId.uuid))
         if let confirmed = try await ApproveEnrollmentRecord.find(id, on: db) { try await ApproveWebhooks(db: db, ctx: ctx).enrollmentConfirmed(confirmed) }
         await ApproveNotifier(db: db, ctx: ctx).notice(.approvalKeyEnrolled, consumerId: record.consumerId, subjectId: kid)
         guard let active = try await ApproveKeyRecord.find(key.id!, on: db) else { throw APIError.internalError }

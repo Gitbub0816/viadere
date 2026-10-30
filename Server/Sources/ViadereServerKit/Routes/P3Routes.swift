@@ -185,7 +185,7 @@ enum BusinessRewardRoutes {
         routes.api(APIRoutes.businessIssueReward, scope: Scope.rewardsWrite) { req in
             var body: IssueRewardRequest = try req.decodeBody()
             let principal = try req.business
-            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(relationshipId: &body.relationshipId, subjectRef: &body.subjectRef, businessId: principal.businessId)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(relationshipId: &body.relationshipId, subjectRef: &body.subjectRef, businessId: principal.businessId)
             let result = try await RewardsService(db: req.db, ctx: req.ctx).createReward(principal: principal, request: body, headerKey: req.idempotencyHeader)
             return try req.jsonResponse(result.reward, status: result.created ? .created : .ok)
         }
@@ -206,7 +206,7 @@ enum BusinessRewardRoutes {
         routes.api(APIRoutes.businessAdjustPoints, scope: Scope.rewardsWrite) { req in
             var body: AdjustLoyaltyPointsRequest = try req.decodeBody()
             let principal = try req.business
-            try await SubjectResolver(db: req.db, ctx: req.ctx).resolve(&body, businessId: principal.businessId)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(&body, businessId: principal.businessId)
             return try req.jsonResponse(try await RewardsService(db: req.db, ctx: req.ctx).adjustPoints(principal: principal, request: body, headerKey: req.idempotencyHeader))
         }
         routes.api(APIRoutes.businessConsumeRedemption, scope: Scope.rewardsWrite) { req in
