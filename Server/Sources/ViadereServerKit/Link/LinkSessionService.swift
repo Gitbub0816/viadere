@@ -151,6 +151,11 @@ struct LinkSessionService {
         let settings = ctx.config.approve
         try await ctx.limiter.enforce("link-lookup", key: principal.consumerId.description, rule: settings.linkLookupRate)
         try await ctx.limiter.enforce("link-lookup-global", key: "all", rule: settings.linkLookupRateGlobal)
+        // Read-only apart from the audit row at the end, so a transient database failure is retried as a whole.
+        return try await DB.retryingTransient { try await lookupAttempt(principal: principal, code: code) }
+    }
+
+    private func lookupAttempt(principal: ConsumerPrincipal, code: String) async throws -> LinkSessionOffer {
         let now = ctx.now
         guard principal.deviceId != nil, let canonical = LinkSessionCode.canonical(code),
               let record = try await LinkSessionRecord.query(on: db).filter(\.$codeHash == codeHash(canonical)).first(),
@@ -189,6 +194,24 @@ struct LinkSessionService {
     // MARK: Device: complete
 
     func complete(principal: ConsumerPrincipal, sessionId: UUID, request: CompleteLinkSessionRequest) async throws -> LinkSessionDeviceView {
+        try await ctx.limiter.enforce("link-complete", key: principal.consumerId.description, rule: ctx.config.approve.linkCompleteRate)
+        // Checking and consuming are retried as a whole on a transient database failure (SQLite serializes writers; PostgreSQL may abort a
+        // contended statement): every attempt re-reads the session, and the compare-and-swap inside decides who wins. Work after the commit is
+        // retried on its own, so a committed completion is never attempted twice.
+        let (record, summary, hasApproval) = try await DB.retryingTransient { try await completeAttempt(principal: principal, sessionId: sessionId, request: request) }
+        try await DB.retryingTransient {
+            _ = try await AuditService(db: db, ctx: ctx).record("link.session_device_completed", principal: principal, businessId: summary.id, subjectType: "link_session",
+                                                               subjectId: sessionId.uuidString.lowercased(),
+                                                               metadata: ["capabilities": record.capabilities, "approval_key": hasApproval ? "pending" : "none",
+                                                                          "binding_tag": request.bindingTag == nil ? "absent" : "present"])
+        }
+        try await DB.retryingTransient { try await LinkWebhooks(db: db, ctx: ctx).completed(businessId: record.businessId, sessionId: sessionId) }
+        guard let completed = try await DB.retryingTransient({ try await LinkSessionRecord.find(sessionId, on: db) }) else { throw APIError.internalError }
+        return try await deviceView(completed, business: summary)
+    }
+
+    private func completeAttempt(principal: ConsumerPrincipal, sessionId: UUID, request: CompleteLinkSessionRequest) async throws
+        -> (LinkSessionRecord, BusinessSummary, Bool) {
         let now = ctx.now
         guard let deviceId = principal.deviceId, let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.consumerId == principal.consumerId.uuid else {
             throw APIError.signatureInvalid
@@ -199,7 +222,6 @@ struct LinkSessionService {
                                         subjectId: sessionId.uuidString.lowercased(), metadata: ["reason": reason])
             throw error
         }
-        try await ctx.limiter.enforce("link-complete", key: principal.consumerId.description, rule: ctx.config.approve.linkCompleteRate)
         guard let record = try await LinkSessionRecord.find(sessionId, on: db), record.livemode,
               try await Sandbox(db: db).matches(consumerId: principal.consumerId.uuid, livemode: true) else { throw APIError.notFound }
         guard device.kind == .app, device.revokedAt == nil, !device.isExpired(at: now) else {
@@ -323,12 +345,7 @@ struct LinkSessionService {
             if let api = error as? APIError, api.status == .conflict { try await reject("not_open", api) }
             throw error
         }
-        _ = try await audit.record("link.session_device_completed", principal: principal, businessId: summary.id, subjectType: "link_session",
-                                   subjectId: sessionId.uuidString.lowercased(),
-                                   metadata: ["capabilities": record.capabilities, "approval_key": approval == nil ? "none" : "pending", "binding_tag": request.bindingTag == nil ? "absent" : "present"])
-        try await LinkWebhooks(db: db, ctx: ctx).completed(businessId: record.businessId, sessionId: sessionId)
-        guard let completed = try await LinkSessionRecord.find(sessionId, on: db) else { throw APIError.internalError }
-        return try await deviceView(completed, business: summary)
+        return (record, summary, approval != nil)
     }
 
     // MARK: Business: confirm

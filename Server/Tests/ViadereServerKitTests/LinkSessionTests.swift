@@ -213,6 +213,8 @@ final class LinkSessionTests: XCTestCase {
                 return out
             }
             XCTAssertEqual(statuses.filter { $0 == .created }.count, 1, "\(statuses)")
+            // Losers see a spent code (a conflict, or no longer looks up), never a server error under contention.
+            XCTAssertTrue(statuses.allSatisfy { [.created, .conflict, .notFound].contains($0) }, "\(statuses)")
             aeq(try await RelationshipRecord.query(on: h.db).filter(\.$businessId == b.id.uuid).count(), 1)
         }
     }
