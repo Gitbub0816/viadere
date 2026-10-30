@@ -137,7 +137,8 @@ public enum LoopContentRules {
         let pieces = folded.split(whereSeparator: { $0.isWhitespace || "()[]<>\"',;!?".contains($0) })
         for piece in pieces {
             if piece.contains("@") && piece.contains(".") { return true }
-            let labels = piece.split(separator: ".", omittingEmptySubsequences: false)
+            let hostPart = piece.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first ?? piece
+            let labels = hostPart.split(separator: ".", omittingEmptySubsequences: false)
             guard labels.count >= 2 else { continue }
             let tld = labels.last.map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "/:")) } ?? ""
             let host = labels.dropLast().last.map(String.init) ?? ""
