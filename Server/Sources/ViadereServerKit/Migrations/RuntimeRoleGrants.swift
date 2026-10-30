@@ -17,8 +17,13 @@ struct GrantRuntimeRolePrivileges: AsyncMigration {
     }
 
     func prepare(on db: any Database) async throws {
-        guard DB.isPostgres(db), let sql = db as? any SQLDatabase, let role = ProcessInfo.processInfo.environment["DATABASE_APP_ROLE"], !role.isEmpty else { return }
-        guard Self.isSafeRoleName(role) else { throw ServerConfigError.invalid("DATABASE_APP_ROLE") }
+        try await Self.grant(roleVariable: "DATABASE_APP_ROLE", on: db)
+    }
+
+    /// Grants the runtime DML set to the role named by `roleVariable` (when set). Shared with `GrantWorkerRolePrivileges`.
+    static func grant(roleVariable: String, on db: any Database) async throws {
+        guard DB.isPostgres(db), let sql = db as? any SQLDatabase, let role = ProcessInfo.processInfo.environment[roleVariable], !role.isEmpty else { return }
+        guard Self.isSafeRoleName(role) else { throw ServerConfigError.invalid(roleVariable) }
         // The role name is validated above (identifier characters only), so interpolating it cannot change the statement.
         for statement in [
             "GRANT USAGE ON SCHEMA public TO \(role)",
@@ -37,6 +42,18 @@ struct GrantRuntimeRolePrivileges: AsyncMigration {
     func revert(on db: any Database) async throws {}
 }
 
+/// The queue worker's database role (`DATABASE_WORKER_ROLE`, `viadere_worker` on Azure, plan 5.3): the same data-only grants as the runtime role and
+/// no DDL, no UPDATE on `audit_events`. A narrower per-table set needs the handler inventory to settle first (recorded in ADR-0011's notes).
+struct GrantWorkerRolePrivileges: AsyncMigration {
+    var name: String { "GrantWorkerRolePrivileges.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await GrantRuntimeRolePrivileges.grant(roleVariable: "DATABASE_WORKER_ROLE", on: db)
+    }
+
+    func revert(on db: any Database) async throws {}
+}
+
 /// Startup check for the runtime role: in staging and production the process that serves requests must not be able to change the schema; it
 /// refuses to start if it can (the role split is mandatory there, see `requireMigrationURL`).
 enum DatabaseRoles {
@@ -45,13 +62,19 @@ enum DatabaseRoles {
     /// the secret, and should not have it (run the release from a separate app or machine: Infra/fly/README.md section 1a).
     static func requireMigrationURL(config: ServerConfig, migrating: Bool) throws {
         guard config.isStrict, migrating, config.operations.migrationDatabaseURL == nil else { return }
-        throw ServerConfigError.missing("DATABASE_MIGRATION_URL (required to run migrations in staging and production)")
+        // With Entra authentication the migration job connects as its own principal (`viadere_migrator`), never as the runtime role.
+        if let entra = config.databaseEntra {
+            let runtimeRoles = ["DATABASE_APP_ROLE", "DATABASE_WORKER_ROLE"].compactMap { ProcessInfo.processInfo.environment[$0] }
+            guard !runtimeRoles.contains(entra.user) else { throw ServerConfigError.invalid("DATABASE_USER (the runtime role cannot run migrations)") }
+            return
+        }
+        throw ServerConfigError.missing("DATABASE_MIGRATION_URL or DATABASE_AUTH=entra (required to run migrations in staging and production)")
     }
 
     /// Whether this process must prove that its login cannot change the schema: every serving process in staging and production that uses
     /// PostgreSQL, whether or not it holds the migration URL (the role split is mandatory, not opt-in).
     static func mustVerifyRuntimeRole(config: ServerConfig, migrating: Bool) -> Bool {
-        config.isStrict && !migrating && config.databaseURL != nil
+        config.isStrict && !migrating && config.hasDatabase
     }
 
     /// Whether the connected role may create objects in the `public` schema or owns tables there (i.e. has DDL).

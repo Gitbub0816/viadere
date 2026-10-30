@@ -204,7 +204,10 @@ struct WalletService {
         row.attempts = 0
         row.nextAttemptAt = now
         row.createdAt = now
-        try await row.create(on: db)
+        try await db.transaction { [ctx] tx in
+            try await row.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.walletPush, ref: row.id!, on: tx, ctx: ctx)
+        }
     }
 
     func touch(consumer: UUID, businessId: UUID, kind: WalletPassKind) async throws {
@@ -228,30 +231,36 @@ struct WalletService {
         var sent = 0
         for row in due {
             guard try await DB.swap(db, table: WalletPushOutboxRecord.schema, id: row.id!, column: "status", expected: "queued", newValue: "sending") else { continue }
-            let registrations = try await WalletRegistrationRecord.query(on: db).filter(\.$passId == row.passId).all()
-            guard let pass = try await WalletPassRecord.find(row.passId, on: db) else {
-                try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).delete()
-                continue
-            }
-            var failed = false
-            for registration in registrations {
-                switch await ctx.passPush.notify(pushToken: registration.pushToken, passTypeIdentifier: pass.passTypeIdentifier) {
-                case .delivered: break
-                // Wallet told us the device forgot the pass: stop pushing to it.
-                case .tokenInvalid: try await WalletRegistrationRecord.query(on: db).filter(\.$id == registration.id!).delete()
-                case .failed: failed = true
-                }
-            }
-            let attempts = row.attempts + 1
-            if failed, attempts < Self.maxPushAttempts {
-                try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).set(\.$status, to: "queued").set(\.$attempts, to: attempts)
-                    .set(\.$nextAttemptAt, to: now.addingTimeInterval(TimeInterval(60 * attempts * attempts))).update()
-            } else {
-                try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).set(\.$status, to: "sent").set(\.$attempts, to: attempts).update()
-                sent += 1
-            }
+            if try await pushClaimed(row, now: now) { sent += 1 }
         }
         return sent
+    }
+
+    /// Sends one claimed (`sending`) outbox row: the shared body of `deliverDue` and the `wallet.push` queue handler. Returns whether it finished.
+    @discardableResult
+    func pushClaimed(_ row: WalletPushOutboxRecord, now: Date) async throws -> Bool {
+        let registrations = try await WalletRegistrationRecord.query(on: db).filter(\.$passId == row.passId).all()
+        guard let pass = try await WalletPassRecord.find(row.passId, on: db) else {
+            try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).delete()
+            return false
+        }
+        var failed = false
+        for registration in registrations {
+            switch await ctx.passPush.notify(pushToken: registration.pushToken, passTypeIdentifier: pass.passTypeIdentifier) {
+            case .delivered: break
+            // Wallet told us the device forgot the pass: stop pushing to it.
+            case .tokenInvalid: try await WalletRegistrationRecord.query(on: db).filter(\.$id == registration.id!).delete()
+            case .failed: failed = true
+            }
+        }
+        let attempts = row.attempts + 1
+        if failed, attempts < Self.maxPushAttempts {
+            try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).set(\.$status, to: "queued").set(\.$attempts, to: attempts)
+                .set(\.$nextAttemptAt, to: now.addingTimeInterval(TimeInterval(60 * attempts * attempts))).update()
+            return false
+        }
+        try await WalletPushOutboxRecord.query(on: db).filter(\.$id == row.id!).set(\.$status, to: "sent").set(\.$attempts, to: attempts).update()
+        return true
     }
 
     /// Maintenance: drop finished outbox rows and old device logs.

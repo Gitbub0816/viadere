@@ -20,7 +20,7 @@ enum PolicyRegistration {
     /// Registers the model middleware that assigns `subject_ref` (one line in `configure`).
     static func configure(_ app: Application, config: ServerConfig) {
         app.databases.middleware.use(SubjectRefMiddleware(deriver: SubjectRefDeriver(key: config.subjectRefKey)),
-                                     on: config.databaseURL == nil ? .sqlite : .psql)
+                                     on: config.hasDatabase ? .psql : .sqlite)
     }
 }
 

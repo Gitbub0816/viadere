@@ -38,6 +38,12 @@ final class MetricsRegistry: @unchecked Sendable {
         case assuranceFailed = "assurance_failed"
         case privilegedDenied = "privileged_denied"
         case verifyPurgeFailed = "verify_purge_failed"
+        // Queues (WP-B3, SECURITY.md §2.91). `queue_dead_lettered` alerts on any value above zero (DLQ depth > 0).
+        case queueDeadLettered = "queue_dead_lettered"
+        case queueHandlerFailed = "queue_handler_failed"
+        case queueDuplicate = "queue_duplicate"
+        case queueProcessed = "queue_processed"
+        case outboxPublishFailed = "outbox_publish_failed"
     }
 
     private let lock = NSLock()

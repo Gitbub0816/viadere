@@ -103,7 +103,10 @@ struct OperatorNotices {
         record.createdAt = ctx.now
         record.status = "queued"
         record.delivered = 0
-        try await record.create(on: db)
+        try await db.transaction { [ctx] tx in
+            try await record.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.operatorNotice, ref: record.id!, on: tx, ctx: ctx)
+        }
         _ = try await AuditService(db: db, ctx: ctx).record("operator.notice_created", actor: AuditActor(kind: .operator_, id: operatorId.uuidString.lowercased()),
             businessId: record.businessId.map(BusinessID.init), subjectType: "operator_notice", subjectId: record.id?.uuidString.lowercased(),
             metadata: ["scope": scope.rawValue, "severity": severity])
@@ -137,7 +140,7 @@ struct OperatorNotices {
 
     /// Claims a notice for one batch: a compare-and-swap of `claim_token` from what was read to a fresh token. Returns the token, or `nil` when
     /// another runner holds an unexpired claim or won the swap.
-    private func claim(_ candidate: OperatorNoticeRecord) async throws -> String? {
+    func claim(_ candidate: OperatorNoticeRecord) async throws -> String? {
         guard let id = candidate.id else { return nil }
         if candidate.claimToken != nil, let expires = candidate.claimExpiresAt, expires > nowSeconds { return nil }
         let token = SecureToken.generate(byteCount: 16)
@@ -151,11 +154,11 @@ struct OperatorNotices {
         return won ? token : nil
     }
 
-    private func release(_ id: UUID, token: String) async throws {
+    func release(_ id: UUID, token: String) async throws {
         try await OperatorNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$claimToken == token).set(\.$claimToken, to: nil).set(\.$claimExpiresAt, to: nil).update()
     }
 
-    private func deliver(_ notice: OperatorNoticeRecord) async throws -> Int {
+    func deliver(_ notice: OperatorNoticeRecord) async throws -> Int {
         let notifier = Notifier(db: db, ctx: ctx)
         let after = notice.cursor.flatMap(UUID.init(uuidString:))
         var count = 0

@@ -183,7 +183,7 @@ extension ServerConfig {
         case "database": rateLimitStore = .database
         default: throw ServerConfigError.invalid("RATE_LIMIT_STORE (memory or database)")
         }
-        if rateLimitStore == .database, databaseURL == nil, isStrict { throw ServerConfigError.missing("DATABASE_URL (required for RATE_LIMIT_STORE=database)") }
+        if rateLimitStore == .database, !hasDatabase, isStrict { throw ServerConfigError.missing("DATABASE_URL (required for RATE_LIMIT_STORE=database)") }
 
         let url = env["EMAIL_API_URL"].flatMap { $0.isEmpty ? nil : $0 }
         let key = env["EMAIL_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }

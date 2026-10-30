@@ -10,9 +10,10 @@ import ViadereCore
 /// `/v1/key-directory` route answers `404`; enrolled keys and the log are untouched.
 public struct ApproveSettings: Sendable {
     public var enabled = true
-    /// The transparency log's signing key (P-256). `KEY_DIRECTORY_LOG_KEY` holds its 32-byte raw scalar, base64url. Production keeps it in a
-    /// managed key service (ADR-03); the environment variable is the interim, covered in the risk register.
-    public var logKey: SoftwareP256SigningKey = SoftwareP256SigningKey()
+    /// The transparency log's signing key (P-256). On Azure it is the Key Vault key `AZURE_KEY_VAULT_KD_LOG_KEY` (`kd-log-signing`, loaded at boot
+    /// by `configure` as a `KMSSigningKey`: the private key never leaves Key Vault). Elsewhere `KEY_DIRECTORY_LOG_KEY` holds its 32-byte raw scalar,
+    /// base64url (Fly staging, development; the interim covered in the risk register).
+    public var logKey: any DeviceSigningKey = SoftwareP256SigningKey()
     public var logId = TransparencyLog.defaultLogId
     /// A new tree head is signed when the latest is older than this (devices refuse heads older than a week).
     public var treeHeadRefreshInterval: TimeInterval = 3600
@@ -48,14 +49,22 @@ extension ServerConfig {
             guard id.utf8.count <= 64, id.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) else { throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_ID") }
             approve.logId = id
         }
-        if let raw = env["KEY_DIRECTORY_LOG_KEY"], !raw.isEmpty {
+        if azure.kdLogKey != nil {
+            // The key lives in Key Vault; `configure` resolves it. A second, software copy would defeat the point.
+            if env["KEY_DIRECTORY_LOG_KEY"].map({ !$0.isEmpty }) == true {
+                throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_KEY (unset it when AZURE_KEY_VAULT_KD_LOG_KEY is configured)")
+            }
+        } else if let raw = env["KEY_DIRECTORY_LOG_KEY"], !raw.isEmpty {
             guard let bytes = Base64URL.decode(raw), let key = try? SoftwareP256SigningKey(rawRepresentation: bytes) else {
                 throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_KEY (base64url, 32-byte P-256 private scalar)")
             }
             approve.logKey = key
-        } else if approve.enabled, production || databaseURL != nil {
+        } else if role == .worker {
+            // The queue worker never signs tree heads (only the api does) and holds no grant on the log key (plan 5.3): its stand-in refuses to sign.
+            approve.logKey = UnavailableSigningKey()
+        } else if approve.enabled, production || hasDatabase {
             // An ephemeral log key would make every tree head already signed unverifiable after a restart.
-            throw ServerConfigError.missing("KEY_DIRECTORY_LOG_KEY (required when Approve v2 is enabled with a database)")
+            throw ServerConfigError.missing("KEY_DIRECTORY_LOG_KEY or AZURE_KEY_VAULT_KD_LOG_KEY (required when Approve v2 is enabled with a database)")
         }
     }
 

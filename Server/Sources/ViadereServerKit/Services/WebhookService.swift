@@ -138,7 +138,10 @@ struct WebhookService {
             delivery.attempts = 0
             delivery.nextAttemptAt = now
             delivery.createdAt = now
-            try await delivery.create(on: db)
+            try await db.transaction { [ctx] tx in
+                try await delivery.create(on: tx)
+                try await Outbox.enqueue(QueueHandlers.webhookDeliver, ref: delivery.id!, tenant: delivery.businessId, on: tx, ctx: ctx)
+            }
         }
     }
 
@@ -236,7 +239,7 @@ struct WebhookService {
         return attempted
     }
 
-    private func attempt(_ delivery: WebhookDeliveryRecord, now: Date) async throws {
+    func attempt(_ delivery: WebhookDeliveryRecord, now: Date) async throws {
         guard let id = delivery.id,
               let subscription = try await WebhookSubscriptionRecord.find(delivery.subscriptionId, on: db), subscription.active,
               let url = URL(string: subscription.url) else {

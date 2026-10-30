@@ -49,7 +49,10 @@ struct ConsumerExports {
         record.createdAt = now
         record.expiresAt = now.addingTimeInterval(Self.lifetime)
         record.downloads = 0
-        try await record.create(on: db)
+        try await db.transaction { [ctx] tx in
+            try await record.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.consumerExport, ref: record.id!, on: tx, ctx: ctx)
+        }
         _ = try await AuditService(db: db, ctx: ctx).record("account.export_requested", principal: principal, subjectType: "export", subjectId: record.id?.uuidString.lowercased())
         return record
     }
@@ -88,24 +91,32 @@ struct ConsumerExports {
         var built = 0
         for record in queued {
             guard let id = record.id, try await DB.swap(db, table: ConsumerExportRecord.schema, id: id, column: "status", expected: "queued", newValue: "building") else { continue }
-            do {
-                let bundle = try await build(for: record)
-                record.bundle = String(decoding: try JSONEncoder().encode(bundle), as: UTF8.self)
-                record.status = "ready"
-                record.readyAt = ctx.now
-                try await record.update(on: db)
-                built += 1
-                // A generic push: no name, no business, no content.
-                await Notifier(db: db, ctx: ctx).pushGeneric(to: record.consumerId, body: "Your Viadere data export is ready. Open Viadere on the device that requested it.")
-                _ = try await AuditService(db: db, ctx: ctx).record("account.export_ready", actor: AuditActor(kind: .system), consumerId: ConsumerID(record.consumerId),
-                                                                  subjectType: "export", subjectId: id.uuidString.lowercased())
-            } catch {
-                ctx.logger.warning("export could not be built", metadata: ["type": "\(type(of: error))"])
-                record.status = "queued"
-                try? await record.update(on: db)
-            }
+            if await buildClaimed(record) { built += 1 }
         }
         return built
+    }
+
+    /// Builds one claimed (`building`) export: the shared body of `processQueued` and the `consumer_export.process` queue handler. Returns whether the
+    /// export is ready; a failure puts it back to `queued` for the next attempt.
+    func buildClaimed(_ record: ConsumerExportRecord) async -> Bool {
+        guard let id = record.id else { return false }
+        do {
+            let bundle = try await build(for: record)
+            record.bundle = String(decoding: try JSONEncoder().encode(bundle), as: UTF8.self)
+            record.status = "ready"
+            record.readyAt = ctx.now
+            try await record.update(on: db)
+            // A generic push: no name, no business, no content.
+            await Notifier(db: db, ctx: ctx).pushGeneric(to: record.consumerId, body: "Your Viadere data export is ready. Open Viadere on the device that requested it.")
+            _ = try await AuditService(db: db, ctx: ctx).record("account.export_ready", actor: AuditActor(kind: .system), consumerId: ConsumerID(record.consumerId),
+                                                              subjectType: "export", subjectId: id.uuidString.lowercased())
+            return true
+        } catch {
+            ctx.logger.warning("export could not be built", metadata: ["type": "\(type(of: error))"])
+            record.status = "queued"
+            try? await record.update(on: db)
+            return false
+        }
     }
 
     private func build(for record: ConsumerExportRecord) async throws -> [String] {

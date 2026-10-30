@@ -130,6 +130,8 @@ struct InteractionService {
                 try await UsageMeter.record(.interaction, businessId: principal.businessId.uuid, livemode: principal.livemode,
                                             ref: issued.id.uuid.uuidString.lowercased(), at: now, on: tx)
                 try await ChannelRouter(db: tx, ctx: ctx).enqueue(record: record, interaction: issued, on: tx)
+                // The expiry is a scheduled message at `expires_at` (the maintenance sweep remains the safety net).
+                try await Outbox.enqueue(QueueHandlers.interactionExpire, ref: issued.id.uuid, tenant: principal.businessId.uuid, notBefore: record.expiresAt, on: tx, ctx: ctx)
                 _ = try await AuditService(db: tx, ctx: ctx).record("interaction.issued", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "interaction",
                     subjectId: issued.id.description, correlationId: issued.correlationId,

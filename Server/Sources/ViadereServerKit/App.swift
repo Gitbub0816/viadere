@@ -7,9 +7,41 @@ import Vapor
 import ViadereCore
 
 /// Builds the application: database, migrations, middleware (outermost first) and routes.
-public func configure(_ app: Application, config: ServerConfig, overrides: Overrides = Overrides()) async throws {
+public func configure(_ app: Application, config initialConfig: ServerConfig, overrides: Overrides = Overrides()) async throws {
+    var config = initialConfig
+    let migrating = app.environment.arguments.dropFirst().contains("migrate")
+    // The migration job's configuration holds no service secret: it may run migrations and nothing else.
+    if config.role == .migrate, !migrating { throw ServerConfigError.invalid("ROLE (migrate runs only `ViadereServer migrate`)") }
+
     // MARK: Collaborators
     let clock = overrides.clock ?? SystemClock()
+    // Every outbound client refuses the managed-identity endpoint and the metadata services (SSRF, SECURITY.md §1).
+    let destinationGuard = OutboundDestinationGuard.fromEnvironment()
+    let client: any Client = GuardedClient(base: app.client, guard: destinationGuard)
+    let outbound: any OutboundHTTP = overrides.outboundHTTP ?? VaporOutboundHTTP(client: app.client, guard: destinationGuard)
+    // Azure: managed-identity tokens, Key Vault, the audit container, Service Bus.
+    let tokens: (any AccessTokenSource)? = overrides.accessTokens ?? AzureManagedIdentity.fromEnvironment(ProcessInfo.processInfo.environment)
+    var kms = overrides.kms
+    if kms == nil, let vault = config.azure.keyVaultURL, let tokens {
+        kms = try AzureKeyVaultKMS(vaultURL: vault, tokens: tokens, http: outbound, now: { clock.now() })
+    }
+    if config.azure.usesKeyVault, kms == nil { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL with a managed identity (a Key Vault key is configured)") }
+    if config.isStrict, let kms, kms is LocalKMS { throw ServerConfigError.invalid("KMS (the local software KMS is for development and tests)") }
+    // The key-directory log key stays in Key Vault; its public key is fetched now, so a missing key fails the boot.
+    if let ref = config.azure.kdLogKey {
+        guard let kms else { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL (for AZURE_KEY_VAULT_KD_LOG_KEY)") }
+        config.approve.logKey = try await KMSSigningKey.load(kms: kms, keyRef: ref)
+    }
+    var auditStore = overrides.auditObjectStore
+    if auditStore == nil, let export = config.operations.auditExport, export.kind == .azureBlob, let endpoint = export.endpoint {
+        guard let tokens else { throw ServerConfigError.missing("a managed identity (for AZURE_AUDIT_BLOB_ENDPOINT)") }
+        auditStore = try AzureBlobObjectStore(endpoint: endpoint, container: export.target, tokens: tokens, http: outbound, now: { clock.now() })
+    }
+    var queueTransport = overrides.queueTransport
+    if queueTransport == nil, config.queueTransport == .servicebus, let fqdn = config.azure.serviceBusFQDN {
+        guard let tokens else { throw ServerConfigError.missing("a managed identity (for QUEUE_TRANSPORT=servicebus)") }
+        queueTransport = ServiceBusRESTTransport(fqdn: fqdn, tokens: tokens, http: outbound)
+    }
     let apns: any APNsSender
     if let override = overrides.apns { apns = override } else if let apnsConfig = config.apns {
         let sender = try APNSwiftSender(config: apnsConfig, logger: app.logger)
@@ -20,9 +52,9 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     }
     let sms: any SMSProvider
     if let override = overrides.sms { sms = override } else if let twilio = config.twilio {
-        sms = TwilioProvider(config: twilio, client: app.client, logger: app.logger)
+        sms = TwilioProvider(config: twilio, client: client, logger: app.logger)
     } else if let mailerSend = config.mailerSendSMS {
-        sms = MailerSendSMSProvider(config: mailerSend, client: app.client)
+        sms = MailerSendSMSProvider(config: mailerSend, client: client)
     } else {
         sms = UnconfiguredSMSProvider()
     }
@@ -30,11 +62,11 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     if let override = overrides.webhookTransport { transport = override } else {
         app.http.client.configuration.redirectConfiguration = .disallow
         app.http.client.configuration.timeout = .init(connect: .seconds(5), read: .seconds(10))
-        transport = VaporWebhookTransport(client: app.client, allowInsecure: config.allowInsecureWebhookURLs)
+        transport = VaporWebhookTransport(client: app.client, allowInsecure: config.allowInsecureWebhookURLs, guard: destinationGuard)
     }
     let rcs: (any RCSProvider)?
     if let override = overrides.rcs { rcs = override } else if let rcsConfig = config.rcs {
-        rcs = GenericRBMProvider(config: rcsConfig, http: VaporRCSHTTPClient(client: app.client))
+        rcs = GenericRBMProvider(config: rcsConfig, http: VaporRCSHTTPClient(client: client))
     } else {
         rcs = nil
     }
@@ -61,9 +93,9 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         passPush = sender
     }
     let email: any EmailSender
-    let domains: any DomainChecker = overrides.domainChecker ?? NetworkDomainChecker(client: app.client, allowInsecure: config.allowInsecureWebhookURLs)
+    let domains: any DomainChecker = overrides.domainChecker ?? NetworkDomainChecker(client: client, allowInsecure: config.allowInsecureWebhookURLs)
     if let override = overrides.emailSender { email = override } else if let emailConfig = config.email {
-        email = HTTPEmailSender(config: emailConfig, client: app.client)
+        email = HTTPEmailSender(config: emailConfig, client: client)
     } else {
         email = LoggingEmailSender(environment: config.environment)
     }
@@ -74,13 +106,23 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
                             rateLimitStore: rateStore, rcs: rcs,
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
-                            domains: domains, outbound: overrides.outboundHTTP ?? VaporOutboundHTTP(client: app.client))
+                            domains: domains, outbound: outbound, kms: kms, auditObjectStore: auditStore, accessTokens: tokens,
+                            queueTransport: queueTransport)
 
     // MARK: Database
-    // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL); every other process uses the runtime role (DATABASE_URL).
-    let migrating = app.environment.arguments.dropFirst().contains("migrate")
+    // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL, or the migrator's Entra identity); every other process uses
+    // the runtime role (DATABASE_URL, or its own Entra identity).
     try DatabaseRoles.requireMigrationURL(config: config, migrating: migrating)
-    if let url = migrating ? (config.operations.migrationDatabaseURL ?? config.databaseURL) : config.databaseURL {
+    if migrating, let url = config.operations.migrationDatabaseURL {
+        try app.databases.use(.postgres(url: url), as: .psql)
+    } else if let entra = config.databaseEntra {
+        // A fresh Entra token for every new connection; a failure refuses the connection and never falls back to a password (ADR-0011).
+        guard let tokens else { throw ServerConfigError.missing("a managed identity (for DATABASE_AUTH=entra)") }
+        let source = TokenAuthPostgresConnectionSource(host: entra.host, port: entra.port, username: entra.user, database: entra.database,
+                                                       tls: try TokenAuthPostgresConnectionSource.verifyFullTLS(caFile: entra.caFile),
+                                                       passwordSource: EntraPostgresPassword(tokens: tokens))
+        app.databases.use(.postgresTokenAuth(source), as: .psql)
+    } else if let url = config.databaseURL {
         try app.databases.use(.postgres(url: url), as: .psql)
     } else {
         guard !config.isStrict else { throw ServerConfigError.missing("DATABASE_URL") }
@@ -91,13 +133,15 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
         app.lifecycle.use(TemporaryDatabaseCleanup(path: path))
     }
     app.migrations.add(Migrations.all)
+    // The database transport needs the database; Service Bus was chosen above.
+    app.ctx.queue.install(DatabaseQueueTransport(database: { [app] in app.db }, now: { clock.now() }))
     // The serving process must not hold DDL rights: the role split is mandatory in staging and production (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
     if DatabaseRoles.mustVerifyRuntimeRole(config: config, migrating: migrating), try await DatabaseRoles.runtimeCanChangeSchema(app.db) {
         throw ServerConfigError.invalid("DATABASE_URL (the runtime role can change the schema; use a data-only role and DATABASE_MIGRATION_URL for migrations)")
     }
     PolicyRegistration.configure(app, config: config)
     VerifyRegistration.configure(app, config: config)
-    if config.databaseURL == nil || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
+    if !config.hasDatabase || overrides.autoMigrate || config.autoMigrate { try await app.autoMigrate() }
 
     // MARK: HTTP
     app.routes.defaultMaxBodySize = ByteCount(value: config.maxBodyBytes)
@@ -116,12 +160,19 @@ public func configure(_ app: Application, config: ServerConfig, overrides: Overr
     app.middleware.use(CORSLockdownMiddleware())
     app.middleware.use(GlobalRateLimitMiddleware())
     app.middleware.use(RequestGuardMiddleware())
-    try Routes.register(app)
+    // The worker has no ingress and serves health checks only; every other role serves the API.
+    if config.role == .worker { HealthRoutes.register(app.routes) } else { try Routes.register(app) }
 
     if let port = config.operations.metricsPort {
         app.lifecycle.use(InternalMetricsServer(host: config.operations.metricsHost, port: port, token: config.operations.metricsToken) { [app] in await MetricsService(db: app.db, ctx: app.ctx).render() })
     }
-    if config.runBackgroundJobs { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
+    if config.runBackgroundJobs, config.role != .migrate { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
+    // Process roles (ADR-0010): the api publishes the outbox right after commits; the worker also consumes every queue.
+    switch config.role {
+    case .api: app.lifecycle.use(QueueWorker(consume: false))
+    case .worker: app.lifecycle.use(QueueWorker(consume: true))
+    case .migrate, .combined: break
+    }
 }
 
 /// Test/dev seams. Production code never sets these.
@@ -140,6 +191,14 @@ public struct Overrides: Sendable {
     public var emailSender: (any EmailSender)?
     /// Domain checks for onboarding (DNS TXT and well-known file). `nil` = the network checker.
     public var domainChecker: (any DomainChecker)?
+    /// Service keys (`LocalKMS` in tests). `nil` = Key Vault when configured.
+    public var kms: (any KeyManagementService)?
+    /// Audit-head storage. `nil` = Azure Blob when configured, else the directory of the settings.
+    public var auditObjectStore: (any ObjectStore)?
+    /// Azure tokens. `nil` = the managed identity when the process has one.
+    public var accessTokens: (any AccessTokenSource)?
+    /// Queue transport. `nil` = Service Bus when `QUEUE_TRANSPORT=servicebus`, else the database transport.
+    public var queueTransport: (any QueueTransport)?
     /// Cloud API calls of the audit-head export. `nil` = the real HTTPS client.
     public var outboundHTTP: (any OutboundHTTP)?
 

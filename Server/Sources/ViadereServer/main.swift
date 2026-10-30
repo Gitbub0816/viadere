@@ -11,8 +11,10 @@ LoggingSystem.bootstrap { label in StructuredLogHandler(label: label, level: lev
 var environment = try Environment.detect()
 let app: Application
 do {
-    let config = try ServerConfig.fromEnvironment()
+    // Envelope-wrapped secrets (`*_WRAPPED`) are unwrapped with the Key Vault key-encryption key before the configuration is read (WP-B2).
+    let config = try ServerConfig.fromEnvironment(try await WrappedSecrets.resolveFromEnvironment())
     app = try await makeApplication(environment: environment, config: config)
+    app.asyncCommands.use(MaintenanceCommand(), as: "maintenance")
     app.asyncCommands.use(SeedCommand(), as: "seed")
     app.asyncCommands.use(CreateOperatorCommand(), as: "create-operator")
     app.asyncCommands.use(AuditHeadCommand(), as: "audit-head")

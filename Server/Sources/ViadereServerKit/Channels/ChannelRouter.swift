@@ -95,6 +95,7 @@ struct ChannelRouter {
         row.fallbackReason = rcsWanted && !rcsUsable ? "disabled" : nil
         row.createdAt = ctx.now
         try await row.create(on: tx)
+        try await Outbox.enqueue(QueueHandlers.channelDeliver, ref: row.id!, tenant: row.businessId, on: tx, ctx: ctx)
     }
 
     /// Essential purposes ride on the verified phone link. Everything else needs a grant that names a text channel.
@@ -139,7 +140,7 @@ struct ChannelRouter {
         try await row.update(on: db)
     }
 
-    private func process(_ row: ChannelOutboundRecord) async throws {
+    func process(_ row: ChannelOutboundRecord) async throws {
         let audit = AuditService(db: db, ctx: ctx)
         guard let interactionRecord = try await InteractionRecord.find(row.interactionId, on: db),
               interactionRecord.statusValue == .pending, interactionRecord.expiresAt > ctx.now,
