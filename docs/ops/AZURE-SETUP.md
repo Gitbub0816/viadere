@@ -220,11 +220,9 @@ cp terraform.tfvars.example terraform.tfvars   # then edit: subscription/tenant 
 # image: the newest signed release in GHCR, e.g. from the Release workflow's summary or:
 #   gh api "/users/<owner>/packages/container/viadere%2Fviadere-server/versions" --jq '.[0].name'   (sha256:...)
 tofu init -backend-config=backend.staging.hcl
-export TF_VAR_postgres_admin_password="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(32))')"
-tofu plan -var profile=lean -var postgres_set_admin_password=true -out tfplan
+tofu plan -var profile=lean -out tfplan   # Entra-only database: no admin password (Azure refuses one when password auth is off)
 tofu show -json tfplan > plan.json && python3 -I policy_check.py plan.json && rm plan.json
 tofu apply tfplan && rm tfplan
-unset TF_VAR_postgres_admin_password   # discard it: the Entra admin group is used from now on
 ```
 
 Expected policy-check output for lean: 0 violations and the recorded exceptions `KV-PUBLIC`, `SB-PUBLIC`, `KV-SOFTWARE-KEYS`, `PG-NO-HA`, `PG-PASSWORD-AUTH` (each has a row in CLAUDE.md's exceptions table).

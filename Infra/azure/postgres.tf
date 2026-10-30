@@ -30,9 +30,10 @@ resource "azurerm_postgresql_flexible_server" "this" {
   # Local administrator: needed by Azure only while password auth is enabled. The password is write-only (never in state) and is sent only
   # on the apply that sets postgres_set_admin_password = true (the first one); later plans leave it out, and rotation goes through
   # `az postgres flexible-server update --admin-password` (AZURE-SETUP.md section 8).
-  administrator_login               = var.postgres_password_auth_enabled ? "viadere_local_admin" : null
-  administrator_password_wo         = var.postgres_set_admin_password ? var.postgres_admin_password : null
-  administrator_password_wo_version = var.postgres_set_admin_password ? var.postgres_admin_password_version : null
+  administrator_login = var.postgres_password_auth_enabled ? "viadere_local_admin" : null
+  # Azure refuses an administrator password on an Entra-only server, so it is sent only when password auth is on.
+  administrator_password_wo         = var.postgres_password_auth_enabled && var.postgres_set_admin_password ? var.postgres_admin_password : null
+  administrator_password_wo_version = var.postgres_password_auth_enabled && var.postgres_set_admin_password ? var.postgres_admin_password_version : null
 
   dynamic "high_availability" {
     for_each = local.p.pg_ha ? [1] : []

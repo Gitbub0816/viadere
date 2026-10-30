@@ -23,7 +23,10 @@ resource "azurerm_key_vault" "this" {
   # Deny by default in both profiles. Lean admits the Container Apps subnet (service endpoint) and the owner's admin IPs, if any; standard
   # admits nothing on the public endpoint (which is disabled) and is reached through its private endpoint.
   network_acls {
-    bypass                     = "None"
+    # Key creation through ARM (azapi kv_key) is proxied by the KeyVault management plane and is evaluated against this firewall;
+    # with bypass None it is refused (ForbiddenByFirewall). AzureServices admits trusted Microsoft services at the network layer only:
+    # every data-plane call still needs an Entra token with an RBAC role on this vault, and no such role is granted to them.
+    bypass                     = "AzureServices"
     default_action             = "Deny"
     virtual_network_subnet_ids = local.p.private_endpoints ? [] : [azurerm_subnet.cae.id]
     ip_rules                   = local.p.private_endpoints ? [] : var.key_vault_allowed_ip_ranges
