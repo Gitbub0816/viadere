@@ -123,7 +123,6 @@ Then create `Infra/azure/backend.staging.hcl` (gitignored) from `backend.example
 cd Infra/azure
 cat > backend.staging.hcl <<EOF
 use_azuread_auth     = true
-tenant_id            = "$TENANT_ID"
 subscription_id      = "$SUB_ID"
 resource_group_name  = "$STATE_RG"
 storage_account_name = "$STATE_SA"
