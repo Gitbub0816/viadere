@@ -47,9 +47,9 @@ variable "tenant_id" {
 }
 
 variable "location" {
-  description = "Azure region. Owner decision: eastus (next to today's Fly iad and Neon us-east-1)."
+  description = "Azure region. eastus2: new subscriptions are refused PostgreSQL Flexible Server in eastus (no versions offered, checked 2026-10-30); eastus2 is adjacent and priced the same."
   type        = string
-  default     = "eastus"
+  default     = "eastus2"
 }
 
 variable "name_suffix" {

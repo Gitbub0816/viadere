@@ -4,7 +4,7 @@ profile         = "lean" # lean (testing, ~USD 27-31/month) | standard (producti
 environment     = "staging"
 subscription_id = "00000000-0000-0000-0000-000000000000" # viadere-staging
 tenant_id       = "00000000-0000-0000-0000-000000000000"
-location        = "eastus"
+location        = "eastus2" # eastus refuses PostgreSQL Flexible Server for new subscriptions
 name_suffix     = "REPLACE" # 3-6 lowercase letters/digits, makes global names unique
 
 github_repository = "OWNER/viadere"
