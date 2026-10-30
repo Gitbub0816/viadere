@@ -474,7 +474,8 @@ final class AzurePlatformTests: XCTestCase {
         // A database is configured, so every secret is required (no ephemeral secrets with a real database).
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(entra.merging(identity) { $1 }))
         let secrets = ["CONNECT_LINK_SIGNING_KEY", "SERVER_PEPPER", "DATA_ENCRYPTION_KEY", "AUDIT_CHAIN_KEY", "SUBJECT_REF_KEY"].reduce(into: [String: String]()) { $0[$1] = SecureToken.generate() }
-            .merging(["KEY_DIRECTORY_LOG_KEY": Base64URL.encode(P256.Signing.PrivateKey().rawRepresentation)]) { $1 }
+            .merging(["KEY_DIRECTORY_LOG_KEY": Base64URL.encode(P256.Signing.PrivateKey().rawRepresentation),
+                      "LINK_DESCRIPTOR_SIGNING_KEY": Base64URL.encode(P256.Signing.PrivateKey().rawRepresentation)]) { $1 }
         let config = try ServerConfig.fromEnvironment(entra.merging(identity) { $1 }.merging(secrets) { $1 })
         XCTAssertEqual(config.databaseEntra, EntraDatabaseSettings(host: "psql-viadere-stgl.postgres.database.azure.com", port: 5432, database: "viadere", user: "viadere_app", caFile: nil))
         XCTAssertTrue(config.hasDatabase)
