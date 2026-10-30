@@ -1,0 +1,124 @@
+{
+  "binding_refused" : [
+    {
+      "fallback_reason" : "publisher_mismatch",
+      "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMiIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.mOb3ecwiai01QuYi-MNo1pT1HfYf_Ffl3w1ndMbu11ECzzSGna0b43MD617-VbYQ8ryt6op1EeyqJsOPS-ToGA",
+      "name" : "other_business"
+    }
+  ],
+  "definition" : {
+    "appearance" : {
+      "mode" : "standard"
+    },
+    "entry_points" : [
+      "business_page",
+      "message",
+      "alert"
+    ],
+    "key" : "pickup-scheduling",
+    "limits" : {
+      "expires_in_seconds" : 86400
+    },
+    "schema_version" : 1,
+    "steps" : [
+      {
+        "actions" : [
+          {
+            "action" : "select_option",
+            "id" : "confirm",
+            "label" : "continue",
+            "next" : "s2"
+          }
+        ],
+        "fields" : [
+          {
+            "id" : "slot",
+            "label" : "Pickup time",
+            "options" : [
+              {
+                "id" : "am",
+                "label" : "Morning"
+              },
+              {
+                "id" : "pm",
+                "label" : "Afternoon"
+              }
+            ],
+            "required" : true,
+            "type" : "single_choice"
+          }
+        ],
+        "id" : "s1",
+        "type" : "form"
+      },
+      {
+        "actions" : [
+          {
+            "action" : "acknowledge",
+            "id" : "submit",
+            "label" : "send_request",
+            "next" : "done",
+            "routing" : {
+              "mode" : "hosted",
+              "queue" : "pickups"
+            }
+          }
+        ],
+        "id" : "s2",
+        "type" : "summary"
+      },
+      {
+        "id" : "done",
+        "show_outcome" : true,
+        "type" : "result"
+      }
+    ],
+    "title" : "Schedule your pickup"
+  },
+  "description" : "Signed Loop publication manifest (SECURITY.md 2.92): compact JWS, header exactly {alg: ES256, kid, typ: viadere-loop-publication+jws} as canonical JSON, payload canonical JSON repeating kid, ECDSA P-256 raw r||s over header64.payload64. Verify with the pinned key; do not compare signatures. `now` is the verification time (unix seconds). Negative cases must all be refused; the builder then renders the safe fallback.",
+  "header_canonical" : "{\"alg\":\"ES256\",\"kid\":\"loop-publication-v1\",\"typ\":\"viadere-loop-publication+jws\"}",
+  "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.y9MJM8HUSb6CCH8kRLbdmZUnkNr2KRoeVkSefQcq544bTGu1Uq9VYSEXuLMaN67eB8KtK5g0iXez57wX2WNYXg",
+  "kid" : "loop-publication-v1",
+  "name" : "loop-publication-manifest-v1",
+  "now" : 1794744000,
+  "payload" : {
+    "attribution_policy_version" : 1,
+    "definition_hash" : "sha256:66d413c5f259750452cdd20bf0379450eac7f094bf7c732ca9f6aa8924fa502c",
+    "kid" : "loop-publication-v1",
+    "not_after" : 1797249600,
+    "published_definition_id" : "3c9d2e1f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+    "publisher_business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+    "publisher_type" : "business",
+    "revision" : 3,
+    "rollout" : {
+      "percent" : 100
+    },
+    "v" : 1,
+    "valid_from" : 1794740400
+  },
+  "payload_canonical" : "{\"attribution_policy_version\":1,\"definition_hash\":\"sha256:66d413c5f259750452cdd20bf0379450eac7f094bf7c732ca9f6aa8924fa502c\",\"kid\":\"loop-publication-v1\",\"not_after\":1797249600,\"published_definition_id\":\"3c9d2e1f-4a5b-4c6d-8e7f-90a1b2c3d4e5\",\"publisher_business_id\":\"0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01\",\"publisher_type\":\"business\",\"revision\":3,\"rollout\":{\"percent\":100},\"v\":1,\"valid_from\":1794740400}",
+  "public_key" : "BNujSAmPBP_dLSRW1dYcNkQRzTqS_pHsYdYhqvO3tfG1vqMtX4-O6wYXNWzQswLa20NDR5ilKG4MU89NIV_Q-F4",
+  "refused" : [
+    {
+      "error" : "bad_signature",
+      "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.hwsKrLuIRlURTPsSxfb2WtYYph2JwMV-5RqPIqhulGYa6b80sA7v_S-OUeR2CrfNHmPz7q-tiRUEwMIfJMA9ng",
+      "name" : "wrong_key"
+    },
+    {
+      "error" : "unsupported_algorithm",
+      "jws" : "eyJhbGciOiJub25lIiwia2lkIjoibG9vcC1wdWJsaWNhdGlvbi12MSIsInR5cCI6InZpYWRlcmUtbG9vcC1wdWJsaWNhdGlvbitqd3MifQ.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.y9MJM8HUSb6CCH8kRLbdmZUnkNr2KRoeVkSefQcq544bTGu1Uq9VYSEXuLMaN67eB8KtK5g0iXez57wX2WNYXg",
+      "name" : "alg_none"
+    },
+    {
+      "error" : "wrong_type",
+      "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWJyYW5kLW1hbmlmZXN0K2p3cyJ9.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.U4xL-cY7z4rYAYnbilReZzGMkQQOBGnuw91xC57jpBpxNCPo7aWz14-xCH0ziSIIvk1Oq3OLgYjc09vbx41Z4A",
+      "name" : "brand_manifest_typ"
+    },
+    {
+      "error" : "bad_signature",
+      "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MjQ5NjAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMiIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.y9MJM8HUSb6CCH8kRLbdmZUnkNr2KRoeVkSefQcq544bTGu1Uq9VYSEXuLMaN67eB8KtK5g0iXez57wX2WNYXg",
+      "name" : "payload_swapped"
+    }
+  ],
+  "version" : 1
+}

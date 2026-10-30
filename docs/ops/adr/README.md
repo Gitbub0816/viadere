@@ -6,6 +6,8 @@ and a status (`proposed`, `accepted`, `superseded by NNNN`). Template: Context, 
 
 ADRs 0010 to 0014 come from `docs/IMPLEMENTATION-PLAN-v3.md` (the Security Architecture Expansion and the Azure migration).
 
+ADRs 0015 to 0018 come from `docs/FEATURE-EXPANSION-PLAN-v4.md` (Loops, Brand Kits, Organization; WP-0.1).
+
 ## Index
 
 | ADR | Decision | Status |
@@ -24,3 +26,7 @@ ADRs 0010 to 0014 come from `docs/IMPLEMENTATION-PLAN-v3.md` (the Security Archi
 | [0012](0012-azure-key-vault-premium.md) | Azure Key Vault Premium (HSM keys), not Managed HSM | proposed |
 | [0013](0013-device-first-pseudonymous-accounts.md) | Device-first pseudonymous accounts and trust tiers D0/D1/D2 | proposed |
 | [0014](0014-service-bus-job-queues.md) | Service Bus queues with a transactional outbox, DLQ and idempotent consumers | proposed |
+| [0015](0015-feature-expansion-modular-boundaries.md) | Modular boundaries and new Core folders for Loops, Brand Kits, surfaces and organization | proposed |
+| [0016](0016-presentation-model-and-renderers.md) | One `PresentationTree` in Core, SwiftUI production renderer, server-side HTML Studio preview | proposed |
+| [0017](0017-brand-asset-domain-and-image-pipeline.md) | Dedicated asset domain; PNG and JPEG only, re-encoded to PNG, content-addressed; SVG refused | proposed |
+| [0018](0018-loop-runtime-outcomes-registry-review.md) | Loop runtime, outcome states, closed action registry, non-overridable hard gate and mandatory review | proposed |

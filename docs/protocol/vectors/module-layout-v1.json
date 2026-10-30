@@ -1,0 +1,330 @@
+{
+  "cases" : [
+    {
+      "expected_issues" : [
+
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "message",
+            "size" : "compact"
+          },
+          {
+            "module" : "offers",
+            "size" : "regular"
+          },
+          {
+            "module" : "rewards",
+            "size" : "compact"
+          },
+          {
+            "module" : "recent_activity",
+            "size" : "compact"
+          },
+          {
+            "module" : "approvals",
+            "size" : "compact"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "valid_business_home"
+    },
+    {
+      "expected_issues" : [
+
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "offers",
+            "size" : "compact"
+          }
+        ],
+        "template" : "widget_small",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "valid_widget_small"
+    },
+    {
+      "expected_issues" : [
+        "unknown_module@modules[1].module"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "casino",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "unknown_module"
+    },
+    {
+      "expected_issues" : [
+        "duplicate_module@modules[2].module"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "offers",
+            "size" : "regular"
+          },
+          {
+            "module" : "offers",
+            "size" : "compact"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "duplicate_module"
+    },
+    {
+      "expected_issues" : [
+        "missing_required_module@modules"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "offers",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "missing_profile"
+    },
+    {
+      "expected_issues" : [
+        "required_module_not_first@modules"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "offers",
+            "size" : "regular"
+          },
+          {
+            "module" : "profile",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "profile_not_first"
+    },
+    {
+      "expected_issues" : [
+        "module_not_enabled@modules[1].module"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "loops",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "loops_not_enabled"
+    },
+    {
+      "expected_issues" : [
+
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "loops",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : true,
+      "name" : "loops_enabled"
+    },
+    {
+      "expected_issues" : [
+        "module_reserved@modules[1].module"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          },
+          {
+            "module" : "shop",
+            "size" : "regular"
+          }
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : true,
+      "name" : "shop_reserved"
+    },
+    {
+      "expected_issues" : [
+        "unknown_member@tabs"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "profile",
+            "size" : "regular"
+          }
+        ],
+        "tabs" : [
+          "shop"
+        ],
+        "template" : "business_home",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "navigation_member"
+    },
+    {
+      "expected_issues" : [
+        "too_many_modules@modules"
+      ],
+      "layout" : {
+        "modules" : [
+          {
+            "module" : "offers",
+            "size" : "compact"
+          },
+          {
+            "module" : "rewards",
+            "size" : "compact"
+          }
+        ],
+        "template" : "widget_small",
+        "v" : 1
+      },
+      "loops_enabled" : false,
+      "name" : "widget_slot_overflow"
+    }
+  ],
+  "description" : "Business surface layouts (plan 4.7, WP-1.6) validated against module registry v1. `expected_issues` lists code@path in order; empty means valid. `loops_enabled` states whether the Loops module is enabled for the business and customer.",
+  "name" : "module-layout-v1",
+  "registry" : [
+    {
+      "availability" : "active",
+      "id" : "profile",
+      "sizes" : [
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "message",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "offers",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "rewards",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "recent_activity",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "approvals",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "active",
+      "id" : "verification_requests",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "gated",
+      "id" : "loops",
+      "sizes" : [
+        "compact",
+        "regular",
+        "expanded"
+      ]
+    },
+    {
+      "availability" : "reserved",
+      "id" : "shop",
+      "sizes" : [
+        "regular",
+        "expanded"
+      ]
+    }
+  ],
+  "version" : 1
+}
