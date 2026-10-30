@@ -149,6 +149,10 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case approvalsFrozen = "approvals_frozen"
     /// The customer's protection against repeated prompts paused requests from this business for a while.
     case approvalsPaused = "approvals_paused"
+    /// The approval request locked after too many invalid result submissions (`423`, WP-C2); the business starts a new one.
+    case requestLocked = "request_locked"
+    /// The request addressed the customer by `relationshipId` after its sunset (`400`, WP-C2): use `subjectRef` (or `connectionId`).
+    case relationshipIdSunset = "relationship_id_sunset"
     case unknown
 
     public init(from decoder: any Decoder) throws {

@@ -292,7 +292,16 @@ public enum ApproveDevicePolicy: String, Codable, Sendable, Hashable, CaseIterab
 public struct ApproveBusinessSettings: Codable, Sendable, Hashable {
     public var devicePolicy: ApproveDevicePolicy
     public init(devicePolicy: ApproveDevicePolicy) { self.devicePolicy = devicePolicy }
-    enum CodingKeys: String, CodingKey { case devicePolicy = "device_policy" }
+    enum CodingKeys: String, CodingKey, CaseIterable { case devicePolicy = "device_policy" }
+
+    /// Strict: a member this version does not define (a `business_id`, say) is refused, never ignored. The tenant is the caller's API key.
+    public init(from decoder: any Decoder) throws {
+        let any = try decoder.container(keyedBy: AnyKey.self)
+        guard Set(any.allKeys.map(\.stringValue)).isSubset(of: Set(CodingKeys.allCases.map(\.rawValue))) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown member"))
+        }
+        devicePolicy = try decoder.container(keyedBy: CodingKeys.self).decode(ApproveDevicePolicy.self, forKey: .devicePolicy)
+    }
 }
 
 /// The business's view of a request. **The status is the relay's say-so: never authorize on it.** Fetch the result, verify the signature

@@ -636,6 +636,9 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case approvalKeyUnconfirmed
     /// An optional recovery credential (a passkey) was added to the account from one of its devices.
     case recoveryCredentialAdded
+    /// A business confirmed a link session with this account (`subjectId` = the relationship id), or one this account completed was never confirmed
+    /// and Viadere ended it (WP-C1).
+    case businessLinked, businessLinkUnconfirmed
     case unknown
 
     public init(from decoder: any Decoder) throws {

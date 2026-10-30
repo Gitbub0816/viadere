@@ -12,8 +12,8 @@ extension TypedID where Tag == IDTag.Relationship {
 /// The business API's customer addressing (WP-C2): `subjectRef` (or its alias `connectionId`) only. `relationshipId` is deprecated: requests that
 /// carry it get `Deprecation` and `Sunset` headers until `relationshipIdSunset`, and `400 relationship_id_sunset` from then on.
 public enum BusinessAddressing {
-    /// 2027-03-31T00:00:00Z.
-    public static let relationshipIdSunset = Date(timeIntervalSince1970: 1_806_451_200)
+    /// 2027-09-30T00:00:00Z: a quarter after the legacy approval sunset (2027-06-30), so a business migrates both in one plan.
+    public static let relationshipIdSunset = Date(timeIntervalSince1970: 1_822_262_400)
 }
 
 public protocol SubjectAddressedRequest: Sendable {
