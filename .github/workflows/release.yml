@@ -101,11 +101,14 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     needs: build
+    # A pre-release tag (v1.2.3-anything) only builds, signs and publishes the image (e.g. the first Azure apply needs a signed digest);
+    # Fly staging is deployed by staging-deploy.yml, production only from a release tag.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment:
       name: staging
-      url: https://api-staging.viadere.com
+      url: https://viadere-api.cksites.dev
     permissions:
       contents: read
       packages: read
@@ -143,12 +146,13 @@ jobs:
       - name: Smoke test
         run: |
           for path in healthz readyz; do
-            curl --proto '=https' --tlsv1.2 -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://api-staging.viadere.com/${path}"
+            curl --proto '=https' --tlsv1.2 -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://viadere-api.cksites.dev/${path}"
           done
 
   deploy-production:
     name: Deploy to production
     needs: [build, deploy-staging]
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Protected environment: required reviewers (two people, neither the author of the release commit), wait timer, tag rule v*.
