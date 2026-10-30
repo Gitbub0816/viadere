@@ -486,19 +486,32 @@ final class LinkSessionTests: XCTestCase {
     }
 
     func testAKMSThatReturnsAWrongSignatureIsNeverUsed() async throws {
+        /// A key service that answers every request with a well-formed signature that does not verify.
         struct LyingKMS: KeyManagementService {
-            let key = SoftwareP256SigningKey()
-            func sign(keyRef: KMSKeyRef, digest: Data) async throws -> Data { Data(repeating: 7, count: 64) }
-            func publicKey(keyRef: KMSKeyRef) async throws -> DevicePublicKey { key.publicKey }
+            let key = P256.Signing.PrivateKey()
+            func sign(keyRef: String, digest: Data) async throws -> Data { Data(repeating: 7, count: 64) }
+            func publicKey(keyRef: String) async throws -> P256.Signing.PublicKey { key.publicKey }
+            func wrap(keyRef: String, plaintext: Data) async throws -> KMSWrappedKey { throw KMSError.wrongKeyType }
+            func unwrap(keyRef: String, ciphertext: Data) async throws -> Data { throw KMSError.wrongKeyType }
+            func resolveVersion(keyRef: String) async throws -> String { keyRef }
         }
-        let signer = KMSStatementSigner(kms: LyingKMS(), keyRef: .linkDescriptor)
+        let signer = KMSStatementSigner(key: try await KMSSigningKey.load(kms: LyingKMS(), keyRef: "link-descriptor"))
         do { _ = try await signer.sign(payload: Data("{}".utf8), domain: LinkDomainSeparator.descriptor); XCTFail("must refuse") } catch {
-            XCTAssertEqual(error as? KMSError, .invalidSignature)
+            XCTAssertEqual(error as? KMSError, .signatureMismatch)
         }
-        // The local KMS signs digests that verify against the published key.
+        // A stand-in that must never sign (the worker's) refuses.
+        do { _ = try await KMSStatementSigner(key: UnavailableSigningKey()).sign(payload: Data("{}".utf8), domain: LinkDomainSeparator.result); XCTFail("must refuse") } catch {}
+        // A KMS key signs digests that verify against the published key.
+        let kms = LocalKMS()
+        kms.createSigningKey("link-descriptor")
+        let published = DevicePublicKey(try await kms.publicKey(keyRef: "link-descriptor"))
+        let viaKMS = KMSStatementSigner(key: try await KMSSigningKey.load(kms: kms, keyRef: "link-descriptor"))
+        let fromKMS = try await viaKMS.sign(payload: Data("{\"a\":1}".utf8), domain: LinkDomainSeparator.result)
+        XCTAssertTrue(SignedStatement(payload: fromKMS.payload, signature: fromKMS.signature).isValid(domain: LinkDomainSeparator.result, publicKey: published))
+        XCTAssertEqual(fromKMS.kid, KeyIdentifier.make(try published.signingKey()))
+        // So does an environment-supplied key (Fly staging, development).
         let key = SoftwareP256SigningKey()
-        let local = KMSStatementSigner(kms: LocalKMS(keys: [.linkDescriptor: key]), keyRef: .linkDescriptor)
-        let signed = try await local.sign(payload: Data("{\"a\":1}".utf8), domain: LinkDomainSeparator.result)
+        let signed = try await KMSStatementSigner(key: key).sign(payload: Data("{\"a\":1}".utf8), domain: LinkDomainSeparator.result)
         XCTAssertTrue(SignedStatement(payload: signed.payload, signature: signed.signature).isValid(domain: LinkDomainSeparator.result, publicKey: key.publicKey))
         XCTAssertEqual(signed.kid, KeyIdentifier.make(try key.publicKey.signingKey()))
     }

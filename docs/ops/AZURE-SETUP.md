@@ -2,7 +2,7 @@
 
 Owner guide for `Infra/azure/` (OpenTofu landing zone, plan [`../IMPLEMENTATION-PLAN-v3.md`](../IMPLEMENTATION-PLAN-v3.md) section 5, ADR-0010 to ADR-0014). Every command is meant to be copied as is; replace only the values in `<angle brackets>` or the variables set at the top of a block.
 
-**Status (2026-10-29): code only, nothing is applied.** The subscriptions do not exist yet, so no `tofu plan`/`apply` has run against Azure. What was verified without credentials: `tofu fmt`, `tofu validate`, `tofu test` (both profiles, mocked providers), 64 Python unit tests (policy checker with its fixture plans, `kv_tool.py`), `actionlint` with shellcheck, and the repository's `trivy config` gate. Every step marked **(owner)** needs your Azure, GitHub or Cloudflare account.
+**Status (2026-10-30): code only, nothing is applied.** WP-B2/B3 (server side: managed identity, Key Vault, Blob export, Entra database authentication, process roles, queues) are implemented and tested against stubs and a local PostgreSQL 18.6; section 11 lists what the server reads. The subscriptions do not exist yet, so no `tofu plan`/`apply` has run against Azure. What was verified without credentials: `tofu fmt`, `tofu validate`, `tofu test` (both profiles, mocked providers), 64 Python unit tests (policy checker with its fixture plans, `kv_tool.py`), `actionlint` with shellcheck, and the repository's `trivy config` gate. Every step marked **(owner)** needs your Azure, GitHub or Cloudflare account.
 
 Contents: [1 Profiles and design choices](#1-profiles-and-design-choices) · [2 Tenant, subscriptions, budget, groups](#2-tenant-subscriptions-budget-groups) · [3 State storage](#3-state-storage-bootstrap) · [4 CI identities](#4-opentofu-ci-identities-optional) · [5 GitHub](#5-github-environments-and-variables) · [6 First apply](#6-first-apply-lean) · [7 Key Vault secrets](#7-key-vault-secrets) · [8 PostgreSQL roles](#8-postgresql-roles) · [9 Cloudflare Tunnel](#9-cloudflare-tunnel) · [10 First deploy and verification](#10-first-deploy-and-verification) · [11 Server environment variables (WP-B2/B3)](#11-server-environment-variables-wp-b2b3) · [12 Switching to standard](#12-switching-to-standard-and-production) · [13 Costs](#13-monthly-cost) · [14 Troubleshooting](#14-troubleshooting)
 
@@ -266,14 +266,25 @@ python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/
 python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name apns-p8 < AuthKey_NH9V2KR4LK.p8
 ```
 
-`put-env` lists every mapped secret it did not find in the file (`NOT SET ...`): at this point that should be only `DATABASE_URL`, `DATABASE_MIGRATION_URL` (section 8) and `APNS_KEY_P8` (the command above).
+`put-env` lists every mapped secret it did not find in the file (`NOT SET ...`): at this point that should be only `APNS_KEY_P8` (the command above), plus `DATABASE_URL` and `DATABASE_MIGRATION_URL` if you opted into the password fallback (section 8).
 
-`database-url` and `database-migration-url` are set in section 8, `cloudflared-tunnel-token` in section 9, and (lean with a private GHCR package) the pull token:
+`cloudflared-tunnel-token` is set in section 9 (and `database-url` / `database-migration-url` in section 8 only with the password fallback), and (lean with a private GHCR package) the pull token:
 
 ```sh
 # a classic token with read:packages only, for the user in ghcr_pull_username
 python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-token     # paste, Enter (no echo)
 ```
+
+**Wrapped service keys (recommended; plan 5.6).** The server accepts each of `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY`, `CONNECT_LINK_SIGNING_KEY` (and the `*_PREVIOUS` lists) as `<NAME>_WRAPPED` = `kms1:kek-data/<version>:<base64url>`, the plain value encrypted with RSA-OAEP-256 under the Key Vault key `kek-data`, and unwraps it once at boot (SECURITY.md §2.95). A member of `grp-viadere-kv-crypto-officers` wraps the values of `"$WORK/s.env"` without any of them touching a command line or the screen:
+
+```sh
+python3 -I Infra/azure/kv_tool.py wrap-env --vault-url https://<vault>.vault.azure.net --env-file "$WORK/s.env" --out "$WORK/wrapped.env"
+# then, in terraform.tfvars, map the wrapped names instead of the plain ones (e.g. SERVER_PEPPER_WRAPPED = "server-pepper"), tofu apply,
+# `tofu output -json key_vault_secret_map > Infra/azure/map.json`, and store them:
+python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/map.json --env-file "$WORK/wrapped.env"
+```
+
+A plain and a wrapped value of the same variable together refuse the boot. After a `kek-data` rotation the old version must stay enabled until every wrapped value is re-wrapped under the new one.
 
 Cloudflare must send the same `EDGE_TOKEN` value as the `edge-token` secret (section 9): read it from `"$WORK/s.env"` before that directory is deleted. Writing secrets through ARM needs `Microsoft.KeyVault/vaults/secrets/write` (Owner, Contributor or Key Vault Contributor on the vault); reading them back needs a data-plane role, which nobody but the workloads has. Container Apps picks up a new secret version within 30 minutes or on the next revision (`az containerapp revision restart`).
 
@@ -281,10 +292,21 @@ Cloudflare must send the same `EDGE_TOKEN` value as the `edge-token` secret (sec
 
 ## 8. PostgreSQL roles
 
-**(owner)** The server is private (no public endpoint), so administration runs in a one-off Container Apps Job inside the environment. Until WP-B2 ships Entra token authentication, the server and `migrate` log in with passwords (the CLAUDE.md exception "DB password in Key Vault"): `kv_tool.py` generates both passwords, stores the two connection URLs in Key Vault and writes the role SQL with **SCRAM-SHA-256 verifiers** (no plaintext password reaches the job).
+**(owner)** The server is private (no public endpoint), so administration runs in a one-off Container Apps Job inside the environment, as the Entra admin group. Since WP-B2 every workload connects with **its own managed identity's Entra token** (`DATABASE_AUTH=entra`, a fresh token for every new connection, TLS `verify-full`), and the module is Entra-only by default (`postgres_password_auth_enabled = false`): there is no database password anywhere. Create one Entra principal role per workload identity and give the migrator the schema:
 
 ```sh
-python3 -I Infra/azure/kv_tool.py db-passwords --vault-id "$KV_ID" --host "$PG_FQDN" --sql-out "$WORK/db-roles.sql"
+cd Infra/azure && tofu output -json workload_identities   # principal_id of api, worker, migrator
+cat > "$WORK/db-roles.sql" <<'SQL'
+-- runs in database "postgres" as the Entra admin group
+SELECT * FROM pgaadauth_create_principal_with_oid('viadere_migrator', '<migrator principal_id>', 'service', false, false);
+SELECT * FROM pgaadauth_create_principal_with_oid('viadere_app', '<api principal_id>', 'service', false, false);
+SELECT * FROM pgaadauth_create_principal_with_oid('viadere_worker', '<worker principal_id>', 'service', false, false);
+ALTER DATABASE viadere OWNER TO viadere_migrator;
+GRANT CONNECT ON DATABASE viadere TO viadere_app, viadere_worker;
+\connect viadere
+ALTER SCHEMA public OWNER TO viadere_migrator;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SQL
 # you must be signed in (az login) as a member of grp-viadere-db-admins; the job spec embeds your Entra token (valid about an hour)
 CAE_ID=$(cd Infra/azure && tofu output -json container_apps_environment | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 python3 -I Infra/azure/kv_tool.py psql-job --environment-id "$CAE_ID" --host "$PG_FQDN" --sql "$WORK/db-roles.sql" --out "$WORK/dbadmin-job.json"
@@ -292,14 +314,12 @@ az containerapp job create -n job-viadere-dbadmin -g "$RG_APP" --yaml "$WORK/dba
 az containerapp job start -n job-viadere-dbadmin -g "$RG_APP"
 az containerapp job execution list -n job-viadere-dbadmin -g "$RG_APP" --query '[0].properties.status' -o tsv   # repeat until Succeeded
 az containerapp job delete -n job-viadere-dbadmin -g "$RG_APP" --yes
-rm -rf "$WORK"   # s.env, db-roles.sql (verifiers only), dbadmin-job.json (your token)
+rm -rf "$WORK"   # s.env, db-roles.sql, dbadmin-job.json (your token)
 ```
 
-The job runs `psql` from the official `postgres:18.6` image (digest-pinned) as the Entra admin group, with the SQL mounted as a secret file. The SQL creates `viadere_migrator` (owns database `viadere`) and `viadere_app` (connect only); `job-viadere-migrate` then creates the schema and grants `viadere_app` DML only, exactly as on Neon (`docs/ops/RUNBOOKS.md`, "Database role bootstrap"). If the execution fails, read its output in Log Analytics (`ContainerAppConsoleLogs`, job `job-viadere-dbadmin`). The spec uses `PGSSLMODE=verify-full` with the system trust store; if libpq reports that it cannot find a root certificate, edit the spec to `require` for this one-off job (the connection stays inside the VNet).
+`job-viadere-migrate` (`ROLE=migrate`, identity `id-viadere-migrator`, a configuration that holds no service secret) then creates the schema and grants `viadere_app` (`DATABASE_APP_ROLE`) and `viadere_worker` (`DATABASE_WORKER_ROLE`) DML only, never DDL and never UPDATE on `audit_events`; every serving process refuses to start if its role can change the schema. If the execution fails, read its output in Log Analytics (`ContainerAppConsoleLogs`, job `job-viadere-dbadmin`). The spec uses `PGSSLMODE=verify-full` with the system trust store; if libpq reports that it cannot find a root certificate, edit the spec to `require` for this one-off job (the connection stays inside the VNet).
 
-After WP-B2 (Entra token connection source): create Entra principals for the identities with `pgaadauth_create_principal_with_oid('<role>', '<principal id from tofu output workload_identities>', 'service', false, false)`, grant them the existing roles (`GRANT viadere_app TO ...`), switch `postgres_password_auth_enabled = false`, delete `database-url`/`database-migration-url`, and remove the CLAUDE.md exception row. Rotating the local admin password meanwhile: `az postgres flexible-server update -g rg-viadere-stg-data -n <server> --admin-password "$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(32))')"` (then discard it).
-
----
+**Password fallback (not the default).** `postgres_password_auth_enabled = true` brings back the WP-B1 password roles (`kv_tool.py db-passwords` writes SCRAM verifiers and stores `database-url` / `database-migration-url`), `DATABASE_AUTH=password` and the two secret references. Using it needs a row in CLAUDE.md's exceptions table again (with its removal condition); turning it off again needs no server change.
 
 ## 9. Cloudflare Tunnel
 
@@ -356,39 +376,33 @@ Verification checklist:
 
 ## 11. Server environment variables (WP-B2/B3)
 
-The module sets these on the processes. **(now)** = read by today's server; the others are the contract WP-B2/B3 implement (today's server ignores them). No server code was changed in WP-B1.
+The module sets these on the processes; the server implements all of them (WP-B2/B3). `python3 -I Infra/azure/check_env_coverage.py` checks that every variable of `Server/.env.example` is set here, is a Key Vault reference, is in `app_env`, or is exempt with a reason (the Fly counterpart is `Infra/fly/check_env_coverage.py`).
 
-| Variable | api | worker / scheduled jobs | migrate | Value | Consumer |
+| Variable | api | worker / scheduled jobs | migrate | Value | Server behaviour |
 |---|---|---|---|---|---|
-| `ENVIRONMENT` | x | x | x | `staging` / `production` | (now) |
-| `PORT`, `BIND_HOST` | x | x | x | `8080`, `0.0.0.0` | (now) |
-| `AUTO_MIGRATE` | x | x | x | `false` | (now) |
-| `RATE_LIMIT_STORE` | x | x | x | `database` | (now) |
-| `RUN_BACKGROUND_JOBS` | `true` until a worker exists, then `false` | `true` | `false` | | (now) |
-| `DATABASE_APP_ROLE` | x | x | x | `viadere_app` | (now) |
-| `DATABASE_URL` | secret `database-url` | secret | secret | password URL until B2 | (now); removed by B2 |
-| `DATABASE_MIGRATION_URL` | **never** | never | secret `database-migration-url` | | (now); replaced by the migrator identity in B2 |
-| other secrets (`EDGE_TOKEN`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY`, `CONNECT_LINK_SIGNING_KEY`, `KEY_DIRECTORY_LOG_KEY`, `EMAIL_API_KEY`, `APNS_KEY_P8`, `MAILERSEND_SMS_*`) | Key Vault references | same | same (today `migrate` loads the full strict configuration) | raw values until B2 wraps them under `kek-data` | (now) |
-| all `[env]` values of `fly.staging.toml` (`PUBLIC_BASE_URL`, `RP_ID`, `TRUSTED_PROXY_COUNT`, …) | from `app_env` | same | same | | (now) |
-| `ROLE` | `api` | `worker` | `migrate` | | B2 (process roles) |
-| `AZURE_CLIENT_ID` | id of `id-viadere-api` | `id-viadere-worker` | `id-viadere-migrator` | client id | B2 (managed-identity token: `IDENTITY_ENDPOINT` + `IDENTITY_HEADER` are injected by Container Apps) |
-| `AZURE_TENANT_ID` | x | x | x | | B2 |
-| `AZURE_KEY_VAULT_URL` | x | x | x | `https://<vault>.vault.azure.net/` | B2 (`AzureKeyVaultKMS`) |
-| `AZURE_KEY_VAULT_KEK_KEY` | `kek-data` | `kek-data` | | RSA 3072 wrap key | B2 (boot-time unwrap) |
-| `AZURE_KEY_VAULT_KD_LOG_KEY` | `kd-log-signing` | | | EC P-256 | B2 (replaces `KEY_DIRECTORY_LOG_KEY`) |
-| `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY` | `link-descriptor` | | | EC P-256 | C1 |
-| `AZURE_KEY_VAULT_AUDIT_HEAD_KEY` | | `audit-head-signing` | | EC P-256 | B2 (replaces `AUDIT_HEAD_KMS_KEY`) |
-| `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER` | | standard: `https://<account>.blob.core.windows.net/`, `audit-heads`; lean: empty | | | B2 (`AzureBlobHeadSink`) |
-| `AZURE_SERVICEBUS_FQDN` | x | x | | `<namespace>.servicebus.windows.net` | B3 (`ServiceBusRESTTransport`) |
-| `QUEUE_TRANSPORT` | x | x | | `database` until the worker exists, then `servicebus` | B3 |
-| `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_AUTH` | `viadere_app` | `viadere_worker` | `viadere_migrator` | host FQDN, `viadere`, role, `password` → `entra` | B2 (token connection source, `verify-full`) |
-| `HEALTH_PEER_NETWORKS` | x | x | | the Container Apps subnet (`10.40.0.0/23` staging) | B2 (replaces Fly's `fdaa::/16`; today's default `10.0.0.0/8` already covers it) |
+| `ENVIRONMENT`, `PORT`, `BIND_HOST`, `AUTO_MIGRATE=false`, `RATE_LIMIT_STORE=database` | x | x | x | | as on Fly |
+| `ROLE` | `api` | `worker` | `migrate` | | api: HTTP, publishes the outbox after commits; worker: queue consumers + publisher, `/healthz` and `/readyz` only; migrate: database-only configuration, no service secret, only `ViadereServer migrate` |
+| `RUN_BACKGROUND_JOBS` | `true` without a worker, else `false` | worker: `true` without scheduled jobs, else `false` | `false` | | the in-process loop (sweeps + one queue pass) |
+| `QUEUE_TRANSPORT`, `AZURE_SERVICEBUS_FQDN` | x | x | | `database` without a worker, else `servicebus`; `<namespace>.servicebus.windows.net` | `ServiceBusRESTTransport` with the managed identity, or the `queue_messages` table |
+| `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` | id of `id-viadere-api` | `id-viadere-worker` | `id-viadere-migrator` | | the user-assigned identity (Container Apps injects `IDENTITY_ENDPOINT` and `IDENTITY_HEADER`) |
+| `AZURE_KEY_VAULT_URL` | x | x | x | `https://<vault>.vault.azure.net/` | `AzureKeyVaultKMS` |
+| `AZURE_KEY_VAULT_KEK_KEY` | `kek-data` | `kek-data` | | RSA 3072 | unwraps `*_WRAPPED` secrets at boot and the Wallet keys |
+| `AZURE_KEY_VAULT_KD_LOG_KEY` | `kd-log-signing` | | | EC P-256 | signs key-directory tree heads (replaces `KEY_DIRECTORY_LOG_KEY`; the worker holds a stand-in that refuses to sign) |
+| `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY` | `link-descriptor` | | | EC P-256 | signs link-session descriptors and results (WP-C1; replaces `LINK_DESCRIPTOR_SIGNING_KEY`; the worker holds a stand-in that refuses to sign) |
+| `AZURE_KEY_VAULT_AUDIT_HEAD_KEY` | | `audit-head-signing` | | EC P-256 | signs exported audit heads (required in production for every role but `api`) |
+| `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER` | | standard: `https://<account>.blob.core.windows.net/`, `audit-heads`; lean: empty | | | create-only export to the immutable container (`AUDIT_HEAD_EXPORT=azure-blob` is inferred) |
+| `DATABASE_AUTH`, `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER` | `viadere_app` | `viadere_worker` | `viadere_migrator` | `entra` (default) or `password`; host FQDN, `viadere`, role | Entra token per new connection, `verify-full`, no fallback |
+| `DATABASE_APP_ROLE` | x | x | x | `viadere_app` | runtime-role grants |
+| `DATABASE_WORKER_ROLE` | | | `viadere_worker` | | worker-role grants (`GrantWorkerRolePrivileges.v1`) |
+| `DATABASE_URL`, `DATABASE_MIGRATION_URL` | secret, password fallback only | secret, password fallback only | migration URL, password fallback only | | as on Fly |
+| `HEALTH_PEER_NETWORKS` | x | x | | the Container Apps subnet (`10.40.0.0/23` staging) | the only peers whose `/healthz` and `/readyz` pass the origin lock without the edge token |
+| `METRICS_BIND_HOST` | via `app_env` when `METRICS_PORT` is set | | | a private address | replaces `FLY_PRIVATE_IP` (still read on Fly) |
+| other secrets (`EDGE_TOKEN`, the five service keys or their `*_WRAPPED` forms, `EMAIL_API_KEY`, `APNS_KEY_P8`, `MAILERSEND_SMS_*`) | Key Vault references | same | **none** | | the migrate job references no service secret |
+| all other `[env]` values of `fly.staging.toml` (`PUBLIC_BASE_URL`, `RP_ID`, `TRUSTED_PROXY_COUNT`, …) | from `app_env` | same | same | | as on Fly |
 
-Queues created for B3 (lock 60 s, dead-letter on expiry): `push` (max 5 deliveries, TTL 1 h), `sms-outbound`, `channel-outbound`, `webhook-delivery`, `wallet-push`, `operator-notices` (8 each), `consumer-export` (3), `expiry` (10; scheduled `interaction.expire`/`approve.expire`/identity holds). Lean (Basic) has no duplicate detection: B3's `processed_messages` idempotency is required, not optional.
+Queues (lock 60 s, dead-letter on expiry): `push` (max 5 deliveries, TTL 1 h), `sms-outbound`, `channel-outbound`, `webhook-delivery`, `wallet-push`, `operator-notices` (8 each), `consumer-export` (3), `expiry` (10). The consumer dead-letters a message itself on its last allowed delivery (recorded in the database, metric `queue_dead_lettered`); alert on that metric above zero and on the broker's DLQ depth above zero (expiry). Lean (Basic) has no duplicate detection: the `processed_messages` idempotency is what makes duplicates harmless (SECURITY.md §2.91).
 
-Findings for WP-B2 from WP-B1: (1) `ViadereServer migrate` loads the full strict configuration, so the migrate job must currently reference every server secret (its identity has Secrets User on them); B2 should give `migrate` a database-only configuration path, then the module's `migrate_secrets` shrinks to the database URL/identity. (2) cloudflared sends `Host: ca-viadere-api` (Container Apps routes internal traffic by app name); confirm the server never derives URLs from `Host` (it uses `PUBLIC_BASE_URL`). (3) Re-measure `TRUSTED_PROXY_COUNT` on Azure staging (client → Cloudflare → cloudflared → ingress → app).
-
----
+Resolved WP-B1 findings: (1) `migrate` has a database-only configuration (`ROLE=migrate`) and references no service secret; (2) the server never reads `Host` (cloudflared's `Host: ca-viadere-api` is irrelevant; a test scans the sources). Open: (3) re-measure `TRUSTED_PROXY_COUNT` on Azure staging (client → Cloudflare → cloudflared → ingress → app) once it runs.
 
 ## 12. Switching to standard (and production)
 

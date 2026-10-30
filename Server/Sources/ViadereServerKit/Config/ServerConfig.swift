@@ -162,6 +162,17 @@ public struct ServerConfig: Sendable {
     public var verify = VerifySettings()
     /// Operations, edge lock, key rotation, webhook verification and audit export (WP6).
     public var operations = OperationsSettings()
+    /// What this process does (`ROLE`: api, worker, migrate; unset = everything, as on Fly).
+    public var role: ProcessRole = .combined
+    /// Where queue messages travel (`QUEUE_TRANSPORT`).
+    public var queueTransport: QueueTransportMode = .database
+    /// Azure resources (managed identity, Key Vault keys, audit blob container, Service Bus).
+    public var azure = AzureSettings()
+    /// PostgreSQL with a Microsoft Entra token per new connection (`DATABASE_AUTH=entra`) instead of `DATABASE_URL`.
+    public var databaseEntra: EntraDatabaseSettings?
+
+    /// Whether a real database is configured (a password URL or Entra token authentication); `false` = in-memory SQLite (tests).
+    public var hasDatabase: Bool { databaseURL != nil || databaseEntra != nil }
 
     /// True only for `production`.
     public var isProduction: Bool { environment == .production }
@@ -194,7 +205,11 @@ public struct ServerConfig: Sendable {
             throw ServerConfigError.invalid("ENVIRONMENT (development, test, staging or production)")
         }
         let production = environment.isStrict
+        // The migration job gets a database-only configuration and never sees a service secret (WP-B2).
+        if try ProcessRole.parse(env["ROLE"]) == .migrate { return try migrationOnly(env) }
         let databaseURL = env["DATABASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
+        let databaseEntra = try entraDatabase(env)
+        let hasDatabase = databaseURL != nil || databaseEntra != nil
 
         func secretBytes(_ name: String, minimum: Int) throws -> Data {
             if let raw = env[name], !raw.isEmpty {
@@ -206,11 +221,11 @@ public struct ServerConfig: Sendable {
             if production { throw ServerConfigError.missing(name) }
             // An ephemeral secret would make everything already stored under it unreadable after a restart, so it is
             // only allowed with the throwaway in-memory database.
-            if databaseURL != nil { throw ServerConfigError.missing("\(name) (required whenever DATABASE_URL is set)") }
+            if hasDatabase { throw ServerConfigError.missing("\(name) (required whenever a database is configured)") }
             return SecureToken.randomBytes(max(minimum, 32))
         }
 
-        if production && databaseURL == nil { throw ServerConfigError.missing("DATABASE_URL") }
+        if production && !hasDatabase { throw ServerConfigError.missing("DATABASE_URL (or DATABASE_AUTH=entra with DATABASE_HOST and DATABASE_USER)") }
 
         let publicBase = (env["PUBLIC_BASE_URL"] ?? "https://viadere.com").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let baseURL = URL(string: publicBase), let scheme = baseURL.scheme, baseURL.host != nil else {
@@ -296,6 +311,7 @@ public struct ServerConfig: Sendable {
         } else if production {
             throw ServerConfigError.missing("LINK_DOMAIN")
         }
+        config.databaseEntra = databaseEntra
         config.auditChainKey = SymmetricKey(data: try secretBytes("AUDIT_CHAIN_KEY", minimum: 32))
         config.subjectRefKey = SymmetricKey(data: try secretBytes("SUBJECT_REF_KEY", minimum: 32))
         if production {
@@ -322,6 +338,8 @@ public struct ServerConfig: Sendable {
             config.auditLegacyThroughSeq = seq
         }
         if let seconds = env["SMS_MENU_RACE_SECONDS"].flatMap(Double.init), seconds >= 0, seconds <= 30 { config.smsMenuRaceWindow = seconds }
+        // Before the sections below: they consult the Key Vault key references (log key, audit-head key, audit container).
+        try config.applyAzureEnvironment(env, strict: production)
         try config.retention.apply(env)
         try config.applyIdentityEnvironment(env, production: production)
         try config.applyPlatformEnvironment(env, production: production)

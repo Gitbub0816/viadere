@@ -124,16 +124,22 @@ locals {
     worker = ["kek-data", "audit-head-signing"]
   }
 
-  # Secrets. Until WP-B2 adds a migrate-only configuration path, `ViadereServer migrate` loads the full strict configuration, so the migrate
-  # job (and the placeholder worker/jobs) reference the same secrets as the api; the migrator additionally gets database-migration-url.
-  api_secrets      = var.app_secret_env
-  migrate_secrets  = merge(var.app_secret_env, { DATABASE_MIGRATION_URL = "database-migration-url" })
-  worker_secrets   = var.app_secret_env
-  ghcr_pull_secret = "ghcr-pull-token"
-  tunnel_secret    = "cloudflared-tunnel-token"
-  ghcr_auth        = !local.p.registry && var.ghcr_pull_username != ""
+  # Secrets (WP-B2). `ViadereServer migrate` runs with ROLE=migrate, a database-only configuration: the migrate job references nothing but its
+  # database credential, and nothing at all once PostgreSQL is Entra-only (postgres_password_auth_enabled = false: every process then connects
+  # with its own managed identity's token, and database-url / database-migration-url are not created). The api and the worker get the service
+  # secrets; DATABASE_URL only while password authentication is on.
+  db_password_secret = var.postgres_password_auth_enabled ? { DATABASE_URL = "database-url" } : {}
+  service_secrets    = { for name, secret in var.app_secret_env : name => secret if name != "DATABASE_URL" }
+  api_secrets        = merge(local.service_secrets, local.db_password_secret)
+  worker_secrets     = merge(local.service_secrets, local.db_password_secret)
+  migrate_secrets    = var.postgres_password_auth_enabled ? { DATABASE_MIGRATION_URL = "database-migration-url" } : {}
+  ghcr_pull_secret   = "ghcr-pull-token"
+  tunnel_secret      = "cloudflared-tunnel-token"
+  ghcr_auth          = !local.p.registry && var.ghcr_pull_username != ""
 
   all_secret_names = toset(concat(
+    values(local.api_secrets),
+    values(local.worker_secrets),
     values(local.migrate_secrets),
     [local.tunnel_secret],
     local.ghcr_auth ? [local.ghcr_pull_secret] : [],

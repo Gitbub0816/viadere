@@ -104,7 +104,15 @@ struct LinkSessionService {
             record.expiresAt = now.addingTimeInterval(TimeInterval(lifetime))
             record.relationshipCreated = false
             do {
-                try await record.create(on: db)
+                // The session's two deadlines are scheduled messages (the maintenance sweep remains the safety net): `expires_at` for an open
+                // session, and `expires_at` + the confirmation grace for a completed one the business never confirmed. `approve.expire` runs the
+                // Approve v2 expiry sweep, which ends both (`expireDue`), so the message is a doorbell and carries only the session id.
+                let grace = settings.unconfirmedGrace
+                try await db.transaction { [ctx] tx in
+                    try await record.create(on: tx)
+                    try await Outbox.enqueue(QueueHandlers.approveExpire, ref: record.id!, notBefore: record.expiresAt, on: tx, ctx: ctx)
+                    try await Outbox.enqueue(QueueHandlers.approveExpire, ref: record.id!, notBefore: record.expiresAt.addingTimeInterval(grace), on: tx, ctx: ctx)
+                }
                 created = record
                 break
             } catch where error.isConstraintViolation { continue }
@@ -186,8 +194,8 @@ struct LinkSessionService {
     }
 
     func signedDescriptor(_ record: LinkSessionRecord, business: BusinessSummary, subject: SubjectRef) async throws -> ViadereSignedStatement {
-        let signer = KMSStatementSigner(kms: ctx.kms, keyRef: .linkDescriptor)
-        let payload = try await descriptor(record, business: business, subject: subject).payload(signerKid: try await signer.kid())
+        let signer = KMSStatementSigner(key: ctx.config.approve.linkDescriptorKey)
+        let payload = try await descriptor(record, business: business, subject: subject).payload(signerKid: try signer.kid())
         return try await signer.sign(payload: payload, domain: LinkDomainSeparator.descriptor)
     }
 
@@ -250,7 +258,7 @@ struct LinkSessionService {
         do {
             statement = try LinkStatement.verify(request.statement)
             let expected = try await descriptor(record, business: summary, subject: subject)
-            let descriptorDigest = SecureToken.sha256Hex(Data(Base64URL.encode(try expected.payload(signerKid: try await KMSStatementSigner(kms: ctx.kms, keyRef: .linkDescriptor).kid())).utf8))
+            let descriptorDigest = SecureToken.sha256Hex(Data(Base64URL.encode(try expected.payload(signerKid: try KMSStatementSigner(key: ctx.config.approve.linkDescriptorKey).kid())).utf8))
             // Bound to this session, this business, **this account's** pairwise reference, the exact capabilities and the descriptor shown.
             try statement.checkBinding(sessionId: sessionId, businessId: summary.id, subject: subject, capabilities: record.capabilityList, descriptorDigest: descriptorDigest)
             approval = try statement.checkApprovalStatement(request.approvalStatement)
@@ -275,10 +283,10 @@ struct LinkSessionService {
 
         // Viadere's signed account of the completion, for the business (made before the transaction: the KMS is a remote call).
         let statementDigest = LinkStatement.digest(of: request.statement)
-        let signer = KMSStatementSigner(kms: ctx.kms, keyRef: .linkDescriptor)
+        let signer = KMSStatementSigner(key: ctx.config.approve.linkDescriptorKey)
         let result = LinkResult(sessionId: sessionId, businessId: summary.id, subject: subject, statementDigest: statementDigest,
                                 approvalStatementDigest: request.approvalStatement.map(ApprovalEnrollmentStatement.digest(of:)), completedAt: now)
-        let signedResult = try await signer.sign(payload: try result.payload(signerKid: try await signer.kid()), domain: LinkDomainSeparator.result)
+        let signedResult = try await signer.sign(payload: try result.payload(signerKid: try signer.kid()), domain: LinkDomainSeparator.result)
         let resultJSON = String(decoding: try ViadereJSON.encode(signedResult), as: UTF8.self)
 
         do {

@@ -16,7 +16,8 @@ public struct KeyDirectoryLogKeyCommand: AsyncCommand {
     }
 }
 
-/// `ViadereServer link-descriptor-key` prints the **public** `link-descriptor` key (and its key id) from the configured key management service:
+/// `ViadereServer link-descriptor-key` prints the **public** `link-descriptor` key (and its key id) as configured: the Key Vault key on Azure
+/// (`AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY`), else `LINK_DESCRIPTOR_SIGNING_KEY`:
 /// the value of the app's `VIADERE_LINK_DESCRIPTOR_KEYS` and of a business SDK's pinned Viadere keys. It never prints a private key.
 public struct LinkDescriptorKeyCommand: AsyncCommand {
     public struct Signature: CommandSignature { public init() {} }
@@ -25,7 +26,7 @@ public struct LinkDescriptorKeyCommand: AsyncCommand {
     public init() {}
 
     public func run(using context: CommandContext, signature: Signature) async throws {
-        let key = try await context.application.ctx.kms.publicKey(keyRef: .linkDescriptor)
+        let key = context.application.ctx.config.approve.linkDescriptorKey.publicKey
         context.console.print("kid=\(KeyIdentifier.make(try key.signingKey()))")
         context.console.print("public_key=\(key.base64URL)")
     }

@@ -111,16 +111,20 @@ public enum WebhookURLPolicy {
 public struct VaporWebhookTransport: WebhookTransport {
     let client: any Client
     let allowInsecure: Bool
+    /// Refuses the managed-identity endpoint and the metadata services in every mode, including the development mode that allows loopback.
+    let destinationGuard: OutboundDestinationGuard
 
-    public init(client: any Client, allowInsecure: Bool) {
+    public init(client: any Client, allowInsecure: Bool, guard destinationGuard: OutboundDestinationGuard = .fromEnvironment()) {
         self.client = client
         self.allowInsecure = allowInsecure
+        self.destinationGuard = destinationGuard
     }
 
     public func send(_ request: WebhookHTTPRequest) async throws -> WebhookHTTPResponse {
         guard WebhookURLPolicy.validate(request.url, allowInsecure: allowInsecure), let host = request.url.host else {
             throw WebhookTransportError.blockedDestination
         }
+        do { try await destinationGuard.check(request.url) } catch { throw WebhookTransportError.blockedDestination }
         guard !allowInsecure else {
             // Development and tests only (loopback targets are allowed there): no pinning.
             do {
@@ -134,7 +138,8 @@ public struct VaporWebhookTransport: WebhookTransport {
         }
         let port = request.url.port ?? 443
         let addresses = try await Self.resolve(host: host, port: port)
-        guard !addresses.isEmpty, addresses.allSatisfy(WebhookURLPolicy.isPublic), let pinned = addresses.first?.ipAddress else {
+        guard !addresses.isEmpty, addresses.allSatisfy(WebhookURLPolicy.isPublic), !addresses.contains(where: destinationGuard.isRefused),
+              let pinned = addresses.first?.ipAddress else {
             throw WebhookTransportError.blockedDestination
         }
         var configuration = HTTPClient.Configuration()

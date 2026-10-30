@@ -235,6 +235,7 @@ final class TestHarness: @unchecked Sendable {
     }
 
     static func make(rcs: (any RCSProvider)? = nil, passes: Bool = true, outbound: (any OutboundHTTP)? = nil,
+                     overrides adjustOverrides: (inout Overrides) -> Void = { _ in },
                      _ adjust: (inout ServerConfig) -> Void = { _ in }) async throws -> TestHarness {
         var config = ServerConfig.testing()
         adjust(&config)
@@ -251,9 +252,11 @@ final class TestHarness: @unchecked Sendable {
         let domains = FakeDomainChecker()
         // TEST_RATE_LIMIT_STORE=database runs the whole suite on the shared database rate limiter (the production default).
         if ProcessInfo.processInfo.environment["TEST_RATE_LIMIT_STORE"] == "database" { config.rateLimitStore = .database }
-        let app = try await makeApplication(environment: .testing, config: config, overrides: Overrides(
+        var overrides = Overrides(
             clock: clock, apns: apns, sms: sms, passkeys: FakePasskeyVerifier(), webhookTransport: transport, rcs: rcs, autoMigrate: postgres != nil,
-            passSigner: passes ? signer : nil, passPush: passPush, emailSender: emails, domainChecker: domains, outboundHTTP: outbound))
+            passSigner: passes ? signer : nil, passPush: passPush, emailSender: emails, domainChecker: domains, outboundHTTP: outbound)
+        adjustOverrides(&overrides)
+        let app = try await makeApplication(environment: .testing, config: config, overrides: overrides)
         let harness = TestHarness(app: app, clock: clock, config: config, signer: signer, passPush: passPush, emails: emails)
         harness.domainChecker = domains
         harness.bind(apns: apns, sms: sms, transport: transport)
@@ -275,7 +278,7 @@ final class TestHarness: @unchecked Sendable {
     var db: any Database { app.db }
 
     func shutdown() async throws {
-        if config.databaseURL != nil { try? await app.autoRevert() }
+        if config.hasDatabase { try? await app.autoRevert() }
         try await app.asyncShutdown()
     }
 
@@ -514,9 +517,10 @@ final class TestHarness: @unchecked Sendable {
 }
 
 /// Runs a test body with a fresh application, always shutting it down.
-func withHarness(rcs: (any RCSProvider)? = nil, passes: Bool = true, outbound: (any OutboundHTTP)? = nil, _ adjust: (inout ServerConfig) -> Void = { _ in },
+func withHarness(rcs: (any RCSProvider)? = nil, passes: Bool = true, outbound: (any OutboundHTTP)? = nil,
+                 overrides: (inout Overrides) -> Void = { _ in }, _ adjust: (inout ServerConfig) -> Void = { _ in },
                  _ body: (TestHarness) async throws -> Void) async throws {
-    let harness = try await TestHarness.make(rcs: rcs, passes: passes, outbound: outbound, adjust)
+    let harness = try await TestHarness.make(rcs: rcs, passes: passes, outbound: outbound, overrides: overrides, adjust)
     do {
         try await body(harness)
     } catch {

@@ -22,11 +22,12 @@ ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns
 api_min_replicas = 0 # first apply only (no replica starts before secrets and database roles exist); then remove the line (lean default 1)
 
 # Non-secret server configuration: Infra/fly/fly.staging.toml [env] minus the keys the module sets itself (ENVIRONMENT, PORT, BIND_HOST,
-# AUTO_MIGRATE, RATE_LIMIT_STORE, RUN_BACKGROUND_JOBS, DATABASE_APP_ROLE) and the GCP_* variables Azure retires.
+# AUTO_MIGRATE, RATE_LIMIT_STORE, RUN_BACKGROUND_JOBS, DATABASE_APP_ROLE, AZURE_*, DATABASE_*, ROLE, QUEUE_TRANSPORT, HEALTH_PEER_NETWORKS).
 # TRUSTED_PROXY_COUNT: client -> Cloudflare -> cloudflared -> Container Apps ingress -> app; keep 2 (one X-Forwarded-For entry per proxy
 # that appends) until WP-B2 re-measures it on Azure staging. Lower is safe, higher lets clients spoof their address.
 app_env = {
   APPROVE_V2_ENABLED                       = "false"
+  APP_ATTEST_ASSERTION_MODE                = "report" # WP-C2; `require` once the shipping app attests (`off` is refused in staging/production)
   KEY_DIRECTORY_LOG_ID                     = "viadere.key-directory.v1"
   VERIFY_ENABLED                           = "false"
   DIDIT_NEW_SESSIONS_ENABLED               = "true"
@@ -43,6 +44,7 @@ app_env = {
   ASSURANCE_GRACE_DAYS                     = "14"
   SUPPORT_NOTIFY_EMAIL                     = ""
   METRICS_PORT                             = ""
+  METRICS_BIND_HOST                        = ""
   DATA_ENCRYPTION_KEY_ID                   = ""
   SERVER_PEPPER_ID                         = ""
   AUDIT_CHAIN_KEY_EPOCH                    = "1"
@@ -51,8 +53,6 @@ app_env = {
   AUDIT_HEAD_EXPORT_TARGET                 = ""
   AUDIT_HEAD_EXPORT_PREFIX                 = "audit-heads/"
   AUDIT_HEAD_EXPORT_INTERVAL_HOURS         = "6"
-  AUDIT_HEAD_EXPORT_ENDPOINT               = ""
-  AUDIT_HEAD_KMS_KEY                       = ""
   VERIFY_REQUIRE_E2EE_IDENTITY             = "false"
   LOG_LEVEL                                = "info"
   JOB_INTERVAL_SECONDS                     = "5"

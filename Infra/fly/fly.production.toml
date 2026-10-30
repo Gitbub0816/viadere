@@ -40,21 +40,19 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   ASSURANCE_GRACE_DAYS = "14"
   SUPPORT_NOTIFY_EMAIL = ""
   METRICS_PORT = ""
+  METRICS_BIND_HOST = ""   # empty on Fly: the listener binds FLY_PRIVATE_IP (set by Fly) or loopback
+  HEALTH_PEER_NETWORKS = ""   # empty on Fly: the default covers Fly's health checker (fdaa::/16)
   DATA_ENCRYPTION_KEY_ID = ""
   SERVER_PEPPER_ID = ""
   AUDIT_CHAIN_KEY_EPOCH = "1"
   CONNECT_LINK_SIGNING_KEY_ID = ""
   DATABASE_APP_ROLE = "viadere_app"   # the runtime role; `migrate` (release command, DATABASE_MIGRATION_URL) grants it DML only
-  # REQUIRED in production (the server refuses to start without AUDIT_HEAD_EXPORT, its target and AUDIT_HEAD_KMS_KEY + the GCP_* values):
-  AUDIT_HEAD_EXPORT = ""              # gcs | r2 (write-once storage); set with AUDIT_HEAD_EXPORT_TARGET after `tofu apply` (Infra/terraform/audit_bucket.tf)
+  # Production runs on Azure (ADR-0010): the audit head goes to an immutable Azure Blob container signed by Key Vault (AZURE_* settings,
+  # docs/ops/AZURE-SETUP.md section 11). On Fly the export stays off; the GCS/R2 settings are retired and refused when set.
+  AUDIT_HEAD_EXPORT = ""              # off on Fly (azure-blob on Azure; directory in development)
   AUDIT_HEAD_EXPORT_TARGET = ""
   AUDIT_HEAD_EXPORT_PREFIX = "audit-heads/"
   AUDIT_HEAD_EXPORT_INTERVAL_HOURS = "6"
-  AUDIT_HEAD_EXPORT_ENDPOINT = ""
-  AUDIT_HEAD_KMS_KEY = ""
-  GCP_WORKLOAD_IDENTITY_AUDIENCE = ""
-  GCP_SERVICE_ACCOUNT_EMAIL = ""
-  GCP_SUBJECT_TOKEN_FILE = ""
   VERIFY_REQUIRE_E2EE_IDENTITY = "false"
   # ---- runtime / mode -------------------------------------------------------------------------------
   ENVIRONMENT = "production"

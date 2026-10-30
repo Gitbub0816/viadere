@@ -102,5 +102,5 @@ output "health_peer_networks" {
 
 output "key_vault_secret_map" {
   description = "Environment variable -> Key Vault secret, for Infra/azure/kv_tool.py put-env (AZURE-SETUP.md section 7)."
-  value       = local.migrate_secrets
+  value       = merge(local.api_secrets, local.worker_secrets, local.migrate_secrets)
 }

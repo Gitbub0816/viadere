@@ -65,7 +65,10 @@ final class VerifyRuntime: @unchecked Sendable {
         if _keys == nil {
             if !settings.walletEncryptionKeyWrapped.isEmpty {
                 if let unwrapper = _keyUnwrapper {
-                    _keys = WrappedWalletEncryptionKeys(wrapped: settings.walletEncryptionKeyWrapped.compactMap { Base64URL.decode($0) }, unwrapper: unwrapper)
+                    // `kms1:` entries (Key Vault, WP-B2) are passed as text to the KMS unwrapper; older entries are raw base64url blobs.
+                    _keys = WrappedWalletEncryptionKeys(wrapped: settings.walletEncryptionKeyWrapped.compactMap {
+                        $0.hasPrefix(WrappedSecrets.prefix) ? Data($0.utf8) : Base64URL.decode($0)
+                    }, unwrapper: unwrapper)
                 } else {
                     logger.error("wallet encryption key is KMS-wrapped but no unwrapper is configured; the Wallet method is unavailable")
                 }
@@ -112,7 +115,6 @@ enum VerifyRegistration {
         let settings = config.verify
         // The client exists whenever credentials do, even with new sessions switched off or the workflow unset: it is the purge client.
         if let key = settings.diditAPIKey, !key.isEmpty, runtime.didit == nil {
-            runtime.didit = VaporDiditAPI(client: app.client, apiKey: key, base: settings.diditAPIBase)
-        }
-    }
+            runtime.didit = VaporDiditAPI(client: GuardedClient(base: app.client, guard: .fromEnvironment()), apiKey: key, base: settings.diditAPIBase)
+        }    }
 }

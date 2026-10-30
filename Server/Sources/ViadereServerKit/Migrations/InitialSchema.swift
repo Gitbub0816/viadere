@@ -547,5 +547,8 @@ struct CreateInitialSchema: AsyncMigration {
 
 /// Business-side invariants that SQL cannot express portably.
 enum Migrations {
-    static let all: [any AsyncMigration] = [CreateInitialSchema(), CreatePlatformSchema(), CreateP3Schema(), CreateSecurityHardeningSchema(), CreateSecurityRound3Schema(), CreatePlatformRound4Schema(), CreateIdentityRound4Schema(), CreateRecoveryRound5Schema(), CreatePolicyWP2Schema(), CreateVaultWP5Schema(), CreateVaultGateSchema(), CreateVerifyWP3Schema(), CreateApproveWP1Schema(), CreateApproveGateSchema(), CreatePlatformWP6Schema(), CreateRetentionDeleteGate(), CreateDecisionsRetentionGate(), CreateVerifyGateSchema(), CreateMTLSIssuerBinding(), CreateOperatorNoticeClaim(), GrantRuntimeRolePrivileges(), CreateDeviceFirstAccounts(), CreateLinkSessionsSchema()]
+    // Append only: Fluent records migrations by name, so existing databases run just the new ones. Link sessions (WP-C1) shipped to staging
+    // before the queue outbox (WP-B3); neither depends on the other, and the worker-role grant runs after every table exists (default
+    // privileges cover tables created later).
+    static let all: [any AsyncMigration] = [CreateInitialSchema(), CreatePlatformSchema(), CreateP3Schema(), CreateSecurityHardeningSchema(), CreateSecurityRound3Schema(), CreatePlatformRound4Schema(), CreateIdentityRound4Schema(), CreateRecoveryRound5Schema(), CreatePolicyWP2Schema(), CreateVaultWP5Schema(), CreateVaultGateSchema(), CreateVerifyWP3Schema(), CreateApproveWP1Schema(), CreateApproveGateSchema(), CreatePlatformWP6Schema(), CreateRetentionDeleteGate(), CreateDecisionsRetentionGate(), CreateVerifyGateSchema(), CreateMTLSIssuerBinding(), CreateOperatorNoticeClaim(), GrantRuntimeRolePrivileges(), CreateDeviceFirstAccounts(), CreateLinkSessionsSchema(), CreateQueueOutbox(), GrantWorkerRolePrivileges()]
 }

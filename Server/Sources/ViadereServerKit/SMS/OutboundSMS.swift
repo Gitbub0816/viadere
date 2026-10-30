@@ -27,7 +27,11 @@ struct OutboundSMS {
         row.nextAttemptAt = now
         row.messageId = messageId
         row.createdAt = now
-        try await row.create(on: db)
+        // The row and its queue message commit together (transactional outbox, ADR-0014); inside a caller's transaction this joins it.
+        try await db.transaction { [ctx] tx in
+            try await row.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.smsSend, ref: row.id!, on: tx, ctx: ctx)
+        }
         return row
     }
 
@@ -54,7 +58,7 @@ struct OutboundSMS {
     }
 
     /// Returns true if the message left the queue successfully.
-    private func dispatch(_ row: SMSOutboundRecord, now: Date) async throws -> Bool {
+    func dispatch(_ row: SMSOutboundRecord, now: Date) async throws -> Bool {
         // Carrier compliance: after STOP only engine replies to that STOP/HELP exchange may be sent.
         if !row.allowWhenOptedOut, let context = try await SMSContextRecord.query(on: db).filter(\.$phoneHash == row.phoneHash).first(),
            context.optedOut {

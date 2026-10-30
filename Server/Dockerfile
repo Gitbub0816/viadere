@@ -20,9 +20,13 @@ WORKDIR /build/Server
 # SwiftPM requires every declared target's directory to exist, even when only one product is built.
 COPY Server/Sources ./Sources
 COPY Server/Tests ./Tests
-RUN swift package resolve
-
-RUN swift build -c release --product ViadereServer --static-swift-stdlib \
+# The SwiftPM build directory is a BuildKit cache mount: a build that is interrupted (remote builders have time limits; a cold
+# release build of the server takes about 30 minutes) resumes where it stopped, and later builds recompile only what changed.
+# The binary is copied out of the mount, so the image never depends on the cache. CI release builds run on fresh runners and
+# start from an empty cache.
+RUN --mount=type=cache,id=viadere-server-build,target=/build/Server/.build \
+    swift package resolve \
+ && swift build -c release --product ViadereServer --static-swift-stdlib \
  && mkdir -p /staging \
  && cp "$(swift build -c release --show-bin-path)/ViadereServer" /staging/ViadereServer
 

@@ -15,7 +15,7 @@ final class PlatformGateOpsTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("heads-" + UUID().uuidString).path
         defer { try? FileManager.default.removeItem(atPath: directory) }
         try await withHarness({ config in
-            config.operations.auditExport = AuditHeadExportSettings(kind: .directory, target: directory, prefix: "audit-heads/", endpoint: nil, interval: 3_600, kmsKey: nil)
+            config.operations.auditExport = AuditHeadExportSettings(kind: .directory, target: directory, prefix: "audit-heads/", interval: 3_600)
         }) { h in
             let business = try await h.makeBusiness(name: "Held Co", handle: "heldco")
             for index in 0..<4 { _ = try await AuditService(db: h.db, ctx: h.ctx).record("seed.\(index)", actor: AuditActor(kind: .system)) }
@@ -191,10 +191,9 @@ final class PlatformGateOpsTests: XCTestCase {
             "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(), "EDGE_TOKEN": SecureToken.generate(),
             "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
             "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.com",
-            "AUDIT_HEAD_EXPORT": "gcs", "AUDIT_HEAD_EXPORT_TARGET": "viadere-audit-heads",
-            "AUDIT_HEAD_KMS_KEY": "projects/p/locations/l/keyRings/r/cryptoKeys/audit-head/cryptoKeyVersions/1",
-            "GCP_WORKLOAD_IDENTITY_AUDIENCE": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/fly",
-            "GCP_SERVICE_ACCOUNT_EMAIL": "audit@p.iam.gserviceaccount.com", "GCP_SUBJECT_TOKEN_FILE": "/tmp/subject-token",
+            "AZURE_AUDIT_BLOB_ENDPOINT": "https://stviaderetestaudit.blob.core.windows.net/", "AZURE_AUDIT_BLOB_CONTAINER": "audit-heads",
+            "AZURE_KEY_VAULT_URL": "https://kv-vdr-test.vault.azure.net/", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY": "audit-head-signing",
+            "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001", "IDENTITY_ENDPOINT": "http://localhost:42356/msi/token", "IDENTITY_HEADER": "test-identity-header",
         ]
     }
 
@@ -203,17 +202,26 @@ final class PlatformGateOpsTests: XCTestCase {
     func testProductionRequiresTheHSMSignedAuditHeadExport() throws {
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(Self.productionEnvironment()))
         var noKey = Self.productionEnvironment()
-        noKey["AUDIT_HEAD_KMS_KEY"] = nil
-        XCTAssertThrowsError(try ServerConfig.fromEnvironment(noKey), "production without AUDIT_HEAD_KMS_KEY")
+        noKey["AZURE_KEY_VAULT_AUDIT_HEAD_KEY"] = nil
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(noKey), "production without AZURE_KEY_VAULT_AUDIT_HEAD_KEY")
         var blank = Self.productionEnvironment()
-        blank["AUDIT_HEAD_KMS_KEY"] = ""
+        blank["AZURE_KEY_VAULT_AUDIT_HEAD_KEY"] = ""
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(blank))
         var noExport = Self.productionEnvironment()
-        for name in ["AUDIT_HEAD_EXPORT", "AUDIT_HEAD_EXPORT_TARGET", "AUDIT_HEAD_KMS_KEY"] { noExport[name] = nil }
+        for name in ["AZURE_AUDIT_BLOB_ENDPOINT", "AZURE_AUDIT_BLOB_CONTAINER", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY"] { noExport[name] = nil }
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(noExport), "production without any audit-head export")
+        // The retired Google Cloud settings are refused, not silently ignored.
+        var legacy = Self.productionEnvironment()
+        legacy["AUDIT_HEAD_KMS_KEY"] = "projects/p/locations/l/keyRings/r/cryptoKeys/audit-head/cryptoKeyVersions/1"
+        XCTAssertThrowsError(try ServerConfig.fromEnvironment(legacy))
+        // The api never exports, so it does not need the export settings (the worker and the scheduled jobs do).
+        var api = Self.productionEnvironment()
+        for name in ["AZURE_AUDIT_BLOB_ENDPOINT", "AZURE_AUDIT_BLOB_CONTAINER", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY"] { api[name] = nil }
+        api["ROLE"] = "api"
+        XCTAssertNoThrow(try ServerConfig.fromEnvironment(api))
         // Staging may run without the HSM key (it has no production audit trail).
         var staging = Self.productionEnvironment("staging")
-        staging["AUDIT_HEAD_KMS_KEY"] = nil
+        staging["AZURE_KEY_VAULT_AUDIT_HEAD_KEY"] = nil
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(staging))
     }
 

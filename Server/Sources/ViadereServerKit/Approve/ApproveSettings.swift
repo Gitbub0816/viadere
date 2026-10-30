@@ -10,9 +10,10 @@ import ViadereCore
 /// `/v1/key-directory` route answers `404`; enrolled keys and the log are untouched.
 public struct ApproveSettings: Sendable {
     public var enabled = true
-    /// The transparency log's signing key (P-256). `KEY_DIRECTORY_LOG_KEY` holds its 32-byte raw scalar, base64url. Production keeps it in a
-    /// managed key service (ADR-03); the environment variable is the interim, covered in the risk register.
-    public var logKey: SoftwareP256SigningKey = SoftwareP256SigningKey()
+    /// The transparency log's signing key (P-256). On Azure it is the Key Vault key `AZURE_KEY_VAULT_KD_LOG_KEY` (`kd-log-signing`, loaded at boot
+    /// by `configure` as a `KMSSigningKey`: the private key never leaves Key Vault). Elsewhere `KEY_DIRECTORY_LOG_KEY` holds its 32-byte raw scalar,
+    /// base64url (Fly staging, development; the interim covered in the risk register).
+    public var logKey: any DeviceSigningKey = SoftwareP256SigningKey()
     public var logId = TransparencyLog.defaultLogId
     /// A new tree head is signed when the latest is older than this (devices refuse heads older than a week).
     public var treeHeadRefreshInterval: TimeInterval = 3600
@@ -42,9 +43,11 @@ public struct ApproveSettings: Sendable {
 
     // MARK: Link sessions (WP-C1)
 
-    /// Viadere's `link-descriptor` key (`LINK_DESCRIPTOR_SIGNING_KEY`, 32-byte P-256 scalar, base64url) behind `LocalKMS` until the Key Vault
-    /// adapter holds it. Its public key is pinned in the app (`VIADERE_LINK_DESCRIPTOR_KEYS`) and in business SDKs.
-    public var linkDescriptorKey: SoftwareP256SigningKey = SoftwareP256SigningKey()
+    /// Viadere's `link-descriptor` key (P-256), which signs link descriptors and results only. On Azure it is the Key Vault key
+    /// `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY` (`link-descriptor`, loaded at boot by `configure` as a `KMSSigningKey`); elsewhere
+    /// `LINK_DESCRIPTOR_SIGNING_KEY` holds its 32-byte raw scalar, base64url (Fly staging, development; the same interim as the log key). Its public
+    /// key is pinned in the app (`VIADERE_LINK_DESCRIPTOR_KEYS`) and in business SDKs.
+    public var linkDescriptorKey: any DeviceSigningKey = SoftwareP256SigningKey()
     /// Link sessions a business creates.
     public var linkCreateRate: RateRule = .perMinute(60, burst: 30)
     /// Link sessions per business customer reference (one person rarely needs more than a couple of tries).
@@ -64,7 +67,7 @@ public enum AppAttestAssertionMode: String, Sendable, CaseIterable {
 }
 
 extension ServerConfig {
-    /// `APPROVE_V2_ENABLED` (`true`/`false`), `KEY_DIRECTORY_LOG_KEY`, `KEY_DIRECTORY_LOG_ID`.
+    /// `APPROVE_V2_ENABLED` (`true`/`false`), `KEY_DIRECTORY_LOG_KEY`, `KEY_DIRECTORY_LOG_ID`, `APP_ATTEST_ASSERTION_MODE`, `LINK_DESCRIPTOR_SIGNING_KEY`.
     mutating func applyApproveEnvironment(_ env: [String: String], production: Bool) throws {
         switch env["APPROVE_V2_ENABLED"] {
         case "true": approve.enabled = true
@@ -84,25 +87,50 @@ extension ServerConfig {
             guard !(production && mode == .off) else { throw ServerConfigError.invalid("APP_ATTEST_ASSERTION_MODE (off is not allowed in staging or production)") }
             approve.assertionMode = mode
         }
-        if let raw = env["LINK_DESCRIPTOR_SIGNING_KEY"], !raw.isEmpty {
+        // The link-descriptor key follows the log key's model: a Key Vault key on Azure (resolved by `configure`), an environment secret elsewhere.
+        if azure.linkDescriptorKey != nil {
+            if env["LINK_DESCRIPTOR_SIGNING_KEY"].map({ !$0.isEmpty }) == true {
+                throw ServerConfigError.invalid("LINK_DESCRIPTOR_SIGNING_KEY (unset it when AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY is configured)")
+            }
+        } else if let raw = env["LINK_DESCRIPTOR_SIGNING_KEY"], !raw.isEmpty {
             guard let bytes = Base64URL.decode(raw), let key = try? SoftwareP256SigningKey(rawRepresentation: bytes) else {
                 throw ServerConfigError.invalid("LINK_DESCRIPTOR_SIGNING_KEY (base64url, 32-byte P-256 private scalar)")
             }
             approve.linkDescriptorKey = key
-        } else if approve.enabled, production || databaseURL != nil {
+        } else if role == .worker {
+            // Only the api signs link descriptors and results; the worker holds no grant on the key (plan 5.3), so its stand-in refuses to sign.
+            approve.linkDescriptorKey = UnavailableSigningKey()
+        } else if approve.enabled, production || hasDatabase {
             // An ephemeral key would make every descriptor and result already handed out unverifiable after a restart, and the app pins the key.
-            throw ServerConfigError.missing("LINK_DESCRIPTOR_SIGNING_KEY (required when Approve v2 is enabled with a database)")
+            throw ServerConfigError.missing("LINK_DESCRIPTOR_SIGNING_KEY or AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY (required when Approve v2 is enabled with a database)")
         }
-        if let raw = env["KEY_DIRECTORY_LOG_KEY"], !raw.isEmpty {
+        if azure.kdLogKey != nil {
+            // The key lives in Key Vault; `configure` resolves it. A second, software copy would defeat the point.
+            if env["KEY_DIRECTORY_LOG_KEY"].map({ !$0.isEmpty }) == true {
+                throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_KEY (unset it when AZURE_KEY_VAULT_KD_LOG_KEY is configured)")
+            }
+        } else if let raw = env["KEY_DIRECTORY_LOG_KEY"], !raw.isEmpty {
             guard let bytes = Base64URL.decode(raw), let key = try? SoftwareP256SigningKey(rawRepresentation: bytes) else {
                 throw ServerConfigError.invalid("KEY_DIRECTORY_LOG_KEY (base64url, 32-byte P-256 private scalar)")
             }
             approve.logKey = key
-        } else if approve.enabled, production || databaseURL != nil {
+        } else if role == .worker {
+            // The queue worker never signs tree heads (only the api does) and holds no grant on the log key (plan 5.3): its stand-in refuses to sign.
+            approve.logKey = UnavailableSigningKey()
+        } else if approve.enabled, production || hasDatabase {
             // An ephemeral log key would make every tree head already signed unverifiable after a restart.
-            throw ServerConfigError.missing("KEY_DIRECTORY_LOG_KEY (required when Approve v2 is enabled with a database)")
+            throw ServerConfigError.missing("KEY_DIRECTORY_LOG_KEY or AZURE_KEY_VAULT_KD_LOG_KEY (required when Approve v2 is enabled with a database)")
         }
-        // One key, one role: the log key signs tree heads only, the link-descriptor key signs link descriptors and results only.
+        if let log = azure.kdLogKey, let link = azure.linkDescriptorKey, KMSKeyRef.parse(log)?.name == KMSKeyRef.parse(link)?.name {
+            throw ServerConfigError.invalid("AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY and AZURE_KEY_VAULT_KD_LOG_KEY must name different keys")
+        }
+        // One key, one role: the log key signs tree heads only, the link-descriptor key signs link descriptors and results only. Key Vault keys
+        // are compared again by `configure` once their public keys are loaded (`requireDistinctSigningKeys`).
+        try requireDistinctSigningKeys()
+    }
+
+    /// One key, one role: the key-directory log key and the link-descriptor key must differ (whatever holds them).
+    func requireDistinctSigningKeys() throws {
         if approve.linkDescriptorKey.publicKey == approve.logKey.publicKey {
             throw ServerConfigError.invalid("LINK_DESCRIPTOR_SIGNING_KEY and KEY_DIRECTORY_LOG_KEY must be different keys")
         }

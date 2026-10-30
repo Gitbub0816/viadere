@@ -185,6 +185,8 @@ struct ApproveRequestService {
                         row.createdAt = now
                         try await row.create(on: tx)
                     }
+                    // The expiry is a scheduled message at `expires_at` (the maintenance sweep remains the safety net).
+                    try await Outbox.enqueue(QueueHandlers.approveExpire, ref: record.id!, notBefore: record.expiresAt, on: tx, ctx: ctx)
                 }
                 // The audit record names the request and the protection mode. Never the amount, the payee or an envelope.
                 _ = try await AuditService(db: tx, ctx: ctx).record(isAutoDenied ? "approve.request_auto_denied" : "approve.request_created", actor: actor,

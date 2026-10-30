@@ -23,8 +23,16 @@ public final class ServerContext: Sendable {
     let metrics = MetricsRegistry()
     /// Resolves and checks business domains (DNS TXT and well-known file) for onboarding and ongoing assurance.
     let domains: any DomainChecker
-    /// Calls to Google Cloud (token exchange, KMS, Cloud Storage) and R2 for the audit-head export.
+    /// Calls to the Azure data planes (Key Vault, Blob Storage, Service Bus), behind the identity-endpoint guard.
     let outbound: any OutboundHTTP
+    /// Service keys (Key Vault on Azure, `LocalKMS` in development and tests); `nil` when no key is configured.
+    public let kms: (any KeyManagementService)?
+    /// Write-once storage for exported audit heads (Azure Blob); `nil` = derived from the settings (a directory in development).
+    let auditObjectStore: (any ObjectStore)?
+    /// Managed-identity tokens for Azure data planes; `nil` outside Azure.
+    let accessTokens: (any AccessTokenSource)?
+    /// The queue pipeline (outbox publisher, transport, consumers): WP-B3.
+    let queue: QueueRuntime
     public let limiter: RateLimiter
     public let apns: any APNsSender
     public let sms: any SMSProvider
@@ -43,9 +51,6 @@ public final class ServerContext: Sendable {
     public let integrity: any DeviceIntegrityVerifier
     /// Transactional email (dashboard verification codes and invitations).
     public let email: any EmailSender
-    /// Server signing keys whose private half the process should not hold (`link-descriptor`, WP-C1). `LocalKMS` from the environment until the
-    /// Key Vault adapter (WP-B2) is passed in instead.
-    public let kms: any KeyManagementService
     /// Security alerts (budget exhaustion, ...) that operators should be able to alert on.
     public let logger = Logger(label: "viadere.security")
 
@@ -56,7 +61,8 @@ public final class ServerContext: Sendable {
                 passPush: any PassPushSender = DisabledPassPushSender(),
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
                 email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil,
-                kms: (any KeyManagementService)? = nil) {
+                kms: (any KeyManagementService)? = nil, auditObjectStore: (any ObjectStore)? = nil, accessTokens: (any AccessTokenSource)? = nil,
+                queueTransport: (any QueueTransport)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
@@ -77,7 +83,10 @@ public final class ServerContext: Sendable {
         self.email = email
         self.domains = domains ?? UnconfiguredDomainChecker()
         self.outbound = outbound ?? UnconfiguredOutboundHTTP()
-        self.kms = kms ?? LocalKMS(keys: [.linkDescriptor: config.approve.linkDescriptorKey])
+        self.kms = kms
+        self.auditObjectStore = auditObjectStore
+        self.accessTokens = accessTokens
+        queue = QueueRuntime(transport: queueTransport)
     }
 
     public var now: Date { clock.now() }

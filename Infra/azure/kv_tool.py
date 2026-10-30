@@ -12,10 +12,14 @@ line (they travel in a mode-600 temporary file inside a mode-700 directory that 
     # one secret, value read from stdin (or typed without echo):
     python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name cloudflared-tunnel-token < token.txt
 
-    # database passwords (until WP-B2 ships Entra token auth): generates the viadere_app and viadere_migrator passwords, stores
+    # database passwords (the opt-in password fallback; Entra-only is the default since WP-B2): generates the viadere_app and viadere_migrator passwords, stores
     # database-url and database-migration-url in Key Vault, and writes the role SQL with SCRAM-SHA-256 verifiers (no plaintext password)
     # to a new mode-600 file for the one-off psql job:
     python3 -I Infra/azure/kv_tool.py db-passwords --vault-id "$KV_ID" --host "$PG_FQDN" --sql-out db-roles.sql
+
+    # envelope-wrap the service keys of an env file under the Key Vault key-encryption key (SECURITY.md section 2.95): writes
+    # NAME_WRAPPED=kms1:<kek>/<version>:<base64url> lines to a new mode-600 file (store them with put-env and a *_WRAPPED map):
+    python3 -I Infra/azure/kv_tool.py wrap-env --vault-url https://<vault>.vault.azure.net --env-file s.env --out wrapped.env
 
     # one-off psql job spec (for `az containerapp job create --yaml`): fetches your Entra token for PostgreSQL with `az`, mounts the SQL
     # as a secret file; the spec file (mode 600) holds the token and must be deleted after use:
@@ -44,6 +48,11 @@ SECRET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}$")
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 SCRAM_ITERATIONS = 4096  # PostgreSQL's default scram_iterations
 PSQL_IMAGE = "docker.io/library/postgres:18.6@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4"  # 2026-10-28
+KEYS_API_VERSION = "2025-07-01"  # Key Vault keys data plane, the version the server pins (AzureKeyVaultKMS.apiVersion)
+VAULT_URL_RE = re.compile(r"^https://[a-z0-9-]{3,24}\.vault\.azure\.net/?$")
+KEY_NAME_RE = re.compile(r"^[A-Za-z0-9-]{1,127}$")
+WRAPPABLE = ["DATA_ENCRYPTION_KEY", "SERVER_PEPPER", "AUDIT_CHAIN_KEY", "SUBJECT_REF_KEY", "CONNECT_LINK_SIGNING_KEY",
+             "DATA_ENCRYPTION_KEYS_PREVIOUS", "SERVER_PEPPERS_PREVIOUS", "AUDIT_CHAIN_KEYS_PREVIOUS", "CONNECT_LINK_SIGNING_KEYS_PREVIOUS"]
 ENV_ID_RE = re.compile(r"^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\.App/managedEnvironments/[A-Za-z0-9-]+$", re.I)
 
 
@@ -163,6 +172,71 @@ def entra_postgres_token(*, az: str = "az", runner=subprocess.run) -> str:
     return result.stdout.strip()
 
 
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def b64url_decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def wrapped_form(kek: str, version: str, ciphertext: bytes) -> str:
+    """The server's wrapped-secret form: kms1:<key name>/<key version>:<base64url ciphertext>."""
+    if not KEY_NAME_RE.match(kek) or not re.match(r"^[0-9a-f]{1,64}$", version) or not ciphertext:
+        raise SystemExit("invalid key name, version or ciphertext")
+    return f"kms1:{kek}/{version}:{b64url(ciphertext)}"
+
+
+def wrap_lines(values: dict[str, str], names: list[str], wrap) -> list[str]:
+    """`NAME_WRAPPED=kms1:...` for every name present in `values`; `wrap(plaintext bytes) -> (version, ciphertext)`. Plaintexts are never returned."""
+    lines = []
+    for name in names:
+        if name not in WRAPPABLE:
+            raise SystemExit(f"{name} cannot be wrapped (the server accepts: {', '.join(WRAPPABLE)})")
+        value = values.get(name, "")
+        if not value:
+            continue
+        version, ciphertext = wrap(value.encode("utf-8"))
+        lines.append(f"{name}_WRAPPED={wrapped_form(wrap.kek, version, ciphertext)}")
+    return lines
+
+
+class KeyVaultWrapper:
+    """RSA-OAEP-256 wrapkey on the Key Vault data plane with the signed-in user's token (Key Vault Crypto Officer or Crypto User on the key)."""
+
+    def __init__(self, vault_url: str, kek: str, *, az: str = "az", runner=subprocess.run, opener=None):
+        if not VAULT_URL_RE.match(vault_url) or not KEY_NAME_RE.match(kek):
+            raise SystemExit("--vault-url must be https://<vault>.vault.azure.net and --kek a key name")
+        self.base = vault_url.rstrip("/")
+        self.kek = kek
+        result = runner([az, "account", "get-access-token", "--resource", "https://vault.azure.net", "--query", "accessToken", "-o", "tsv"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise SystemExit("could not get a Key Vault token (az login as a member of grp-viadere-kv-crypto-officers)")
+        self.token = result.stdout.strip()
+        import urllib.request
+        self.opener = opener or urllib.request.urlopen
+        self.version = self._current_version()
+
+    def _call(self, method: str, path: str, body: dict | None) -> dict:
+        import urllib.request
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        request = urllib.request.Request(f"{self.base}/{path}?api-version={KEYS_API_VERSION}", data=data, method=method,
+                                         headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+        with self.opener(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _current_version(self) -> str:
+        kid = self._call("GET", f"keys/{self.kek}", None)["key"]["kid"]
+        return kid.rstrip("/").split("/")[-1]
+
+    def __call__(self, plaintext: bytes) -> tuple[str, bytes]:
+        result = self._call("POST", f"keys/{self.kek}/{self.version}/wrapkey", {"alg": "RSA-OAEP-256", "value": b64url(plaintext)})
+        if not result.get("kid", "").rstrip("/").endswith(f"/keys/{self.kek}/{self.version}"):
+            raise SystemExit("Key Vault answered for another key version")
+        return self.version, b64url_decode(result["value"])
+
+
 def write_private_file(path: str, content: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -208,6 +282,12 @@ def main(argv: list[str] | None = None) -> int:
     p_db.add_argument("--vault-id", required=True)
     p_db.add_argument("--host", required=True, help="PostgreSQL FQDN (tofu output -json postgres | .fqdn)")
     p_db.add_argument("--sql-out", required=True, help="new file for the role SQL (mode 600; delete it after use)")
+    p_wrap = sub.add_parser("wrap-env", help="envelope-wrap the service keys of an env file under the Key Vault key-encryption key")
+    p_wrap.add_argument("--vault-url", required=True, help="https://<vault>.vault.azure.net")
+    p_wrap.add_argument("--kek", default="kek-data")
+    p_wrap.add_argument("--env-file", required=True)
+    p_wrap.add_argument("--out", required=True, help="new file (mode 600) for the NAME_WRAPPED lines")
+    p_wrap.add_argument("--names", default=",".join(WRAPPABLE[:5]), help="comma-separated variables to wrap")
     p_job = sub.add_parser("psql-job", help="write a one-off psql job spec that runs a SQL file as the Entra admin group")
     p_job.add_argument("--environment-id", required=True, help="tofu output -json container_apps_environment | .id")
     p_job.add_argument("--host", required=True)
@@ -215,6 +295,13 @@ def main(argv: list[str] | None = None) -> int:
     p_job.add_argument("--out", required=True, help="new file (mode 600); holds your token: delete it after `job create`")
     p_job.add_argument("--admin-group", default="grp-viadere-db-admins")
     args = parser.parse_args(argv)
+
+    if args.command == "wrap-env":
+        names = [n.strip() for n in args.names.split(",") if n.strip()]
+        lines = wrap_lines(parse_env_file(args.env_file), names, KeyVaultWrapper(args.vault_url, args.kek))
+        write_private_file(args.out, "\n".join(lines) + "\n")
+        print(f"wrote {len(lines)} wrapped values to {args.out} (names only shown): " + ", ".join(line.split("=", 1)[0] for line in lines))
+        return 0
 
     if args.command == "psql-job":
         with open(args.sql, encoding="utf-8") as handle:

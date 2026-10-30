@@ -131,7 +131,10 @@ extension WebhookService {
         delivery.attempts = 0
         delivery.nextAttemptAt = now
         delivery.createdAt = now
-        try await delivery.create(on: db)
+        try await db.transaction { [ctx] tx in
+            try await delivery.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.webhookDeliver, ref: delivery.id!, tenant: delivery.businessId, on: tx, ctx: ctx)
+        }
         _ = try await AuditService(db: db, ctx: ctx).record("webhook.test_sent", actor: AuditActor(kind: .business, id: businessId.description), businessId: businessId,
             subjectType: "webhook", subjectId: id.description)
         return delivery.id!

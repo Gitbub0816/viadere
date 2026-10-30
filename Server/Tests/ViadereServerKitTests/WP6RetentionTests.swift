@@ -337,7 +337,7 @@ final class WP6RetentionTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("audit-heads-" + UUID().uuidString).path
         defer { try? FileManager.default.removeItem(atPath: directory) }
         try await withHarness({ config in
-            config.operations.auditExport = AuditHeadExportSettings(kind: .directory, target: directory, prefix: "audit-heads/", endpoint: nil, interval: 3_600, kmsKey: nil)
+            config.operations.auditExport = AuditHeadExportSettings(kind: .directory, target: directory, prefix: "audit-heads/", interval: 3_600)
         }) { h in
             let audit = AuditService(db: h.db, ctx: h.ctx)
             for index in 0..<6 { _ = try await audit.record("old.event.\(index)", actor: AuditActor(kind: .system)) }
