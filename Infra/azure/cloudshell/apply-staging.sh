@@ -5,35 +5,14 @@
 set -uo pipefail
 source "$(dirname "$0")/common.sh"
 need SUB_ID STATE_SA SUFFIX DB_ADMINS_ID IMAGE
-STATE_RG="${STATE_RG:-rg-viadere-stg-tfstate}"
-TOFU_VERSION=1.13.2
 cd "$(dirname "$0")/.." || fail "cd Infra/azure"
 
-step "1/5 subscription"
+step "1/4 subscription and OpenTofu"
 az account set --subscription "$SUB_ID" || fail "az account set"
 TENANT_ID="$(az account show --query tenantId -o tsv)" || fail "tenant"
+tofu_ready
 
-step "2/5 OpenTofu $TOFU_VERSION"
-if ! ~/bin/tofu version 2>/dev/null | grep -q "v$TOFU_VERSION"; then
-  dl="$(mktemp -d)" && mkdir -p ~/bin || fail "mkdir"
-  base="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/tofu.zip" "$base/tofu_${TOFU_VERSION}_linux_amd64.zip" || fail "download tofu"
-  curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/sums" "$base/tofu_${TOFU_VERSION}_SHA256SUMS" || fail "download sums"
-  want="$(grep " tofu_${TOFU_VERSION}_linux_amd64.zip\$" "$dl/sums" | cut -d' ' -f1)"
-  [ -n "$want" ] && echo "$want  $dl/tofu.zip" | sha256sum --check --quiet || fail "checksum"
-  unzip -o -q "$dl/tofu.zip" tofu -d "$dl" && install "$dl/tofu" ~/bin/ || fail "install tofu"
-fi
-export PATH=~/bin:$PATH; tofu version | head -1
-
-step "3/5 settings"
-cat > backend.staging.hcl <<HCL
-use_azuread_auth     = true
-subscription_id      = "$SUB_ID"
-resource_group_name  = "$STATE_RG"
-storage_account_name = "$STATE_SA"
-container_name       = "tfstate"
-key                  = "viadere/azure/staging.tfstate"
-HCL
+step "2/4 settings"
 cp terraform.tfvars.example terraform.tfvars
 sed -i \
   -e "s/^subscription_id *= .*/subscription_id = \"$SUB_ID\"/" \
@@ -45,17 +24,19 @@ sed -i \
   -e "s#^image .*#image              = \"$IMAGE\"#" \
   -e "s/^ghcr_pull_username .*/ghcr_pull_username = \"${GHCR_USER:-}\"/" \
   terraform.tfvars
+# api_min_replicas = 0 is for the first apply only (no replica before secrets and database roles exist); after the first migration the
+# module default (1) applies, so a later apply does not scale the api back to zero.
+if migrate_has_run; then sed -i '/^api_min_replicas *=/d' terraform.tfvars; echo "first deploy done: api_min_replicas uses the default"; fi
 if grep -nE "REPLACE|OWNER/|00000000-0000" terraform.tfvars; then fail "placeholder left in terraform.tfvars"; fi
-grep -E "^(location|name_suffix)" terraform.tfvars
+grep -E "^(location|name_suffix|api_min_replicas)" terraform.tfvars
 
-step "4/5 init + plan + policy check"
-tofu init -input=false -backend-config=backend.staging.hcl || fail "tofu init"
+step "3/4 plan + policy check"
 tofu plan -input=false -var profile=lean -out tfplan || fail "tofu plan"
 tofu show -json tfplan > plan.json || fail "tofu show"
 python3 -I policy_check.py plan.json || fail "policy check"
 rm -f plan.json
 
-step "5/5 apply (20-30 minutes; press Enter now and then so Cloud Shell stays connected)"
+step "4/4 apply (20-30 minutes the first time; press Enter now and then so Cloud Shell stays connected)"
 tofu apply -input=false tfplan || fail "tofu apply"
 rm -f tfplan
 echo; echo "------ send these to Claude ------"

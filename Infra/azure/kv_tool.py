@@ -23,7 +23,7 @@ line (they travel in a mode-600 temporary file inside a mode-700 directory that 
 
     # one-off psql job spec (for `az containerapp job create --yaml`): fetches your Entra token for PostgreSQL with `az`, mounts the SQL
     # as a secret file; the spec file (mode 600) holds the token and must be deleted after use:
-    python3 -I Infra/azure/kv_tool.py psql-job --environment-id "$CAE_ID" --host "$PG_FQDN" --sql db-roles.sql --out dbadmin-job.json
+    python3 -I Infra/azure/kv_tool.py psql-job --environment-id "$CAE_ID" --location centralus --host "$PG_FQDN" --sql db-roles.sql --out dbadmin-job.json
 """
 from __future__ import annotations
 
@@ -124,14 +124,16 @@ GRANT CONNECT ON DATABASE {database} TO viadere_app;
 """
 
 
-def psql_job_spec(environment_id: str, host: str, sql: str, token: str, admin_group: str = "grp-viadere-db-admins") -> dict:
+def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location: str, admin_group: str = "grp-viadere-db-admins") -> dict:
     """Container Apps job (az containerapp job create --yaml) that runs `sql` once as the PostgreSQL Entra admin group."""
     if not ENV_ID_RE.match(environment_id):
         raise SystemExit("--environment-id must be the Container Apps environment's ARM id")
     if not token or not sql.strip():
         raise SystemExit("empty token or SQL")
+    if not re.match(r"^[a-z0-9]{3,32}$", location):
+        raise SystemExit("--location must be the environment's Azure region (e.g. centralus)")
     return {
-        "location": "eastus",
+        "location": location,
         "properties": {
             "environmentId": environment_id,
             "workloadProfileName": "Consumption",
@@ -293,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     p_job.add_argument("--host", required=True)
     p_job.add_argument("--sql", required=True)
     p_job.add_argument("--out", required=True, help="new file (mode 600); holds your token: delete it after `job create`")
+    p_job.add_argument("--location", required=True, help="the Container Apps environment's region (tofu output / az containerapp env show)")
     p_job.add_argument("--admin-group", default="grp-viadere-db-admins")
     args = parser.parse_args(argv)
 
@@ -306,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "psql-job":
         with open(args.sql, encoding="utf-8") as handle:
             sql = handle.read()
-        spec = psql_job_spec(args.environment_id, args.host, sql, entra_postgres_token(), args.admin_group)
+        spec = psql_job_spec(args.environment_id, args.host, sql, entra_postgres_token(), args.location, args.admin_group)
         write_private_file(args.out, json.dumps(spec, indent=1))
         print(f"wrote {args.out}; run: az containerapp job create -n job-viadere-dbadmin -g <app rg> --yaml {args.out}")
         return 0

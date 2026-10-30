@@ -220,6 +220,8 @@ SUB_ID=... STATE_SA=... SUFFIX=... DB_ADMINS_ID=... CRYPTO_OFFICERS_ID=... GHCR_
   bash Infra/azure/cloudshell/apply-staging.sh 2>&1 | tee ~/apply.log
 ```
 
+`configure-staging.sh` then does sections 7 to 10 in one run: fresh service keys (only while `job-viadere-migrate` has never succeeded; a rerun keeps them), MailerSend placeholders until MailerSend is connected, the APNs key uploaded to the Cloud Shell home directory, the GHCR and tunnel tokens (hidden prompts), the database roles (idempotent SQL in the one-off job, created in the environment's region), the first migration and the api start. It prints `EDGE_TOKEN` once, for the Cloudflare transform rule of the Azure host (a rule of its own: the Fly host keeps its own token).
+
 **(owner)** From your machine, as subscription Owner (CI applies come later). The PostgreSQL local administrator password is used once (password authentication must exist until WP-B2), never stored in state, and discarded.
 
 ```sh
@@ -314,7 +316,7 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 SQL
 # you must be signed in (az login) as a member of grp-viadere-db-admins; the job spec embeds your Entra token (valid about an hour)
 CAE_ID=$(cd Infra/azure && tofu output -json container_apps_environment | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-python3 -I Infra/azure/kv_tool.py psql-job --environment-id "$CAE_ID" --host "$PG_FQDN" --sql "$WORK/db-roles.sql" --out "$WORK/dbadmin-job.json"
+python3 -I Infra/azure/kv_tool.py psql-job --environment-id "$CAE_ID" --location "$(az group show -n "$RG_APP" --query location -o tsv)" --host "$PG_FQDN" --sql "$WORK/db-roles.sql" --out "$WORK/dbadmin-job.json"
 az containerapp job create -n job-viadere-dbadmin -g "$RG_APP" --yaml "$WORK/dbadmin-job.json"
 az containerapp job start -n job-viadere-dbadmin -g "$RG_APP"
 az containerapp job execution list -n job-viadere-dbadmin -g "$RG_APP" --query '[0].properties.status' -o tsv   # repeat until Succeeded

@@ -125,7 +125,7 @@ class PsqlJob(unittest.TestCase):
     ENV = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-viadere-stg-app/providers/Microsoft.App/managedEnvironments/cae-viadere-stg"
 
     def test_sql_is_mounted_and_token_is_a_secret_reference(self):
-        spec = kv_tool.psql_job_spec(self.ENV, "psql-x.postgres.database.azure.com", "SELECT 1;", "eyJ0eXAi-entra-token")
+        spec = kv_tool.psql_job_spec(self.ENV, "psql-x.postgres.database.azure.com", "SELECT 1;", "eyJ0eXAi-entra-token", "centralus")
         container = spec["properties"]["template"]["containers"][0]
         env = {e["name"]: e for e in container["env"]}
         self.assertEqual(env["PGPASSWORD"], {"name": "PGPASSWORD", "secretRef": "pgtoken"})
@@ -133,10 +133,15 @@ class PsqlJob(unittest.TestCase):
         self.assertEqual(container["command"][-1], "/mnt/sql/rolesql")
         self.assertIn("@sha256:", container["image"])
         self.assertEqual(spec["properties"]["configuration"]["replicaRetryLimit"], 0)
+        self.assertEqual(spec["location"], "centralus")  # the job must be created in the environment's region
 
     def test_rejects_bad_environment_id(self):
         with self.assertRaises(SystemExit):
-            kv_tool.psql_job_spec("cae-viadere-stg", "h", "SELECT 1;", "tok")
+            kv_tool.psql_job_spec("cae-viadere-stg", "h", "SELECT 1;", "tok", "centralus")
+
+    def test_rejects_bad_location(self):
+        with self.assertRaises(SystemExit):
+            kv_tool.psql_job_spec(self.ENV, "h", "SELECT 1;", "tok", "Central US; rm")
 
     def test_token_errors_are_reported(self):
         failing = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "no login")  # noqa: E731
