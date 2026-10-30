@@ -198,3 +198,16 @@ write-once export of signed heads, not the trigger (SECURITY.md section 2.77).
 **Status of the section 5 gaps.** Gap 1 (no age-based purge) closed for every table listed there, with these exceptions that stay by design: `sms_consent_events` (suppression evidence),
 `businesses`/handles/codes (never reassigned), `passkey_credentials`, `devices` and `relationships` (until account deletion), `kd_*` (public log). Gap 2 closed (14 classes). Gap 3 closed:
 `POST /v1/account/exports` is the subject-access export (section 6.4, `consumer_exports`; SECURITY.md section 2.78). Gap 4 (backups) is unchanged.
+
+## 8. Addendum (2026-10-30, feature expansion v4 Phase 1: Organization)
+
+Migrations `Organization.v1` and `Surfaces.v1`. No Loops or Brand Kit table exists in this release.
+
+| Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `business_preferences` | per (customer, business): favorite, mute level and end, `blocked_at` | OPS | P | none | Deleted with the account (`PreferenceService.wipe`); a block outlives the connection it ended, by design | never shown to the business |
+| `conversation_state` | per (customer, conversation): archived time, muted | OPS | P | none | Deleted with the account | never shown to the business |
+| `alert_seen` | per viewer: alert id (`{source}:{id}`) and when it was marked seen | OPS | P | none | Deleted with the account | gap: no age-based purge yet (bounded by the alerts the account opened); add a 400-day class with the next retention change |
+| `business_surfaces` | a business's module layout versions (module ids and order only), who published | OPS | | none | Deleted with the tenant (`TenantRights`) | no customer data |
+
+The Alerts and Benefits lists are read models over existing tables; they store nothing beyond the rows above.

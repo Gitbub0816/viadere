@@ -39,6 +39,8 @@ public final class AppModel {
     public var selectedTab: AppTab = .alerts
     /// Settings, opened from the context bar (secondary, not a tab).
     public var settingsPresented = false
+    /// Add business (+): from the Businesses directory or next to the selector; also opened by connect codes, QR and link sessions.
+    public var addBusinessPresented = false
     /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
     public var presentedApproval: ApprovalViewModel? {
         didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
@@ -196,6 +198,7 @@ public final class AppModel {
         conversationToOpen = nil
         businessToOpen = nil
         settingsPresented = false
+        addBusinessPresented = false
         toast = nil
     }
 
@@ -231,6 +234,7 @@ public final class AppModel {
         switch link {
         case .connect(let code, let link):
             selectedTab = .businesses
+            addBusinessPresented = true
             pendingConnect = PendingConnect(code: code, link: link, source: link == nil ? .code : .qr)
         case .business(let handle):
             // Opens that business's page (or the connect review when not connected). It never selects a business context: only the
@@ -252,6 +256,7 @@ public final class AppModel {
                 if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
             case .manageBusinesses:
                 selectedTab = .businesses
+                addBusinessPresented = true
             case .accountHelp:
                 settingsPresented = true
             }
@@ -268,6 +273,7 @@ public final class AppModel {
         case .linkSession(let code, let secret):
             pendingLinkSession = PendingLinkSession(code: code, secret: secret)
             selectedTab = .businesses
+            addBusinessPresented = true
         }
     }
 
@@ -371,6 +377,7 @@ public final class AppModel {
         keysNeedRecheck = false
         selectedTab = .alerts
         settingsPresented = false
+        addBusinessPresented = false
         organization.reset()
         alerts.reset()
         benefits.reset()

@@ -52,7 +52,7 @@ public final class MessagesViewModel {
     }
 
     /// The All view groups threads by business (spec C2 "unified thread list grouped by business"), groups ordered by their newest thread.
-    public func groups(context: OrganizationContext) -> [(business: BusinessSummary, threads: [ConversationSummary])] {
+    public func groups(context: OrganizationContext) -> [ConversationGroup] {
         var order: [BusinessID] = []
         var byBusiness: [BusinessID: (BusinessSummary, [ConversationSummary])] = [:]
         for thread in visible(context: context) {
@@ -62,7 +62,7 @@ public final class MessagesViewModel {
             }
             byBusiness[thread.business.id]?.1.append(thread)
         }
-        return order.compactMap { byBusiness[$0].map { (business: $0.0, threads: $0.1) } }
+        return order.compactMap { byBusiness[$0].map { ConversationGroup(business: $0.0, threads: $0.1) } }
     }
 
     public func unread(context: OrganizationContext) -> Int {
@@ -100,6 +100,13 @@ public final class MessagesViewModel {
             return nil
         }
     }
+}
+
+/// One business's threads in the All view.
+public struct ConversationGroup: Identifiable, Sendable, Hashable {
+    public var business: BusinessSummary
+    public var threads: [ConversationSummary]
+    public var id: BusinessID { business.id }
 }
 
 /// A message plus the structured `choose` request it carries, if still open.

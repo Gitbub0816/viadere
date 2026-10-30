@@ -214,6 +214,46 @@ public final class BusinessPreferencesViewModel {
     }
 }
 
+extension ConnectedBusiness {
+    /// The connection as the existing per-business screens take it (consents, history, disconnect). The account id is not part of the
+    /// directory (the app never needs it); those screens only use the relationship and business ids.
+    public var relationship: Relationship {
+        Relationship(id: relationshipId, consumerId: ConsumerID(), business: business, status: isActive ? .active : .disconnected,
+                     source: .code, connectedAt: connectedAt)
+    }
+}
+
+/// List copy for Alerts rows (deterministic, never business-supplied security wording).
+public enum AlertPresentation {
+    public static func statusLabel(_ status: AlertStatus) -> String {
+        switch status {
+        case .pending: "Waiting for you"
+        case .completed: "Done"
+        case .expired: "Expired"
+        case .cancelled: "Cancelled"
+        case .unknown: "Unavailable"
+        }
+    }
+
+    public static func kindLabel(_ entry: AlertEntry) -> String {
+        switch entry.category {
+        case .approval: "Approval"
+        case .linkConfirmation: "Link confirmation"
+        case .securityNotice: "Account security"
+        case .request: entry.purpose == .security ? "Security check" : "Request"
+        case .update: "Update"
+        case .verification: "Verification"
+        case .unknown: "Notice"
+        }
+    }
+
+    /// "Viadere" for the account's own notices; otherwise the issuer's sanitized name.
+    public static func issuer(_ entry: AlertEntry) -> String { entry.business?.safeName ?? "Viadere" }
+
+    /// The issuer-supplied headline, cleaned again on the device like every other untrusted line.
+    public static func title(_ entry: AlertEntry) -> String { UntrustedText.optionalLine(entry.title, max: AlertTitles.maxLength) ?? "Request" }
+}
+
 // MARK: - Business home (spec C6.2, WP-1.6)
 
 /// A business home composed from Viadere's standard modules. It renders **immediately** with Viadere's default layout (no network, no
