@@ -54,6 +54,18 @@
 
 The version exceptions live in `CLAUDE.md` (webauthn-swift pre-release, Vapor 4, iOS 17 deployment target) and are tracked here as R-037. Exceptions to infrastructure policy: GitHub's own JavaScript actions run on the runner's bundled Node (platform infrastructure, not our code); TLS 1.2 compatibility (R-038).
 
+## Feature expansion v4 (Loops, Brand Kits, Organization; WP-0.1)
+
+Prefixed `R-FX` so the numbering does not collide with the main sequence while the work streams merge. Controls named here are in `docs/SECURITY.md` §1.1 and §2.92 to §2.94.
+
+| ID | Risk | Source | Owner | L | I | Rating | Treatment and current controls | Status |
+|---|---|---|---|---|---|---|---|---|
+| R-FX1 | Health information collected through a business Loop despite the ban (free text, phrasing that avoids listed terms) | FX-4; SECURITY.md 1.1 | Trust & Safety lead | 3 | 4 | Medium | Mitigate: no health field type, health content rules (hard gate), healthcare category refused platform-wide, human review of every revision, "Don't share health details here" notice, reports and auto-suspension, AUP. Accept residual for free text typed by customers. | Open |
+| R-FX2 | Customers misled about who built a Loop (attribution spoofing, first-party look) | Spec A6a; SECURITY.md 1.1 | Security lead | 2 | 4 | Medium | Mitigate: attribution from the signed manifest and directory record only, protected attribution bar, device re-validation and safe fallback, content rules, Brand Kits cannot reach protected nodes. | Open |
+| R-FX3 | Review capacity or quality: a harmful Loop passes human review, or review delays block legitimate businesses | FX-3; plan O10, O20 | Product owner | 3 | 3 | Medium | Mitigate: non-overridable hard gate, two reviewers for high risk and flags, hash-bound approvals, per-Loop and per-business kill switches, monitoring. Size the team and SLA before Phase 3 launch. | Open |
+| R-FX4 | Malicious or privacy-leaking brand asset (script-bearing file, polyglot, decompression bomb, EXIF GPS) | Spec B2.2; ADR-0017 | Engineering lead | 3 | 3 | Medium | Mitigate: PNG/JPEG only, SVG and markup refused, bounds before decode and allocation, re-encode to fresh PNG, content-addressed cookie-less asset domain with nosniff; fuzz corpus gate in WP-2.2. | Open |
+| R-FX5 | Context confusion in the All view: acting on business B's request while browsing A, or a cross-tenant item in an aggregate list | Spec C9.7, D3 | Engineering lead | 2 | 4 | Medium | Mitigate: server-side tenant scoping with 404 for foreign business ids, context never switches during sensitive flows, sheets show their own issuer, expired and unverified items never actionable; leakage matrix in WP-0.5. | Open |
+
 ## Review log
 
 | Date | Reviewer | Notes |

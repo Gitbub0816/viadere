@@ -1,0 +1,26 @@
+# ADR-0018: Loop runtime, outcomes, action registry and mandatory review
+
+- **Status:** proposed (2026-10-30)
+- **Plan reference:** `docs/FEATURE-EXPANSION-PLAN-v4.md` decisions FX-3, FX-4, FX-5; sections 4.3, 4.5, 4.9, 4.11.7, 4.12, 4.13; WP-3.1 to WP-3.5
+- **Related:** ADR-0014 (outbox, queues, DLQ), ADR-0015, ADR-0016, `SECURITY.md` §2.28/§2.29 (capabilities and policy), §2.56 (opaque webhooks), §2.92, §2.94
+- **Review:** before Phase 3 build start (after WP-C1 and WP-B3 land); on every change to the rule set or registry (O20)
+
+## Context
+
+Loops let businesses compose interactions from Viadere components. Businesses must never define operations, collect forbidden data (secrets, payment data, government ids, health information), take payments, or impersonate Viadere or another author. The product owner decided that every Loop and every revision is reviewed by Viadere (FX-3), that healthcare is banned platform-wide (FX-4), and that commerce is a Shopify handoff only with Viadere never taking payment (FX-5). The spec asks for idempotent immutable action events and separate outcome states (A7), so that "sent to Viadere" is never shown as "done by the business" (INV-8).
+
+## Decision
+
+1. **Closed definition schema** (`LoopDefinition` v1): steps `form`, `summary`, `result`, `handoff`; fields from a fixed allowlist (`single_choice`, `multi_choice`, `short_text`, `date`, `time_slot`, `yes_no`, `acknowledgement`) with no type for secrets, payment, government ids, health, files or long text; no URL, color, markup, confirmation or attribution member. Unknown members fail. The canonical JSON hash (`definition_hash`) is what review approves and what the publication manifest signs.
+2. **Action registry** (`LoopActionRegistry.v1`): `acknowledge`, `confirm_attendance`, `request_callback`, `submit_inquiry` (low); `check_in`, `select_option`, `select_pickup_time` (medium); `review_estimate` (high, read-only: acknowledges, authorizes nothing); `approve_estimate` (high, Phase 4, binds through Approve v2, "It does not charge you"). Reserved and always refused: `verify_*`, `identity.*`, `age.*` (first-party Verify only), `payment*`, `order*`, `shop.*`, `checkout`, `pay`, `refund`, `charge`, `health*`, `medical*`. Labels come from Viadere-written keys; custom text only for low risk. Each entry carries the policy capability as a string id (integration point with the `Capability` enum after WP-C1).
+3. **Hard gate** (`LoopPolicyValidator`): structure, limits, graph (acyclic, all steps reachable, a terminal step, no dead ends), registry and labels, typed parameters, routing per phase, field allowlist, content rules (health terms, sensitive-data requests, attribution claims, links, Viadere impersonation), publisher identity present, verified and equal to the submitting tenant, category policy (healthcare banned platform-wide, AUP categories refused for Loops), free text refused in high-risk flows, **an amount-bearing approval never shares a flow with a checkout handoff**. A failure is a `LoopHardGateFailure`, which has no public initializer and no override path. Review flags (health-adjacent words, authority claims, any high-risk action) never fail the gate; they require two reviewers.
+4. **Publication gate** (`LoopPublicationGate`): hard gate first (non-overridable), then report freshness bound to the exact hash, rule set and registry version; self-review refused; any rejection or change request blocks; one approver, or two distinct approvers for high risk or any flag. Only `.publishable(definitionHash)` allows signing with the `loop-publication` key. Business roles have no publish path.
+5. **Runtime** (server, WP-3.3, on the ADR-0014 outbox): access checked in the order of `LoopAccessPolicy` (instance ownership, platform switch, relationship, business verified, category, both consents at the current text version, business switch, publication active, expiry); one immutable `loop_action_events` row per `(instance_id, idempotency_key)` with a request digest (`LoopIdempotency`: replay returns the stored result, a different request with the same key is a conflict); ids-only queue envelopes (`loop.action.deliver`, `loop.instance.timeout`; anything else dead-lettered).
+6. **Outcomes** (`LoopOutcomeMachine`): `pending` is the only initial state; `accepted` and `rejected` are final and come only from staff or the authenticated connected endpoint; `timed_out` and `unknown` come only from Viadere and can still be resolved by a late business answer; outcomes are appended, never updated. Customer wording comes from the string catalog and never promises an external outcome.
+
+## Consequences
+
+- Review capacity becomes a launch dependency (O10); locked templates shorten review but never skip it.
+- Rule changes (terms, registry, limits) are Core changes with tests and vectors; a reviewer cannot widen them.
+- The content word lists are a tripwire, not the control; the control is that forbidden data has no field and forbidden operations have no action. Customers can still type anything into a short text field, hence the "Don't share health details here" notice, the AUP and the report path.
+- `approve_estimate` and connected routing stay unavailable until Phase 4 (`LoopPlatformPhase`).

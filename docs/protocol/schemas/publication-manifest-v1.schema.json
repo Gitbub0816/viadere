@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/schemas/publication-manifest-v1.schema.json",
+  "title": "Viadere Loop publication manifest payload, version 1",
+  "description": "Payload of the compact JWS with header exactly {\"alg\":\"ES256\",\"kid\":…,\"typ\":\"viadere-loop-publication+jws\"} (SECURITY.md 2.92). Canonical JSON byte for byte. Signed only with the KMS key loop-publication after review approved exactly definition_hash. Vectors: docs/protocol/vectors/loop-publication-manifest-v1.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "publisher_type", "published_definition_id", "revision", "attribution_policy_version", "definition_hash", "rollout", "valid_from", "not_after", "kid"],
+  "properties": {
+    "v": { "const": 1 },
+    "publisher_type": { "enum": ["viadere", "business"] },
+    "publisher_business_id": { "type": "string", "format": "uuid", "description": "Present exactly when publisher_type is business; must equal the instance's business and the verified directory record." },
+    "published_definition_id": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "attribution_policy_version": { "type": "integer", "minimum": 1, "description": "Version 1 is the only supported value; any other renders the safe fallback." },
+    "definition_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "rollout": { "type": "object", "additionalProperties": false, "required": ["percent"], "properties": { "percent": { "type": "integer", "minimum": 1, "maximum": 100 } } },
+    "valid_from": { "type": "integer", "description": "unix seconds" },
+    "not_after": { "type": "integer", "description": "unix seconds; at most 90 days after valid_from" },
+    "kid": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "description": "Must equal the header kid." }
+  },
+  "if": { "properties": { "publisher_type": { "const": "business" } } },
+  "then": { "required": ["publisher_business_id"] },
+  "else": { "not": { "required": ["publisher_business_id"] } }
+}
