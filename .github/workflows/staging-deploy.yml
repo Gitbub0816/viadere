@@ -1,0 +1,67 @@
+# Staging: build the server image on a GitHub-hosted runner and deploy it to Fly by digest.
+# Fly's remote builders time out or stall on the ~30-minute cold Swift release build, so the image is built here (job limit 6 h)
+# and Fly only receives the finished image. Production stays on release.yml (signed image, protected environment, tag rule).
+#
+# Repository setup (once): Settings > Environments > `staging` > secret FLY_API_TOKEN = `fly tokens create deploy --app viadere-server-staging`.
+name: Staging deploy
+
+on:
+  push:
+    branches: [claude/inspiring-cannon-t5hxfw]
+    paths:
+      - "Server/**"
+      - "Packages/ViadereCore/**"
+      - "Infra/fly/fly.staging.toml"
+      - ".github/workflows/staging-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false # never cancel a deploy whose release command (migrations) may be running
+
+jobs:
+  deploy:
+    name: Build and deploy staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: staging
+      url: https://viadere-api.cksites.dev
+    env:
+      FLY_APP: viadere-server-staging
+      FLY_CONFIG: Infra/fly/fly.staging.toml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh flyctl trivy
+      - name: Build (context = repository root)
+        run: |
+          docker build -f Server/Dockerfile \
+            --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label org.opencontainers.image.revision="${GITHUB_SHA}" \
+            -t "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}" .
+      - name: Scan before publishing (fail on fixable HIGH or CRITICAL)
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+      - name: Push to the Fly registry
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl auth docker
+          docker push "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "registry.fly.io/${FLY_APP}:${GITHUB_SHA::12}" | cut -d@ -f2)"
+          echo "DIGEST=${digest}" >> "$GITHUB_ENV"
+      - name: Deploy by digest (the release command runs migrations first)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --app "${FLY_APP}" --config "${FLY_CONFIG}" --image "registry.fly.io/${FLY_APP}@${DIGEST}" --strategy rolling --wait-timeout 600
+      - name: Smoke test through Cloudflare (warning only until the edge is configured)
+        run: |
+          for path in healthz readyz; do
+            if ! curl --proto '=https' --tlsv1.2 -fsS --max-time 20 --retry 5 --retry-delay 6 --retry-all-errors "https://viadere-api.cksites.dev/${path}"; then
+              echo "::warning::https://viadere-api.cksites.dev/${path} did not answer 200 (Cloudflare DNS, SSL mode or the edge-token rule)"
+            fi
+          done
