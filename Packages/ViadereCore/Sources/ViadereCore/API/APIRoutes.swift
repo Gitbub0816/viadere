@@ -380,6 +380,32 @@ public enum APIRoutes {
     public static let approveFreezeSet = Endpoint<ApproveFreezeRequest, ApproveFreezeState>(
         "approve.freeze.set", .POST, "/v1/approve/freeze", auth: .deviceSignedBearer)
 
+    /// Business: per-business Approve settings (`approve.device_policy`).
+    public static let businessApproveSettingsGet = Endpoint<EmptyBody, ApproveBusinessSettings>(
+        "business.approve.settings.get", .GET, "/v1/business/approve/settings", auth: .businessAPIKey)
+    public static let businessApproveSettingsPut = Endpoint<ApproveBusinessSettings, ApproveBusinessSettings>(
+        "business.approve.settings.put", .PUT, "/v1/business/approve/settings", auth: .businessAPIKey)
+
+    // MARK: Business link sessions (WP-C1; behind `APPROVE_V2_ENABLED`, needs the key directory)
+    /// Business: an expiring (≤ 5 min), single-use session that links the customer it just authenticated to their Viadere app.
+    public static let businessLinkSessionCreate = Endpoint<CreateLinkSessionRequest, LinkSessionTicket>(
+        "business.linkSessions.create", .POST, "/v1/business/link-sessions", auth: .businessAPIKey)
+    public static let businessLinkSessionGet = Endpoint<EmptyBody, LinkSessionView>(
+        "business.linkSessions.get", .GET, "/v1/business/link-sessions/{sessionId}", auth: .businessAPIKey)
+    /// The business's signed confirmation, after it verified the statement and the person compared the SAS in its own session.
+    public static let businessLinkSessionConfirm = Endpoint<ConfirmLinkSessionRequest, LinkSessionView>(
+        "business.linkSessions.confirm", .POST, "/v1/business/link-sessions/{sessionId}/confirm", auth: .businessAPIKey)
+    public static let businessLinkSessionCancel = Endpoint<EmptyBody, LinkSessionView>(
+        "business.linkSessions.cancel", .POST, "/v1/business/link-sessions/{sessionId}/cancel", auth: .businessAPIKey)
+    /// Device: the signed descriptor of a session code (rate-limited per account and globally).
+    public static let linkSessionLookup = Endpoint<LinkSessionLookupRequest, LinkSessionOffer>(
+        "linkSessions.lookup", .POST, "/v1/link-sessions/lookup", auth: .deviceSignedBearer)
+    /// Device: accepts the session (consumed once).
+    public static let linkSessionComplete = Endpoint<CompleteLinkSessionRequest, LinkSessionDeviceView>(
+        "linkSessions.complete", .POST, "/v1/link-sessions/{sessionId}/complete", auth: .deviceSignedBearer)
+    public static let linkSessionGet = Endpoint<EmptyBody, LinkSessionDeviceView>(
+        "linkSessions.get", .GET, "/v1/link-sessions/{sessionId}", auth: .deviceSignedBearer)
+
     /// Public key directory (rate-limited, no authentication: it publishes public keys and signatures only).
     public static let keyDirectorySTH = Endpoint<EmptyBody, SignedTreeHead>(
         "keyDirectory.sth", .GET, "/v1/key-directory/sth", auth: .none)
@@ -444,6 +470,9 @@ public enum APIRoutes {
         approveEnrollmentLookup.descriptor, approveEnrollmentComplete.descriptor, approveKeys.descriptor, approveKeyRevoke.descriptor, approveRequests.descriptor,
         approveRequestGet.descriptor, approveRequestResult.descriptor, approveFreezeGet.descriptor, approveFreezeSet.descriptor,
         keyDirectorySTH.descriptor, keyDirectoryConsistency.descriptor, keyDirectoryBusiness.descriptor,
+        businessApproveSettingsGet.descriptor, businessApproveSettingsPut.descriptor,
+        businessLinkSessionCreate.descriptor, businessLinkSessionGet.descriptor, businessLinkSessionConfirm.descriptor, businessLinkSessionCancel.descriptor,
+        linkSessionLookup.descriptor, linkSessionComplete.descriptor, linkSessionGet.descriptor,
     ] + verifyEndpoints
 
     /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.com` in production).

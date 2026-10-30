@@ -83,6 +83,7 @@ tags:
   - name: Verification
   - name: Approve
   - name: KeyDirectory
+  - name: LinkSessions
 
 paths:
   /v1/business/capabilities:
@@ -556,6 +557,136 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FreezeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/approve/settings:
+    get:
+      tags: [Approve]
+      operationId: getApproveSettings
+      summary: Your Approve settings
+      description: Requires scope `approvals:manage`. `device_policy` is `any_enrolled` (default) or `single_device` (SECURITY.md 2.55).
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Approve]
+      operationId: putApproveSettings
+      summary: Change your device policy
+      description: |
+        Requires scope `approvals:manage` and an approval capability. `single_device`: when a key is activated, the customer's other keys for your
+        business are revoked, and requests go to the newest active key only. The policy in force is recorded on every key and every request. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+      responses:
+        "200":
+          description: The settings now in force.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/link-sessions:
+    post:
+      tags: [LinkSessions]
+      operationId: createLinkSession
+      summary: Start linking the customer you just authenticated to their Viadere app
+      description: |
+        Requires scope `links:manage`, a live key, a registered key-directory root and a published `approval-enrollment-confirmation` key, and the
+        capabilities you ask for (each must be a registered, linkable action: `message.send`, `contact.reachable`, `consent.request`, `auth.challenge`,
+        `transaction.approve`). Step the customer up in your own session immediately before; the session lives at most 5 minutes and is single use.
+        `customer_ref` is your own opaque reference (stored only as a keyed hash, for per-customer rate limits). Do not show the returned `link`: the
+        BusinessSDK (`createLinkSession`) builds the link with your session secret in the fragment (`#es=`, never sent to Viadere), and the check
+        code for the typed path. Rate limited per business and per `customer_ref` (SECURITY.md 2.59).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLinkSessionRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/link-sessions/{sessionId}:
+    get:
+      tags: [LinkSessions]
+      operationId: getLinkSession
+      summary: A link session, with the device's statement once completed
+      description: |
+        Requires scope `links:manage`. After `link.completed`: `subject_ref` (alias `connection_id`), the device's `statement`, the `binding_tag` (QR
+        path), the `approval_statement` (approval capabilities) and `result`, Viadere's signed account (key `link-descriptor`). **Authenticate the
+        statement yourself** (binding tag and/or SAS) and have the person compare or type the SAS in your signed-in session before confirming.
+        Another business's session is a 404.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/link-sessions/{sessionId}/confirm:
+    post:
+      tags: [LinkSessions]
+      operationId: confirmLinkSession
+      summary: Confirm a completed link session (activates the connection)
+      description: |
+        Requires scope `links:manage`. `confirmation` is your `LinkConfirmation` (VIADERE-LINK-CONFIRM-V1) and, with approval capabilities,
+        `approval_confirmation` is your `ApprovalEnrollmentConfirmation` of the approval key (enrollment id = session id), both signed by a currently
+        published `approval-enrollment-confirmation` key. The connection becomes `active` only now. Too late (expiry + 5 minutes) is `410`. Then send
+        the customer an out-of-band notice through your own channel ("A Viadere app was linked to your account. Not you?").
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmLinkSessionRequest" }
+      responses:
+        "200":
+          description: Confirmed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { description: Too late to confirm. }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/link-sessions/{sessionId}/cancel:
+    post:
+      tags: [LinkSessions]
+      operationId: cancelLinkSession
+      summary: Cancel a link session (also ends a pending connection and key)
+      description: Requires scope `links:manage`. Idempotent.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1470,6 +1601,54 @@ components:
         subject_ref: { $ref: "#/components/schemas/SubjectRef" }
         frozen: { type: boolean }
         reason: { type: string, maxLength: 120 }
+    ApproveBusinessSettings:
+      type: object
+      additionalProperties: false
+      required: [device_policy]
+      properties:
+        device_policy: { enum: [any_enrolled, single_device] }
+    CreateLinkSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [customer_ref, capabilities]
+      properties:
+        customer_ref: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]+$" }
+        capabilities: { type: array, minItems: 1, maxItems: 8, items: { enum: [message.send, contact.reachable, consent.request, auth.challenge, transaction.approve] } }
+        display_hint: { type: string, maxLength: 40, description: "Non-sensitive context shown in the app (no run of more than four digits)." }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 300, default: 300 }
+    LinkSessionTicket:
+      type: object
+      required: [session_id, code, link, root_kid, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        code: { type: string, description: "Eight characters, no separator." }
+        link: { type: string, description: "The relay's suggestion (https://{link domain}/k/{CODE}); do not show it. The SDK builds the link with your secret." }
+        root_kid: { type: string, description: "Your registered root key id; the SDK refuses a ticket naming another." }
+        expires_at: { type: string, format: date-time }
+    LinkSessionView:
+      type: object
+      required: [session_id, status, capabilities, created_at, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        status: { enum: [open, device_completed, confirmed, expired, cancelled] }
+        capabilities: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        connection_id: { $ref: "#/components/schemas/SubjectRef" }
+        statement: { $ref: "#/components/schemas/SignedStatement" }
+        binding_tag: { type: string }
+        approval_statement: { $ref: "#/components/schemas/SignedStatement" }
+        result: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        completed_at: { type: string, format: date-time }
+        confirmed_at: { type: string, format: date-time }
+    ConfirmLinkSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmation]
+      properties:
+        confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        approval_confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
     FreezeStatus:
       type: object
       required: [subject_ref, frozen]

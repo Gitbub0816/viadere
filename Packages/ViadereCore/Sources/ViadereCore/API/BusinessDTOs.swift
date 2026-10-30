@@ -9,6 +9,13 @@ extension TypedID where Tag == IDTag.Relationship {
 }
 
 /// A business request that names its customer by `relationshipId`, by `subjectRef` (SEC §3.2), or by both (which must agree).
+/// The business API's customer addressing (WP-C2): `subjectRef` (or its alias `connectionId`) only. `relationshipId` is deprecated: requests that
+/// carry it get `Deprecation` and `Sunset` headers until `relationshipIdSunset`, and `400 relationship_id_sunset` from then on.
+public enum BusinessAddressing {
+    /// 2027-03-31T00:00:00Z.
+    public static let relationshipIdSunset = Date(timeIntervalSince1970: 1_806_451_200)
+}
+
 public protocol SubjectAddressedRequest: Sendable {
     var relationshipId: RelationshipID { get set }
     var subjectRef: SubjectRef? { get set }
@@ -16,11 +23,19 @@ public protocol SubjectAddressedRequest: Sendable {
 
 enum SubjectAddressing {
     /// Reads the addressing pair of a request body: at least one of the two must be present.
-    static func decode<K: CodingKey>(_ c: KeyedDecodingContainer<K>, relationshipKey: K, subjectKey: K) throws -> (RelationshipID, SubjectRef?) {
+    /// `connectionKey` (`connectionId`) is an alias of `subjectRef` (the same `sub_…` value, spec §5 "pairwise connection id"); both present must agree.
+    /// `relationshipId` is **deprecated** (sunset `BusinessAddressing.relationshipIdSunset`): the server refuses it after that date.
+    static func decode<K: CodingKey>(_ c: KeyedDecodingContainer<K>, relationshipKey: K, subjectKey: K, connectionKey: K? = nil) throws -> (RelationshipID, SubjectRef?) {
         let relationship = try c.decodeIfPresent(RelationshipID.self, forKey: relationshipKey)
-        let subject = try c.decodeIfPresent(SubjectRef.self, forKey: subjectKey)
+        var subject = try c.decodeIfPresent(SubjectRef.self, forKey: subjectKey)
+        if let connectionKey, let connection = try c.decodeIfPresent(SubjectRef.self, forKey: connectionKey) {
+            if let subject, subject != connection {
+                throw DecodingError.dataCorruptedError(forKey: connectionKey, in: c, debugDescription: "connectionId and subjectRef disagree")
+            }
+            subject = connection
+        }
         guard relationship != nil || subject != nil else {
-            throw DecodingError.keyNotFound(relationshipKey, .init(codingPath: c.codingPath, debugDescription: "relationshipId or subjectRef is required"))
+            throw DecodingError.keyNotFound(subjectKey, .init(codingPath: c.codingPath, debugDescription: "subjectRef (or connectionId) is required"))
         }
         return (relationship ?? .unaddressed, subject)
     }
@@ -84,12 +99,12 @@ public struct IssueInteractionRequest: Codable, Sendable, Hashable, SubjectAddre
 
     enum CodingKeys: String, CodingKey {
         case relationshipId, subjectRef, kind, purpose, payload, requestedActions, priority, sensitivity, allowedChannels
-        case ttlSeconds, idempotencyKey, correlationId, accountReference
+        case ttlSeconds, idempotencyKey, correlationId, accountReference, connectionId
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef, connectionKey: .connectionId)
         kind = try c.decode(InteractionKind.self, forKey: .kind)
         purpose = try c.decode(InteractionPurpose.self, forKey: .purpose)
         payload = try InteractionPayload.decode(kind: kind, from: c, forKey: .payload)
@@ -154,11 +169,11 @@ public struct BusinessSendMessageRequest: Codable, Sendable, Hashable, SubjectAd
                   subjectRef: subjectRef)
     }
 
-    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, sessionId, body, agentName, idempotencyKey }
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, sessionId, body, agentName, idempotencyKey, connectionId }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef, connectionKey: .connectionId)
         sessionId = try c.decodeIfPresent(SessionID.self, forKey: .sessionId)
         body = try c.decode(String.self, forKey: .body)
         agentName = try c.decodeIfPresent(String.self, forKey: .agentName)
@@ -203,11 +218,11 @@ public struct BusinessStatusUpdateRequest: Codable, Sendable, Hashable, SubjectA
                   correlationId: correlationId, subjectRef: subjectRef)
     }
 
-    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, purpose, status, activityKey, idempotencyKey, correlationId }
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, purpose, status, activityKey, idempotencyKey, correlationId, connectionId }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef, connectionKey: .connectionId)
         purpose = try c.decode(InteractionPurpose.self, forKey: .purpose)
         status = try c.decode(StatusPayload.self, forKey: .status)
         activityKey = try c.decode(String.self, forKey: .activityKey)
@@ -329,11 +344,11 @@ public struct AdjustLoyaltyPointsRequest: Codable, Sendable, Hashable, SubjectAd
         self.init(relationshipId: .unaddressed, delta: delta, reason: reason, idempotencyKey: idempotencyKey, subjectRef: subjectRef)
     }
 
-    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, delta, reason, idempotencyKey }
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, delta, reason, idempotencyKey, connectionId }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef)
+        (relationshipId, subjectRef) = try SubjectAddressing.decode(c, relationshipKey: .relationshipId, subjectKey: .subjectRef, connectionKey: .connectionId)
         delta = try c.decode(Int.self, forKey: .delta)
         reason = try c.decodeIfPresent(String.self, forKey: .reason)
         idempotencyKey = try c.decode(String.self, forKey: .idempotencyKey)

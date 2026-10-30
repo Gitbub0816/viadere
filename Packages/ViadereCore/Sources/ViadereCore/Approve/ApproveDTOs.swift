@@ -33,6 +33,8 @@ public enum ApprovalKeyStatus: String, Codable, Sendable, Hashable {
 
 public enum ApprovalRequestStatus: String, Codable, Sendable, Hashable {
     case pending, approved, denied, reported, expired, cancelled
+    /// Ended after too many invalid result submissions (WP-C2): nothing more is accepted for it. The business starts a new request.
+    case locked
     case unknown
 
     public init(from decoder: any Decoder) throws {
@@ -241,7 +243,56 @@ public struct CreateApprovalRequest: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case requestId = "request_id", subjectRef = "subject_ref", capability, challenge, transaction, authentication, envelopes
         case expiresInSeconds = "expires_in_seconds"
+        case connectionId = "connection_id"
     }
+
+    /// `connection_id` is accepted as an alias of `subject_ref` (the same value; spec §5 "pairwise connection id"). Both present must agree.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        requestId = try c.decode(String.self, forKey: .requestId)
+        let subject = try c.decodeIfPresent(SubjectRef.self, forKey: .subjectRef)
+        let connection = try c.decodeIfPresent(SubjectRef.self, forKey: .connectionId)
+        if let subject, let connection, subject != connection {
+            throw DecodingError.dataCorruptedError(forKey: .connectionId, in: c, debugDescription: "connection_id and subject_ref disagree")
+        }
+        guard let resolved = subject ?? connection else {
+            throw DecodingError.keyNotFound(CodingKeys.subjectRef, .init(codingPath: c.codingPath, debugDescription: "subject_ref (or connection_id) is required"))
+        }
+        subjectRef = resolved
+        capability = try c.decode(Capability.self, forKey: .capability)
+        challenge = try c.decodeIfPresent(String.self, forKey: .challenge)
+        transaction = try c.decodeIfPresent(TransactionDetails.self, forKey: .transaction)
+        authentication = try c.decodeIfPresent(AuthenticationDetails.self, forKey: .authentication)
+        envelopes = try c.decodeIfPresent([ApprovalEnvelopeDelivery].self, forKey: .envelopes)
+        expiresInSeconds = try c.decodeIfPresent(Int.self, forKey: .expiresInSeconds)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(requestId, forKey: .requestId)
+        try c.encode(subjectRef, forKey: .subjectRef)
+        try c.encode(capability, forKey: .capability)
+        try c.encodeIfPresent(challenge, forKey: .challenge)
+        try c.encodeIfPresent(transaction, forKey: .transaction)
+        try c.encodeIfPresent(authentication, forKey: .authentication)
+        try c.encodeIfPresent(envelopes, forKey: .envelopes)
+        try c.encodeIfPresent(expiresInSeconds, forKey: .expiresInSeconds)
+    }
+}
+
+/// Which of a customer's enrolled devices may approve for a business (`approve.device_policy`, spec §13 item 2; WP-C2).
+public enum ApproveDevicePolicy: String, Codable, Sendable, Hashable, CaseIterable {
+    /// Every active approval key of the customer receives the request; the first valid decision wins (default).
+    case anyEnrolled = "any_enrolled"
+    /// One device: activating a new key revokes the customer's other keys for this business, and requests go to the newest active key only.
+    case singleDevice = "single_device"
+}
+
+/// `GET` / `PUT /v1/business/approve/settings`.
+public struct ApproveBusinessSettings: Codable, Sendable, Hashable {
+    public var devicePolicy: ApproveDevicePolicy
+    public init(devicePolicy: ApproveDevicePolicy) { self.devicePolicy = devicePolicy }
+    enum CodingKeys: String, CodingKey { case devicePolicy = "device_policy" }
 }
 
 /// The business's view of a request. **The status is the relay's say-so: never authorize on it.** Fetch the result, verify the signature
@@ -467,10 +518,14 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     public var requestsInWindow: Int
     /// True when the customer has received several: the app must say so (SEC-DEV-008).
     public var showFatigueWarning: Bool
+    /// The request as a durable alert (spec v4 C5): its stable event id (dedupe repeated pushes), urgency, status and expiry.
+    public var alert: AlertDescriptor?
 
     public init(id: UUID, requestId: String, business: BusinessSummary, subjectRef: SubjectRef, capability: Capability, kid: String, protection: ApprovalProtection,
                 status: ApprovalRequestStatus, createdAt: Date, expiresAt: Date, envelope: E2EEEnvelope? = nil, challenge: String? = nil,
-                transaction: TransactionDetails? = nil, authentication: AuthenticationDetails? = nil, requestsInWindow: Int = 1, showFatigueWarning: Bool = false) {
+                transaction: TransactionDetails? = nil, authentication: AuthenticationDetails? = nil, requestsInWindow: Int = 1, showFatigueWarning: Bool = false,
+                alert: AlertDescriptor? = nil) {
+        self.alert = alert
         self.id = id
         self.requestId = requestId
         self.business = business
@@ -492,6 +547,7 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, requestId = "request_id", business, subjectRef = "subject_ref", capability, kid, protection, status, createdAt = "created_at"
         case expiresAt = "expires_at", envelope, challenge, transaction, authentication, requestsInWindow = "requests_in_window", showFatigueWarning = "show_fatigue_warning"
+        case alert
     }
 }
 
@@ -499,7 +555,24 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
 public struct SubmitApprovalResultRequest: Codable, Sendable, Hashable {
     /// The compact JWS the device signed with the pairwise approval key.
     public var result: String
-    public init(result: String) { self.result = result }
+    /// App Attest assertion (CBOR, base64url) over `ApprovalAppAttest.clientData` from a device enrolled with an attested key
+    /// (`APP_ATTEST_ASSERTION_MODE`, WP-C2).
+    public var appAttestAssertion: String?
+    public init(result: String, appAttestAssertion: String? = nil) {
+        self.result = result
+        self.appAttestAssertion = appAttestAssertion
+    }
+
+    enum CodingKeys: String, CodingKey { case result, appAttestAssertion = "app_attest_assertion" }
+}
+
+/// App Attest client data of an approval result (`docs/SECURITY.md` §2.55): `"VIADERE-APPATTEST-APPROVE-V1\n{delivery id}\n{hex SHA-256 of the JWS}"`.
+/// The app passes `SHA-256(clientData)` to `generateAssertion`; the server rebuilds the same bytes from the route and the body.
+public enum ApprovalAppAttest {
+    public static let domain = "VIADERE-APPATTEST-APPROVE-V1\n"
+    public static func clientData(deliveryId: UUID, result: String) -> Data {
+        Data((domain + deliveryId.uuidString.lowercased() + "\n" + SecureToken.sha256Hex(Data(result.utf8))).utf8)
+    }
 }
 
 public struct SubmitApprovalResultResponse: Codable, Sendable, Hashable {
@@ -664,10 +737,15 @@ public extension WebhookEventType {
     static let approveRequestDecided = WebhookEventType(rawValue: "approve.request.decided")
     static let approveRequestExpired = WebhookEventType(rawValue: "approve.request.expired")
     static let approveFrozen = WebhookEventType(rawValue: "approve.frozen")
+    /// A device completed a link session (WP-C1): fetch `GET /v1/business/link-sessions/{request_id}`, verify, compare the SAS, confirm.
+    static let linkCompleted = WebhookEventType(rawValue: "link.completed")
+    /// A link session the device completed was never confirmed and has been ended (pending connection and key removed).
+    static let linkExpired = WebhookEventType(rawValue: "link.expired")
 
     /// The events a v2 (opaque) subscription may receive.
     static let opaqueEvents: [WebhookEventType] = [
         .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
+        .linkCompleted, .linkExpired,
         .interactionDecided, .interactionExpired, .interactionCancelled,
         // Verify (WP3): `verification.completed` carries only `request_id` and `result_ref`.
         .verificationCompleted,
