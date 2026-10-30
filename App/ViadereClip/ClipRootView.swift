@@ -73,8 +73,8 @@ struct ClipRootView: View {
                 .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: ViadereSpace.m) {
-                if let terms = URL(string: "https://\(ViadereCore.domain)/legal/consumer-terms/") { Link("Consumer Terms", destination: terms) }
-                if let privacy = URL(string: "https://\(ViadereCore.domain)/legal/privacy-notice/") { Link("Privacy Notice", destination: privacy) }
+                if let terms = URL(string: "https://\(ViadereCore.defaultDomain)/legal/consumer-terms/") { Link("Consumer Terms", destination: terms) }
+                if let privacy = URL(string: "https://\(ViadereCore.defaultDomain)/legal/privacy-notice/") { Link("Privacy Notice", destination: privacy) }
             }
             .font(ViadereType.subhead)
             .tint(ViadereColor.textPrimary)

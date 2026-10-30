@@ -202,14 +202,14 @@ struct GatewayService {
             case .sendAccountLink:
                 let token = try await mintToken(kind: "accountLink", context: context, consumerId: nil, purpose: nil,
                                                 ttl: configuration.linkTTL, on: db)
-                guard let url = URL(string: ctx.config.publicBaseURL + APIRoutes.Web.accountLinkPrefix + token) else { break }
+                guard let url = APIRoutes.Web.accountLinkURL(token: token, domain: ctx.config.linkDomain) else { break }
                 try await queue.enqueue(to: phone, body: GatewayCopy.accountLink(url: url, ttlMinutes: Int(configuration.linkTTL / 60)),
                                         sensitive: true)
 
             case .sendSecureHandoff(let purpose):
                 let token = try await mintToken(kind: "handoff", context: context, consumerId: context.consumerId,
                                                 purpose: purpose.rawValue, ttl: Self.handoffTTL, on: db)
-                guard let url = URL(string: ctx.config.publicBaseURL + APIRoutes.Web.handoffPrefix + token) else { break }
+                guard let url = APIRoutes.Web.handoffURL(token: token, domain: ctx.config.linkDomain) else { break }
                 try await queue.enqueue(to: phone, body: GatewayCopy.secureHandoff(url: url, ttlMinutes: Int(Self.handoffTTL / 60)),
                                         sensitive: true)
 

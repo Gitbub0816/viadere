@@ -29,6 +29,13 @@ public struct ViadereConfiguration: Sendable {
     /// build**: a key taken from the network would let a relay vouch for itself. Empty = Approve v2 and E2EE fail closed.
     public var keyDirectoryLogKeys: [String] = []
     public var keyDirectoryLogId: String = TransparencyLog.defaultLogId
+    /// The universal-link host (`VIADERE_LINK_DOMAIN`, Info.plist `ViadereLinkDomain`; defaults to the web domain). Every link parser in the app
+    /// accepts only this host; `installLinkDomain()` makes it the process-wide `ViadereCore.domain`. The production API always uses `viadere.com`.
+    public var linkDomain: LinkDomain = .production
+    /// Base64url X9.63 public keys of Viadere's `link-descriptor` signing key (more than one during a rotation; Info.plist
+    /// `ViadereLinkDescriptorKeys`). **Pinned in the build**: the app accepts a link-session descriptor only if one of these signed it.
+    /// Empty = business link sessions fail closed.
+    public var linkDescriptorKeys: [String] = []
 
     public static let productionHost = "api.viadere.com"
 
@@ -38,7 +45,7 @@ public struct ViadereConfiguration: Sendable {
         pins: ["REPLACE_ME_PRIMARY_SPKI_SHA256_BASE64", "REPLACE_ME_BACKUP_SPKI_SHA256_BASE64"]
     )
 
-    public init(mode: Mode, apiBaseURL: URL, relyingPartyID: String = ViadereCore.domain,
+    public init(mode: Mode, apiBaseURL: URL, relyingPartyID: String = ViadereCore.defaultDomain,
                 bundleID: String = "\(ViadereCore.bundlePrefix).app", appGroupID: String = "group.\(ViadereCore.bundlePrefix).shared",
                 keychainService: String = "\(ViadereCore.bundlePrefix).client", keychainAccessGroup: String? = nil,
                 pinning: PinningConfiguration = ViadereConfiguration.productionPinning,
@@ -88,6 +95,8 @@ public struct ViadereConfiguration: Sendable {
                         config.apnsEnvironment = env
                     }
                     if let rp = info["ViadereRelyingPartyID"] as? String, isDomainName(rp) { config.relyingPartyID = rp.lowercased() }
+                    // Staging links point at the staging web host (WP-C3); production keeps viadere.com whatever the plist says.
+                    if let raw = info["ViadereLinkDomain"] as? String, let domain = LinkDomain(raw) { config.linkDomain = domain }
                 }
             }
         }
@@ -105,6 +114,9 @@ public struct ViadereConfiguration: Sendable {
             config.keyDirectoryLogKeys = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { (try? DevicePublicKey(base64URL: $0)) != nil }
         }
         if let id = info["ViadereKeyDirectoryLogId"] as? String, !id.isEmpty, !id.contains("$(") { config.keyDirectoryLogId = id }
+        if let raw = info["ViadereLinkDescriptorKeys"] as? String {
+            config.linkDescriptorKeys = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { (try? DevicePublicKey(base64URL: $0)) != nil }
+        }
         #if DEBUG
         config.apnsEnvironment = .sandbox
         #endif
@@ -159,4 +171,14 @@ public struct ViadereConfiguration: Sendable {
 extension ViadereConfiguration {
     /// The pinned log keys, parsed.
     public var parsedKeyDirectoryLogKeys: [DevicePublicKey] { keyDirectoryLogKeys.compactMap { try? DevicePublicKey(base64URL: $0) } }
+}
+
+extension ViadereConfiguration {
+    /// Makes `linkDomain` the process-wide link domain (`ViadereCore.domain`, `LinkDomain.current`). Called once at launch.
+    public func installLinkDomain() {
+        ViadereCore.configureLinkDomain(linkDomain.host)
+    }
+
+    /// The pinned `link-descriptor` keys, parsed.
+    public var parsedLinkDescriptorKeys: [DevicePublicKey] { linkDescriptorKeys.compactMap { try? DevicePublicKey(base64URL: $0) } }
 }

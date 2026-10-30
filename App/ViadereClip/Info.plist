@@ -68,6 +68,8 @@
 	<string>$(VIADERE_APNS_ENVIRONMENT)</string>
 	<key>ViadereRelyingPartyID</key>
 	<string>$(VIADERE_RP_DOMAIN)</string>
+	<key>ViadereLinkDomain</key>
+	<string>$(VIADERE_LINK_DOMAIN)</string>
 	<key>ViadereAppGroupID</key>
 	<string></string>
 	<key>NSAppTransportSecurity</key>

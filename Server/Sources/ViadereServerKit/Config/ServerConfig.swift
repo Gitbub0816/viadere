@@ -79,6 +79,9 @@ public struct ServerConfig: Sendable {
     /// Public origin used to build links and to verify provider signatures (never taken from the Host header).
     public var publicBaseURL: String
     public var relyingPartyID: String
+    /// The universal-link host (`LINK_DOMAIN`; default `RP_ID`): every link the server builds (`/c/`, `/a/`, `/k/`, `/l/`, `/h/`) uses it and every
+    /// link it parses must use it. Staging sets its own host so staging QR codes never point at production (WP-C3).
+    public var linkDomain: LinkDomain = .production
     public var relyingPartyName: String
     public var relyingPartyOrigin: String
     public var appleTeamID: String
@@ -215,8 +218,8 @@ public struct ServerConfig: Sendable {
         }
         if production && scheme != "https" { throw ServerConfigError.invalid("PUBLIC_BASE_URL (must be https in production)") }
         // Passkeys are scoped to the origin: outside local development it must be an https origin of the relying party.
-        let relyingPartyID = env["RP_ID"] ?? ViadereCore.domain
-        let relyingPartyOrigin = env["RP_ORIGIN"] ?? "https://\(ViadereCore.domain)"
+        let relyingPartyID = env["RP_ID"] ?? ViadereCore.defaultDomain
+        let relyingPartyOrigin = env["RP_ORIGIN"] ?? "https://\(ViadereCore.defaultDomain)"
         if environment != .development {
             guard let origin = URL(string: relyingPartyOrigin), origin.scheme == "https", let host = origin.host,
                   host == relyingPartyID || host.hasSuffix("." + relyingPartyID), origin.user == nil, origin.path.isEmpty || origin.path == "/" else {
@@ -285,6 +288,14 @@ public struct ServerConfig: Sendable {
             freeDailyInteractionQuota: Int(env["FREE_DAILY_INTERACTION_QUOTA"] ?? "") ?? 1000,
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
         config.mailerSendSMS = mailerSendSMS
+        if let raw = env["LINK_DOMAIN"], !raw.isEmpty {
+            guard let domain = LinkDomain(raw) else { throw ServerConfigError.invalid("LINK_DOMAIN (a DNS name such as viadere.com, no scheme or path)") }
+            config.linkDomain = domain
+        } else if let domain = LinkDomain(relyingPartyID) {
+            config.linkDomain = domain
+        } else if production {
+            throw ServerConfigError.missing("LINK_DOMAIN")
+        }
         config.auditChainKey = SymmetricKey(data: try secretBytes("AUDIT_CHAIN_KEY", minimum: 32))
         config.subjectRefKey = SymmetricKey(data: try secretBytes("SUBJECT_REF_KEY", minimum: 32))
         if production {

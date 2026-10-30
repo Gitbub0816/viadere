@@ -28,10 +28,10 @@ public enum ApprovalEnrollmentCode {
         return String(canonical.prefix(4)) + "-" + String(canonical.suffix(4))
     }
 
-    /// `https://viadere.com/a/{CODE}[?rk={root kid}][#es={secret}]`. The business SDK builds it (never the relay): `rk` is the business's own
+    /// `https://{link domain}/a/{CODE}[?rk={root kid}][#es={secret}]`. The business SDK builds it (never the relay): `rk` is the business's own
     /// root key id and `es` the enrollment secret. The fragment is never sent to a server, so the relay cannot see `es`.
-    public static func deepLink(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret? = nil) -> String {
-        var link = "https://\(ViadereCore.domain)/a/\(code)"
+    public static func deepLink(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret? = nil, domain: LinkDomain = .current) -> String {
+        var link = "\(domain.origin)/a/\(code)"
         if let rootKid { link += "?rk=\(rootKid)" }
         if let secret { link += "#es=\(secret.base64URL)" }
         return link
@@ -39,8 +39,8 @@ public enum ApprovalEnrollmentCode {
 
     /// Parses a deep link. Strict: https, the exact host, path `/a/{CODE}`, an optional single `rk` parameter holding a key id, and an
     /// optional fragment that is exactly `es={43 characters}`; nothing else.
-    public static func parse(link: URL) -> (code: String, rootKid: String?, secret: ApprovalEnrollmentSecret?)? {
-        guard link.scheme == "https", link.host == ViadereCore.domain, link.user == nil, link.password == nil, link.port == nil,
+    public static func parse(link: URL, domain: LinkDomain = .current) -> (code: String, rootKid: String?, secret: ApprovalEnrollmentSecret?)? {
+        guard link.scheme == "https", domain.matches(link.host), link.host == link.host?.lowercased(), link.user == nil, link.password == nil, link.port == nil,
               let components = URLComponents(url: link, resolvingAgainstBaseURL: false) else { return nil }
         var secret: ApprovalEnrollmentSecret?
         if let fragment = components.fragment {

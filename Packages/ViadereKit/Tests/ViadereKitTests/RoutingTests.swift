@@ -129,3 +129,36 @@ struct ConfigurationTests {
         #expect(ok.keychainAccessGroup == "ABCDE12345.com.viadere.shared")
     }
 }
+
+/// WP-C3: the app's link domain comes from the build (`VIADERE_LINK_DOMAIN`), and the router accepts only that host.
+@Suite("Link domain")
+struct LinkDomainRoutingTests {
+    let staging = LinkDomain("viadere.cksites.dev")!
+    let token = String(repeating: "A", count: 43)
+
+    @Test func everyUniversalLinkForAnotherHostIsRefused() {
+        // Built for staging: production links (and look-alikes) are not ours.
+        for link in ["https://viadere.com/c/AF2345", "https://viadere.com/l/\(token)", "https://viadere.com/h/\(token)", "https://viadere.com/a/ABCDEFGH",
+                     "https://viadere.cksites.dev.evil.com/c/AF2345", "https://www.viadere.cksites.dev/l/\(token)", "https://www.viadere.cksites.dev/h/\(token)"] {
+            #expect(DeepLinkRouter.route(link, domain: staging) == nil, "\(link)")
+        }
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: staging) != nil)
+        #expect(DeepLinkRouter.route("https://www.viadere.cksites.dev/c/AF2345", domain: staging) != nil)
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/l/\(token)", domain: staging) == .accountLink(token: token))
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/h/\(token)", domain: staging) == .handoff(token: token))
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/a/ABCDEFGH", domain: staging) == .approveEnrollment(code: "ABCDEFGH", rootKid: nil, secret: nil))
+        // And a production build refuses staging links.
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: .production) == nil)
+    }
+
+    @Test func theBuildSettingSetsTheLinkDomainForNonProductionHostsOnly() {
+        let stagingBuild = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "viadere.cksites.dev"],
+                                                        allowLocalHTTP: false)
+        #expect(stagingBuild.linkDomain.host == "viadere.cksites.dev")
+        let unexpanded = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "$(VIADERE_LINK_DOMAIN)"],
+                                                      allowLocalHTTP: false)
+        #expect(unexpanded.linkDomain == .production)
+        let production = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api.viadere.com", "ViadereLinkDomain": "evil.example.com"], allowLocalHTTP: false)
+        #expect(production.linkDomain == .production, "the production API never takes its link domain from the plist")
+    }
+}

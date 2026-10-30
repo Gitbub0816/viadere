@@ -53,7 +53,8 @@ public struct ConnectContext: Codable, Sendable, Hashable {
     }
 }
 
-/// A `https://viadere.com/c/{CODE}` connect link (QR codes, NFC, buttons, App Clip invocations).
+/// A `https://{link domain}/c/{CODE}` connect link (QR codes, NFC, buttons, App Clip invocations). The host is the configured
+/// `LinkDomain` (`viadere.com` in production).
 ///
 /// Optional signed context: `?ctx={base64url canonical JSON}&sig={base64url HMAC}` where
 /// `sig = HMAC-SHA256(key, "VIADERE-CTX-V1\n" + canonicalCode + "\n" + ctx)`.
@@ -61,14 +62,14 @@ public struct ConnectContext: Codable, Sendable, Hashable {
 /// unverified until the server validates it (`verifiedContext`).
 ///
 /// Parsing is strict to block open-redirect and look-alike tricks: scheme `https` only,
-/// host exactly one of `allowedHosts`, no userinfo, no port other than 443, no fragment,
+/// host exactly the link domain or its `www.` alias (`LinkDomain.connectHosts`), no userinfo, no port other than 443, no fragment,
 /// path exactly `/c/{code}` (optional trailing `/`), only `ctx`/`sig` query items, each at most once,
 /// and both or neither.
 public struct ConnectLink: Sendable, Hashable {
-    /// Hosts accepted when parsing.
-    public static let allowedHosts: Set<String> = ["viadere.com", "www.viadere.com"]
-    /// Host used when building links.
-    public static let canonicalHost = "viadere.com"
+    /// Hosts accepted when parsing with the process's link domain (`LinkDomain.current`).
+    public static var allowedHosts: Set<String> { LinkDomain.current.connectHosts }
+    /// Host used when building links with the process's link domain.
+    public static var canonicalHost: String { LinkDomain.current.host }
     /// Maximum length of the `ctx` parameter.
     public static let maxContextLength = 512
     static let contextDomain = "VIADERE-CTX-V1"
@@ -99,29 +100,33 @@ public struct ConnectLink: Sendable, Hashable {
 
     /// The business code (canonical).
     public let code: BusinessCode
+    /// The link domain this link belongs to (canonical host, never the `www.` alias).
+    public let host: String
     /// Raw `ctx` parameter (base64url), if present.
     public let context: String?
     /// Raw `sig` parameter (base64url), if present.
     public let signature: String?
 
     /// A plain link with no context.
-    public init(code: BusinessCode) {
+    public init(code: BusinessCode, domain: LinkDomain = .current) {
         self.code = code
+        self.host = domain.host
         self.context = nil
         self.signature = nil
     }
 
     /// Builds a link with signed context (server side).
-    public init(code: BusinessCode, context: ConnectContext, key: SymmetricKey) throws {
+    public init(code: BusinessCode, context: ConnectContext, key: SymmetricKey, domain: LinkDomain = .current) throws {
         let ctx = Base64URL.encode(try context.canonicalJSON())
         self.code = code
+        self.host = domain.host
         self.context = ctx
         self.signature = Self.sign(code: code, context: ctx, key: key)
     }
 
     /// The canonical URL string.
     public var urlString: String {
-        var s = "https://\(Self.canonicalHost)/c/\(code.canonical)"
+        var s = "https://\(host)/c/\(code.canonical)"
         if let context, let signature { s += "?ctx=\(context)&sig=\(signature)" }
         return s
     }
@@ -129,8 +134,8 @@ public struct ConnectLink: Sendable, Hashable {
     /// The canonical URL.
     public var url: URL? { URL(string: urlString) }
 
-    /// Strictly parses a link string (see type documentation).
-    public static func parse(_ string: String) throws -> ConnectLink {
+    /// Strictly parses a link string (see type documentation). Only `domain` (and its `www.` alias) is accepted.
+    public static func parse(_ string: String, domain: LinkDomain = .current) throws -> ConnectLink {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         // Reject whitespace, backslashes and control chars anywhere: common parser-confusion vectors.
         guard !trimmed.isEmpty, trimmed.count <= 2048,
@@ -141,7 +146,7 @@ public struct ConnectLink: Sendable, Hashable {
         guard components.user == nil, components.password == nil, !trimmed.contains("@") else {
             throw ParseError.userInfoNotAllowed
         }
-        guard let host = components.host?.lowercased(), allowedHosts.contains(host) else { throw ParseError.disallowedHost }
+        guard let host = components.host?.lowercased(), domain.connectHosts.contains(host) else { throw ParseError.disallowedHost }
         if let port = components.port, port != 443 { throw ParseError.portNotAllowed }
         guard components.fragment == nil else { throw ParseError.fragmentNotAllowed }
         // Use the percent-encoded path so "%2F" tricks cannot alter segmentation.
@@ -174,11 +179,12 @@ public struct ConnectLink: Sendable, Hashable {
                 throw ParseError.incompleteSignature
             }
         }
-        return ConnectLink(code: code, context: ctx, signature: sig)
+        return ConnectLink(code: code, host: domain.host, context: ctx, signature: sig)
     }
 
-    private init(code: BusinessCode, context: String?, signature: String?) {
+    private init(code: BusinessCode, host: String, context: String?, signature: String?) {
         self.code = code
+        self.host = host
         self.context = context
         self.signature = signature
     }

@@ -13,8 +13,7 @@
 public enum ViadereCore {
     /// Semantic version of the shared contract.
     public static let version = "1.0.0"
-    /// Canonical public web origin.
-    public static let domain = "viadere.com"
+    // `domain` (the configured link domain) is in `Identifiers/LinkDomain.swift`.
     /// Bundle identifier prefix for Apple targets.
     public static let bundlePrefix = "com.viadere"
 }

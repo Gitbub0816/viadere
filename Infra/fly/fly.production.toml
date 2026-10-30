@@ -76,6 +76,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   RP_ID = "viadere.com"
   RP_NAME = "Viadere"
   RP_ORIGIN = "https://viadere.com"
+  LINK_DOMAIN = "viadere.com"           # universal-link host (WP-C3); equals the app build setting VIADERE_LINK_DOMAIN
   DASHBOARD_ORIGIN = ""                 # set to https://business.viadere.com if the dashboard gets its own origin
   DASHBOARD_IDLE_MINUTES = "30"
   DASHBOARD_ABSOLUTE_HOURS = "12"

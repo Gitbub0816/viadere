@@ -50,7 +50,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     /// - Parameters:
     ///   - apiKey: `vdk_live_…` or `vdk_test_…`.
     ///   - baseURL: defaults to `https://viadere.com`. Must be https (plain http only for loopback development).
-    public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.domain)")!, transport: any BusinessTransport = URLSessionTransport(),
+    public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.defaultDomain)")!, transport: any BusinessTransport = URLSessionTransport(),
                 retry: RetryPolicy = .standard, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) throws {
         guard (apiKey.hasPrefix("vdk_live_") || apiKey.hasPrefix("vdk_test_")), apiKey.count >= 20, apiKey.count <= 80,
               apiKey.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) else { throw ViadereSDKError.invalidAPIKey }

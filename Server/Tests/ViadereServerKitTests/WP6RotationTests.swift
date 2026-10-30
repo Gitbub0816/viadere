@@ -201,14 +201,14 @@ final class WP6RotationTests: XCTestCase {
         XCTAssertEqual(before.currentId, ConnectKeyring.legacyKeyId)
         let code = try BusinessCode("K7M4Q2")
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let oldLink = try before.link(code: code, context: ConnectContext(campaign: "spring", issuedAt: now, expiresAt: now.addingTimeInterval(86_400)))
+        let oldLink = try before.link(code: code, context: ConnectContext(campaign: "spring", issuedAt: now, expiresAt: now.addingTimeInterval(86_400)), domain: .production)
         config.connectLinkKey = k2
         config.operations.connectKeyId = "c2"
         config.operations.previousConnectKeys = ["c1": k1]
         let after = ConnectKeyring(config: config)
         // A link issued before the rotation still verifies; a new one names the new key and verifies.
         XCTAssertEqual(try after.verifiedContext(of: oldLink, now: now).campaign, "spring")
-        let newLink = try after.link(code: code, context: ConnectContext(campaign: "summer", issuedAt: now, expiresAt: now.addingTimeInterval(86_400)))
+        let newLink = try after.link(code: code, context: ConnectContext(campaign: "summer", issuedAt: now, expiresAt: now.addingTimeInterval(86_400)), domain: .production)
         XCTAssertEqual(newLink.claimedKeyId, "c2")
         XCTAssertEqual(try after.verifiedContext(of: newLink, now: now).campaign, "summer")
         // The old keyring (before rotation) cannot verify new links, and a retired previous key stops verifying old ones.

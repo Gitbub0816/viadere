@@ -195,8 +195,8 @@ private struct DeviceStep: View {
 
 /// The terms and the privacy notice, as links. Continuing is the agreement.
 private struct ConsentLine: View {
-    private static let terms = URL(string: "https://\(ViadereCore.domain)/legal/consumer-terms/")
-    private static let privacy = URL(string: "https://\(ViadereCore.domain)/legal/privacy-notice/")
+    private static let terms = URL(string: "https://\(ViadereCore.defaultDomain)/legal/consumer-terms/")
+    private static let privacy = URL(string: "https://\(ViadereCore.defaultDomain)/legal/privacy-notice/")
 
     var body: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.xs) {

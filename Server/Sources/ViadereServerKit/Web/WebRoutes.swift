@@ -43,7 +43,9 @@ enum WebRoutes {
             let appID = "\(ctx.config.appleTeamID).\(ctx.config.appBundleID)"
             let clipID = "\(ctx.config.appleTeamID).\(ctx.config.appClipBundleID)"
             let json: [String: Any] = [
-                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"]]]]],
+                // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, account link, handoff, Approve enrollment and link sessions.
+                // Fragments (`#es=`) are never sent to a server; the matching rules ignore them.
+                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"]]]]],
                 "webcredentials": ["apps": [appID]],
                 "appclips": ["apps": [clipID]],
             ]
@@ -91,7 +93,7 @@ enum WebRoutes {
         var head = ""
         if let storeID = ctx.config.appStoreID, storeID.allSatisfy(\.isNumber) {
             // Smart App Banner with App Clip support; argument carries only the public connect URL.
-            let argument = escape("https://\(ViadereCore.domain)/c/\(code.canonical)")
+            let argument = escape(ConnectLink(code: code, domain: ctx.config.linkDomain).urlString)
             head = "<meta name=\"apple-itunes-app\" content=\"app-id=\(storeID), app-clip-bundle-id=\(escape(ctx.config.appClipBundleID)), app-argument=\(argument)\">"
         }
         var body = "<p><strong>\(escape(profile.displayName))</strong> is a verified business on Viadere.</p>"

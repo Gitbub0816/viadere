@@ -118,7 +118,7 @@ struct RelationshipService {
               let summary = try await directory.summary(for: business) else { throw APIError.notFound }
         if let link = request.link {
             // A supplied link must be a valid Viadere link for *this* business; its signed context is verified, never trusted.
-            guard let parsed = try? ConnectLink.parse(link), parsed.code == summary.code else {
+            guard let parsed = try? ConnectLink.parse(link, domain: ctx.config.linkDomain), parsed.code == summary.code else {
                 throw APIError.validation("The connect link does not match this business.", details: ["link": "mismatch"])
             }
         }

@@ -360,10 +360,10 @@ struct DashboardActions {
         let days = min(max(validDays, 0), 365)
         let expires = days == 0 ? nil : now.addingTimeInterval(TimeInterval(days) * 86_400)
         let context = ConnectContext(campaign: campaignId, action: actionId, issuedAt: now, expiresAt: expires)
-        let link = try ctx.connectKeys.link(code: code, context: context)
+        let link = try ctx.connectKeys.link(code: code, context: context, domain: ctx.config.linkDomain)
         let qr = try QRCode.encode(link.urlString, errorCorrection: .medium)
         try await audit("campaign.link_created", subjectType: "campaign", subjectId: campaignId)
-        return Campaign(link: link, plainLink: ConnectLink(code: code), qr: qr, expiresAt: expires)
+        return Campaign(link: link, plainLink: ConnectLink(code: code, domain: ctx.config.linkDomain), qr: qr, expiresAt: expires)
     }
 
     // MARK: Team

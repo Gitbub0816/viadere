@@ -65,6 +65,7 @@ app_env = {
   RP_ID                                    = "viadere.cksites.dev"
   RP_NAME                                  = "Viadere"
   RP_ORIGIN                                = "https://viadere.cksites.dev"
+  LINK_DOMAIN                              = "viadere.cksites.dev"
   DASHBOARD_ORIGIN                         = ""
   DASHBOARD_IDLE_MINUTES                   = "30"
   DASHBOARD_ABSOLUTE_HOURS                 = "12"

@@ -446,7 +446,7 @@ public enum APIRoutes {
         keyDirectorySTH.descriptor, keyDirectoryConsistency.descriptor, keyDirectoryBusiness.descriptor,
     ] + verifyEndpoints
 
-    /// Web (non-API) paths served on `viadere.com`.
+    /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.com` in production).
     public enum Web {
         /// Connect link: `/c/{CODE}` (see `ConnectLink`).
         public static let connectPrefix = "/c/"
@@ -459,7 +459,12 @@ public enum APIRoutes {
         /// Viadere operator console (separate realm, passkey sign-in).
         public static let operatorPrefix = "/operator"
 
-        public static func accountLinkURL(token: String) -> URL? { URL(string: "https://\(ViadereCore.domain)\(accountLinkPrefix)\(token)") }
-        public static func handoffURL(token: String) -> URL? { URL(string: "https://\(ViadereCore.domain)\(handoffPrefix)\(token)") }
+        /// Link-session landing (WP-C1): `/k/{CODE}#es={secret}`. The fragment never reaches a server.
+        public static let linkSessionPrefix = "/k/"
+        /// Approve v2 enrollment landing: `/a/{CODE}?rk=…#es=…`.
+        public static let approveEnrollmentPrefix = "/a/"
+
+        public static func accountLinkURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(accountLinkPrefix + token) }
+        public static func handoffURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(handoffPrefix + token) }
     }
 }

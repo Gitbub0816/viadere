@@ -3,20 +3,20 @@ import ViadereCore
 
 /// A destination inside the app. Produced only from strictly validated URLs.
 public enum DeepLink: Sendable, Equatable {
-    /// `https://viadere.com/c/{CODE}` (QR, NFC, button, App Clip invocation) or `viadere://c/{CODE}`.
+    /// `https://{link domain}/c/{CODE}` (QR, NFC, button, App Clip invocation) or `viadere://c/{CODE}`.
     case connect(code: BusinessCode, link: ConnectLink?)
     /// `viadere://b/{handle}`
     case business(BusinessHandle)
-    /// `https://viadere.com/l/{token}` (universal link only; no custom-scheme equivalent): finish linking a phone that texted Viadere.
+    /// `https://{link domain}/l/{token}` (universal link only; no custom-scheme equivalent): finish linking a phone that texted Viadere.
     case accountLink(token: String)
-    /// `https://viadere.com/h/{token}`: secure handoff of a request that can't be completed by text.
+    /// `https://{link domain}/h/{token}`: secure handoff of a request that can't be completed by text.
     case handoff(token: String)
     /// `viadere://i/{interactionId}` (also used by notification taps).
     case interaction(InteractionID)
     /// `viadere://m/{sessionId}`
     case conversation(SessionID)
     case settings
-    /// `https://viadere.com/a/{CODE}?rk={root key id}#es={secret}` (QR or button the business shows in its own session): start an Approve enrollment.
+    /// `https://{link domain}/a/{CODE}?rk={root key id}#es={secret}` (QR or button the business shows in its own session): start an Approve enrollment.
     /// The fragment never reaches a server; log nothing of this link.
     case approveEnrollment(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret?)
 }
@@ -29,35 +29,37 @@ public enum DeepLinkRouter {
     public static let customScheme = "viadere"
     static let tokenLength = 43
 
-    public static func route(_ url: URL) -> DeepLink? {
+    /// `domain` is the build's link domain (`ViadereCore.configureLinkDomain` at launch); a universal link for any other host is refused.
+    public static func route(_ url: URL, domain: LinkDomain = .current) -> DeepLink? {
         switch url.scheme?.lowercased() {
-        case "https": return routeUniversal(url)
+        case "https": return routeUniversal(url, domain: domain)
         case customScheme: return routeCustom(url)
         default: return nil
         }
     }
 
-    public static func route(_ string: String) -> DeepLink? {
+    public static func route(_ string: String, domain: LinkDomain = .current) -> DeepLink? {
         guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-        return route(url)
+        return route(url, domain: domain)
     }
 
     // MARK: https
 
-    private static func routeUniversal(_ url: URL) -> DeepLink? {
+    private static func routeUniversal(_ url: URL, domain: LinkDomain) -> DeepLink? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = components.host?.lowercased(),
-              ConnectLink.allowedHosts.contains(host) else { return nil }
+              domain.connectHosts.contains(host) else { return nil }
         if components.path.hasPrefix(APIRoutes.Web.connectPrefix) {
-            guard let link = try? ConnectLink.parse(url.absoluteString) else { return nil }
+            guard let link = try? ConnectLink.parse(url.absoluteString, domain: domain) else { return nil }
             return .connect(code: link.code, link: link)
         }
         if components.path.hasPrefix("/a/") {
             // The fragment (`#es=`, the enrollment secret) is parsed strictly by `ApprovalEnrollmentCode.parse`; anything else in it is refused.
             guard components.user == nil, components.password == nil, components.port == nil || components.port == 443,
-                  let parsed = ApprovalEnrollmentCode.parse(link: url) else { return nil }
+                  let parsed = ApprovalEnrollmentCode.parse(link: url, domain: domain) else { return nil }
             return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid, secret: parsed.secret)
         }
-        guard components.user == nil, components.password == nil, components.fragment == nil,
+        // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
+        guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,
               components.query == nil, components.port == nil || components.port == 443 else { return nil }
         if let token = token(in: components.percentEncodedPath, prefix: APIRoutes.Web.accountLinkPrefix) { return .accountLink(token: token) }
         if let token = token(in: components.percentEncodedPath, prefix: APIRoutes.Web.handoffPrefix) { return .handoff(token: token) }
@@ -96,7 +98,7 @@ public enum DeepLinkRouter {
         case "m":
             return SessionID(arg).map(DeepLink.conversation)
         // There is deliberately no `viadere://l/{token}`: any app on the device can open a custom-scheme URL, so a
-        // phone-link token is accepted only from the https universal link (`https://viadere.com/l/{token}`), which
+        // phone-link token is accepted only from the https universal link (`https://{link domain}/l/{token}`), which
         // iOS verifies against the app-site association.
         case "h":
             guard Base64URL.isValid(arg, minLength: tokenLength, maxLength: tokenLength) else { return nil }

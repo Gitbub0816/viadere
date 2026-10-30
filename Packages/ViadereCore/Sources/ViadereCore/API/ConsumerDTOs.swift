@@ -32,9 +32,10 @@ public enum DirectoryInput: Sendable, Hashable {
     case code(BusinessCode)
     case name(String)
 
-    public init(parsing input: String) {
+    /// `domain`: the link domain a connect link must use (the server passes `ServerConfig.linkDomain`).
+    public init(parsing input: String, domain: LinkDomain = .current) {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.lowercased().hasPrefix("https://"), let link = try? ConnectLink.parse(trimmed) {
+        if trimmed.lowercased().hasPrefix("https://"), let link = try? ConnectLink.parse(trimmed, domain: domain) {
             self = .link(link)
         } else if trimmed.hasPrefix("@"), let handle = BusinessHandle(parsing: trimmed) {
             self = .handle(handle)

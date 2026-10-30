@@ -27,10 +27,10 @@ struct ConnectKeyring: Sendable {
     func key(for id: String) -> SymmetricKey? { id == currentId ? current : previous[id] }
 
     /// Builds a link whose context names the signing key.
-    func link(code: BusinessCode, context: ConnectContext) throws -> ConnectLink {
+    func link(code: BusinessCode, context: ConnectContext, domain: LinkDomain) throws -> ConnectLink {
         var stamped = context
         stamped.keyId = currentId
-        return try ConnectLink(code: code, context: stamped, key: current)
+        return try ConnectLink(code: code, context: stamped, key: current, domain: domain)
     }
 
     /// Verifies a link's context with the key it names (or the legacy key when it names none). The named id only selects a key; the

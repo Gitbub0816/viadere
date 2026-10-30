@@ -84,7 +84,7 @@ struct ApproveEnrollmentService {
         _ = try await AuditService(db: db, ctx: ctx).record("approve.enrollment_created", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
             consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "approve_enrollment", subjectId: enrollment.id?.uuidString.lowercased(),
             metadata: ["capability": request.capability.rawValue, "assurance": assurance.rawValue])
-        return ApprovalEnrollmentTicket(enrollmentId: enrollment.id!, code: code, deepLink: ApprovalEnrollmentCode.deepLink(code: code, rootKid: root.kid), expiresAt: enrollment.expiresAt)
+        return ApprovalEnrollmentTicket(enrollmentId: enrollment.id!, code: code, deepLink: ApprovalEnrollmentCode.deepLink(code: code, rootKid: root.kid, domain: ctx.config.linkDomain), expiresAt: enrollment.expiresAt)
     }
 
     // MARK: Business: read, cancel

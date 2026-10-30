@@ -11,6 +11,12 @@ VIADERE_API_BASE_URL = https:/$()/api.viadere.com
 // Staging.xcconfig points both at staging.viadere.com. The server's RP_ID / RP_ORIGIN must be the same domain.
 VIADERE_WEB_DOMAIN = viadere.com
 VIADERE_RP_DOMAIN = $(VIADERE_WEB_DOMAIN)
+// Universal-link host (WP-C3): every link the app parses must use it (`/c/`, `/a/`, `/k/`, `/l/`, `/h/`). Defaults to the web domain, so the
+// Staging build gets viadere.cksites.dev; the server's LINK_DOMAIN must be the same value. Read from Info.plist `ViadereLinkDomain`.
+VIADERE_LINK_DOMAIN = $(VIADERE_WEB_DOMAIN)
+// Viadere's `link-descriptor` public key(s) (base64url X9.63, comma separated; the second during a rotation). The app accepts a business link
+// session only if one of these signed its descriptor; empty = link sessions fail closed. Print it with `ViadereServer link-descriptor-key`.
+VIADERE_LINK_DESCRIPTOR_KEYS =
 // Which APNs environment the app registers its push token for (`sandbox` | `production`; read from Info.plist `ViadereAPNsEnvironment`).
 // It must equal the server's APNS_ENVIRONMENT. ViadereConfiguration honours `sandbox` only for a host other than the production API.
 VIADERE_APNS_ENVIRONMENT = production

@@ -26,7 +26,7 @@ struct HandoffTokens {
         record.createdAt = ctx.now
         record.expiresAt = ctx.now.addingTimeInterval(Self.ttl)
         try await record.create(on: db)
-        return URL(string: ctx.config.publicBaseURL + APIRoutes.Web.handoffPrefix + token)
+        return APIRoutes.Web.handoffURL(token: token, domain: ctx.config.linkDomain)
     }
 }
 

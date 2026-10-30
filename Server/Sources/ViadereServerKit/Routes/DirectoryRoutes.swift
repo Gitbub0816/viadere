@@ -47,7 +47,7 @@ enum DirectoryRoutes {
     /// verified businesses only.
     static func resolve(_ input: String, req: Request) async throws -> DirectoryResolveResponse {
         let directory = DirectoryService(db: req.db)
-        switch DirectoryInput(parsing: String(input.prefix(2048))) {
+        switch DirectoryInput(parsing: String(input.prefix(2048)), domain: req.ctx.config.linkDomain) {
         case .link(let link):
             guard let business = try await directory.verified(code: link.code), let summary = try await directory.summary(for: business) else {
                 throw APIError.notFound
