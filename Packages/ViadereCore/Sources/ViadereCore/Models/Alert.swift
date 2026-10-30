@@ -47,6 +47,12 @@ public enum AlertCategory: String, Codable, Sendable, Hashable {
     case approval
     case linkConfirmation = "link_confirmation"
     case securityNotice = "security_notice"
+    /// A business interaction that asks for an answer (confirm, choose, acknowledge, reply, sign-in, authorize).
+    case request
+    /// An informational business item (status update, reward, ticket).
+    case update
+    /// A first-party identity or age verification request (Verify).
+    case verification
     case unknown
 
     public init(from decoder: any Decoder) throws {
