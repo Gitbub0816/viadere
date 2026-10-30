@@ -21,6 +21,15 @@ EXEMPT = {
     "PASS_WWDR_CERTIFICATE_PATH": "alternative to PASS_WWDR_CERTIFICATE_PEM; use the inline PEM secrets on Fly",
     "WALLET_ENCRYPTION_KEY_PATHS": "development only; refused in staging/production (use WALLET_ENCRYPTION_KEY_WRAPPED)",
 }
+# Azure-only settings (WP-B2/B3): Infra/azure sets them on Container Apps (checked by Infra/azure/check_env_coverage.py); on Fly they stay unset
+# and the server uses its defaults (one combined process, database queue transport, DATABASE_URL password auth, no Key Vault).
+AZURE_ONLY = {
+    "ROLE", "QUEUE_TRANSPORT", "AZURE_SERVICEBUS_FQDN", "AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_KEY_VAULT_URL", "AZURE_KEY_VAULT_KEK_KEY",
+    "AZURE_KEY_VAULT_KD_LOG_KEY", "AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY", "AZURE_AUDIT_BLOB_ENDPOINT",
+    "AZURE_AUDIT_BLOB_CONTAINER", "DATABASE_AUTH", "DATABASE_HOST", "DATABASE_PORT", "DATABASE_NAME", "DATABASE_USER", "DATABASE_CA_FILE",
+    "DATABASE_WORKER_ROLE",
+}
+EXEMPT.update({name: "Azure only (Infra/azure); unset on Fly" for name in AZURE_ONLY})
 # Names the server reads that are not in .env.example (documented in Server/README.md).
 EXTRA_KNOWN = {"AUDIT_CHAIN_LEGACY_THROUGH_SEQ", "PASS_CERTIFICATE_PEM", "PASS_PRIVATE_KEY_PEM", "PASS_WWDR_CERTIFICATE_PEM",
                "BIND_HOST", "EMAIL_API_AUTH_HEADER", "EMAIL_API_AUTH_SCHEME"}

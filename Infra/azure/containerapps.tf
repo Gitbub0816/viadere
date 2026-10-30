@@ -53,9 +53,8 @@ resource "azapi_resource" "cae" {
 locals {
   kv_secret_uri = { for s in local.all_secret_names : s => "${azurerm_key_vault.this.vault_uri}secrets/${s}" } # versionless: latest version
 
-  # Settings every server process gets. Keys the current server reads are marked (now); the AZURE_*/DATABASE_* connection settings and
-  # QUEUE_TRANSPORT/HEALTH_PEER_NETWORKS/ROLE are the contract for WP-B2/B3 and are ignored by today's server (docs/ops/AZURE-SETUP.md
-  # section 10 lists every variable).
+  # Settings every server process gets (docs/ops/AZURE-SETUP.md section 11 lists every variable; Infra/azure/check_env_coverage.py checks them
+  # against Server/.env.example).
   base_env = {
     ENVIRONMENT           = var.environment # (now) strict mode: every secret mandatory
     PORT                  = "8080"          # (now)
@@ -84,20 +83,22 @@ locals {
       AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY = "link-descriptor"
     })
     worker = merge(var.app_env, local.base_env, {
-      ROLE                           = "worker"
-      AZURE_CLIENT_ID                = azurerm_user_assigned_identity.workload["worker"].client_id
-      DATABASE_USER                  = local.db_roles.worker
-      RUN_BACKGROUND_JOBS            = "true"
+      ROLE            = "worker"
+      AZURE_CLIENT_ID = azurerm_user_assigned_identity.workload["worker"].client_id
+      DATABASE_USER   = local.db_roles.worker
+      # The worker consumes the queues continuously; the periodic sweeps run in the scheduled jobs when they exist, else in the worker.
+      RUN_BACKGROUND_JOBS            = var.enable_scheduled_jobs ? "false" : "true"
       AZURE_KEY_VAULT_KEK_KEY        = "kek-data"
       AZURE_KEY_VAULT_AUDIT_HEAD_KEY = "audit-head-signing"
       AZURE_AUDIT_BLOB_ENDPOINT      = local.p.audit_storage ? azurerm_storage_account.audit[0].primary_blob_endpoint : ""
       AZURE_AUDIT_BLOB_CONTAINER     = local.p.audit_storage ? "audit-heads" : ""
     })
     migrator = merge(var.app_env, local.base_env, {
-      ROLE                = "migrate"
-      AZURE_CLIENT_ID     = azurerm_user_assigned_identity.workload["migrator"].client_id
-      DATABASE_USER       = local.db_roles.migrator
-      RUN_BACKGROUND_JOBS = "false"
+      ROLE                 = "migrate"
+      AZURE_CLIENT_ID      = azurerm_user_assigned_identity.workload["migrator"].client_id
+      DATABASE_USER        = local.db_roles.migrator
+      DATABASE_WORKER_ROLE = local.db_roles.worker # `migrate` grants the worker role the same data-only privileges as the api role
+      RUN_BACKGROUND_JOBS  = "false"
     })
   }
 
@@ -386,7 +387,7 @@ resource "azurerm_container_app_job" "migrate" {
   depends_on = [azurerm_role_assignment.secret_user]
 }
 
-# ---- Placeholders for WP-B3 (worker) and WP-B2 (scheduled maintenance commands) ------------------------------------------------
+# ---- Worker (WP-B3 queue consumers) and scheduled maintenance jobs (`ViadereServer maintenance <task>`, WP-B2) ---------------------
 resource "azurerm_container_app" "worker" {
   count                        = var.enable_worker ? 1 : 0
   name                         = "ca-viadere-worker"

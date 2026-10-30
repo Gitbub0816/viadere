@@ -162,8 +162,12 @@ run "lean_is_the_default_and_has_no_fixed_fee_extras" {
     error_message = "the api must never reference the migration URL"
   }
   assert {
-    condition     = contains([for s in azurerm_container_app_job.migrate.secret : s.name], "database-migration-url")
-    error_message = "the migrate job gets the migration URL"
+    condition     = length(azurerm_container_app_job.migrate.secret) == 0 && !contains([for s in azurerm_container_app.api.secret : s.name], "database-url")
+    error_message = "Entra-only by default (WP-B2): no database password is referenced anywhere"
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e.value if e.name == "DATABASE_AUTH"]) == "entra"
+    error_message = "the api connects with its managed identity's Entra token"
   }
   assert {
     condition     = alltrue([for k, ra in azurerm_role_assignment.secret_user : can(regex("^workload:", ra.description))])
@@ -233,6 +237,61 @@ run "worker_and_jobs_when_enabled" {
     condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e.value if e.name == "RUN_BACKGROUND_JOBS"]) == "false"
     error_message = "with a worker, the api stops the in-process job loop"
   }
+  assert {
+    condition     = one([for e in azurerm_container_app.worker[0].template[0].container[0].env : e.value if e.name == "RUN_BACKGROUND_JOBS"]) == "false"
+    error_message = "with the scheduled jobs, the worker leaves the sweeps to them"
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.worker[0].template[0].container[0].env : e.value if e.name == "QUEUE_TRANSPORT"]) == "servicebus"
+    error_message = "with a worker, messages travel over Service Bus"
+  }
+  assert {
+    condition     = alltrue([for job in azurerm_container_app_job.scheduled : job.template[0].container[0].args[0] == "maintenance"])
+    error_message = "scheduled jobs run `ViadereServer maintenance <task>`"
+  }
+}
+
+# WP-B2: `migrate` runs with a database-only configuration (ROLE=migrate): with password authentication its job references the migration URL and
+# nothing else; Entra-only, it references no secret at all, and no process gets a database password.
+run "migrate_job_holds_no_service_secret" {
+  command = plan
+  variables {
+    postgres_password_auth_enabled = true
+  }
+
+  assert {
+    condition     = toset([for s in azurerm_container_app_job.migrate.secret : s.name]) == toset(["database-migration-url"])
+    error_message = "the migrate job references only database-migration-url while password auth is on"
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app_job.migrate.template[0].container[0].env : e.value if e.name == "ROLE"]) == "migrate"
+    error_message = "the migrate job runs with ROLE=migrate"
+  }
+}
+
+# The default since WP-B2.
+run "entra_only_postgres_has_no_database_password_anywhere" {
+  command = plan
+  variables {
+    enable_worker = true
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.migrate.secret) == 0
+    error_message = "Entra-only: the migrate job references no secret"
+  }
+  assert {
+    condition     = !contains([for e in azurerm_container_app.api.template[0].container[0].env : e.name], "DATABASE_URL") && !contains([for e in azurerm_container_app.worker[0].template[0].container[0].env : e.name], "DATABASE_URL")
+    error_message = "Entra-only: no process gets DATABASE_URL"
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e.value if e.name == "DATABASE_AUTH"]) == "entra"
+    error_message = "Entra-only: DATABASE_AUTH=entra"
+  }
+  assert {
+    condition     = !contains(keys(azapi_resource.kv_secret), "database-url") && !contains(keys(azapi_resource.kv_secret), "database-migration-url")
+    error_message = "Entra-only: the database secrets are not created"
+  }
 }
 
 run "rejects_unpinned_image" {
@@ -254,8 +313,9 @@ run "rejects_migration_url_on_the_api" {
 run "first_apply_sets_the_admin_password_write_only" {
   command = plan
   variables {
-    postgres_set_admin_password = true
-    postgres_admin_password     = "only-in-this-test-not-a-secret"
+    postgres_password_auth_enabled = true # the opt-in password fallback (needs the CLAUDE.md exception row)
+    postgres_set_admin_password    = true
+    postgres_admin_password        = "only-in-this-test-not-a-secret"
   }
   assert {
     condition     = azurerm_postgresql_flexible_server.this.administrator_password_wo_version == 1

@@ -146,3 +146,60 @@ class PsqlJob(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrapEnv(unittest.TestCase):
+    class FakeWrap:
+        kek = "kek-data"
+
+        def __init__(self):
+            self.seen = []
+
+        def __call__(self, plaintext: bytes):
+            self.seen.append(plaintext)
+            return "0123abcd", b"cipher-" + hashlib.sha256(plaintext).digest()
+
+    def test_writes_the_servers_kms1_form_and_never_the_plaintext(self):
+        wrap = self.FakeWrap()
+        lines = kv_tool.wrap_lines({"SERVER_PEPPER": "pepper-value", "EDGE_TOKEN": "not-wrapped", "SUBJECT_REF_KEY": ""}, ["SERVER_PEPPER", "SUBJECT_REF_KEY"], wrap)
+        self.assertEqual(len(lines), 1, "empty values are skipped")
+        name, value = lines[0].split("=", 1)
+        self.assertEqual(name, "SERVER_PEPPER_WRAPPED")
+        self.assertTrue(value.startswith("kms1:kek-data/0123abcd:"))
+        self.assertEqual(kv_tool.b64url_decode(value.split(":", 2)[2]), b"cipher-" + hashlib.sha256(b"pepper-value").digest())
+        self.assertNotIn("pepper-value", lines[0])
+        self.assertEqual(wrap.seen, [b"pepper-value"])
+
+    def test_refuses_names_the_server_does_not_accept_wrapped(self):
+        with self.assertRaises(SystemExit):
+            kv_tool.wrap_lines({"EDGE_TOKEN": "x"}, ["EDGE_TOKEN"], self.FakeWrap())
+
+    def test_wrapper_resolves_the_version_and_checks_the_answer(self):
+        calls = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def opener(request, timeout):
+            calls.append((request.get_method(), request.full_url, request.headers.get("Authorization")))
+            if request.get_method() == "GET":
+                return Response(json.dumps({"key": {"kid": "https://kv-vdr-stgabc1l.vault.azure.net/keys/kek-data/00ff"}}).encode())
+            body = json.loads(request.data)
+            self.assertEqual(body["alg"], "RSA-OAEP-256")
+            return Response(json.dumps({"kid": "https://kv-vdr-stgabc1l.vault.azure.net/keys/kek-data/00ff", "value": kv_tool.b64url(b"wrapped")}).encode())
+
+        def runner(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, stdout="user-token\n", stderr="")
+
+        wrapper = kv_tool.KeyVaultWrapper("https://kv-vdr-stgabc1l.vault.azure.net", "kek-data", runner=runner, opener=opener)
+        self.assertEqual(wrapper(b"secret"), ("00ff", b"wrapped"))
+        self.assertEqual(calls[0][1], "https://kv-vdr-stgabc1l.vault.azure.net/keys/kek-data?api-version=2025-07-01")
+        self.assertEqual(calls[1][1], "https://kv-vdr-stgabc1l.vault.azure.net/keys/kek-data/00ff/wrapkey?api-version=2025-07-01")
+        self.assertEqual(calls[1][2], "Bearer user-token")
+        with self.assertRaises(SystemExit):
+            kv_tool.KeyVaultWrapper("http://kv.vault.azure.net", "kek-data", runner=runner, opener=opener)
+

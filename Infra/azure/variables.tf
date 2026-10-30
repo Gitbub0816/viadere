@@ -152,13 +152,13 @@ variable "api_max_replicas" {
 }
 
 variable "enable_worker" {
-  description = "Create ca-viadere-worker (WP-B3 queue consumers). Until WP-B3 ships, leave false: the api keeps the in-process job loop (RUN_BACKGROUND_JOBS=true)."
+  description = "Create ca-viadere-worker (WP-B3 queue consumers, ROLE=worker) and switch QUEUE_TRANSPORT to servicebus. False keeps the lean single-app setup: the api runs the in-process job loop on the database queue (RUN_BACKGROUND_JOBS=true)."
   type        = bool
   default     = false
 }
 
 variable "enable_scheduled_jobs" {
-  description = "Create the maintenance/hourly/audit-export Container Apps Jobs (WP-B2 adds the `ViadereServer maintenance <task>` command). Leave false until then."
+  description = "Create the maintenance/hourly/audit-export Container Apps Jobs (`ViadereServer maintenance <task>`). With them the worker stops running the sweeps itself."
   type        = bool
   default     = false
 }
@@ -178,17 +178,16 @@ variable "app_env" {
 }
 
 variable "app_secret_env" {
-  description = "Server secrets: environment variable name -> Key Vault secret name. The module creates an empty placeholder secret for each, grants the api (and, until WP-B2, the migrate job and worker) Key Vault Secrets User on that secret only, and references it from the container app. Values are set by the owner (AZURE-SETUP.md section 7), never by OpenTofu."
+  description = "Server secrets: environment variable name -> Key Vault secret name. The module creates an empty placeholder secret for each, grants the api and the worker Key Vault Secrets User on that secret only, and references it from the container app (the migrate job gets none of them: ROLE=migrate is database-only). DATABASE_URL is used only while postgres_password_auth_enabled. A wrapped value is stored under the `<NAME>_WRAPPED` variable name (kms1:<kek>/<version>:<base64url>, AZURE-SETUP.md section 7). Values are set by the owner, never by OpenTofu."
   type        = map(string)
   default = {
-    DATABASE_URL                  = "database-url" # until WP-B2 ships Entra token auth (CLAUDE.md exception)
+    DATABASE_URL                  = "database-url" # only while postgres_password_auth_enabled (CLAUDE.md exception)
     EDGE_TOKEN                    = "edge-token"
     CONNECT_LINK_SIGNING_KEY      = "connect-link-key"
     SERVER_PEPPER                 = "server-pepper"
     DATA_ENCRYPTION_KEY           = "data-encryption-key"
     AUDIT_CHAIN_KEY               = "audit-chain-key"
     SUBJECT_REF_KEY               = "subject-ref-key"
-    KEY_DIRECTORY_LOG_KEY         = "key-directory-log-key" # replaced by the HSM key kd-log-signing in WP-B2
     EMAIL_API_KEY                 = "mailersend-api-token"
     APNS_KEY_P8                   = "apns-p8"
     MAILERSEND_SMS_API_TOKEN      = "mailersend-sms-api-token"
@@ -207,9 +206,9 @@ variable "app_secret_env" {
 
 # ---- PostgreSQL -----------------------------------------------------------------------------------------------------
 variable "postgres_password_auth_enabled" {
-  description = "Password authentication next to Entra. Required until WP-B2 ships the Entra token connection source (the server and `migrate` take a DATABASE_URL with a password today). Set false afterwards: Entra-only."
+  description = "Password authentication next to Entra (the CLAUDE.md exception). The server's Entra token connection source shipped with WP-B2 (DATABASE_AUTH=entra): after creating the Entra principal roles (AZURE-SETUP.md section 8) set this false: Entra-only, no database password exists, and database-url / database-migration-url are no longer referenced."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "postgres_admin_password" {

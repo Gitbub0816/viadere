@@ -271,7 +271,7 @@ def check_postgres(r: Resource, rep: Report) -> None:
     if auth.get("active_directory_auth_enabled") is not True:
         rep.violate("PG-ENTRA", r.address, "Microsoft Entra authentication must be enabled")
     if auth.get("password_auth_enabled") is not False:
-        rep.allow("PG-PASSWORD-AUTH", r.address, "password authentication enabled next to Entra until WP-B2 ships Entra token auth")
+        rep.allow("PG-PASSWORD-AUTH", r.address, "password authentication enabled next to Entra: the opt-in fallback (Entra-only is the default since WP-B2); needs the CLAUDE.md exception row")
     ha = r.block("high_availability")
     backup_days, _ = r.get("backup_retention_days")
     geo = is_true(r, "geo_redundant_backup_enabled", default=False)

@@ -86,7 +86,7 @@ or child zone, KMS key ring, and Neon project. Nothing is shared, so a staging m
   `PUT /zones/{id}/certificate_authorities/hostname_associations`), not Terraform state; see docs/ops/RUNBOOKS.md "Enterprise mTLS onboarding". The tenant then binds the leaf fingerprint or CA key id in the
   console (Security > Certificates). Ordinary businesses never need a certificate or a VPN.
 * **Audit-head bucket (`audit_bucket.tf`).** `google_storage_bucket.audit_heads` with `retention_policy` (7 years default) and `is_locked = local.audit_bucket_locked` (**irreversible**; `audit_bucket_lock` defaults to `null`, which means **locked in production, unlocked in staging**: agree the retention period with counsel before the first production apply), `roles/storage.objectCreator` for the server's service account (create only: no read, overwrite or delete) and an auditor viewer list. Outputs `audit_head_bucket` and `audit_head_kms_key` feed
-  `AUDIT_HEAD_EXPORT_TARGET` and `AUDIT_HEAD_KMS_KEY`. Cloudflare R2 with Object Lock is the documented alternative (`AUDIT_HEAD_EXPORT=r2`); it needs no resource here.
+  `AUDIT_HEAD_EXPORT_TARGET` and `AUDIT_HEAD_KMS_KEY` for the Fly-era server. **Retired by WP-B2:** the server now exports to an immutable Azure Blob container signed by a Key Vault key (`Infra/azure`, SECURITY.md §2.77) and refuses the GCS/R2 settings; this bucket, the KMS key and the workload-identity pool are removed at decommission (plan phase 6; key rings cannot be deleted in GCP, versions are disabled).
 * **Roles.** `neon.tf` documents the two database roles; the grants are applied by the `migrate` release command (`GrantRuntimeRolePrivileges`).
 
 ## Azure origin through Cloudflare Tunnel (WP-B1, 2026-10-29)
