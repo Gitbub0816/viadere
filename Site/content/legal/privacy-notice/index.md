@@ -27,7 +27,7 @@ This notice explains how Viadere handles personal information when you use the V
 - **Loops are optional and off by default.** A Loop is an interactive workflow a business builds from components Viadere provides and Viadere reviews before publication. You turn Loops on yourself and allow each business separately, and every Loop shows who built it (section 6.1).
 - **Viadere does not take payments.** If a business uses Shopify, Viadere can show you products and order status and send you to the business's own Shopify checkout. The sale and payment are between you and the business (section 6.2).
 - **No health information.** Healthcare providers may not use Viadere, and Viadere does not ask for health information. Please do not send it through Viadere (section 6.3).
-- **Retention is set by data class.** Message text, interaction details and most records have stated maximum periods (section 12). Deleted data can remain in encrypted backups for up to 30 days.
+- **Retention is set by data class.** Message text, interaction details and most records have stated maximum periods (section 13). Deleted data can remain in encrypted backups for up to 30 days.
 - **You are in control.** You can download your data and delete your account from the app, disconnect from a business, change consent per purpose, reply STOP to texts, and contact us about any other right (section 16).
 
 ## 2. Who we are and what role we play
@@ -100,7 +100,7 @@ If you work for a business that uses Viadere we also collect your work email add
 
 ## 4. The data, in one table
 
-The table is by category. "Retention" gives the longest period Viadere's system keeps the data before its automatic deletion job runs; section 12 explains the classes and the exceptions.
+The table is by category. "Retention" gives the longest period Viadere's system keeps the data before its automatic deletion job runs; section 13 explains the classes and the exceptions.
 
 | Category | Examples | Source | Why we use it | Retention | Who receives it |
 |---|---|---|---|---|---|
