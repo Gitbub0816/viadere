@@ -9,9 +9,7 @@ public enum AlertSource: String, Sendable, Codable, CaseIterable, Hashable {
     case loopTask = "loop_task"
 }
 
-public enum AlertStatus: String, Sendable, Codable, CaseIterable, Hashable {
-    case pending, completed, expired, cancelled
-}
+// `AlertStatus` is the durable alert status of `Models/Alert.swift` (unknown values decode as `.unknown`, which is never actionable).
 
 /// Alert list filters (spec C5.2).
 public enum AlertStatusFilter: String, Sendable, Codable, CaseIterable, Hashable {
