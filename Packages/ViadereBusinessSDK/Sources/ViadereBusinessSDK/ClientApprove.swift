@@ -82,7 +82,7 @@ public enum ApprovalRequestBuilderError: Error, Sendable, Equatable {
 
 /// What you show the customer, built **by the SDK** (gate findings F1 and F3), and what you must keep until the enrollment is confirmed.
 ///
-/// * `link` is `https://viadere.com/a/{CODE}?rk={your root key id}#es={secret}`. The root key id is the one **you** passed, not the relay's;
+/// * `link` is `https://{link domain}/a/{CODE}?rk={your root key id}#es={secret}`. The root key id is the one **you** passed, not the relay's;
 ///   the secret travels in the URL fragment, which no server (Viadere's included) ever receives. Show it as a QR or button in your own
 ///   signed-in session. Never send it by SMS or email.
 /// * `code` and `checkCode` are for a customer who types instead of scanning: the customer types **both** into the app, and the app shows a
@@ -97,19 +97,23 @@ public struct ApprovalEnrollmentInvitation: Sendable, Hashable {
     public let secret: ApprovalEnrollmentSecret
     public let expiresAt: Date
 
-    public init(enrollmentId: UUID, code: String, rootKid: String, secret: ApprovalEnrollmentSecret, expiresAt: Date) {
+    /// The link domain the link uses (the client's `linkDomain`).
+    public let domain: LinkDomain
+
+    public init(enrollmentId: UUID, code: String, rootKid: String, secret: ApprovalEnrollmentSecret, expiresAt: Date, domain: LinkDomain = .production) {
         self.enrollmentId = enrollmentId
         self.code = code
         self.rootKid = rootKid
         self.secret = secret
         self.expiresAt = expiresAt
+        self.domain = domain
     }
 
     public var displayCode: String { ApprovalEnrollmentCode.display(code) }
     /// The 40-bit check code for the typed path, as `ABCD-EFGH`.
     public var checkCode: String { ApprovalEnrollmentCode.display(secret.checkCode) }
     /// The link or QR content.
-    public var link: String { ApprovalEnrollmentCode.deepLink(code: code, rootKid: rootKid, secret: secret) }
+    public var link: String { ApprovalEnrollmentCode.deepLink(code: code, rootKid: rootKid, secret: secret, domain: domain) }
 }
 
 /// Failures while confirming an enrollment, before anything is sent to Viadere.
@@ -169,12 +173,13 @@ extension ViadereBusinessClient {
         // Gate finding F3: the root key id in the link is what the customer's app treats as "verified out of band". The relay's suggestion is
         // never shown; it is only checked against your own root, and a ticket that disagrees (or has no root at all) is refused.
         guard let canonical = ApprovalEnrollmentCode.canonical(ticket.code), canonical == ticket.code,
-              let url = URL(string: ticket.deepLink), let parsed = ApprovalEnrollmentCode.parse(link: url), parsed.code == ticket.code, parsed.secret == nil,
+              let url = URL(string: ticket.deepLink), let parsed = ApprovalEnrollmentCode.parse(link: url, domain: linkDomain), parsed.code == ticket.code, parsed.secret == nil,
               let relayRoot = parsed.rootKid, ConstantTime.equals(relayRoot, rootKid) else {
             _ = try? await cancelApprovalEnrollment(id: ticket.enrollmentId)
             throw ApprovalEnrollmentFailure.rootKeyMismatch
         }
-        return ApprovalEnrollmentInvitation(enrollmentId: ticket.enrollmentId, code: ticket.code, rootKid: rootKid, secret: ApprovalEnrollmentSecret(), expiresAt: ticket.expiresAt)
+        return ApprovalEnrollmentInvitation(enrollmentId: ticket.enrollmentId, code: ticket.code, rootKid: rootKid, secret: ApprovalEnrollmentSecret(), expiresAt: ticket.expiresAt,
+                                            domain: linkDomain)
     }
 
     /// `createApprovalEnrollment(subject:capability:rootKid:expiresIn:)` with the root of your `BusinessKeyAuthority`.
@@ -275,6 +280,18 @@ extension ViadereBusinessClient {
     /// Resolves the opaque `request_id` of an `approve.frozen` webhook (`frz_...`) to the customer and whether approvals are frozen now.
     public func approvalFreeze(ref: String) async throws -> FreezeStatus {
         try decode(FreezeStatus.self, try await perform(APIRoutes.businessApproveFreezeGet.descriptor, parameters: ["freezeRef": ref]))
+    }
+
+    /// Your `approve.device_policy` (`any_enrolled` by default).
+    public func approveSettings() async throws -> ApproveBusinessSettings {
+        try decode(ApproveBusinessSettings.self, try await perform(APIRoutes.businessApproveSettingsGet.descriptor))
+    }
+
+    /// `single_device`: activating a key revokes the customer's other keys for your business; requests go to the newest key only.
+    @discardableResult
+    public func setApproveDevicePolicy(_ policy: ApproveDevicePolicy) async throws -> ApproveBusinessSettings {
+        try decode(ApproveBusinessSettings.self, try await perform(APIRoutes.businessApproveSettingsPut.descriptor, body: ApproveBusinessSettings(devicePolicy: policy),
+                                                                   naturallyIdempotent: true))
     }
 
     /// Stops (or resumes) approvals for one customer. You can lift only your own freeze, never the customer's.

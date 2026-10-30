@@ -116,7 +116,9 @@ struct ClientTests {
                                     "business.approve.keys.list", "business.approve.keys.revoke", "business.approve.requests.create", "business.approve.requests.get",
                                     "business.approve.requests.cancel", "business.approve.results.get", "business.approve.freeze", "business.approve.freezes.get",
                                     "business.keyDirectory.publish", "business.keyDirectory.entries",
-                                    "business.webhooks.verify", "business.webhooks.test", "business.webhooks.pause", "business.webhooks.resume"]
+                                    "business.webhooks.verify", "business.webhooks.test", "business.webhooks.pause", "business.webhooks.resume",
+                                    "business.approve.settings.get", "business.approve.settings.put",
+                                    "business.linkSessions.create", "business.linkSessions.get", "business.linkSessions.confirm", "business.linkSessions.cancel"]
         #expect(Set(business).subtracting(covered).isEmpty)
     }
 

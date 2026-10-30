@@ -46,12 +46,16 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     private let transport: any BusinessTransport
     public let retry: RetryPolicy
     private let sleep: @Sendable (TimeInterval) async -> Void
+    /// The universal-link host the links you show must use (`viadere.com`; your staging integration passes the staging host). The SDK builds
+    /// Approve and link-session links on it and refuses a relay ticket that names any other host.
+    public let linkDomain: LinkDomain
 
     /// - Parameters:
     ///   - apiKey: `vdk_live_…` or `vdk_test_…`.
     ///   - baseURL: defaults to `https://viadere.com`. Must be https (plain http only for loopback development).
     public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.defaultDomain)")!, transport: any BusinessTransport = URLSessionTransport(),
-                retry: RetryPolicy = .standard, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) throws {
+                retry: RetryPolicy = .standard, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
+                linkDomain: LinkDomain = .production) throws {
         guard (apiKey.hasPrefix("vdk_live_") || apiKey.hasPrefix("vdk_test_")), apiKey.count >= 20, apiKey.count <= 80,
               apiKey.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) else { throw ViadereSDKError.invalidAPIKey }
         let loopback = ["localhost", "127.0.0.1", "::1"].contains(baseURL.host ?? "")
@@ -63,6 +67,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         self.transport = transport
         self.retry = retry
         self.sleep = sleep
+        self.linkDomain = linkDomain
     }
 
     /// Whether this client uses a live key (real customers) or a test key.
