@@ -330,9 +330,9 @@ extension MockViadereAPI {
         let envelopes: [InteractionEnvelope] = [
             PreviewData.orderStatus(now: now, relationship: rel(PreviewData.juniperCoffee)),
             PreviewData.deliveryStatus(now: now, relationship: rel(PreviewData.northfield)),
-            PreviewData.appointmentStatus(now: now, relationship: rel(PreviewData.lindenDental)),
-            PreviewData.appointmentCheckIn(now: now, relationship: rel(PreviewData.lindenDental)),
-            PreviewData.appointmentReschedule(now: now, relationship: rel(PreviewData.lindenDental)),
+            PreviewData.appointmentStatus(now: now, relationship: rel(PreviewData.lindenStudio)),
+            PreviewData.appointmentCheckIn(now: now, relationship: rel(PreviewData.lindenStudio)),
+            PreviewData.appointmentReschedule(now: now, relationship: rel(PreviewData.lindenStudio)),
             PreviewData.northwindFlight(now: now, relationship: rel(PreviewData.northwindAir)),
             PreviewData.rebookOffer(now: now, relationship: rel(PreviewData.northwindAir)),
             PreviewData.boardingPass(now: now, relationship: rel(PreviewData.northwindAir)),
@@ -346,10 +346,10 @@ extension MockViadereAPI {
         let samGrant = DelegationGrant(id: DelegationID(), grantorId: consumerId, delegateId: ConsumerID(), role: .viewer, purposes: [.transactional, .rewards],
                                        businessIds: [coffee.id], createdAt: now.addingTimeInterval(-86_400 * 9), expiresAt: now.addingTimeInterval(86_400 * 51))
         let alexGrant = DelegationGrant(id: DelegationID(), grantorId: ConsumerID(), delegateId: consumerId, role: .manager, purposes: [.transactional, .support],
-                                        businessIds: [PreviewData.lindenDental.id], createdAt: now.addingTimeInterval(-86_400 * 3), expiresAt: now.addingTimeInterval(86_400 * 27))
+                                        businessIds: [PreviewData.lindenStudio.id], createdAt: now.addingTimeInterval(-86_400 * 3), expiresAt: now.addingTimeInterval(86_400 * 27))
         state.household = HouseholdOverview(
             given: [HouseholdGrant(grant: samGrant, counterpartName: "Sam Rivera", businessNames: [coffee.displayName], status: .active)],
-            received: [HouseholdGrant(grant: alexGrant, counterpartName: "Alex Morgan", businessNames: [PreviewData.lindenDental.displayName], status: .active)])
+            received: [HouseholdGrant(grant: alexGrant, counterpartName: "Alex Morgan", businessNames: [PreviewData.lindenStudio.displayName], status: .active)])
         state.audit = [
             HouseholdAuditEntry(occurredAt: now.addingTimeInterval(-3_600 * 5), action: "delegation.used", actorName: "Sam Rivera", businessName: coffee.displayName),
             HouseholdAuditEntry(occurredAt: now.addingTimeInterval(-86_400 * 3), action: "delegation.accepted", actorName: "You"),
@@ -362,7 +362,7 @@ extension MockViadereAPI {
         state.acknowledgments = [
             AcknowledgmentRecord(id: InteractionID(), business: PreviewData.harborBank, title: "Updated privacy notice", documentVersion: "2026-09",
                                  acknowledged: true, recordedAt: now.addingTimeInterval(-86_400 * 5)),
-            AcknowledgmentRecord(id: InteractionID(), business: PreviewData.lindenDental, title: "Treatment estimate", documentVersion: "v3",
+            AcknowledgmentRecord(id: InteractionID(), business: PreviewData.lindenStudio, title: "Service estimate", documentVersion: "v3",
                                  acknowledged: true, recordedAt: now.addingTimeInterval(-86_400 * 40)),
         ]
         return (state, envelopes)

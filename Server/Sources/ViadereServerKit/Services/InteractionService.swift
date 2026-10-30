@@ -500,8 +500,22 @@ struct InteractionService {
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id))
                 .filter(\.$invalidatedAt == nil).all()
             let topic = ctx.config.appBundleID
+            // Per-business mute (WP-1.5) changes how the push interrupts, never whether it is sent, and never for security, account-service or
+            // action-required items (`MutePolicy`). Each recipient's own mute applies to their own devices.
+            var quietFor: Set<UUID> = []
+            if let purpose = InteractionPurpose(rawValue: record.purpose) {
+                let preferences = PreferenceService(db: db, ctx: ctx)
+                for recipient in recipients where await preferences.silences(consumer: recipient, business: record.businessId, purpose: purpose,
+                                                                             actionRequired: InteractionKind(rawValue: record.kind).expectsResponse) {
+                    quietFor.insert(recipient)
+                }
+            }
             for token in tokens {
-                let message = PushPayloadBuilder.message(for: interaction, business: summary, token: token.record, topic: topic)
+                var message = PushPayloadBuilder.message(for: interaction, business: summary, token: token.record, topic: topic)
+                if quietFor.contains(token.consumerId) {
+                    message.interruptionLevel = "passive"
+                    message.highPriority = false
+                }
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }

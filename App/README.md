@@ -14,8 +14,10 @@ App/
   Shared/LiveActivity/        ActivityKit attributes (app + widgets)
   Shared/UI/                  Pieces shared by the app and the App Clip (connect review, key window)
   Shared/Privacy/             PrivacyInfo.xcprivacy (app, clip, watch)
-  Viadere/                    The app (Onboarding, Home, Activity, Rewards, Wallet, Approval, Connect, Business, Messages,
-                              Household, Consent, Settings, Security, Push)
+  Viadere/                    The app: four tabs (Messages, Alerts, Benefits, Businesses) under one business selector
+                              (Organization), plus Onboarding, Activity (Alerts > History), Rewards, Wallet, Approval,
+                              Connect (Add business), Business, Household, Consent, Settings (from the context bar),
+                              Security, Push
   ViadereNotificationService/ UNNotificationServiceExtension: opaque push -> rich, actionable notification
   ViadereNotificationContent/ Custom compact approval card for sign-in / approval notifications
   ViadereCredentialProvider/  Authenticator credential-provider extension (passkeys iOS 17, one-time codes iOS 18; no network)

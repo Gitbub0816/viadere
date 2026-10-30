@@ -154,6 +154,7 @@ public enum APIRoutes {
         "interactions.decide", .POST, "/v1/interactions/{interactionId}/decision", auth: .deviceSignedBearer)
 
     // MARK: Conversations
+    /// Query: `business_id` (optional filter; `404` unless the caller is connected to it), `archived=1` (include archived threads).
     public static let conversationsList = Endpoint<EmptyBody, [ConversationSummary]>(
         "conversations.list", .GET, "/v1/conversations", auth: .deviceSignedBearer)
     public static let conversationStart = Endpoint<StartConversationRequest, ConversationSummary>(
@@ -473,7 +474,7 @@ public enum APIRoutes {
         businessApproveSettingsGet.descriptor, businessApproveSettingsPut.descriptor,
         businessLinkSessionCreate.descriptor, businessLinkSessionGet.descriptor, businessLinkSessionConfirm.descriptor, businessLinkSessionCancel.descriptor,
         linkSessionLookup.descriptor, linkSessionComplete.descriptor, linkSessionGet.descriptor,
-    ] + verifyEndpoints
+    ] + verifyEndpoints + organizationEndpoints
 
     /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.com` in production).
     public enum Web {

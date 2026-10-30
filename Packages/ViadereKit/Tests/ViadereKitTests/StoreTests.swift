@@ -350,9 +350,9 @@ struct AppModelTests {
         #expect(model.pendingConnect == nil)
         await model.bootstrap()
         #expect(model.pendingConnect?.code == code)
-        #expect(model.selectedTab == .connect)
+        #expect(model.selectedTab == .businesses)
         await model.handle(.settings)
-        #expect(model.selectedTab == .settings)
+        #expect(model.settingsPresented)
         let session = SessionID()
         await model.handle(.conversation(session))
         #expect(model.conversationToOpen == session)
@@ -419,7 +419,7 @@ struct DetailStoreTests {
     @Test func conversationShowsChoiceChipsAndSends() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)
-        let business = PreviewData.lindenDental
+        let business = PreviewData.lindenStudio
         let conversation = try await api.startConversation(with: business.id)
         let model = ConversationViewModel(conversation: conversation, services: services)
         model.draft = "  Hello  "

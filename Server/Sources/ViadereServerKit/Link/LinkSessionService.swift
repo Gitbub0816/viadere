@@ -273,6 +273,10 @@ struct LinkSessionService {
         if let tag = request.bindingTag, !Base64URL.isValid(tag, minLength: 43, maxLength: 43) {
             try await reject("binding_tag_invalid", .validation("The binding tag is not valid.", details: ["binding_tag": "invalid"]))
         }
+        // A business the customer blocked cannot link (WP-1.5): refused before anything is written.
+        if try await PreferenceService(db: db, ctx: ctx).isBlocked(consumer: principal.consumerId.uuid, business: record.businessId) {
+            try await reject("blocked", .conflict(PreferenceService.blockedMessage))
+        }
         let existing = try await RelationshipRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$businessId == record.businessId).first()
         if let existing, existing.isPendingLink { try await reject("link_in_progress", .conflict("Another link with this business is waiting for its confirmation.")) }
         if approval != nil, let existing {

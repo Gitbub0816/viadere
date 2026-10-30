@@ -62,8 +62,8 @@ struct DashboardAuthService {
     let ctx: ServerContext
 
     static let ceremonyTTL: TimeInterval = 5 * 60
-    static let categories = ["retail", "banking", "airline", "hospitality", "food_and_drink", "healthcare", "utilities", "telecom",
-                             "government", "other"]
+    /// Categories offered at sign-up. Healthcare is not offered: it is refused platform-wide (FX-4, WP-1.9).
+    static let categories = ["retail", "banking", "airline", "hospitality", "food_and_drink", "utilities", "telecom", "government", "other"]
 
     private var store: DashboardSessionStore { DashboardSessionStore(db: db, ctx: ctx) }
     private var verifier: any PasskeyVerifier { ctx.dashboardPasskeys }
@@ -166,6 +166,10 @@ struct DashboardAuthService {
         guard let email = Self.normalizeEmail(body.email), let name = cleanName(body.displayName, max: 64),
               let org = cleanName(body.organizationName, max: 80, min: 2) else {
             throw APIError.validation("Enter a valid email, your name and your organization's name.", details: ["form": "invalid"])
+        }
+        // A banned category is refused with a plain reason, never silently mapped to "other" (FX-4, WP-1.9).
+        if let raw = body.category?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), OnboardingService.isBanned(raw) {
+            throw APIError.validation(BusinessOnboarding.categoryBannedMessage, details: ["category": "category_banned"])
         }
         let category = body.category.flatMap { Self.categories.contains($0) ? $0 : nil } ?? "other"
         var website: String?

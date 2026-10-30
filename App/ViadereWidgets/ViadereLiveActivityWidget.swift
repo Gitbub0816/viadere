@@ -151,8 +151,8 @@ private enum PreviewStates {
                                         estimatedDeliveryAt: Date().addingTimeInterval(25 * 60), stopsAway: 3))
     }
     static var appointment: LiveActivityStatus {
-        .appointment(AppointmentActivityState(title: "Cleaning with Dr. Okafor", startsAt: Date().addingTimeInterval(50 * 60),
-                                              location: "Suite 210", providerName: "Linden Dental", stage: .checkInOpen))
+        .appointment(AppointmentActivityState(title: "Haircut with Maya", startsAt: Date().addingTimeInterval(50 * 60),
+                                              location: "Suite 210", providerName: "Linden Hair Studio", stage: .checkInOpen))
     }
 }
 

@@ -30,12 +30,25 @@ struct RootView: View {
                 .presentationCornerRadius(ViadereRadius.sheet)
                 .presentationBackground(ViadereColor.background)
         }
-        .sheet(item: Binding(get: { AppEnvironment.shared.approve.presented }, set: { if $0 == nil { AppEnvironment.shared.approve.closePresented() } })) { prompt in
+        .sheet(item: Binding(get: { AppEnvironment.shared.approve.presented }, set: { value in
+            if value == nil {
+                AppEnvironment.shared.approve.closePresented()
+                // The context was frozen while the Approve request was open (C9.7); it may change again now.
+                model.organization.endSensitiveFlow()
+                Task { await model.alerts.refresh() }
+            }
+        })) { prompt in
             ApproveRequestSheet(prompt: prompt, controller: AppEnvironment.shared.approve, capture: capture)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(ViadereRadius.sheet)
                 .presentationBackground(ViadereColor.background)
+        }
+        .onChange(of: AppEnvironment.shared.approve.presented?.id) { _, id in
+            // An Approve request opened by a push or a refresh shows its own issuer and freezes the business context until it closes (C9.7).
+            guard id != nil, let business = AppEnvironment.shared.approve.presented?.business.id else { return }
+            model.organization.open(itemFrom: business)
+            model.organization.beginSensitiveFlow()
         }
         .task(id: model.phase) {
             // Approve v2 requests are verified on this phone and shown here; poll gently while the app is open (pushes wake it too).

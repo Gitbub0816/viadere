@@ -42,6 +42,7 @@ enum DashboardFormat {
         "approved": "Business verified. Its handle and code have been issued.", "rejected": "Application declined.",
         "suspended": "Business suspended. Its API keys and interactions are blocked.", "unsuspended": "Business reinstated.",
         "ceiling": "Priority ceiling updated.", "throttle": "Throttle updated.",
+        "page-published": "Your Viadere page was published.", "reclassified": "Category updated.",
         "domain-added": "Domain added. Publish the record, then check it.", "domain-verified": "Domain verified.", "domain-removed": "Domain removed.",
         "legal": "Legal entity submitted for review.", "accepted": "Agreement accepted.", "golive": "Production access requested. A Viadere reviewer will respond.",
         "rotated": "Key rotated. The old key keeps working until the overlap ends.", "pending": "Waiting for a second person to approve it.",

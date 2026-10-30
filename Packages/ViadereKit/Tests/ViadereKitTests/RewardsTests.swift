@@ -220,7 +220,7 @@ struct RewardFlowTests {
 
     @Test func businessWithoutAProgramHidesTheSection() async throws {
         let (services, _) = await p3World()
-        let model = BusinessRewardsViewModel(business: PreviewData.lindenDental, services: services)
+        let model = BusinessRewardsViewModel(business: PreviewData.lindenStudio, services: services)
         await model.load()
         #expect(model.phase == .noProgram)
     }

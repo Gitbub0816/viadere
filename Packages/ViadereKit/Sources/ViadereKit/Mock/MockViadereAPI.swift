@@ -64,6 +64,8 @@ public actor MockViadereAPI: ViadereAPI {
     public private(set) var accountDeleted = false
     /// P3 state: loyalty, rewards, Wallet, household, acknowledgments (see `MockP3.swift`).
     var p3 = MockP3State()
+    /// Organization state: per-business preferences, seen marks, conversation state, layouts (see `MockOrganization.swift`).
+    var org = MockOrganizationState()
     /// Artificial latency, for demoing loading states.
     public var latency: Duration = .zero
 
@@ -109,7 +111,7 @@ public actor MockViadereAPI: ViadereAPI {
 
     private static func makeSeed(now: Date, consumerId: ConsumerID) -> Seed {
         var seed = Seed()
-        let connected = [PreviewData.harborBank, PreviewData.northfield, PreviewData.lindenDental, PreviewData.juniperAir]
+        let connected = [PreviewData.harborBank, PreviewData.northfield, PreviewData.lindenStudio, PreviewData.juniperAir]
         for business in connected {
             let relationship = PreviewData.relationship(business, connectedAt: now.addingTimeInterval(-86_400 * 30))
             seed.relationships.append(relationship)
@@ -119,14 +121,14 @@ public actor MockViadereAPI: ViadereAPI {
         let list = [
             PreviewData.authorize(now: now, relationship: rel(PreviewData.northfield)),
             PreviewData.authenticate(now: now, relationship: rel(PreviewData.harborBank)),
-            PreviewData.choose(now: now, relationship: rel(PreviewData.lindenDental)),
+            PreviewData.choose(now: now, relationship: rel(PreviewData.lindenStudio)),
             PreviewData.flightStatus(now: now, relationship: rel(PreviewData.juniperAir)),
         ]
         for envelope in list {
             seed.envelopes[envelope.id] = envelope
             seed.order.append(envelope.id)
         }
-        let (summary, messages) = PreviewData.conversation(for: PreviewData.lindenDental, now: now)
+        let (summary, messages) = PreviewData.conversation(for: PreviewData.lindenStudio, now: now)
         seed.conversations = [summary]
         seed.messages[summary.id] = messages
         return seed

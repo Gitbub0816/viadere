@@ -34,6 +34,8 @@ enum OnboardingGoLive: String, Sendable, Equatable { case none, requested, appro
 /// What blocks a go-live request or its approval.
 enum OnboardingBlocker: String, Sendable, Equatable, CaseIterable {
     case domain, legalEntity = "legal_entity", enhancedReview = "enhanced_review", identity, contracts
+    /// FX-4 (WP-1.9): the business's category is refused platform-wide. Nothing the business does clears it.
+    case categoryBanned = "category_banned"
     case sandboxKey = "sandbox_key", testCustomer = "test_customer", testEvent = "test_event", securityContact = "security_contact"
 
     var title: String {
@@ -47,6 +49,7 @@ enum OnboardingBlocker: String, Sendable, Equatable, CaseIterable {
         case .testCustomer: "Create a test customer"
         case .testEvent: "Send a test message or event"
         case .securityContact: "Add a security contact"
+        case .categoryBanned: "Healthcare providers can't use Viadere"
         }
     }
 }
@@ -78,6 +81,8 @@ struct OnboardingState: Sendable, Equatable {
     var securityContact = false
     var goLive = OnboardingGoLive.none
     var suspended = false
+    /// The category is banned platform-wide (FX-4). Blocks every request and approval; set from the business record, never cleared by an event.
+    var categoryBanned = false
 
     var controlComplete: Bool { domainVerified && legalEntity == .approved && (enhanced == .notRequired || enhanced == .approved) }
     var integrationComplete: Bool { sandboxKey && testCustomer && testEvent }
@@ -93,6 +98,7 @@ struct OnboardingState: Sendable, Equatable {
     /// What stands between this business and a go-live **request**.
     var requestBlockers: [OnboardingBlocker] {
         var out: [OnboardingBlocker] = []
+        if categoryBanned { out.append(.categoryBanned) }
         if !domainVerified { out.append(.domain) }
         if legalEntity != .approved { out.append(.legalEntity) }
         if enhanced == .pending || enhanced == .rejected { out.append(.enhancedReview) }
@@ -131,12 +137,14 @@ enum OnboardingStateMachine {
             guard state.enhanced == .notRequired || state.enhanced == .rejected else { throw reject() }
             next.enhanced = .pending
         case .enhancedApproved:
+            guard !state.categoryBanned else { throw OnboardingError.blocked([.categoryBanned]) }
             guard state.enhanced == .pending else { throw reject() }
             next.enhanced = .approved
         case .enhancedRejected:
             guard state.enhanced == .pending else { throw reject() }
             next.enhanced = .rejected
         case .identityVerified:
+            guard !state.categoryBanned else { throw OnboardingError.blocked([.categoryBanned]) }
             next.identityVerified = true
         case .contractsAccepted:
             next.contractsCurrent = true
@@ -172,6 +180,7 @@ enum OnboardingStateMachine {
         case .suspended:
             next.suspended = true
         case .reinstated:
+            guard !state.categoryBanned else { throw OnboardingError.blocked([.categoryBanned]) }
             guard state.suspended else { throw reject() }
             next.suspended = false
         }
@@ -209,7 +218,14 @@ struct OnboardingService {
     let db: any Database
     let ctx: ServerContext
 
-    static let sensitiveCategories: Set<String> = ["banking", "healthcare", "government"]
+    /// Categories that need the additional review. Healthcare is **not** one of them any more: it is refused platform-wide (FX-4, WP-1.9,
+    /// `LoopCategoryPolicy.bannedPlatformWide`).
+    static let sensitiveCategories: Set<String> = ["banking", "government"]
+
+    static func isBanned(_ category: String) -> Bool {
+        if case .refused = LoopCategoryPolicy.onboarding(BusinessCategory(rawValue: category)) { return true }
+        return false
+    }
 
     // MARK: Creation
 
@@ -250,6 +266,7 @@ struct OnboardingService {
         state.securityContact = try await SecuritySettings(db: db, ctx: ctx).contacts(businessId: businessId).isEmpty == false
         state.goLive = OnboardingGoLive(rawValue: row.goLiveStatus) ?? .none
         state.suspended = business.status == .suspended
+        state.categoryBanned = Self.isBanned(business.category)
         return state
     }
 

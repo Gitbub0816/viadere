@@ -236,6 +236,11 @@ struct GatewayService {
             try await OutboundSMS(db: db, ctx: ctx).enqueue(to: context.phone, body: GatewayCopy.businessUnavailable(context.session?.business ?? placeholder(businessId)))
             return
         }
+        // A blocked business is unavailable to this customer over SMS too (WP-1.5).
+        if try await PreferenceService(db: db, ctx: ctx).isBlocked(consumer: consumerId.uuid, business: businessId.uuid) {
+            try await OutboundSMS(db: db, ctx: ctx).enqueue(to: context.phone, body: GatewayCopy.businessUnavailable(context.session?.business ?? placeholder(businessId)))
+            return
+        }
         let relationship = try await RelationshipService(db: db, ctx: ctx)
             .connect(consumer: consumerId, request: ConnectRequest(businessId: businessId, source: .sms), channels: [.sms],
                      consentSource: .sms).relationship

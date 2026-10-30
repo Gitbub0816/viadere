@@ -76,14 +76,20 @@ public struct ConversationSummary: Codable, Sendable, Hashable, Identifiable {
     public var lastMessagePreview: String?
     public var lastMessageAt: Date?
     public var unreadCount: Int
+    /// This account archived the thread (spec C4.3; absent from older servers).
+    public var archived: Bool?
+    /// This account muted the thread's notifications (spec C4.3; absent from older servers).
+    public var muted: Bool?
 
     public init(id: SessionID, business: BusinessSummary, state: State, lastMessagePreview: String? = nil,
-                lastMessageAt: Date? = nil, unreadCount: Int = 0) {
+                lastMessageAt: Date? = nil, unreadCount: Int = 0, archived: Bool? = nil, muted: Bool? = nil) {
         self.id = id
         self.business = business
         self.state = state
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageAt = lastMessageAt
         self.unreadCount = unreadCount
+        self.archived = archived
+        self.muted = muted
     }
 }

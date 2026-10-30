@@ -123,6 +123,10 @@ struct EntitlementService {
                         reviewReference: String?, audited action: String, expiresAt: Date? = nil) async throws -> BusinessEntitlementRecord {
         guard let business = try await BusinessRecord.find(businessId, on: db) else { throw APIError.notFound }
         guard business.isVerified else { throw APIError.conflict("Only a verified business can be granted entitlements.") }
+        // FX-4 (WP-1.9): a category banned platform-wide is granted nothing, whoever asks.
+        if OnboardingService.isBanned(business.category) {
+            throw APIError(.forbidden, .forbidden, "Healthcare providers can't use Viadere, so no entitlement can be granted.", details: ["category": "category_blocked"])
+        }
         let justification = rawJustification.trimmingCharacters(in: .whitespacesAndNewlines)
         guard justification.count >= Self.minimumJustificationLength, justification.count <= 1000,
               !justification.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" }) else {
@@ -159,6 +163,31 @@ struct EntitlementService {
     func revoke(businessId: UUID, capability: Capability, actor: EntitlementActor, justification: String) async throws {
         try await revoke(businessId: businessId, kind: BusinessEntitlementRecord.capabilityKind, value: capability.rawValue, actor: actor,
                          justification: justification, cascade: [], audited: "entitlement.capability_revoked")
+    }
+
+    /// Revokes every active entitlement row of a business (operator reclassification into a banned category, WP-1.9). Returns the count.
+    @discardableResult
+    func revokeAll(businessId: UUID, actor: EntitlementActor, justification rawJustification: String) async throws -> Int {
+        let justification = rawJustification.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...1000).contains(justification.count) else {
+            throw APIError.validation("Record why the entitlements are revoked.", details: ["justification": "required"])
+        }
+        let now = ctx.now
+        return try await db.transaction { tx -> Int in
+            let rows = try await BusinessEntitlementRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$revokedAt == nil).all()
+            for row in rows {
+                row.revokedAt = now
+                row.revokedBy = actor.id
+                row.revokeJustification = justification
+                try await row.update(on: tx)
+            }
+            if !rows.isEmpty {
+                _ = try await AuditService(db: tx, ctx: ctx).record("entitlement.all_revoked", actor: AuditActor(kind: actor.kind, id: actor.id),
+                    businessId: BusinessID(businessId), subjectType: "entitlement", subjectId: nil,
+                    metadata: ["justification": justification, "revoked_rows": String(rows.count)])
+            }
+            return rows.count
+        }
     }
 
     private func revoke(businessId: UUID, kind: String, value: String, actor: EntitlementActor, justification rawJustification: String,

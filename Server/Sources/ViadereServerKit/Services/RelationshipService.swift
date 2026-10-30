@@ -123,6 +123,10 @@ struct RelationshipService {
                 throw APIError.validation("The connect link does not match this business.", details: ["link": "mismatch"])
             }
         }
+        // A business the customer blocked cannot be connected again, by any path, until the customer unblocks it (WP-1.5).
+        if try await PreferenceService(db: db, ctx: ctx).isBlocked(consumer: consumer.uuid, business: business.id!) {
+            throw APIError.conflict(PreferenceService.blockedMessage)
+        }
         let optIn = Set(request.optInPurposes.filter { !$0.isGrantedByDefault })
         let now = ctx.now
         let effectiveSource = source ?? request.source

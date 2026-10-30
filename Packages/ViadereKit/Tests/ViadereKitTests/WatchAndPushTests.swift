@@ -111,8 +111,8 @@ struct LiveActivityPresentationTests {
         #expect(order.detail == "Ready for pickup")
         #expect(order.headline == "Order 1042")
         let appointment = LiveActivityPresentation(status: .appointment(AppointmentActivityState(
-            title: "Dental cleaning", startsAt: Date(), providerName: "Linden Dental", stage: .checkInOpen)), businessName: "Linden Dental")
-        #expect(appointment.detail == "Check-in is open · Linden Dental")
+            title: "Haircut", startsAt: Date(), providerName: "Linden Hair Studio", stage: .checkInOpen)), businessName: "Linden Hair Studio")
+        #expect(appointment.detail == "Check-in is open · Linden Hair Studio")
         #expect(!appointment.isAlert)
         #expect(LiveActivityPresentation(status: .order(OrderActivityState(orderReference: "1", stage: .cancelled)), businessName: "x").progress == nil)
     }

@@ -2,11 +2,15 @@ import SwiftUI
 import ViadereCore
 import ViadereKit
 
-/// A connected business: identity, what it may contact you about (purpose by purpose), history, disconnect.
+/// Settings for one business (spec C7.2; WP-1.5): identity, notifications (favorite, quiet levels), what it may contact you about (purpose
+/// by purpose), history, block and disconnect. Quieting changes how notifications interrupt, never whether a request reaches Alerts, and
+/// never applies to security checks or anything that needs an answer.
 struct BusinessDetailView: View {
     let relationship: Relationship
     let model: AppModel
     @State private var vm: BusinessDetailViewModel
+    @State private var prefs: BusinessPreferencesViewModel
+    @State private var confirmingBlock = false
     @State private var confirmingDisconnect = false
     @State private var copied = false
     @Environment(\.dismiss) private var dismiss
@@ -15,6 +19,9 @@ struct BusinessDetailView: View {
         self.relationship = relationship
         self.model = model
         _vm = State(initialValue: BusinessDetailViewModel(relationship: relationship, services: model.services))
+        _prefs = State(initialValue: BusinessPreferencesViewModel(business: relationship.business,
+                                                                  initial: model.businesses.entry(relationship.business.id)?.preferences,
+                                                                  api: model.services.organizationAPI, clock: model.services.clock))
     }
 
     var body: some View {
@@ -25,9 +32,11 @@ struct BusinessDetailView: View {
                 actions
                 ApproveBusinessFreezeRow(controller: AppEnvironment.shared.approve, relationshipId: relationship.id, businessName: vm.business.safeName)
                 BusinessRewardsEntry(business: vm.business, model: model)
+                notifications
                 permissions
                 history
                 disconnect
+                block
             }
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.xl)
@@ -35,10 +44,22 @@ struct BusinessDetailView: View {
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .task { await vm.load() }
+        .task {
+            prefs.onSaved = { saved in model.businesses.apply(saved) }
+            await vm.load()
+            await prefs.load()
+        }
         .onChange(of: vm.isDisconnected) { _, gone in
             guard gone else { return }
-            Task { await model.home.load() }
+            Task {
+                await model.home.load()
+                await model.refreshOrganization()
+            }
+            dismiss()
+        }
+        .onChange(of: prefs.preferences.blocked) { _, blocked in
+            guard blocked else { return }
+            Task { await model.refreshOrganization() }
             dismiss()
         }
     }
@@ -88,6 +109,53 @@ struct BusinessDetailView: View {
             }
         }
         .buttonStyle(.viadere(.secondary))
+    }
+
+    /// Favorite and how loudly this business may interrupt (spec C7.2). Security requests and anything that needs an answer always come
+    /// through at full priority, whatever is chosen here.
+    private var notifications: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Notifications")
+            ViadereRowGroup {
+                Toggle(isOn: Binding(get: { prefs.preferences.favorite }, set: { value in Task { await prefs.setFavorite(value) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Favorite").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+                        Text("Shown first in Businesses and in the selector").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                    }
+                }
+                .toggleStyle(.viadere)
+                .padding(.vertical, ViadereSpace.s)
+                .disabled(prefs.isSaving)
+                ViadereHairline()
+                VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+                    Text("Interruptions").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+                    ViadereFilterBar("Interruptions", selection: Binding(get: { prefs.effectiveMute }, set: { level in Task { await prefs.setMute(level) } }),
+                                     options: [ViadereFilterBar<MuteLevel>.Option(MuteLevel.none, "Everything"), ViadereFilterBar<MuteLevel>.Option(.promotional, "Quiet offers"),
+                                              ViadereFilterBar<MuteLevel>.Option(.allNonEssential, "Only what matters")])
+                    Text(muteExplanation)
+                        .font(ViadereType.footnote)
+                        .foregroundStyle(ViadereColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let until = prefs.preferences.muteUntil, prefs.effectiveMute != MuteLevel.none {
+                        Text("Until \(until.formatted(date: .abbreviated, time: .shortened))")
+                            .font(ViadereType.footnote)
+                            .foregroundStyle(ViadereColor.textTertiary)
+                    }
+                }
+                .padding(.vertical, ViadereSpace.s)
+            }
+            if let error = prefs.errorMessage {
+                ViadereNotice(error, kind: .danger).padding(.top, ViadereSpace.s)
+            }
+        }
+    }
+
+    private var muteExplanation: String {
+        switch prefs.effectiveMute {
+        case .none: "Notifications from \(vm.business.safeName) arrive normally."
+        case .promotional: "Offers and rewards arrive quietly. Everything still appears in Alerts and Benefits."
+        case .allNonEssential: "Only security checks and requests that need your answer interrupt you. Everything still appears in Alerts."
+        }
     }
 
     private var permissions: some View {
@@ -158,6 +226,29 @@ struct BusinessDetailView: View {
             }
         }
         .padding(.top, ViadereSpace.m)
+    }
+
+    /// Block: ends the connection like Disconnect and also refuses new connections, links and SMS threads from this business until unblocked.
+    private var block: some View {
+        VStack(alignment: .leading, spacing: ViadereSpace.s) {
+            if confirmingBlock {
+                ViadereCard(padding: ViadereSpace.m) {
+                    VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                        Text("Block \(vm.business.safeName)?")
+                            .font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
+                        Text("You'll be disconnected, its waiting requests are cancelled, and it can't connect to you again until you unblock it in Businesses.")
+                            .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                        HStack(spacing: ViadereSpace.s) {
+                            Button("Cancel") { confirmingBlock = false }.buttonStyle(.viadere(.secondary))
+                            Button("Block") { Task { await prefs.block() } }.buttonStyle(.viadere(.destructive))
+                        }
+                    }
+                }
+            } else {
+                Button("Block \(vm.business.safeName)") { withAnimation(ViadereMotion.standard) { confirmingBlock = true } }
+                    .buttonStyle(.viadere(.quiet))
+            }
+        }
     }
 }
 
