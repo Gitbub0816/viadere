@@ -1,0 +1,311 @@
+{
+  "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+  "description" : "Brand manifest (SECURITY.md 2.93): JWS typ viadere-brand-manifest+jws, pinned key below. `manifest_hash` (sha256 of canonical payload) is the ETag. `token_resolutions`: ContrastPolicy.resolve output (integer WCAG math, see SECURITY.md 2.93). `selections`: BrandKitSelector results at now + offset (seconds), with the pool seed `selection_seed_hex` (server HMAC per customer and business) when `use_seed` is true. `dst`: local wall-clock times and the instant they denote (earlier instant for repeated times, shifted forward by the gap for skipped ones).",
+  "dst" : [
+    {
+      "instant" : 1794744000,
+      "local" : "2026-11-15T07:00",
+      "timezone" : "America/New_York"
+    },
+    {
+      "instant" : 1772955000,
+      "local" : "2026-03-08T02:30",
+      "timezone" : "America/New_York"
+    },
+    {
+      "instant" : 1793511000,
+      "local" : "2026-11-01T01:30",
+      "timezone" : "America/New_York"
+    },
+    {
+      "instant" : 1782932400,
+      "local" : "2026-07-01T12:00",
+      "timezone" : "America/Phoenix"
+    },
+    {
+      "instant" : 1774747800,
+      "local" : "2026-03-29T02:30",
+      "timezone" : "Europe/Berlin"
+    }
+  ],
+  "invalid_tokens" : [
+    {
+      "expected_issues" : [
+        "unknown_member@tokens.button_label"
+      ],
+      "tokens" : {
+        "button_label" : "Approve",
+        "primary" : "#2F5D50"
+      }
+    },
+    {
+      "expected_issues" : [
+        "invalid_color@tokens.primary"
+      ],
+      "tokens" : {
+        "primary" : "url(x)"
+      }
+    },
+    {
+      "expected_issues" : [
+        "invalid_value@tokens.on_primary"
+      ],
+      "tokens" : {
+        "on_primary" : "#FFFFFF",
+        "primary" : "#2F5D50"
+      }
+    }
+  ],
+  "jws" : "eyJhbGciOiJFUzI1NiIsImtpZCI6ImJyYW5kLW1hbmlmZXN0LXYxIiwidHlwIjoidmlhZGVyZS1icmFuZC1tYW5pZmVzdCtqd3MifQ.eyJidXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsImlzc3VlZF9hdCI6MTc5NDc0MDQwMCwia2lkIjoiYnJhbmQtbWFuaWZlc3QtdjEiLCJraXRzIjpbeyJraXRfaWQiOiJldmVyeWRheSIsIm5hbWUiOiJFdmVyeWRheSIsInRva2VucyI6eyJvbl9wcmltYXJ5IjoiYXV0byIsInByaW1hcnkiOiIjOEMyRjM5In19LHsiYXNzZXRzIjp7ImxvZ28iOnsiYnl0ZXMiOjE4NDMyLCJoIjo1MTIsInNoYTI1NiI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ3Ijo1MTJ9fSwiZnJhbWVfaWQiOiJ2aWFkZXJlLmZyYW1lLmhhaXJsaW5lLnYxIiwia2l0X2lkIjoic3ByaW5nIiwibmFtZSI6IlNwcmluZyIsInRva2VucyI6eyJhY2NlbnQiOiIjQjU2ODNBIiwiYm9yZGVyIjoiaGFpcmxpbmUiLCJvbl9wcmltYXJ5IjoiYXV0byIsInByaW1hcnkiOiIjMkY1RDUwIiwicmFkaXVzIjoibGFyZ2UiLCJzZWNvbmRhcnkiOiIjNEE0QTQ4Iiwic3VyZmFjZSI6IiNGRkZERjciLCJ0eXBlX3NjYWxlIjoic3RhbmRhcmQifX0seyJmcmFtZV9pZCI6InZpYWRlcmUuZnJhbWUuc25vdy52MSIsImtpdF9pZCI6IndpbnRlciIsIm5hbWUiOiJXaW50ZXIiLCJ0b2tlbnMiOnsib25fcHJpbWFyeSI6ImF1dG8iLCJwcmltYXJ5IjoiIzFEMzU1NyJ9fV0sIm5vdF9hZnRlciI6MTc5NzMzMjQwMCwic2NoZWR1bGUiOnsiZGVmYXVsdF9raXQiOiJldmVyeWRheSIsInJhbmRvbV9wb29sIjpbeyJraXQiOiJzcHJpbmciLCJ3ZWlnaHQiOjJ9LHsia2l0IjoiZXZlcnlkYXkiLCJ3ZWlnaHQiOjF9XSwidGltZXpvbmUiOiJBbWVyaWNhL05ld19Zb3JrIiwid2luZG93cyI6W3siZW5kc19hdCI6IjIwMjYtMTEtMzBUMDA6MDAiLCJraXQiOiJzcHJpbmciLCJwcmlvcml0eSI6MTAsInN0YXJ0c19hdCI6IjIwMjYtMTEtMDFUMDA6MDAifSx7ImVuZHNfYXQiOiIyMDI2LTExLTIwVDAwOjAwIiwia2l0Ijoid2ludGVyIiwicHJpb3JpdHkiOjIwLCJzdGFydHNfYXQiOiIyMDI2LTExLTEwVDAwOjAwIn1dfSwidiI6MSwidmVyc2lvbiI6MTR9.dI2VBNTGXpz5a3vYb3OShkQf3sbzoDpmuDY_0afMWhgKvvUPGNOLCYq5E0ey52WxzKWAFaeLz3cfOv4X6EmDSA",
+  "kid" : "brand-manifest-v1",
+  "manifest_hash" : "sha256:4c02620d6bcd613cd2305f4adab235e75b34aeeed2271b23bca59af4b2acabf1",
+  "name" : "brand-manifest-v1",
+  "now" : 1794744000,
+  "payload" : {
+    "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+    "issued_at" : 1794740400,
+    "kid" : "brand-manifest-v1",
+    "kits" : [
+      {
+        "kit_id" : "everyday",
+        "name" : "Everyday",
+        "tokens" : {
+          "on_primary" : "auto",
+          "primary" : "#8C2F39"
+        }
+      },
+      {
+        "assets" : {
+          "logo" : {
+            "bytes" : 18432,
+            "h" : 512,
+            "sha256" : "abababababababababababababababababababababababababababababababab",
+            "w" : 512
+          }
+        },
+        "frame_id" : "viadere.frame.hairline.v1",
+        "kit_id" : "spring",
+        "name" : "Spring",
+        "tokens" : {
+          "accent" : "#B5683A",
+          "border" : "hairline",
+          "on_primary" : "auto",
+          "primary" : "#2F5D50",
+          "radius" : "large",
+          "secondary" : "#4A4A48",
+          "surface" : "#FFFDF7",
+          "type_scale" : "standard"
+        }
+      },
+      {
+        "frame_id" : "viadere.frame.snow.v1",
+        "kit_id" : "winter",
+        "name" : "Winter",
+        "tokens" : {
+          "on_primary" : "auto",
+          "primary" : "#1D3557"
+        }
+      }
+    ],
+    "not_after" : 1797332400,
+    "schedule" : {
+      "default_kit" : "everyday",
+      "random_pool" : [
+        {
+          "kit" : "spring",
+          "weight" : 2
+        },
+        {
+          "kit" : "everyday",
+          "weight" : 1
+        }
+      ],
+      "timezone" : "America/New_York",
+      "windows" : [
+        {
+          "ends_at" : "2026-11-30T00:00",
+          "kit" : "spring",
+          "priority" : 10,
+          "starts_at" : "2026-11-01T00:00"
+        },
+        {
+          "ends_at" : "2026-11-20T00:00",
+          "kit" : "winter",
+          "priority" : 20,
+          "starts_at" : "2026-11-10T00:00"
+        }
+      ]
+    },
+    "v" : 1,
+    "version" : 14
+  },
+  "public_key" : "BF7fa2BO1IVHDroY7bubj_IAmnN68TyZdqSWg9TNZb3K7KgjTweAvMtAsJr5NsCpZIOuebP-x_sEVVhwJWN1MhU",
+  "selection_seed_hex" : "5323f53253ed74a8a90c0071a0276bb3bb94e6251c9b6c45dbe06197a52c105c",
+  "selections" : [
+    {
+      "expected_kit" : "winter",
+      "expected_reason" : "window",
+      "offset" : 0,
+      "use_seed" : true
+    },
+    {
+      "expected_kit" : "winter",
+      "expected_reason" : "window",
+      "offset" : 0,
+      "use_seed" : false
+    },
+    {
+      "expected_kit" : "spring",
+      "expected_reason" : "window",
+      "offset" : 518400,
+      "use_seed" : true
+    },
+    {
+      "expected_kit" : "spring",
+      "expected_reason" : "window",
+      "offset" : 518400,
+      "use_seed" : false
+    },
+    {
+      "expected_kit" : "everyday",
+      "expected_reason" : "random_pool",
+      "offset" : 1728000,
+      "use_seed" : true
+    },
+    {
+      "expected_kit" : "everyday",
+      "expected_reason" : "default_kit",
+      "offset" : 1728000,
+      "use_seed" : false
+    },
+    {
+      "expected_kit" : "winter",
+      "expected_reason" : "pinned",
+      "offset" : 518400,
+      "pinned_kit" : "winter",
+      "use_seed" : true
+    },
+    {
+      "expected_kit" : "winter",
+      "expected_reason" : "pinned",
+      "offset" : 518400,
+      "pinned_kit" : "winter",
+      "use_seed" : false
+    },
+    {
+      "expected_reason" : "neutral",
+      "offset" : 3456000,
+      "use_seed" : true
+    },
+    {
+      "expected_reason" : "neutral",
+      "offset" : 3456000,
+      "use_seed" : false
+    }
+  ],
+  "token_resolutions" : [
+    {
+      "expected" : {
+        "dark" : {
+          "accent" : "#B5683A",
+          "on_primary" : "#1F1E1C",
+          "on_surface" : "#F3F0EA",
+          "primary" : "#F3F0EA",
+          "secondary" : "#A29D94",
+          "surface" : "#1C1B1A"
+        },
+        "light" : {
+          "accent" : "#B5683A",
+          "on_primary" : "#F5F2EC",
+          "on_surface" : "#1F1E1C",
+          "primary" : "#2F5D50",
+          "secondary" : "#4A4A48",
+          "surface" : "#FFFDF7"
+        },
+        "overridden_dark" : [
+          "primary",
+          "secondary"
+        ],
+        "overridden_light" : [
+
+        ]
+      },
+      "tokens" : {
+        "accent" : "#B5683A",
+        "border" : "hairline",
+        "on_primary" : "auto",
+        "primary" : "#2F5D50",
+        "radius" : "large",
+        "secondary" : "#4A4A48",
+        "surface" : "#FFFDF7",
+        "type_scale" : "standard"
+      }
+    },
+    {
+      "expected" : {
+        "dark" : {
+          "accent" : "#FDFDFD",
+          "on_primary" : "#1F1E1C",
+          "on_surface" : "#F3F0EA",
+          "primary" : "#FFF5D6",
+          "secondary" : "#D9D9D9",
+          "surface" : "#1C1B1A"
+        },
+        "light" : {
+          "accent" : "#8C7550",
+          "on_primary" : "#F5F2EC",
+          "on_surface" : "#1F1E1C",
+          "primary" : "#1F1E1C",
+          "secondary" : "#6B675F",
+          "surface" : "#FCFBF8"
+        },
+        "overridden_dark" : [
+
+        ],
+        "overridden_light" : [
+          "primary",
+          "secondary",
+          "accent",
+          "surface"
+        ]
+      },
+      "tokens" : {
+        "accent" : "#FDFDFD",
+        "on_primary" : "auto",
+        "primary" : "#FFF5D6",
+        "secondary" : "#D9D9D9",
+        "surface" : "#808080"
+      }
+    },
+    {
+      "expected" : {
+        "dark" : {
+          "accent" : "#CDB993",
+          "on_primary" : "#1F1E1C",
+          "on_surface" : "#F3F0EA",
+          "primary" : "#F3F0EA",
+          "secondary" : "#A29D94",
+          "surface" : "#1C1B1A"
+        },
+        "light" : {
+          "accent" : "#8C7550",
+          "on_primary" : "#F5F2EC",
+          "on_surface" : "#1F1E1C",
+          "primary" : "#1F1E1C",
+          "secondary" : "#6B675F",
+          "surface" : "#FCFBF8"
+        },
+        "overridden_dark" : [
+          "primary"
+        ],
+        "overridden_light" : [
+
+        ]
+      },
+      "tokens" : {
+        "primary" : "#1F1E1C"
+      }
+    }
+  ],
+  "version" : 1
+}

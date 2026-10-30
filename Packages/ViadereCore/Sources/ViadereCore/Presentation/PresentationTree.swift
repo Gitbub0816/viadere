@@ -164,6 +164,12 @@ public struct NoticeNode: Sendable, Hashable, Codable {
     public var title: String?
     public var text: String
     public var protected: Bool
+
+    /// `notice_kind` on the wire: `kind` is the node discriminator.
+    enum CodingKeys: String, CodingKey {
+        case title, text, protected
+        case kind = "notice_kind"
+    }
 }
 
 /// The closed node set of the platform-neutral presentation model (plan section 4.4; FX-1). Order of `children` is reading order.

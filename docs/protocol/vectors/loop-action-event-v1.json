@@ -1,0 +1,102 @@
+{
+  "customer_wording" : {
+    "accepted" : "{business} confirmed",
+    "pending" : "Sent to {business}. Waiting for them to confirm.",
+    "rejected" : "{business} couldn't do this",
+    "timed_out" : "{business} hasn't answered. You can contact them.",
+    "unknown" : "We couldn't confirm that {business} received this."
+  },
+  "description" : "Loop action events (SECURITY.md 2.94). `request_digest` = sha256 of the canonical digest object; the same idempotency key with another digest is a conflict. `envelope_canonical` is the ids-only queue message; any other type or v is dead-lettered. `legal_transitions` is the complete list of allowed outcome appends (everything else is refused); `pending` is the only initial outcome.",
+  "digest_object_canonical" : "{\"action_id\":\"confirm\",\"inputs\":{\"slot\":\"am\"},\"instance_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"step_id\":\"s1\",\"v\":1}",
+  "envelope_canonical" : "{\"id\":\"11111111-2222-4333-8444-555555555555\",\"ref\":\"66666666-7777-4888-9999-000000000000\",\"type\":\"loop.action.deliver\",\"v\":1}",
+  "initial_outcome" : "pending",
+  "legal_transitions" : [
+    {
+      "from" : "pending",
+      "source" : "staff",
+      "to" : "accepted"
+    },
+    {
+      "from" : "pending",
+      "source" : "webhook",
+      "to" : "accepted"
+    },
+    {
+      "from" : "pending",
+      "source" : "staff",
+      "to" : "rejected"
+    },
+    {
+      "from" : "pending",
+      "source" : "webhook",
+      "to" : "rejected"
+    },
+    {
+      "from" : "pending",
+      "source" : "system",
+      "to" : "timed_out"
+    },
+    {
+      "from" : "pending",
+      "source" : "system",
+      "to" : "unknown"
+    },
+    {
+      "from" : "timed_out",
+      "source" : "staff",
+      "to" : "accepted"
+    },
+    {
+      "from" : "timed_out",
+      "source" : "webhook",
+      "to" : "accepted"
+    },
+    {
+      "from" : "timed_out",
+      "source" : "staff",
+      "to" : "rejected"
+    },
+    {
+      "from" : "timed_out",
+      "source" : "webhook",
+      "to" : "rejected"
+    },
+    {
+      "from" : "unknown",
+      "source" : "staff",
+      "to" : "accepted"
+    },
+    {
+      "from" : "unknown",
+      "source" : "webhook",
+      "to" : "accepted"
+    },
+    {
+      "from" : "unknown",
+      "source" : "staff",
+      "to" : "rejected"
+    },
+    {
+      "from" : "unknown",
+      "source" : "webhook",
+      "to" : "rejected"
+    },
+    {
+      "from" : "unknown",
+      "source" : "webhook",
+      "to" : "pending"
+    }
+  ],
+  "name" : "loop-action-event-v1",
+  "request_digest" : "sha256:644b576ad828fb2a500e59aa4dac3b89cc9514e2dc8dfda0017c6886d8a9fc88",
+  "submission" : {
+    "action_id" : "confirm",
+    "idempotency_key" : "tap-1",
+    "inputs" : {
+      "slot" : "am"
+    },
+    "instance_id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+    "step_id" : "s1"
+  },
+  "version" : 1
+}

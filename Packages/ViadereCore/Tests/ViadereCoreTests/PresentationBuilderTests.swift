@@ -243,6 +243,14 @@ struct PresentationBuilderTests {
         let tree = build(FX.estimate, manifest: try await FX.manifest(for: FX.estimate), phase: .confirm(stepId: "review", actionId: "ack"), brand: spring)
         let data = try tree.canonicalJSON()
         #expect(try JSONDecoder().decode(PresentationTree.self, from: data) == tree)
+        // Every node kind survives the round trip (a node member named like the discriminator would corrupt it).
+        var d = FX.pickup
+        d.steps[0].fields.append(LoopField(id: "note", type: .shortText, label: "Note", maxLength: 40))
+        for other in [PresentationBuilder.fallback(.manifestMissing), PresentationBuilder.paused(),
+                      build(d, manifest: try await FX.manifest(for: d)), build(manifest: try await FX.manifest(for: FX.pickup), phase: .step("done", outcome: .accepted)),
+                      PresentationBuilder.firstPartyScreen(id: "home", title: "Home", modules: [ModulePlacement(module: "profile", size: .regular)])] {
+            #expect(try JSONDecoder().decode(PresentationTree.self, from: other.canonicalJSON()) == other)
+        }
         #expect(throws: (any Error).self) { try JSONDecoder().decode(PresentationNode.self, from: Data(#"{"kind":"web_view","url":"https://x"}"#.utf8)) }
     }
 }
