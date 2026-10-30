@@ -697,6 +697,6 @@ struct NoticeRoutingTests {
         await api.setSecurityNotices([notice("recoveryStarted", action: .cancelRecovery, subject: RecoveryID().description)])
         await model.apply(.open(nil))
         #expect(model.securityNotices.current?.topic == .recoveryStarted)
-        #expect(model.selectedTab == .home)
+        #expect(model.selectedTab == .alerts)
     }
 }

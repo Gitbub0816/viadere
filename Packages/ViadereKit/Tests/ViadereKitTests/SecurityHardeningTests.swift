@@ -92,7 +92,7 @@ struct AppLockHardeningTests {
         // Nothing was routed, fetched or presented while locked.
         #expect(model.presentedApproval == nil)
         #expect(model.pendingConnect == nil)
-        #expect(model.selectedTab == .home)
+        #expect(model.selectedTab == .alerts)
         #expect(model.queuedWhileLockedCount == 4)
 
         await model.unlock()
@@ -100,7 +100,7 @@ struct AppLockHardeningTests {
         #expect(model.queuedWhileLockedCount == 0)
         #expect(model.pendingConnect?.code == code)
         #expect(model.presentedApproval?.envelope.id == pending.id)
-        #expect(model.selectedTab == .settings) // replayed in arrival order: the last link wins
+        #expect(model.settingsPresented) // replayed in arrival order: the last link wins
     }
 
     @Test func failedUnlockKeepsEverythingQueued() async throws {

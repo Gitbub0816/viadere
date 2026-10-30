@@ -33,6 +33,63 @@ public final class MessagesViewModel {
         }
     }
 
+    // MARK: Organization (spec C4; WP-1.2)
+
+    /// On-device search over the cached thread list (business name, handle, last preview). Message bodies are encrypted at rest on the
+    /// server, so there is no server-side search; nothing here crosses into another tenant's data.
+    public var searchQuery = ""
+
+    /// Threads for the business context and the search, newest first. One business's history is never merged with another's.
+    public func visible(context: OrganizationContext) -> [ConversationSummary] {
+        let needle = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return conversations.filter { thread in
+            if let business = context.businessFilter, thread.business.id != business { return false }
+            if thread.archived == true { return false }
+            guard !needle.isEmpty else { return true }
+            if BusinessDirectoryRules.matches(thread.business, query: needle) { return true }
+            return thread.lastMessagePreview?.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    /// The All view groups threads by business (spec C2 "unified thread list grouped by business"), groups ordered by their newest thread.
+    public func groups(context: OrganizationContext) -> [(business: BusinessSummary, threads: [ConversationSummary])] {
+        var order: [BusinessID] = []
+        var byBusiness: [BusinessID: (BusinessSummary, [ConversationSummary])] = [:]
+        for thread in visible(context: context) {
+            if byBusiness[thread.business.id] == nil {
+                order.append(thread.business.id)
+                byBusiness[thread.business.id] = (thread.business, [])
+            }
+            byBusiness[thread.business.id]?.1.append(thread)
+        }
+        return order.compactMap { byBusiness[$0].map { (business: $0.0, threads: $0.1) } }
+    }
+
+    public func unread(context: OrganizationContext) -> Int {
+        conversations.filter { context.businessFilter == nil || $0.business.id == context.businessFilter }.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    /// Archives (or restores) a thread for this account only; the business is never told.
+    public func setArchived(_ id: SessionID, _ archived: Bool) async {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let previous = conversations[index].archived
+        conversations[index].archived = archived
+        do { _ = try await api.updateConversation(id, ConversationStateUpdate(archived: archived)) } catch {
+            if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].archived = previous }
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+        }
+    }
+
+    public func setMuted(_ id: SessionID, _ muted: Bool) async {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let previous = conversations[index].muted
+        conversations[index].muted = muted
+        do { _ = try await api.updateConversation(id, ConversationStateUpdate(muted: muted)) } catch {
+            if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].muted = previous }
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+        }
+    }
+
     public func start(with business: BusinessID) async -> ConversationSummary? {
         do {
             let conversation = try await services.api.startConversation(with: business)

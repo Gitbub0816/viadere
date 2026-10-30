@@ -82,7 +82,7 @@ struct DelegationPolicyTests {
         let me = PreviewData.consumerId
         let alex = ConsumerID()
         let grant = DelegationGrant(id: DelegationID(), grantorId: alex, delegateId: me, role: .manager, purposes: [.transactional],
-                                    businessIds: [PreviewData.lindenDental.id], createdAt: tuesdayNoon, expiresAt: tuesdayNoon.addingTimeInterval(86_400))
+                                    businessIds: [PreviewData.lindenStudio.id], createdAt: tuesdayNoon, expiresAt: tuesdayNoon.addingTimeInterval(86_400))
         let received = [HouseholdGrant(grant: grant, counterpartName: "Alex Morgan", businessNames: [], status: .active)]
         #expect(DelegationScopePolicy.onBehalfOfName(scopeConsumerId: me, myConsumerId: me, received: received) == nil)
         #expect(DelegationScopePolicy.onBehalfOfName(scopeConsumerId: alex, myConsumerId: me, received: received) == "Alex Morgan")
@@ -249,7 +249,7 @@ struct HouseholdFlowTests {
         let (services, api) = await p3World()
         let household = try await api.household()
         let alex = try #require(household.received.first)
-        var envelope = PreviewData.confirm(now: tuesdayNoon, business: PreviewData.lindenDental)
+        var envelope = PreviewData.confirm(now: tuesdayNoon, business: PreviewData.lindenStudio)
         envelope.interaction.scope.consumerId = alex.grant.grantorId
         await api.add(envelope)
         let record = try await services.records.load()

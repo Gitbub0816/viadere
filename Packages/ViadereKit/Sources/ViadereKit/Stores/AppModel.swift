@@ -4,7 +4,21 @@ import ViadereCore
 import Observation
 #endif
 
-public enum AppTab: String, CaseIterable, Sendable, Hashable { case home, activity, connect, messages, settings }
+/// The stable primary bar (spec C1; plan 4.8 variant A, the owner's decision): Messages, Alerts, Benefits, Businesses. Activity is the
+/// History segment of Alerts; Settings is a secondary destination opened from the context bar, never a tab; Add business lives in Businesses
+/// and next to the selector. The bar never grows with the number of businesses.
+public enum AppTab: String, CaseIterable, Sendable, Hashable {
+    case messages, alerts, benefits, businesses
+
+    public var destination: OrganizationDestination {
+        switch self {
+        case .messages: .messages
+        case .alerts: .alerts
+        case .benefits: .benefits
+        case .businesses: .businesses
+        }
+    }
+}
 
 /// A request to start the connect flow with a code that arrived by link, QR, NFC or App Clip.
 public struct PendingConnect: Equatable, Sendable {
@@ -22,8 +36,13 @@ public final class AppModel {
     public enum Phase: Equatable, Sendable { case launching, onboarding(OnboardingStep), needsReenrollment, ready }
 
     public private(set) var phase: Phase = .launching
-    public var selectedTab: AppTab = .home
-    public var presentedApproval: ApprovalViewModel?
+    public var selectedTab: AppTab = .alerts
+    /// Settings, opened from the context bar (secondary, not a tab).
+    public var settingsPresented = false
+    /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
+    public var presentedApproval: ApprovalViewModel? {
+        didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
+    }
     public var pendingConnect: PendingConnect?
     public var pendingAccountLinkToken: String?
     /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
@@ -52,6 +71,11 @@ public final class AppModel {
     public let wallet: WalletPassCoordinator
     public let messages: MessagesViewModel
     public let securityNotices: SecurityNoticesViewModel
+    /// Organization (WP-1.2): the business context and the Alerts, Benefits and Businesses destinations.
+    public let organization: OrganizationContextStore
+    public let alerts: AlertsViewModel
+    public let benefits: BenefitsViewModel
+    public let businesses: BusinessesViewModel
     private var queuedLink: DeepLink?
     /// Links and notification opens that arrived while the app was locked, replayed in order after unlock.
     private var lockedQueue: [DeepLink] = []
@@ -70,6 +94,15 @@ public final class AppModel {
         wallet = WalletPassCoordinator(services: services, library: walletLibrary)
         messages = MessagesViewModel(services: services)
         securityNotices = SecurityNoticesViewModel(services: services)
+        organization = OrganizationContextStore(preferences: services.preferences)
+        alerts = AlertsViewModel(api: services.organizationAPI, clock: services.clock)
+        benefits = BenefitsViewModel(api: services.organizationAPI)
+        businesses = BusinessesViewModel(api: services.organizationAPI)
+        businesses.onChange = { [weak self] directory in
+            guard let self else { return }
+            self.organization.update(directory: directory)
+            for entry in directory where !entry.isActive { self.alerts.forget(business: entry.business.id) }
+        }
         // The API client reports "the server no longer trusts this device" through this notifier.
         services.revocation.setHandler { [weak self] in
             Task { @MainActor in await self?.deviceWasRevoked() }
@@ -107,8 +140,17 @@ public final class AppModel {
             await home.load()
             await activity.load()
             await securityNotices.load()
+            await refreshOrganization()
             if let link = queuedLink { queuedLink = nil; await handle(link) }
         }
+    }
+
+    /// Businesses first (the selector's options), then the lists. The server is the source of truth; a missed push is healed here.
+    public func refreshOrganization() async {
+        await businesses.load()
+        await alerts.refresh()
+        await alerts.ensureLoaded(organization.effective)
+        await benefits.load()
     }
 
     public func completeOnboarding() async {
@@ -116,12 +158,13 @@ public final class AppModel {
         await home.load()
         await activity.load()
         await securityNotices.load()
+        await refreshOrganization()
         if let link = queuedLink { queuedLink = nil; await handle(link) }
     }
 
     // MARK: App lock & scene phases
 
-    public func reviewDevices() { reviewDevicesRequested = true; selectedTab = .settings }
+    public func reviewDevices() { reviewDevicesRequested = true; settingsPresented = true }
 
     public func sceneDidEnterBackground() { backgroundedAt = services.clock() }
 
@@ -136,7 +179,7 @@ public final class AppModel {
             case .unavailable: break
             }
         }
-        if phase == .ready, !isLocked { await home.load(); await activity.load(); await securityNotices.load() }
+        if phase == .ready, !isLocked { await home.load(); await activity.load(); await securityNotices.load(); await refreshOrganization() }
     }
 
     /// Locks the app: dismisses every presented sheet and discards pending presentations, so nothing stays on
@@ -152,6 +195,7 @@ public final class AppModel {
         pendingLinkSession = nil
         conversationToOpen = nil
         businessToOpen = nil
+        settingsPresented = false
         toast = nil
     }
 
@@ -186,16 +230,18 @@ public final class AppModel {
         guard phase == .ready else { queuedLink = link; return }
         switch link {
         case .connect(let code, let link):
-            selectedTab = .connect
+            selectedTab = .businesses
             pendingConnect = PendingConnect(code: code, link: link, source: link == nil ? .code : .qr)
         case .business(let handle):
+            // Opens that business's page (or the connect review when not connected). It never selects a business context: only the
+            // customer's own choice in the selector does.
             businessToOpen = handle
-            selectedTab = .home
+            selectedTab = .businesses
         case .accountLink(let token):
             pendingAccountLinkToken = token
-            selectedTab = .settings
+            settingsPresented = true
         case .handoff(let token):
-            selectedTab = .home
+            selectedTab = .alerts
             guard let redeemed = try? await services.api.redeemHandoff(token: token) else {
                 toast = "That link has expired. Open Viadere to see your requests."
                 await home.load()
@@ -205,9 +251,9 @@ public final class AppModel {
             case .interaction:
                 if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
             case .manageBusinesses:
-                selectedTab = .connect
+                selectedTab = .businesses
             case .accountHelp:
-                selectedTab = .settings
+                settingsPresented = true
             }
         case .interaction(let id):
             await openInteraction(id)
@@ -215,13 +261,13 @@ public final class AppModel {
             conversationToOpen = id
             selectedTab = .messages
         case .settings:
-            selectedTab = .settings
+            settingsPresented = true
         case .approveEnrollment(let code, let rootKid, let secret):
             pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid, secret: secret)
-            selectedTab = .settings
+            settingsPresented = true
         case .linkSession(let code, let secret):
             pendingLinkSession = PendingLinkSession(code: code, secret: secret)
-            selectedTab = .connect
+            selectedTab = .businesses
         }
     }
 
@@ -238,12 +284,18 @@ public final class AppModel {
         model.onFinished = { [weak self] outcome in
             guard let self else { return }
             self.home.didDecide(outcome.interactionId)
+            self.alerts.markHandled(alertId: AlertIdentifier.make(.interaction, outcome.interactionId.uuid))
             Task {
                 await self.home.load()
                 await self.activity.load()
+                await self.alerts.refresh()
             }
         }
         model.onKeyInvalidated = { [weak self] in self?.phase = .needsReenrollment }
+        // C9.7: a request from business B opened while browsing A shows B ("Showing B", with "Back to all") without rewriting the saved
+        // context, and the context is frozen until the sheet closes. The sheet itself always names its own issuing business.
+        organization.open(itemFrom: envelope.business.id)
+        organization.beginSensitiveFlow()
         presentedApproval = model
     }
 
@@ -262,7 +314,7 @@ public final class AppModel {
         case .open(let id?): await openInteraction(id)
         case .open(nil):
             // A security push ("Review") carries no subject: the notices are fetched when the app opens.
-            selectedTab = .home
+            selectedTab = .alerts
             await securityNotices.load()
         case .submitted: await home.load()
         case .stale: toast = "That was already handled."; await home.load()
@@ -317,7 +369,12 @@ public final class AppModel {
         lockedQueue.removeAll()
         queuedLink = nil
         keysNeedRecheck = false
-        selectedTab = .home
+        selectedTab = .alerts
+        settingsPresented = false
+        organization.reset()
+        alerts.reset()
+        benefits.reset()
+        businesses.reset()
         isLocked = false
         phase = .onboarding(.welcome)
     }

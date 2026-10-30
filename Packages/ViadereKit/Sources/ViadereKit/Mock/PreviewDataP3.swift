@@ -74,17 +74,17 @@ extension PreviewData {
     // MARK: Appointments
 
     public static func appointmentStatus(now: Date = Date(), stage: AppointmentActivityState.Stage = .checkInOpen,
-                                         business: BusinessSummary = lindenDental,
+                                         business: BusinessSummary = lindenStudio,
                                          relationship: RelationshipID = RelationshipID()) -> InteractionEnvelope {
-        let state = AppointmentActivityState(title: "Cleaning with Dr. Okafor", startsAt: now.addingTimeInterval(50 * 60),
+        let state = AppointmentActivityState(title: "Haircut with Maya", startsAt: now.addingTimeInterval(50 * 60),
                                              location: "Suite 210", providerName: business.displayName, stage: stage)
         return status(business, relationship: relationship, now: now, title: "Check-in is open", body: "Suite 210 · starts in 50 minutes",
                       live: .appointment(state), correlation: "appt-8841", ageMinutes: 5)
     }
 
-    public static func appointmentCheckIn(now: Date = Date(), business: BusinessSummary = lindenDental,
+    public static func appointmentCheckIn(now: Date = Date(), business: BusinessSummary = lindenStudio,
                                           relationship: RelationshipID = RelationshipID()) -> InteractionEnvelope {
-        let payload = ConfirmPayload(title: "Check in for your cleaning", details: "Today, \(now.addingTimeInterval(3_000).formatted(date: .omitted, time: .shortened)) · Suite 210",
+        let payload = ConfirmPayload(title: "Check in for your haircut", details: "Today, \(now.addingTimeInterval(3_000).formatted(date: .omitted, time: .shortened)) · Suite 210",
                                      reference: "8841", scheduledAt: now.addingTimeInterval(3_000))
         let interaction = Interaction(
             businessId: business.id, scope: scope(relationship), purpose: .transactional, payload: .confirm(payload),
@@ -95,7 +95,7 @@ extension PreviewData {
         return InteractionEnvelope(interaction: interaction, business: business, status: .pending)
     }
 
-    public static func appointmentReschedule(now: Date = Date(), business: BusinessSummary = lindenDental,
+    public static func appointmentReschedule(now: Date = Date(), business: BusinessSummary = lindenStudio,
                                              relationship: RelationshipID = RelationshipID()) -> InteractionEnvelope {
         let payload = ChoosePayload(prompt: "Need a different time?", options: [
             ChoiceOption(id: "tue_9", label: "Tue 9:00"), ChoiceOption(id: "wed_14", label: "Wed 2:30"), ChoiceOption(id: "fri_11", label: "Fri 11:15")])

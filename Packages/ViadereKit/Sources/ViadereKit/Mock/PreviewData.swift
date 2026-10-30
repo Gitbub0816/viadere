@@ -21,14 +21,14 @@ public enum PreviewData {
     public static let juniperAir = BusinessSummary(
         id: tid("a0000000-0000-4000-8000-000000000003"), displayName: "Juniper Air", handle: handle("@juniperair"),
         code: code("JA9X31"), verificationStatus: .verified)
-    public static let lindenDental = BusinessSummary(
-        id: tid("a0000000-0000-4000-8000-000000000004"), displayName: "Linden Dental", handle: handle("@lindendental"),
+    public static let lindenStudio = BusinessSummary(
+        id: tid("a0000000-0000-4000-8000-000000000004"), displayName: "Linden Hair Studio", handle: handle("@lindenstudio"),
         code: code("LD2R56"), verificationStatus: .verified)
     public static let copperline = BusinessSummary(
         id: tid("a0000000-0000-4000-8000-000000000005"), displayName: "Copperline Coffee", handle: handle("@copperline"),
         code: code("CC8M40"), verificationStatus: .verified)
 
-    public static let allBusinesses: [BusinessSummary] = [harborBank, northfield, juniperAir, lindenDental, copperline] + p3Businesses
+    public static let allBusinesses: [BusinessSummary] = [harborBank, northfield, juniperAir, lindenStudio, copperline] + p3Businesses
 
     public static func profile(for business: BusinessSummary) -> BusinessProfile {
         let category: BusinessCategory
@@ -36,7 +36,7 @@ public enum PreviewData {
         case "Harbor Bank": category = .banking
         case "Northfield Market": category = .retail
         case "Juniper Air": category = .airline
-        case "Linden Dental": category = .healthcare
+        case "Linden Hair Studio": category = .other
         default: category = .foodAndDrink
         }
         return BusinessProfile(id: business.id, displayName: business.displayName, legalName: business.displayName + " Inc.",
@@ -89,9 +89,9 @@ public enum PreviewData {
         return InteractionEnvelope(interaction: interaction, business: business, status: .pending)
     }
 
-    public static func choose(now: Date = Date(), business: BusinessSummary = lindenDental,
+    public static func choose(now: Date = Date(), business: BusinessSummary = lindenStudio,
                               relationship: RelationshipID = RelationshipID()) -> InteractionEnvelope {
-        let payload = ChoosePayload(prompt: "Which time works for your cleaning?", options: [
+        let payload = ChoosePayload(prompt: "Which time works for your haircut?", options: [
             ChoiceOption(id: "tue_9", label: "Tue 9:00"), ChoiceOption(id: "wed_14", label: "Wed 2:30"),
             ChoiceOption(id: "fri_11", label: "Fri 11:15")])
         let interaction = Interaction(
@@ -125,7 +125,7 @@ public enum PreviewData {
 
     // MARK: Conversations
 
-    public static func conversation(for business: BusinessSummary = lindenDental, now: Date = Date()) -> (ConversationSummary, [ConversationMessage]) {
+    public static func conversation(for business: BusinessSummary = lindenStudio, now: Date = Date()) -> (ConversationSummary, [ConversationMessage]) {
         let session = SessionID()
         func message(_ text: String, _ direction: MessageDirection, minutesAgo: Double, interaction: InteractionID? = nil) -> ConversationMessage {
             let attribution = direction == .consumerToBusiness
@@ -137,7 +137,7 @@ public enum PreviewData {
                                        interactionId: interaction)
         }
         let messages = [
-            message("Hi, this is Maya at Linden Dental. Your cleaning is coming up.", .businessToConsumer, minutesAgo: 42),
+            message("Hi, this is Maya at Linden Hair Studio. Your haircut is coming up.", .businessToConsumer, minutesAgo: 42),
             message("Can I move it to later in the week?", .consumerToBusiness, minutesAgo: 30),
             message("Of course. Pick whichever time suits you.", .businessToConsumer, minutesAgo: 28),
         ]

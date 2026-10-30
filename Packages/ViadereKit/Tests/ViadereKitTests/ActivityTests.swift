@@ -15,9 +15,9 @@ struct ActivityFeedTests {
         }
         let list: [InteractionEnvelope] = [
             PreviewData.orderStatus(now: now, relationship: rel(PreviewData.juniperCoffee)),
-            PreviewData.appointmentStatus(now: now, relationship: rel(PreviewData.lindenDental)),
-            PreviewData.appointmentCheckIn(now: now, relationship: rel(PreviewData.lindenDental)),
-            PreviewData.appointmentReschedule(now: now, relationship: rel(PreviewData.lindenDental)),
+            PreviewData.appointmentStatus(now: now, relationship: rel(PreviewData.lindenStudio)),
+            PreviewData.appointmentCheckIn(now: now, relationship: rel(PreviewData.lindenStudio)),
+            PreviewData.appointmentReschedule(now: now, relationship: rel(PreviewData.lindenStudio)),
             PreviewData.northwindFlight(now: now, relationship: rel(PreviewData.northwindAir)),
             PreviewData.rebookOffer(now: now, relationship: rel(PreviewData.northwindAir)),
             PreviewData.boardingPass(now: now, relationship: rel(PreviewData.northwindAir)),
@@ -33,11 +33,11 @@ struct ActivityFeedTests {
     @Test func groupsByBusinessAndMergesCorrelatedInteractions() throws {
         let content = ActivityFeed.build(interactions: world().interactions, now: now)
         let names = content.groups.map(\.business.displayName)
-        #expect(Set(names) == ["Juniper Coffee", "Linden Dental", "Northwind Air", "Harbor Hotel", "Lumen Theater"])
+        #expect(Set(names) == ["Juniper Coffee", "Linden Hair Studio", "Northwind Air", "Harbor Hotel", "Lumen Theater"])
         #expect(!names.contains("Harbor Bank") && !names.contains("Northfield Market"))
-        let dental = try #require(content.groups.first { $0.business.id == PreviewData.lindenDental.id })
-        #expect(dental.items.count == 1)   // status + check-in + reschedule are one appointment
-        let appointment = dental.items[0]
+        let studio = try #require(content.groups.first { $0.business.id == PreviewData.lindenStudio.id })
+        #expect(studio.items.count == 1)   // status + check-in + reschedule are one appointment
+        let appointment = studio.items[0]
         #expect(appointment.category == .appointment && appointment.phase == .needsYou)
         #expect(appointment.pending.count == 2)
     }
@@ -291,7 +291,7 @@ struct P3ShellTests {
         let model = AppModel(services: services)
         await model.bootstrap()
         #expect(model.phase == .ready)
-        #expect(AppTab.allCases.contains(.activity))
+        #expect(AppTab.allCases == [.messages, .alerts, .benefits, .businesses]) // Activity is the History segment of Alerts (spec C1, variant A)
         #expect(!model.activity.content.isEmpty && model.activity.needsYouCount == 2)
         #expect(model.wallet.canAddPasses == false)    // default library: Wallet unavailable until the app supplies PassKit
         await model.rewards.load()

@@ -19,6 +19,8 @@ public enum PreferenceKey: String, CaseIterable, Sendable {
     /// Show business detail in notification banners (user controls previews further in iOS Settings).
     case richNotificationPreviews
     case lastKnownConsumerId
+    /// The saved business context of the Organization views (`OrganizationContext` JSON). A filter only; never sent as authority.
+    case organizationContext
 }
 
 public final class UserDefaultsPreferences: PreferencesStore, @unchecked Sendable {

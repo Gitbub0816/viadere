@@ -24,6 +24,8 @@ public struct ViadereServices: Sendable {
     public var clock: @Sendable () -> Date
     /// The Approve v2 API (`nil` in extensions, the App Clip and tests that do not use it).
     public var approveAPI: (any ApproveAPI)?
+    /// The Organization API (alerts, benefits, businesses; `nil` in extensions and the App Clip).
+    public var organizationAPI: (any OrganizationAPI)?
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -98,7 +100,10 @@ public struct ViadereServices: Sendable {
                                records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
                                secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock,
                                residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
-        if !isAppClip { services.approveAPI = LiveApproveAPI(client: client) }
+        if !isAppClip {
+            services.approveAPI = LiveApproveAPI(client: client)
+            services.organizationAPI = LiveOrganizationAPI(client: client)
+        }
         return services
     }
 
@@ -153,10 +158,11 @@ public struct ViadereServices: Sendable {
         let records = SecretDeviceRecordStore(secrets: secrets)
         let tokens = SecretTokenStore(secrets: secrets)
         let sessions = SessionManager(store: tokens, refresher: FailingRefresher(), clock: clock)
-        let services = ViadereServices(configuration: .local, api: api, sessions: sessions, keys: keys, records: records,
+        var services = ViadereServices(configuration: .local, api: api, sessions: sessions, keys: keys, records: records,
                                        preferences: InMemoryPreferences(), secrets: secrets, passkeys: MockPasskeyService(),
                                        notificationPermission: MockNotificationPermissionService(), appLock: MockAppLockAuthenticator(),
                                        appAttest: appAttest, clock: clock)
+        services.organizationAPI = api
         if signedIn {
             let consumerId = api.consumerId
             try? await sessions.set(TokenSet(consumerId: consumerId, accessToken: "mock", accessExpiresAt: clock().addingTimeInterval(3_600)))
