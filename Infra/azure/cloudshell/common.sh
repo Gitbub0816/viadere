@@ -53,7 +53,7 @@ run_job() {
     status="$(az containerapp job execution show -n "$job" -g "$RG_APP" --job-execution-name "$exec" --query properties.status -o tsv 2>/dev/null)"
     case "$status" in
       Succeeded) echo "$job: Succeeded"; return 0 ;;
-      Failed|Stopped|Degraded) fail "$job: $status (logs: Log Analytics, ContainerAppConsoleLogs_CL, job $job)" ;;
+      Failed|Stopped|Degraded) fail "$job: $status. Logs (allow 2-5 minutes): bash Infra/azure/cloudshell/job-logs.sh $job" ;;
     esac
     sleep 15
   done

@@ -12,7 +12,8 @@ source "$(dirname "$0")/common.sh"
 need SUB_ID STATE_SA
 cd "$(dirname "$0")/.." || fail "cd Infra/azure"
 WORK="$(mktemp -d)" && chmod 700 "$WORK" || fail "mktemp"
-trap 'rm -rf "$WORK"' EXIT
+# The one-off admin job carries your Entra token as a secret: never leave it behind, even when a step fails.
+trap 'rm -rf "$WORK"; az containerapp job delete -n job-viadere-dbadmin -g "$RG_APP" --yes -o none 2>/dev/null' EXIT
 
 step "1/6 subscription and OpenTofu outputs"
 az account set --subscription "$SUB_ID" || fail "az account set"
@@ -76,7 +77,6 @@ az containerapp job delete -n job-viadere-dbadmin -g "$RG_APP" --yes -o none 2>/
 az containerapp job create -n job-viadere-dbadmin -g "$RG_APP" --yaml "$WORK/dbadmin-job.json" -o none || fail "create dbadmin job"
 rm -f "$WORK/dbadmin-job.json"
 run_job job-viadere-dbadmin
-az containerapp job delete -n job-viadere-dbadmin -g "$RG_APP" --yes -o none || echo "warning: delete job-viadere-dbadmin by hand (it holds an expired token)"
 
 step "4/6 migrations"
 run_job job-viadere-migrate
