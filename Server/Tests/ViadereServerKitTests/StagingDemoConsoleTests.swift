@@ -100,6 +100,11 @@ final class StagingDemoConsoleTests: XCTestCase {
             do { _ = try await demo.ensureConsoleOwner(businessId: atlas, email: "ops@viadere.test", displayName: nil); XCTFail("operator") } catch {
                 XCTAssertEqual(error as? StagingDemo.ConsoleRefusal, .accountInUse)
             }
+            // A dormant account (its only membership elsewhere was removed) is still someone else's.
+            try await OrgMembershipRecord.query(on: h.db).filter(\.$businessId == other.businessId).set(\.$removedAt, to: h.clock.now()).update()
+            do { _ = try await demo.ensureConsoleOwner(businessId: atlas, email: "owner@acme.test", displayName: nil); XCTFail("dormant takeover") } catch {
+                XCTAssertEqual(error as? StagingDemo.ConsoleRefusal, .accountInUse)
+            }
             try await eq(try await OrgMembershipRecord.query(on: h.db).filter(\.$businessId == atlas).count(), 1)
         }
     }

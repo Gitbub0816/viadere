@@ -45,8 +45,11 @@ extension StagingDemo {
         let system = AuditActor(kind: .system, id: Self.actor)
         if let existing = try await DashboardUserRecord.query(on: db).filter(\.$emailHash == hash).first() {
             guard existing.kind == "business", existing.status == "active", let userId = existing.id else { throw ConsoleRefusal.accountInUse }
-            let memberships = try await OrgMembershipRecord.query(on: db).filter(\.$userId == userId).filter(\.$removedAt == nil).all()
-            guard memberships.allSatisfy({ $0.businessId == businessId }) else { throw ConsoleRefusal.accountInUse }
+            // Only an account that has only ever belonged to Atlas Demo (in practice: one this command created) is reused. A dormant account
+            // whose memberships elsewhere were removed is still someone else's: no enrollment link is handed out for it.
+            let history = try await OrgMembershipRecord.query(on: db).filter(\.$userId == userId).all()
+            guard !history.isEmpty, history.allSatisfy({ $0.businessId == businessId }) else { throw ConsoleRefusal.accountInUse }
+            let memberships = history.filter { $0.removedAt == nil }
             if let membership = memberships.first {
                 if membership.role != OrgRole.owner.rawValue {
                     membership.role = OrgRole.owner.rawValue
