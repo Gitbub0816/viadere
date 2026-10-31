@@ -41,8 +41,9 @@ struct LoopPublicationService {
                 ? "Healthcare organizations can't use Loops on Viadere." : "Organizations in this category can't use Loops on Viadere.")
         }
         let publisher = LoopPublisherIdentity(publisherType: .business, businessId: BusinessID(businessId), verificationStatus: business.status, category: category)
-        // Brand Kit keys are checked by the Brand Kit service once kits exist on this branch; until then a `brand_kit` appearance fails the gate.
-        let context = LoopValidationContext(submittingBusinessId: BusinessID(businessId), publisher: publisher, phase: .hosted, brandKitKeys: [])
+        // A `brand_kit` appearance may name only one of this business's own approved kits (never another tenant's).
+        let context = LoopValidationContext(submittingBusinessId: BusinessID(businessId), publisher: publisher, phase: .hosted,
+                                            brandKitKeys: try await Self.approvedBrandKitKeys(businessId: businessId, on: db))
         let report = LoopPolicyValidator.validate(data, context: context)
         guard let hash = report.definitionHash, let parsed = LoopDefinition.parse(data).definition, let canonical = try? parsed.canonicalJSON() else {
             throw APIError.validation("The definition could not be read.", details: Self.details(report.hits))
@@ -185,8 +186,9 @@ struct LoopPublicationService {
         guard let business = try await BusinessRecord.find(revision.businessId, on: db) else { throw APIError.notFound }
         let publisher = LoopPublisherIdentity(publisherType: .business, businessId: BusinessID(revision.businessId), verificationStatus: business.status,
                                               category: BusinessCategory(rawValue: business.category))
+        let kits = try await Self.approvedBrandKitKeys(businessId: revision.businessId, on: db)
         let report = LoopPolicyValidator.validate(Data(revision.definitionJSON.utf8),
-                                                  context: LoopValidationContext(submittingBusinessId: BusinessID(revision.businessId), publisher: publisher, brandKitKeys: []))
+                                                  context: LoopValidationContext(submittingBusinessId: BusinessID(revision.businessId), publisher: publisher, brandKitKeys: kits))
         let reviews = try await LoopReviewRecord.query(on: db).filter(\.$revisionId == revision.id!).filter(\.$stage != ReviewStage.automated.rawValue).all()
             .compactMap { record -> LoopReview? in
                 guard let reviewer = record.reviewerId, let decision = LoopReview.Decision(rawValue: record.decision) else { return nil }
@@ -440,6 +442,12 @@ struct LoopPublicationService {
         var out: [String: String] = [:]
         for hit in hits.prefix(20) { out[hit.path.isEmpty ? "definition" : hit.path] = hit.rule.rawValue }
         return out
+    }
+
+    /// Keys of the Brand Kits **this** business owns that Viadere has approved (an approved snapshot exists). The query is scoped by the
+    /// business id from the server's own record, so a kit key of another tenant can never satisfy the `unknown_brand_kit` rule.
+    static func approvedBrandKitKeys(businessId: UUID, on db: any Database) async throws -> Set<String> {
+        Set(try await BrandKitRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$approvedJSON != nil).all().map(\.kitKey))
     }
 
     static func businessActor(_ id: UUID) -> AuditActor { AuditActor(kind: .business, id: id.uuidString.lowercased()) }

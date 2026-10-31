@@ -260,6 +260,7 @@ enum ConsoleRoutes {
         ProfileConsole.register(pages)
         ConsoleSurface.register(pages)
         ConsoleInbox.register(pages)
+        ConsoleLoopStudio.register(pages)
         ConsoleBrandStudio.register(pages)
         ConsoleDevelopers.register(pages)
         ConsoleSecurity.register(pages)

@@ -24,7 +24,9 @@ let package = Package(
         ),
         .testTarget(
             name: "ViadereCoreTests",
-            dependencies: ["ViadereCore"]
+            dependencies: ["ViadereCore"],
+            // Presentation tree goldens (WP-3.8) are read by path, so every renderer's tests can share them.
+            exclude: ["Golden"]
         ),
     ],
     swiftLanguageModes: [.v6]

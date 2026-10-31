@@ -153,7 +153,9 @@ final class LoopReviewPipelineTests: XCTestCase {
         try await withHarness { h in
             let (owner, account, businessId) = try await h.verifiedOwner()
             _ = account
-            let submit = try await h.formPost("/dashboard/loops", owner, [("definition", String(decoding: LoopFixtures.pickup(), as: UTF8.self))])
+            // Submission goes through Loop Studio (WP-3.7): a draft from a template, then "Submit for Viadere review".
+            let draftId = try await LoopStudioTests.createDraft(h, owner, template: "pickup_time")
+            let submit = try await h.formPost("/dashboard/loops/studio/drafts/\(draftId.uuidString.lowercased())/submit", owner, [("version", "1")])
             XCTAssertEqual(submit.status, .seeOther, submit.text)
             let revision = try await XCTUnwrapAsync(try await LoopRevisionRecord.query(on: h.db).filter(\.$businessId == businessId).first())
             XCTAssertEqual(revision.stateValue, .inReview)
@@ -170,8 +172,10 @@ final class LoopReviewPipelineTests: XCTestCase {
             try await eq(try await LoopPublicationRecord.query(on: h.db).count(), 0)
             // A role without submitLoops cannot even submit.
             let analyst = try await h.addMember(owner: owner, role: .analyst, email: "analyst@example.com")
-            let denied = try await h.formPost("/dashboard/loops", analyst.session, [("definition", "{}")])
+            let denied = try await h.formPost("/dashboard/loops/studio/drafts/\(draftId.uuidString.lowercased())/submit", analyst.session, [("version", "1")])
             XCTAssertEqual(denied.status, .forbidden, denied.text)
+            let create = try await h.formPost("/dashboard/loops/studio/drafts", analyst.session, [("template", "acknowledge")])
+            XCTAssertEqual(create.status, .forbidden, create.text)
         }
     }
 
@@ -185,7 +189,8 @@ final class LoopReviewPipelineTests: XCTestCase {
             let revision = try await world.submit()
             let page = try await h.page("/operator/loops/revisions/\(revision.id!.uuidString.lowercased())", session)
             XCTAssertEqual(page.status, .ok, page.text)
-            XCTAssertTrue(page.text.contains("Built by Corner Bakery"), "the reviewer sees the customer tree")
+            let preview = try await h.page("/operator/loops/revisions/\(revision.id!.uuidString.lowercased())/preview", session)
+            XCTAssertTrue(preview.text.contains("Built by Corner Bakery"), "the reviewer sees the customer tree")
             let path = "/operator/loops/revisions/\(revision.id!.uuidString.lowercased())/decide"
             // The sign-in assertion counts as fresh for the re-authentication window only.
             h.clock.advance(by: h.ctx.config.dashboard.reauthWindow + 60)

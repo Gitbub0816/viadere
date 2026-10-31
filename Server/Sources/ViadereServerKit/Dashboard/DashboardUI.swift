@@ -76,7 +76,7 @@ enum DashboardUI {
     static func sha256Base64(_ text: String) -> String { Data(SHA256.hash(data: Data(text.utf8))).base64EncodedString() }
 
     /// CSP for HTML pages. Scripts are allowed only where a page declares `needsScript` (passkey ceremonies).
-    /// `frames`: the page embeds same-origin sandboxed previews (the Brand Kit Studio only, WP-2.5).
+    /// `frames`: the page embeds same-origin sandboxed previews (Brand Kit Studio WP-2.5, Loop Studio WP-3.7, operator Loop review).
     static func csp(script: Bool, frames: Bool = false) -> String {
         var parts = ["default-src 'none'", "style-src 'sha256-\(sha256Base64(css))'", "img-src 'self' data:", "font-src 'none'",
                      "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'"]
@@ -145,7 +145,10 @@ enum DashboardUI {
             NavItem(title: "Consent", path: "/dashboard/consent", permissions: [.viewConsent]),
         ]),
         NavSection(title: "Inbox", path: "/dashboard/inbox", permissions: [.viewInbox], children: []),
-        NavSection(title: "Loops", path: "/dashboard/loops", permissions: [.submitLoops], children: []),
+        NavSection(title: "Loops", path: "/dashboard/loops", permissions: [.submitLoops, .viewLoops], children: [
+            NavItem(title: "Your Loops", path: "/dashboard/loops", permissions: []),
+            NavItem(title: "Loop Studio", path: "/dashboard/loops/studio", permissions: []),
+        ]),
         NavSection(title: "Verify", path: "/dashboard/verification", permissions: [.viewVerify], children: []),
         NavSection(title: "Approve", path: "/dashboard/approve", permissions: [.viewApprove], children: []),
         NavSection(title: "Security", path: "/dashboard/security", permissions: [.viewSecurity], children: [
@@ -237,7 +240,7 @@ enum DashboardUI {
 
     /// Signed-in operator page.
     static func operatorPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, flash: String? = nil,
-                             body: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
+                             body: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
         let items = operatorNav.map { "<a href=\"\($0.1)\"\($0.1 == active || (active.hasPrefix($0.1 + "/") && $0.1 != "/operator") ? " aria-current=\"page\"" : "")>\(esc($0.0))</a>" }.joined()
         let side = """
         <aside class="side">\(brand)<div class="org"><span class="mu sm">Operator console</span><strong>\(esc(p.user.displayName))</strong></div>\
@@ -246,7 +249,7 @@ enum DashboardUI {
         """
         let flashHTML = flash.map { "<div class=\"notice ok\" role=\"status\">\(esc($0))</div>" } ?? ""
         let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div></header>"
-        return response(document(title: title + " · Operator", body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(flashHTML)\(body)</main></div>", script: script), status: status, script: script)
+        return response(document(title: title + " · Operator", body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(flashHTML)\(body)</main></div>", script: script), status: status, script: script, frames: frames)
     }
 
     /// Error page inside the signed-in shell.

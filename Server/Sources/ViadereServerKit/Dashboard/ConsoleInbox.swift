@@ -15,10 +15,6 @@ private struct InboxHoursForm: Content {
     var hours: String?
     var timezone: String
 }
-private struct LoopSubmitForm: Content {
-    var definition: String
-    var template: String?
-}
 
 /// The hosted business inbox (WP-3.4) and Loop submission (WP-3.2 business side). Server-rendered like the rest of the console: every page
 /// re-reads the current membership (a role change takes effect on the next request), every POST carries the CSRF token, and the tenant is
@@ -75,14 +71,6 @@ enum ConsoleInbox {
             return DashboardResponses.redirect("\(inboxPath)?im=hours")
         }
         pages.get("dashboard", "loops") { req in try await loops(req) }
-        pages.post("dashboard", "loops") { req -> Response in
-            let (p, businessId) = try req.businessDashboard
-            guard p.can(.submitLoops), let userId = p.user.id else { throw APIError.forbidden }
-            let form = try req.content.decode(LoopSubmitForm.self)
-            let revision = try await LoopPublicationService(db: req.db, ctx: req.ctx).submit(businessId: businessId, authorId: userId, definition: Data(form.definition.utf8),
-                                                                                            templateKey: form.template.flatMap { $0.isEmpty ? nil : $0 })
-            return DashboardResponses.redirect("\(loopsPath)?im=\(revision.stateValue == .inReview ? "submitted" : "failed")")
-        }
         pages.post("dashboard", "loops", "revisions", ":id", "withdraw") { req -> Response in
             let (p, businessId) = try req.businessDashboard
             guard p.can(.submitLoops), let userId = p.user.id else { throw APIError.forbidden }
@@ -192,7 +180,7 @@ enum ConsoleInbox {
 
     private static func loops(_ req: Request) async throws -> Response {
         let (p, businessId) = try req.businessDashboard
-        guard p.can(.submitLoops) else { throw APIError.forbidden }
+        guard ConsoleLoopStudio.canView(p) else { throw APIError.forbidden }
         let revisions = try await LoopRevisionRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$createdAt, .descending).limit(50).all()
         let definitions = Dictionary(try await LoopDefinitionRecord.query(on: req.db).filter(\.$businessId == businessId).all().map { ($0.id!, $0.key) }, uniquingKeysWith: { a, _ in a })
         var rows: [[String]] = []
@@ -207,7 +195,7 @@ enum ConsoleInbox {
             let stages = "Checks \(reviews.contains { $0.stage == "automated" && $0.decision == "pass" } ? "passed" : "failed") · " +
                 "Reviews \(reviews.filter { $0.stage != "automated" && $0.decision == "approve" }.count)/\(revision.requiredReview == LoopReviewLevel.twoPerson.rawValue ? 2 : 1)"
             var withdraw = ""
-            if revision.stateValue == .inReview {
+            if revision.stateValue == .inReview && p.can(.submitLoops) {
                 withdraw = "<form method=\"post\" action=\"\(loopsPath)/revisions/\(revision.id!.uuidString.lowercased())/withdraw\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Withdraw</button></form>"
             }
             rows.append([DashboardUI.esc(definitions[revision.definitionId] ?? "—"), String(revision.revision), DashboardUI.esc(revision.state.replacingOccurrences(of: "_", with: " ")),
@@ -217,11 +205,9 @@ enum ConsoleInbox {
         <div class="card"><h2>Your Loops</h2><p class="mu sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer \
         (two for high-risk actions), then a signed publication. You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review.</p>\
         \(DashboardFormat.table(["Loop", "Revision", "State", "Pipeline", "Messages", ""], rows, empty: "No Loops submitted yet.", caption: "Loop revisions"))</div>\
-        <div class="card"><h2>Submit a revision</h2><form method="post" action="\(loopsPath)">\(DashboardUI.csrf(p))\
-        <label for="def">Loop definition (JSON, schema version 1)</label><textarea id="def" name="definition" rows="14" maxlength="65536" required></textarea>\
-        <label for="tpl">Template (optional)</label><input id="tpl" name="template" type="text" maxlength="40">\
-        <p class="mu sm">Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p>\
-        <button class="btn" type="submit">Submit for review</button></form></div>
+        <div class="card"><h2>Build or change a Loop</h2><p class="sm">Use <a href="\(ConsoleLoopStudio.path)">Loop Studio</a> to start from a template, edit it with \
+        a form, check the automated report and preview, and submit it for Viadere review.</p>\
+        <p class="mu sm">Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p></div>
         """
         return DashboardUI.businessPage(p, title: "Loops", active: loopsPath, subtitle: "Requests customers can send you from the Viadere app.", flash: flash(req), body: body)
     }

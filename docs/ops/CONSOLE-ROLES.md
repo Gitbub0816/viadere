@@ -41,6 +41,10 @@ templates, support).
   left open cannot be used for them. Revoking a key is protective and needs no step-up.
 * Permissions are checked on every request against the **current** membership: a demotion or removal takes effect on the next request, and the
   server (not the hidden button) is what refuses.
+* **Loops (WP-3.2, WP-3.7):** `submitLoops` (Owner, Organization Admin, Developer) edits Loop Studio drafts and submits them for Viadere review;
+  `viewLoops` (the same plus Messaging Operator and Read-only Auditor) reads drafts, the automated report, the sandboxed preview and the review status,
+  with every editing control removed. No business permission publishes or reviews a Loop: every revision is decided by Viadere operators holding the
+  operator permission `loop_reviewer` (two of them for high risk), and only then signed.
 
 ## Matrix
 
@@ -82,5 +86,6 @@ templates, support).
 | `viewInbox` | x | x |  |  |  | x |  |  | x |
 | `manageInbox` | x | x |  |  |  | x |  |  |  |
 | `submitLoops` | x | x |  | x |  |  |  |  |  |
+| `viewLoops` | x | x |  | x |  | x |  |  | x |
 | `manageBrandKits` | x | x |  |  |  |  |  |  |  |
 <!-- matrix:end -->

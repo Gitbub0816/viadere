@@ -24,7 +24,8 @@ private struct LoopSwitchForm: Content {
 /// The Viadere Loop review queue and publication controls (plan section 4.12, WP-3.2). Operator realm only; every mutation needs a fresh
 /// passkey assertion, the `loop_reviewer` permission (checked in the service against the database) and a reason, and is audited with the
 /// operator as actor. Reviewers see the same presentation tree customers will see (built by `PresentationBuilder` from a preview manifest
-/// signed with a throwaway key) and the diff to the previously published revision.
+/// signed with a throwaway key, `LoopPreview`), rendered by `LoopWebRenderer` in a sandboxed iframe, and the diff to the previously
+/// published revision.
 enum OperatorLoops {
     static let base = "/operator/loops"
 
@@ -39,6 +40,18 @@ enum OperatorLoops {
             guard let decision = LoopReview.Decision(rawValue: form.decision) else { throw APIError.validation("Choose approve, request changes or reject.") }
             let updated = try await LoopPublicationService(db: req.db, ctx: req.ctx).review(revisionId: id, reviewerId: p.user.id!, decision: decision, reason: form.reason)
             return DashboardResponses.redirect("\(base)/revisions/\(id.uuidString.lowercased())?lm=\(updated.state)")
+        }
+        pages.get("operator", "loops", "revisions", ":id", "preview") { req -> Response in
+            _ = try principal(req)
+            guard let revision = try await LoopRevisionRecord.find(try req.uuid("id"), on: req.db),
+                  let business = try await BusinessRecord.find(revision.businessId, on: req.db) else { throw APIError.notFound }
+            guard let definition = LoopDefinition.parse(Data(revision.definitionJSON.utf8)).definition else {
+                return LoopWebRenderer.response(screens: [], notice: "The definition could not be read.")
+            }
+            // The business's own approved kit only (scoped by the revision's business), exactly as devices resolve it.
+            let brand = try await LoopPreview.brand(for: definition, businessId: revision.businessId, on: req.db)
+            let screens = await LoopPreview.screens(definition: definition, business: business, brand: brand, now: req.ctx.now)
+            return LoopWebRenderer.response(screens: screens, entryPoints: definition.entryPoints)
         }
         pages.get("operator", "loops", "publications", ":id") { req in try await publication(req) }
         pages.post("operator", "loops", "publications", ":id", "status") { req -> Response in
@@ -141,7 +154,6 @@ enum OperatorLoops {
             .filter(\.$state ~~ [LoopRevisionState.published.rawValue, LoopRevisionState.superseded.rawValue]).filter(\.$revision < revision.revision)
             .sort(\.$revision, .descending).first()
         let diff = previous.map { Self.diff(old: $0.definitionJSON, new: revision.definitionJSON) } ?? ["First revision: no published revision to compare."]
-        let preview = await Self.preview(revision: revision, business: business)
         var checklist = """
         <ul class="plain sm"><li>Wording matches the intent and makes no promise the business may not keep.</li>\
         <li>Data collected is necessary; nothing health-related, no secrets, card, bank or government id data (FX-4, FX-5).</li>\
@@ -163,11 +175,13 @@ enum OperatorLoops {
         <div class="card"><h2>\(DashboardUI.esc(business.displayName)) · revision \(revision.revision) <span class="badge">\(DashboardUI.esc(revision.state))</span></h2>\
         <p class="sm">Category \(DashboardUI.esc(business.category)) · risk \(DashboardUI.esc(revision.riskClass)) · review \(DashboardUI.esc(revision.requiredReview)) · rule set \(revision.ruleSetVersion)</p>\
         \(DashboardFormat.table(["Rule", "Where", "Kind"], hits, empty: "No rule hits.", caption: "Automated checks"))</div>\
-        <div class="card"><h2>Preview, not exactly what customers see</h2>\(preview)</div>\
+        <div class="card"><h2>Preview, not exactly what customers see</h2><p class="mu sm">Rendered by the web renderer from the same presentation tree devices build, \
+        with the business's own approved Brand Kit if the Loop names one.</p><iframe title="Preview of revision \(revision.revision), not exactly what customers see" \
+        src="\(base)/revisions/\(id.uuidString.lowercased())/preview" sandbox="" referrerpolicy="no-referrer" width="760" height="900" loading="lazy"></iframe></div>\
         <div class="card"><h2>Changes since the published revision</h2><pre class="sm">\(DashboardUI.esc(diff.joined(separator: "\n")))</pre></div>\
         <div class="card"><h2>Reviews</h2>\(DashboardFormat.table(["Stage", "Decision", "Reason", "When"], reviewRows, caption: "Review history"))</div>\(decide)
         """
-        return DashboardUI.operatorPage(p, title: "Loop review", active: base, flash: flash(req), body: body)
+        return DashboardUI.operatorPage(p, title: "Loop review", active: base, flash: flash(req), body: body, frames: true)
     }
 
     private static func publication(_ req: Request) async throws -> Response {
@@ -214,51 +228,7 @@ enum OperatorLoops {
         return DashboardUI.operatorPage(p, title: "Published Loop", active: base, flash: flash(req), body: body)
     }
 
-    // MARK: Preview and diff
-
-    /// The tree customers would see for each step, from a preview manifest signed by a throwaway key that no device pins.
-    static func preview(revision: LoopRevisionRecord, business: BusinessRecord) async -> String {
-        guard let definition = LoopDefinition.parse(Data(revision.definitionJSON.utf8)).definition else { return "<p class=\"mu\">The definition could not be read.</p>" }
-        let key = SoftwareP256SigningKey()
-        guard let kid = try? KeyIdentifier.make(key.publicKey.signingKey()) else { return "" }
-        let now = Date()
-        let from = Int64(now.timeIntervalSince1970)
-        let manifest = LoopPublicationManifest(publisherType: .business, publisherBusinessId: BusinessID(business.id!), publishedDefinitionId: LoopPublicationID(UUID()),
-                                               revision: Int64(revision.revision), definitionHash: revision.definitionHash, validFrom: from, notAfter: from + 3600, kid: kid)
-        guard let compact = try? await manifest.sign(with: key) else { return "" }
-        let record = VerifiedBusinessRecord(id: BusinessID(business.id!), displayName: business.displayName, verificationStatus: business.status,
-                                            category: BusinessCategory(rawValue: business.category))
-        let context = LoopPresentationContext(manifest: compact, pinnedKeys: [PinnedManifestKey(kid: kid, publicKey: key.publicKey)], definition: definition,
-                                              instanceBusinessId: BusinessID(business.id!), publisher: record, now: now)
-        var html = ""
-        for step in definition.steps {
-            let tree = PresentationBuilder.build(context, phase: .step(step.id, outcome: step.type == .result ? .pending : nil))
-            html += "<section aria-label=\"Step \(DashboardUI.esc(step.id))\" class=\"card\"><h3>Step \(DashboardUI.esc(step.id))</h3>\(render(tree.root))</section>"
-            for action in step.actions {
-                guard case .registered(let definition) = LoopActionRegistry.v1.resolve(action.action), definition.confirmation != nil else { continue }
-                let confirm = PresentationBuilder.build(context, phase: .confirm(stepId: step.id, actionId: action.id))
-                html += "<section aria-label=\"Confirmation \(DashboardUI.esc(action.id))\" class=\"card\"><h3>Confirmation for \(DashboardUI.esc(action.id))</h3>\(render(confirm.root))</section>"
-            }
-        }
-        return html
-    }
-
-    static func render(_ node: PresentationNode) -> String {
-        switch node {
-        case .screen(let s): return "<div><p><strong>\(DashboardUI.esc(s.title))</strong></p>\(s.children.map(render).joined())</div>"
-        case .header(let h): return "<h4>\(DashboardUI.esc(h.text))</h4>"
-        case .attributionBar(let a): return "<p class=\"badge ok\">\(DashboardUI.esc(a.text))</p>"
-        case .text(let t): return "<p>\(DashboardUI.esc(t.text))</p>"
-        case .fieldGroup(let g): return "<div>\(g.children.map(render).joined())</div>"
-        case .choice(let c): return "<p>\(DashboardUI.esc(c.label)): \(c.options.map { DashboardUI.esc($0.label) }.joined(separator: " / "))</p>"
-        case .input(let i): return "<p>\(DashboardUI.esc(i.label)) [\(DashboardUI.esc(i.input))]</p>"
-        case .actionBar(let b): return "<p>\(b.actions.map { "<span class=\"badge\">\(DashboardUI.esc($0.label))</span>" }.joined(separator: " "))</p>"
-        case .confirmationPanel(let c): return "<p><strong>\(DashboardUI.esc(c.title))</strong> \(DashboardUI.esc(c.statement)) \(DashboardUI.esc(c.effect))</p>"
-        case .outcomeStatus(let o): return "<p class=\"mu\">\(DashboardUI.esc(o.text))</p>"
-        case .moduleSlot: return ""
-        case .notice(let n): return "<p class=\"notice\">\(DashboardUI.esc(n.text))</p>"
-        }
-    }
+    // MARK: Diff
 
     /// A line diff of the pretty-printed canonical JSON (good enough to spot what changed between two small documents).
     static func diff(old: String, new: String) -> [String] {

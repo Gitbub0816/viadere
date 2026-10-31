@@ -125,6 +125,8 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
     case manageInbox
     /// Submit Loop revisions for Viadere review. There is no business permission that publishes (FX-3).
     case submitLoops
+    /// Read Loops and Loop Studio drafts (report, preview, review status) without editing or submitting (WP-3.7).
+    case viewLoops
     /// Brand Kit Studio (WP-2.5): upload images, edit kits and the schedule, submit for Viadere review. Never publishes unreviewed content.
     case manageBrandKits
 
@@ -162,6 +164,7 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
         case .viewInbox: [.owner, .orgAdmin, .messagingOperator, .auditor]
         case .manageInbox: [.owner, .orgAdmin, .messagingOperator]
         case .submitLoops: [.owner, .orgAdmin, .developer]
+        case .viewLoops: [.owner, .orgAdmin, .developer, .messagingOperator, .auditor]
         case .manageBrandKits: [.owner, .orgAdmin]
         }
     }
