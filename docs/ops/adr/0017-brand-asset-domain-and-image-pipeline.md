@@ -1,6 +1,6 @@
 # ADR-0017: Brand asset domain and image pipeline (PNG and JPEG only, re-encoded, SVG refused)
 
-- **Status:** proposed (2026-10-30)
+- **Status:** accepted for Phase 2 (2026-10-31; implemented: `Server/.../BrandKits/BrandImagePipeline.swift`, swift-png 4.5.2 and swift-jpeg 2.1.0, pure Swift; ingestion runs in the api with a concurrency bound rather than a worker, see SECURITY.md §2.93)
 - **Plan reference:** `docs/FEATURE-EXPANSION-PLAN-v4.md` sections 4.6, conflicts K6, K8, WP-2.1, WP-2.2, open decisions O4, O9, O11; spec B2.2, B2.3, B4
 - **Related:** `SECURITY.md` §2.93, `Packages/ViadereCore/Sources/ViadereCore/BrandKits/BrandAssetPolicy.swift`, WP-C3 (`LINK_DOMAIN` injection pattern), WP-B2 (`ObjectStore`, Blob adapter, managed identity)
 - **Review:** after device profiling (O4); if the owner asks for SVG logos (WP-2.9)

@@ -211,3 +211,16 @@ Migrations `Organization.v1` and `Surfaces.v1`. No Loops or Brand Kit table exis
 | `business_surfaces` | a business's module layout versions (module ids and order only), who published | OPS | | none | Deleted with the tenant (`TenantRights`) | no customer data |
 
 The Alerts and Benefits lists are read models over existing tables; they store nothing beyond the rows above.
+
+## 9. Addendum (2026-10-31, feature expansion v4 Phase 2: Brand Kits)
+
+Migration `BrandKits.v1`. Business-supplied appearance data only; no customer data except the pin column.
+
+| Table / store | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `brand_assets` | per image: business, SHA-256, slot, size, review state and note, uploader and reviewer ids | OPS | | none | Deleted with the tenant (`TenantRights`) | rejected uploads are not stored (audit event only) |
+| `brand_kits` | per kit: identifier, name, tokens, frame, image ids, approved snapshot, versions, review state and note | OPS | | none | Deleted with the tenant | |
+| `brand_kit_schedules` | per business: schedule JSON (time zone, windows, rotation weights) | OPS | | none | Deleted with the tenant | |
+| `brand_manifests` | every signed manifest version (canonical JSON, JWS, hash, kid, lifetime) or a withdrawal | OPS | | integrity by signature | Deleted with the tenant | gap: no age-based purge of superseded versions yet |
+| `interactions.brand_kit_pin` | the kit id pinned to an interaction | OPS | | none | With the interaction row | |
+| Blob container `brand-assets` | re-encoded PNGs (`brand/{business}/{sha256}.png`), no metadata | OPS | | private container, Entra only, create-only writes | **gap**: blobs are not deleted with the tenant or after a takedown (no delete path in the store); never served without an approved row | add a purge job |
