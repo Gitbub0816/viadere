@@ -118,14 +118,14 @@ public enum ContractHash {
         return isLowerHex64(String(value.dropFirst(7)))
     }
 
-    static func isLowerHex64(_ value: String) -> Bool {
+    public static func isLowerHex64(_ value: String) -> Bool {
         value.utf8.count == 64 && value.utf8.allSatisfy { ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66) }
     }
 }
 
 extension JSONValue {
     /// Decodes JSON bytes into a `JSONValue`, refusing floating point anywhere (contracts carry integers only).
-    static func parseContract(_ data: Data) -> JSONValue? {
+    public static func parseContract(_ data: Data) -> JSONValue? {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: data), !value.containsFloatingPoint else { return nil }
         return value
     }

@@ -49,6 +49,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | swift-certificates / swift-asn1 / swift-nio-ssl | 1.21.1 / 1.7.3 / 2.37.5 | |
 | async-http-client | 1.36.2 | |
 | APNSwift | 8.0.0 | |
+| swift-png / swift-jpeg | 4.5.2 / 2.1.0 | Brand Kit image ingestion (WP-2.2, ADR-0017): pure-Swift PNG decode/encode and JPEG decode, no C codec. Latest tags checked 2026-10-31 (git tags; Swift Package Index lists both building on Swift 6.4, Linux). Transitive: rarestype/h 1.0.1 |
 | PostgreSQL | 18.6 | Docker Compose (`postgres:18-alpine`) and production; server suite verified on 18.6 |
 | Container base | `swift:6.4.1-resolute` (build) / `ubuntu:26.04` (runtime) | Ubuntu 26.04 LTS is the newest LTS the Swift image supports; both stages on the same LTS |
 | Python (tooling only) | 3.15.x | |

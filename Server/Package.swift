@@ -24,6 +24,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5"),
         // Webhook delivery pins the vetted IP address with `dnsOverride` (the SSRF defence against DNS rebinding).
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.36.2"),
+        // Brand Kit asset ingestion (WP-2.2, ADR-0017): memory-safe pure-Swift PNG decode/encode and JPEG decode. No C codecs, no shell-outs.
+        .package(url: "https://github.com/tayloraswift/swift-png.git", from: "4.5.2"),
+        .package(url: "https://github.com/tayloraswift/swift-jpeg.git", from: "2.1.0"),
     ],
     targets: [
         .target(
@@ -42,6 +45,8 @@ let package = Package(
                 .product(name: "SwiftASN1", package: "swift-asn1"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "PNG", package: "swift-png"),
+                .product(name: "JPEG", package: "swift-jpeg"),
             ]
         ),
         .executableTarget(
@@ -57,6 +62,7 @@ let package = Package(
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
                 .product(name: "X509", package: "swift-certificates"),
                 .product(name: "SwiftASN1", package: "swift-asn1"),
+                .product(name: "JPEG", package: "swift-jpeg"),
             ],
             exclude: ["Fixtures"]  // read by path (#filePath), not bundled
         ),
