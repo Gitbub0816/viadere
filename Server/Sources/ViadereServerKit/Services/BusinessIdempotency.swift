@@ -110,12 +110,15 @@ struct BusinessIdempotency {
         // Cancelling (or replaying a cancel of) an approval needs the approval capability, like issuing it did.
         try await PolicyService(db: db, ctx: ctx).enforce(PolicyInput(Capability.required(forInteractionKind: InteractionKind(rawValue: existing.kind))),
                                                           principal: principal, auditAllowed: false)
-        return try await once(businessId: businessId.uuid, operation: .interactionCancel, key: key, requestHash: hash, sealResult: false,
+        let result = try await once(businessId: businessId.uuid, operation: .interactionCancel, key: key, requestHash: hash, sealResult: false,
                               perform: { tx in (try await InteractionService(db: tx, ctx: ctx).cancel(principal: principal, id: id), id.uuid) },
                               replay: { _ in
                                   let record = try await InteractionService(db: self.db, ctx: ctx).record(id: id, businessId: businessId, livemode: livemode)
                                   return try InteractionService(db: self.db, ctx: ctx).outcome(record)
                               })
+        // The cancel (or expiry) committed inside `once`: end a decision Live Activity now (a no-op once its tokens are used).
+        if result.value.status != .pending { await InteractionService(db: db, ctx: ctx).endDecisionActivity(id.uuid) }
+        return result
     }
 
     /// Wipes one-time secrets that outlived their replay window.

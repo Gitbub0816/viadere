@@ -169,6 +169,8 @@ public enum InteractionValidation {
         case .status(let p):
             text(p.title, "payload.title", max: Limits.shortText, required: true, identity: true)
             text(p.body, "payload.body", max: Limits.longText)
+            // Decision activities are Viadere's own (with Lock Screen buttons); a business status can never supply one.
+            if p.liveActivity?.isDecision == true { issues.append(Issue(.invalidValue, "payload.liveActivity")) }
         case .reward(let p):
             text(p.title, "payload.title", max: Limits.shortText, required: true, identity: true)
             text(p.details, "payload.details", max: Limits.longText)

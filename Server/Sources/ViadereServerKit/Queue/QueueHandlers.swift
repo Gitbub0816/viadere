@@ -135,8 +135,12 @@ enum QueueHandlers {
         guard record.businessId == envelope.tenant else { return .deadLetter(reason: "tenant_mismatch") }
         guard record.statusValue == .pending else { return .done }
         if record.expiresAt > ctx.now { return .retry(at: record.expiresAt) }
-        _ = try await InteractionService(db: tx, ctx: ctx).expireIfNeeded(record)
-        return .done
+        guard try await InteractionService(db: tx, ctx: ctx).expireIfNeeded(record), let id = record.id else { return .done }
+        // A decision Live Activity ends only once the expiry has committed.
+        return .afterCommit { db, ctx in
+            await InteractionService(db: db, ctx: ctx).endDecisionActivity(id)
+            return nil
+        }
     }
 
     /// Approve v2 expiries: approval requests (scheduled at `expires_at` on creation) and link sessions (scheduled at `expires_at` and at the end of

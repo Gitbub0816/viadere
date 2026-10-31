@@ -249,11 +249,16 @@ public enum ChannelRenderer {
 
     // MARK: Native notifications
 
+    /// True when a native rendering must finish in the app (assurance above `.deviceSignature`: step-up, Face ID or passcode). The
+    /// notification's `requiresSecureFlow` and decision Live Activity eligibility (`LiveActivityPolicy.isDecisionEligible`) share this rule.
+    public static func requiresSecureFlow(_ interaction: Interaction) -> Bool {
+        interaction.requiredAssurance > .deviceSignature
+    }
+
     /// Renders an actionable notification. For assurance above `.deviceSignature`, approve
     /// actions open the app so the device can perform biometric/passcode signing.
     public static func notification(_ interaction: Interaction, business: BusinessSummary) -> NotificationRendering {
-        let required = interaction.requiredAssurance
-        let secure = required > .deviceSignature
+        let secure = requiresSecureFlow(interaction)
         func action(_ id: String, _ title: String, _ style: NotificationActionSpec.Style = .normal,
                     auth: Bool = true, foreground: Bool = false) -> NotificationActionSpec {
             NotificationActionSpec(identifier: "viadere.\(id)", title: title, style: style, requiresAuthentication: auth, opensApp: foreground)

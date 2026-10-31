@@ -166,6 +166,9 @@ struct RelationshipService {
         guard record.isActive else { return }
         let now = ctx.now
         let businessId = BusinessID(record.businessId)
+        // Read before the transaction; ending is a no-op for any that did not end up cancelled.
+        let pendingIds = try await InteractionRecord.query(on: db).filter(\.$relationshipId == record.id!)
+            .filter(\.$status == InteractionStatus.pending.rawValue).all().compactMap(\.id)
         try await db.transaction { tx in
             record.status = "disconnected"
             record.disconnectedAt = now
@@ -186,6 +189,9 @@ struct RelationshipService {
                 actor: AuditActor(kind: .consumer, id: consumer.description), consumerId: consumer, businessId: businessId,
                 subjectType: "relationship", subjectId: relationshipId.description)
         }
+        // Withdrawn requests end their decision Live Activities after the commit.
+        let service = InteractionService(db: db, ctx: ctx)
+        for id in pendingIds { await service.endDecisionActivity(id) }
     }
 }
 

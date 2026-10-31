@@ -194,6 +194,7 @@ struct RCSInbound {
             default: return try await reject(.notPending, interaction: interactionId, business: businessId)
             }
         }
+        await InteractionService(db: db, ctx: ctx).endDecisionActivity(interactionId)
         return .accepted
     }
 }

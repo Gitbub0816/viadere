@@ -46,8 +46,10 @@ public enum PushOutcome: Sendable, Equatable {
 
 /// An ActivityKit push (`apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivity`).
 ///
-/// The only content is `LiveActivityStatus` (an order, delivery, flight or appointment state), so it is never marketing and
-/// never carries more than the Live Activity already shows. `start` also carries the generic attributes and a neutral alert.
+/// The only content is `LiveActivityStatus` (an order, delivery, flight or appointment state, or a decision's neutral state), so it
+/// is never marketing and never carries more than the Live Activity already shows. A decision state carries no business text at all
+/// (interaction id, kind, expiry and stage only; the app enriches it on the device). `start` also carries the generic attributes and a
+/// neutral alert.
 public struct LiveActivityPush: Sendable, Equatable {
     public enum Event: String, Sendable { case start, update, end }
 
@@ -77,12 +79,18 @@ public struct LiveActivityPush: Sendable, Equatable {
     /// Neutral alert shown when an activity is started remotely.
     public var alertTitle: String?
     public var alertBody: String?
+    /// Seconds since 1970 after which the system shows the content as stale (a decision's expiry). A start push is not delivered after it.
+    public var staleDate: Int?
+    /// Seconds since 1970 when an ended activity leaves the Lock Screen (`end` only; `nil` = the system default).
+    public var dismissalDate: Int?
 
     public var topic: String { bundleId + ".push-type.liveactivity" }
 
     public init(deviceToken: String, environment: APNsTokenRegistration.Environment, bundleId: String, event: Event,
                 content: LiveActivityStatus, timestamp: Int, attributes: Attributes? = nil, alertTitle: String? = nil,
-                alertBody: String? = nil) {
+                alertBody: String? = nil, staleDate: Int? = nil, dismissalDate: Int? = nil) {
+        self.staleDate = staleDate
+        self.dismissalDate = dismissalDate
         self.deviceToken = deviceToken
         self.environment = environment
         self.bundleId = bundleId

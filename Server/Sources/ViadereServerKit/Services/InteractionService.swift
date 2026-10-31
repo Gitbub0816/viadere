@@ -231,6 +231,7 @@ struct InteractionService {
         _ = try await AuditService(db: db, ctx: ctx).record("interaction.cancelled", actor: AuditActor(kind: .system),
             consumerId: ConsumerID(record.consumerId), businessId: outcome.businessId, subjectType: "interaction",
             subjectId: outcome.interactionId.description)
+        await endDecisionActivity(record)
         return true
     }
 
@@ -250,6 +251,7 @@ struct InteractionService {
             .set(\.$expiryNotified, to: true).update()
         try await WebhookService(db: db, ctx: ctx).enqueue(.interactionExpired, businessId: outcome.businessId, payload: outcome,
                                                            opaque: OpaqueWebhookEvent(requestId: outcome.interactionId.description, resultRef: nil))
+        await endDecisionActivity(record)
         return true
     }
 
@@ -471,7 +473,22 @@ struct InteractionService {
                     subjectType: "interaction", subjectId: id.description)
             }
         }
+        await endDecisionActivity(id.uuid)
         return outcome
+    }
+
+    /// Ends a decision Live Activity once the interaction's final status has committed (no-op without an update token). Inside a
+    /// transaction it does nothing: that caller ends it after its commit (`QueueHandlers.interactionExpire`, `BusinessIdempotency`,
+    /// `RelationshipService.disconnect`, `RCSInbound`), so a push never announces a change that could still roll back.
+    func endDecisionActivity(_ interactionId: UUID) async {
+        guard !db.inTransaction else { return }
+        await LiveActivityService(db: db, ctx: ctx).endDecision(interactionId: interactionId)
+    }
+
+    /// Same, skipping the lookups for kinds that never have a decision activity (the expiry sweep runs this per row).
+    private func endDecisionActivity(_ record: InteractionRecord) async {
+        guard [InteractionKind.confirm.rawValue, InteractionKind.choose.rawValue].contains(record.kind), let id = record.id else { return }
+        await endDecisionActivity(id)
     }
 
     // MARK: Push
@@ -519,6 +536,11 @@ struct InteractionService {
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }
+            }
+            // An eligible confirm/choose also gets a decision Live Activity (§2.16), under the same gate and never when muted. Only the
+            // consumer's own devices; the content carries no business text.
+            if !quietFor.contains(record.consumerId) {
+                await LiveActivityService(db: db, ctx: ctx).startDecision(record: record, interaction: interaction, business: summary)
             }
         } catch {
             // Push is best effort; the interaction remains available through the authenticated API.

@@ -89,6 +89,99 @@ struct LiveActivityService {
         }
     }
 
+    // MARK: Decision activities (docs/SECURITY.md §2.16)
+
+    /// Seconds an ended decision activity stays on the Lock Screen showing its stage before it is dismissed.
+    static let decisionDismissalDelay = 8
+    /// The start alert of a decision activity: as neutral as the interaction's own push (`PushPayloadBuilder`).
+    static let decisionAlertBody = "You have a new request."
+
+    /// Starts a decision activity (Lock Screen buttons) for an eligible `confirm` / `choose` on the consumer's own app devices.
+    ///
+    /// Called by `InteractionService.push` only after the messaging gate allowed the push and only when the person has not muted the
+    /// business, so it follows exactly the same rules. The content is the neutral `DecisionActivityState` (`LiveActivityPolicy`): no title,
+    /// details, prompt, option labels or reference ever enter it; the app fetches and adds those itself. Delegates never get one.
+    func startDecision(record: InteractionRecord, interaction: Interaction, business summary: BusinessSummary) async {
+        guard let state = LiveActivityPolicy.neutralDecisionState(for: interaction, livemode: record.livemode) else { return }
+        do {
+            let consumerId = record.consumerId
+            // App devices only: an App Clip can never decide, so it never gets buttons.
+            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$revokedAt == nil).all()
+                .filter { $0.kind == .app }
+            let deviceIds = devices.compactMap(\.id)
+            guard !deviceIds.isEmpty else { return }
+            let startTokens = try await LiveActivityTokenRecord.query(on: db).filter(\.$consumerId == consumerId)
+                .filter(\.$kind == LiveActivityTokenRegistration.Kind.pushToStart.rawValue).filter(\.$deviceId ~~ deviceIds).all()
+            guard !startTokens.isEmpty else { return }
+            let routes = try await routing(deviceIds)
+            let timestamp = Int(ctx.now.timeIntervalSince1970)
+            let attributes = LiveActivityPush.Attributes(businessName: summary.displayName, businessId: summary.id.description,
+                                                         interactionId: interaction.id.description)
+            for token in startTokens {
+                let (environment, bundle) = routes(token.deviceId)
+                let push = LiveActivityPush(deviceToken: token.pushToken, environment: environment, bundleId: bundle, event: .start,
+                                            content: .decision(state.neutral), timestamp: timestamp, attributes: attributes,
+                                            alertTitle: PushPayloadBuilder.genericTitle, alertBody: Self.decisionAlertBody,
+                                            staleDate: Int(interaction.expiresAt.timeIntervalSince1970))
+                if await ctx.apns.sendLiveActivity(push) == .tokenInvalid {
+                    try await LiveActivityTokenRecord.query(on: db).filter(\.$id == token.id!).delete()
+                }
+            }
+        } catch {
+            // Best effort: the notification and the app remain the way to answer.
+        }
+    }
+
+    /// Ends the decision activity of an interaction that is no longer pending (answered, expired, withdrawn), on every device that
+    /// registered an update token for it. The content is the neutral state with the final stage, never business text. Each token is
+    /// used once and then deleted, so a repeated call sends nothing. Call it after the status change has committed.
+    func endDecision(interactionId: UUID) async {
+        do {
+            guard let record = try await InteractionRecord.find(interactionId, on: db), record.livemode, record.statusValue != .pending else { return }
+            let kind: DecisionActivityState.Kind
+            switch InteractionKind(rawValue: record.kind) {
+            case .confirm: kind = .confirm
+            case .choose: kind = .choose
+            default: return
+            }
+            let tokens = try await LiveActivityTokenRecord.query(on: db).filter(\.$consumerId == record.consumerId)
+                .filter(\.$kind == LiveActivityTokenRegistration.Kind.update.rawValue).filter(\.$businessId == record.businessId)
+                .filter(\.$interactionId == interactionId).all()
+            guard !tokens.isEmpty else { return }
+            let live = Set(try await DeviceRecord.query(on: db).filter(\.$id ~~ Set(tokens.map(\.deviceId))).filter(\.$revokedAt == nil).all().compactMap(\.id))
+            let routes = try await routing(Array(live))
+            let state = DecisionActivityState(interactionId: InteractionID(interactionId), kind: kind, expiresAt: record.expiresAt,
+                                              stage: DecisionActivityState.stage(for: record.statusValue))
+            let timestamp = Int(ctx.now.timeIntervalSince1970)
+            for token in tokens {
+                if live.contains(token.deviceId) {
+                    let (environment, bundle) = routes(token.deviceId)
+                    let push = LiveActivityPush(deviceToken: token.pushToken, environment: environment, bundleId: bundle, event: .end,
+                                                content: .decision(state), timestamp: timestamp,
+                                                dismissalDate: timestamp + Self.decisionDismissalDelay)
+                    // A transient failure keeps the token so a later call can still end the activity (its stale date ends it anyway).
+                    if await ctx.apns.sendLiveActivity(push) == .failed { continue }
+                }
+                try await LiveActivityTokenRecord.query(on: db).filter(\.$id == token.id!).delete()
+            }
+        } catch {
+            // Best effort: the activity also goes stale at the interaction's expiry, and the app reconciles it on launch.
+        }
+    }
+
+    /// APNs environment and bundle for each device, from its registered APNs token (else the server's configuration).
+    private func routing(_ deviceIds: [UUID]) async throws -> @Sendable (UUID) -> (APNsTokenRegistration.Environment, String) {
+        let tokens = deviceIds.isEmpty ? [] : try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).all()
+        let byDevice = Dictionary(tokens.map { ($0.deviceId, (APNsTokenRegistration.Environment(rawValue: $0.environment) ?? .production, $0.bundleId)) },
+                                  uniquingKeysWith: { first, _ in first })
+        let fallbackEnvironment: APNsTokenRegistration.Environment = ctx.config.apns.map { $0.useSandbox ? .sandbox : .production } ?? .production
+        let appBundle = ctx.config.appBundleID
+        return { device in
+            guard let (environment, bundle) = byDevice[device] else { return (fallbackEnvironment, appBundle) }
+            return (environment, bundle.isEmpty ? appBundle : bundle)
+        }
+    }
+
     // MARK: Token registration
 
     static let maxTokensPerDevice = 40

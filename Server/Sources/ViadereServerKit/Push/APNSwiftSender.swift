@@ -53,15 +53,18 @@ public final class APNSwiftSender: APNsSender, Sendable {
             switch push.event {
             case .start:
                 guard let attributes = push.attributes else { return .failed }
+                // A start for something that is already stale (an expired decision) is never worth delivering late.
+                let startExpiry = APNSNotificationExpiration.timeIntervalSince1970InSeconds(min(push.timestamp + 3600, push.staleDate ?? Int.max))
                 let notification = APNSStartLiveActivityNotification(
-                    expiration: expiration, priority: .immediately, appID: push.bundleId, contentState: push.content,
-                    timestamp: push.timestamp, attributes: attributes, attributesType: LiveActivityPush.attributesType,
+                    expiration: startExpiry, priority: .immediately, appID: push.bundleId, contentState: push.content,
+                    timestamp: push.timestamp, staleDate: push.staleDate, attributes: attributes, attributesType: LiveActivityPush.attributesType,
                     alert: .init(title: .raw(push.alertTitle ?? "Viadere"), body: .raw(push.alertBody ?? "There is an update.")))
                 try await client.sendStartLiveActivityNotification(notification, pushToStartToken: push.deviceToken)
             case .update, .end:
+                let dismissal: APNSLiveActivityDismissalDate = push.event == .end ? (push.dismissalDate.map { .timeIntervalSince1970InSeconds($0) } ?? .none) : .none
                 let notification = APNSLiveActivityNotification(
                     expiration: expiration, priority: .immediately, topic: push.topic, contentState: push.content,
-                    event: push.event == .end ? .end : .update, timestamp: push.timestamp)
+                    event: push.event == .end ? .end : .update, timestamp: push.timestamp, dismissalDate: dismissal, staleDate: push.staleDate)
                 try await client.sendLiveActivityNotification(notification, deviceToken: push.deviceToken)
             }
             return .delivered

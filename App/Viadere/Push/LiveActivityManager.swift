@@ -10,6 +10,9 @@ import ViadereKit
 /// - Update tokens (`pushType: .token`) are registered per activity.
 /// - Push-to-start tokens (iOS 17.2+) are registered once, letting the server start an activity remotely.
 /// - Only genuinely ongoing, non-promotional events qualify (`LiveActivityPolicy` in ViadereCore).
+/// - Decision activities (docs/SECURITY.md §2.16) arrive by push-to-start with a neutral state (no business text). When one appears,
+///   the app fetches the interaction over the authenticated API and writes the sanitized title, detail and options into the activity
+///   itself (`LiveDecisionEnrichment`). If the fetch fails the activity keeps the generic wording. Its buttons run `ViadereDecisionIntent`.
 @MainActor
 final class LiveActivityManager {
     private let services: ViadereServices
@@ -47,6 +50,52 @@ final class LiveActivityManager {
                 await self.registerUpdateToken(activity: activity, token: token)
             }
         })
+        if case .decision = activity.content.state {
+            tasks.append(Task { [weak self] in await self?.enrichDecision(activity) })
+        }
+    }
+
+    // MARK: Decision activities
+
+    /// Seconds a finished decision stays on the Lock Screen showing its stage.
+    private static let decisionDismissalDelay: TimeInterval = 8
+
+    /// Adds the interaction's own (sanitized) text to a neutral decision activity, or ends it if it is no longer pending.
+    private func enrichDecision(_ activity: Activity<ViadereActivityAttributes>) async {
+        guard case .decision(let state) = activity.content.state, state.stage == .pending, !state.isEnriched,
+              state.interactionId.description == activity.attributes.interactionId else { return }
+        // A failed fetch leaves the generic wording ("{business} needs a quick decision", Decline and Open).
+        guard let envelope = try? await services.api.interaction(state.interactionId) else { return }
+        let enriched = LiveDecisionEnrichment.enriched(state, businessId: activity.attributes.businessId, from: envelope, now: Date())
+        if enriched.stage == .pending {
+            await activity.update(ActivityContent(state: .decision(enriched), staleDate: enriched.expiresAt))
+        } else {
+            await end(activity, stage: enriched.stage)
+        }
+    }
+
+    /// Shows the final stage of a decision activity and dismisses it shortly after. Called after a Lock Screen answer.
+    func finishDecision(interactionId: String, stage: DecisionActivityState.Stage) async {
+        for activity in Activity<ViadereActivityAttributes>.activities where activity.attributes.interactionId == interactionId {
+            await end(activity, stage: stage)
+        }
+    }
+
+    private func end(_ activity: Activity<ViadereActivityAttributes>, stage: DecisionActivityState.Stage) async {
+        guard case .decision(var state) = activity.content.state else { return }
+        state.stage = stage
+        await activity.end(ActivityContent(state: .decision(state), staleDate: nil),
+                           dismissalPolicy: .after(Date().addingTimeInterval(Self.decisionDismissalDelay)))
+    }
+
+    /// Ends decision activities whose interaction was answered elsewhere, withdrawn or expired while no end push arrived.
+    private func reconcileDecisions() async {
+        for activity in Activity<ViadereActivityAttributes>.activities {
+            guard case .decision(let state) = activity.content.state, state.stage == .pending else { continue }
+            if state.expiresAt <= Date() { await end(activity, stage: .expired); continue }
+            guard let envelope = try? await services.api.interaction(state.interactionId) else { continue }
+            if envelope.status != .pending { await end(activity, stage: DecisionActivityState.stage(for: envelope.status)) }
+        }
     }
 
     private func registerUpdateToken(activity: Activity<ViadereActivityAttributes>, token: Data) async {
@@ -74,6 +123,7 @@ final class LiveActivityManager {
     /// Reconciles the foreground list of in-progress statuses with running activities.
     func sync(_ statuses: [InteractionEnvelope]) async {
         for envelope in statuses { _ = await apply(envelope) }
+        await reconcileDecisions()
     }
 
     /// A silent push announced a status change: fetch it and start/update/end the activity.

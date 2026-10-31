@@ -95,6 +95,19 @@ public struct LiveActivityPresentation: Equatable, Sendable {
             case .cancelled: detail = "Cancelled"; compact = "Off"; progress = nil
             }
             if let provider = s.providerName ?? Optional(businessName), s.stage != .completed { detail += " · \(provider)" }
+        case .decision(let s):
+            // Viadere's own wording only: the decision's business text is drawn by `LiveDecisionPresentation`, never here.
+            headline = "Decision needed"
+            symbol = "checkmark.circle"
+            target = s.stage == .pending ? s.expiresAt : nil
+            isAlert = false
+            progress = nil
+            switch s.stage {
+            case .pending: detail = "\(businessName) needs a quick decision"; compact = "Decide"
+            case .answered: detail = "Answered"; compact = "Done"
+            case .expired: detail = "Expired"; compact = "Expired"
+            case .cancelled: detail = "Withdrawn by the business"; compact = "Off"
+            }
         }
         // Business-supplied references, notes and names were interpolated above: sanitize the finished strings.
         // The stage word always comes first in `detail`, so a long note is what gets cut.
@@ -136,6 +149,8 @@ public struct LiveActivityPresentation: Equatable, Sendable {
             case .departed: return "Next: arrival"
             case .landed, .cancelled, .diverted: return nil
             }
+        case .decision:
+            return "Next: answer here or open Viadere"
         case .appointment(let s):
             switch s.stage {
             case .upcoming: return "Next: check-in opens before your visit"

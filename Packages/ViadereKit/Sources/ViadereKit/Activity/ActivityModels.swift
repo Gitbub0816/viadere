@@ -220,7 +220,8 @@ public enum ActivityFeed {
 
         if case .status(let payload) = latest.interaction.payload {
             subtitle = payload.body
-            if let status = payload.liveActivity {
+            // A decision activity is never a business status (rejected by validation); ignore one defensively.
+            if let status = payload.liveActivity, !status.isDecision {
                 live = status
                 let presentation = LiveActivityPresentation(status: status, businessName: latest.business.displayName, now: now)
                 statusText = presentation.detail
@@ -231,6 +232,7 @@ public enum ActivityFeed {
                 case .delivery: category = .delivery
                 case .flight: category = .travel
                 case .appointment: category = .appointment
+                case .decision: break
                 }
                 if let target = presentation.target { date = target }
             }

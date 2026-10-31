@@ -63,6 +63,8 @@ public enum ActivityPresentation {
                 rows.append(PresentedDetail(label: "When", value: time(s.startsAt), emphasized: true))
                 if let provider = s.providerName { rows.append(PresentedDetail(label: "With", value: provider)) }
                 if let location = s.location { rows.append(PresentedDetail(label: "Where", value: location)) }
+            case .decision:
+                break
             }
         }
         // Tickets and confirmations that ride along with the item.
