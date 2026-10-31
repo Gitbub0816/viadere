@@ -259,6 +259,7 @@ enum ConsoleRoutes {
         ConsoleOrganization.register(pages)
         ProfileConsole.register(pages)
         ConsoleSurface.register(pages)
+        ConsoleInbox.register(pages)
         ConsoleDevelopers.register(pages)
         ConsoleSecurity.register(pages)
         ConsoleCompliance.register(pages)

@@ -79,4 +79,7 @@ templates, support).
 | `manageSupport` | x | x | x | x | x | x | x |  |  |
 | `approveChanges` | x | x | x |  |  |  |  |  |  |
 | `manageDataRequests` | x | x |  |  |  |  |  |  |  |
+| `viewInbox` | x | x |  |  |  | x |  |  | x |
+| `manageInbox` | x | x |  |  |  | x |  |  |  |
+| `submitLoops` | x | x |  | x |  |  |  |  |  |
 <!-- matrix:end -->

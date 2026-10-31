@@ -56,6 +56,8 @@ public struct AzureSettings: Sendable, Equatable {
     public var kdLogKey: String?
     /// `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY`: EC P-256 key for link-session descriptors (WP-C1).
     public var linkDescriptorKey: String?
+    /// `AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY`: EC P-256 key that signs Loop publication manifests only (WP-3.2, SECURITY.md §2.92).
+    public var loopPublicationKey: String?
     /// `AZURE_KEY_VAULT_AUDIT_HEAD_KEY`: EC P-256 key that signs exported audit heads (replaces `AUDIT_HEAD_KMS_KEY`).
     public var auditHeadKey: String?
     /// `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER`: the immutable audit-head container.
@@ -67,7 +69,7 @@ public struct AzureSettings: Sendable, Equatable {
     public init() {}
 
     /// Whether any Key Vault key is configured (the process then needs `AZURE_KEY_VAULT_URL` and a managed identity).
-    var usesKeyVault: Bool { [kekKey, kdLogKey, linkDescriptorKey, auditHeadKey].contains { $0 != nil } }
+    var usesKeyVault: Bool { [kekKey, kdLogKey, linkDescriptorKey, auditHeadKey, loopPublicationKey].contains { $0 != nil } }
 }
 
 extension ServerConfig {
@@ -84,7 +86,8 @@ extension ServerConfig {
             azure.keyVaultURL = raw
         }
         for (name, path) in [("AZURE_KEY_VAULT_KEK_KEY", \AzureSettings.kekKey), ("AZURE_KEY_VAULT_KD_LOG_KEY", \.kdLogKey),
-                             ("AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY", \.linkDescriptorKey), ("AZURE_KEY_VAULT_AUDIT_HEAD_KEY", \.auditHeadKey)] {
+                             ("AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY", \.linkDescriptorKey), ("AZURE_KEY_VAULT_AUDIT_HEAD_KEY", \.auditHeadKey),
+                             ("AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY", \.loopPublicationKey)] {
             guard let raw = value(name) else { continue }
             guard KMSKeyRef.parse(raw) != nil else { throw ServerConfigError.invalid("\(name) (a key name, optionally /version)") }
             azure[keyPath: path] = raw

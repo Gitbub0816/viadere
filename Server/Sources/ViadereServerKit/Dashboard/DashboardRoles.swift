@@ -119,6 +119,12 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
     case approveChanges
     /// Request the tenant's data export or deletion.
     case manageDataRequests
+    /// Hosted Loops inbox (WP-3.4): read items, which contain what customers entered.
+    case viewInbox
+    /// Act on inbox items: accept, reject, ask for information, assign, notes, operating hours.
+    case manageInbox
+    /// Submit Loop revisions for Viadere review. There is no business permission that publishes (FX-3).
+    case submitLoops
 
     var roles: Set<OrgRole> {
         switch self {
@@ -151,6 +157,9 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
         case .manageSupport: [.owner, .orgAdmin, .developer, .messagingOperator, .verificationAdmin, .securityAdmin, .billingAdmin]
         case .approveChanges: [.owner, .securityAdmin, .orgAdmin]
         case .manageDataRequests: [.owner, .orgAdmin]
+        case .viewInbox: [.owner, .orgAdmin, .messagingOperator, .auditor]
+        case .manageInbox: [.owner, .orgAdmin, .messagingOperator]
+        case .submitLoops: [.owner, .orgAdmin, .developer]
         }
     }
 }

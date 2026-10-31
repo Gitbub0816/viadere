@@ -78,6 +78,7 @@ struct BackgroundJobs {
         // Approve v2: overdue requests end with one opaque event each; stale enrollments expire.
         if ctx.config.approve.enabled { try await ApproveRequestService(db: db, ctx: ctx).expireDue() }
         try await IdentityMaintenance(db: db, ctx: ctx).run()
+        await guarded("loop-sweep") { try await LoopMaintenance(db: db, ctx: ctx).sweep() }
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
         if await gate("abuse-sweep", gated) {
             try await AbuseService(db: db, ctx: ctx).sweep()
@@ -94,6 +95,7 @@ struct BackgroundJobs {
         }
         if await gate("retention-purge", gated) {
             try await RetentionService(db: db, ctx: ctx).purge()
+            _ = try await LoopInbox(db: db, ctx: ctx).purgeClosed(before: ctx.now.addingTimeInterval(-ctx.config.loops.inboxRetention))
         }
         await guarded("operator-notices") { _ = try await OperatorNotices(db: db, ctx: ctx).deliverDue() }
         await guarded("consumer-exports") { _ = try await ConsumerExports(db: db, ctx: ctx).processQueued() }

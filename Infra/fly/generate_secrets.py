@@ -40,6 +40,7 @@ GENERATED = {
     "SUBJECT_REF_KEY": "bytes32",
     "KEY_DIRECTORY_LOG_KEY": "scalar",
     "LINK_DESCRIPTOR_SIGNING_KEY": "scalar",
+    "LOOP_PUBLICATION_SIGNING_KEY": "scalar",
     "EDGE_TOKEN": "token",
     "METRICS_TOKEN": "token",
 }
@@ -81,7 +82,7 @@ def p256_scalar():
 def generate(include_log_key=True):
     values = {}
     for name, kind in GENERATED.items():
-        if name in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY") and not include_log_key:
+        if name in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY", "LOOP_PUBLICATION_SIGNING_KEY") and not include_log_key:
             continue
         while True:
             if kind == "bytes32":
@@ -102,7 +103,7 @@ def validate(values):
     for name, kind in GENERATED.items():
         value = values.get(name)
         if value is None:
-            if name not in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY"):
+            if name not in ("KEY_DIRECTORY_LOG_KEY", "LINK_DESCRIPTOR_SIGNING_KEY", "LOOP_PUBLICATION_SIGNING_KEY"):
                 problems.append("%s is missing" % name)
             continue
         if kind == "bytes32":

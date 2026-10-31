@@ -23,6 +23,8 @@ enum PlatformFlag: String, CaseIterable, Sendable {
     case abuseThresholds = "abuse.thresholds"
     /// Bookkeeping: the time of the last successful audit-head export (`updated_at`).
     case auditExportMark = "audit.export_mark"
+    /// Plan 5.5: Loops kill switch. No new instances; existing ones show "paused" and nothing is actionable. Core features are unaffected.
+    case loops = "loops"
 
     var globalOnly: Bool { self != .webhooksPause && self != .messagingRestrict }
 }
@@ -234,7 +236,7 @@ struct PlatformFlags {
                 throw APIError.validation("Give a short status message (up to 200 characters).", details: ["message": "invalid"])
             }
             return message
-        case .signupConsumer, .signupBusiness, .inviteDashboard, .webhooksPause, .auditExportMark:
+        case .signupConsumer, .signupBusiness, .inviteDashboard, .webhooksPause, .auditExportMark, .loops:
             return "on"
         case .messagingRestrict:
             guard let restriction = try? JSONDecoder().decode(MessagingRestriction.self, from: Data(raw.utf8)),

@@ -35,6 +35,9 @@ struct QueueMessageType: Sendable {
     let requiresTenant: Bool
     /// Runs inside the message transaction. Must re-read state from the database and change it only by compare-and-swap.
     let claim: @Sendable (_ envelope: QueueEnvelope, _ tx: any Database, _ ctx: ServerContext) async throws -> QueueClaim
+    /// Runs (best effort) when a message of this type is dead-lettered, e.g. to mark a Loop delivery `unknown` (plan 4.5: a DLQ never reads
+    /// as delivered). Never executes the message's work.
+    var onDeadLetter: (@Sendable (_ envelope: QueueEnvelope, _ db: any Database, _ ctx: ServerContext) async throws -> Void)? = nil
 
     var key: String { "\(name)@\(version)" }
 }
@@ -49,7 +52,7 @@ struct QueueRegistry: Sendable {
 
     func type(for envelope: QueueEnvelope) -> QueueMessageType? { types["\(envelope.type)@\(envelope.version)"] }
 
-    static let standard = QueueRegistry(QueueHandlers.all)
+    static let standard = QueueRegistry(QueueHandlers.all + LoopQueue.all)
 }
 
 // MARK: - Outbox
@@ -221,6 +224,13 @@ struct QueueConsumer {
         try? await QueueDeadLetters.record(on: db, messageId: envelope?.id ?? UUID(uuidString: message.messageId), queue: message.queue.rawValue, type: envelope?.type,
                                            reason: reason, body: String(decoding: message.body, as: UTF8.self), deliveryCount: message.deliveryCount, now: ctx.now)
         try? await transport.deadLetter(message, reason: reason)
+        // Only for a known type whose tenant matched: a forged or malformed message never triggers the hook.
+        if let envelope, reason != "tenant_mismatch", reason != "wrong_queue", let type = registry.type(for: envelope), type.queue == message.queue,
+           let hook = type.onDeadLetter {
+            do { try await hook(envelope, db, ctx) } catch {
+                ctx.logger.warning("dead-letter hook failed", metadata: ["type": "\(type.name)", "error": "\(Swift.type(of: error))"])
+            }
+        }
         return .deadLettered(reason)
     }
 }

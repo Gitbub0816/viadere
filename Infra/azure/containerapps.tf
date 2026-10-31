@@ -74,13 +74,14 @@ locals {
 
   process_env = {
     api = merge(var.app_env, local.base_env, {
-      ROLE                                = "api"
-      AZURE_CLIENT_ID                     = azurerm_user_assigned_identity.workload["api"].client_id
-      DATABASE_USER                       = local.db_roles.api
-      RUN_BACKGROUND_JOBS                 = var.enable_worker ? "false" : "true" # (now) the in-process loop runs until WP-B3's worker exists
-      AZURE_KEY_VAULT_KEK_KEY             = "kek-data"
-      AZURE_KEY_VAULT_KD_LOG_KEY          = "kd-log-signing"
-      AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY = "link-descriptor"
+      ROLE                                 = "api"
+      AZURE_CLIENT_ID                      = azurerm_user_assigned_identity.workload["api"].client_id
+      DATABASE_USER                        = local.db_roles.api
+      RUN_BACKGROUND_JOBS                  = var.enable_worker ? "false" : "true" # (now) the in-process loop runs until WP-B3's worker exists
+      AZURE_KEY_VAULT_KEK_KEY              = "kek-data"
+      AZURE_KEY_VAULT_KD_LOG_KEY           = "kd-log-signing"
+      AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY  = "link-descriptor"
+      AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY = "loop-publication"
     })
     worker = merge(var.app_env, local.base_env, {
       ROLE            = "worker"

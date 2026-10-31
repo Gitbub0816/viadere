@@ -141,6 +141,8 @@ enum DashboardUI {
             NavItem(title: "Campaigns", path: "/dashboard/campaigns", permissions: [.manageCampaigns]),
             NavItem(title: "Consent", path: "/dashboard/consent", permissions: [.viewConsent]),
         ]),
+        NavSection(title: "Inbox", path: "/dashboard/inbox", permissions: [.viewInbox], children: []),
+        NavSection(title: "Loops", path: "/dashboard/loops", permissions: [.submitLoops], children: []),
         NavSection(title: "Verify", path: "/dashboard/verification", permissions: [.viewVerify], children: []),
         NavSection(title: "Approve", path: "/dashboard/approve", permissions: [.viewApprove], children: []),
         NavSection(title: "Security", path: "/dashboard/security", permissions: [.viewSecurity], children: [
@@ -172,7 +174,7 @@ enum DashboardUI {
 
     static let operatorNav: [(String, String)] = [
         ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"), ("Capability policy", "/operator/policy"),
-        ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"),
+        ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"), ("Loops", "/operator/loops"),
     ]
 
     static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {

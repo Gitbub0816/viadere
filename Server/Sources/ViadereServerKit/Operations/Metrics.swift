@@ -44,6 +44,16 @@ final class MetricsRegistry: @unchecked Sendable {
         case queueDuplicate = "queue_duplicate"
         case queueProcessed = "queue_processed"
         case outboxPublishFailed = "outbox_publish_failed"
+        // Hosted Loops (plan 5.5). Outcomes by state; refusals and DLQ-marked deliveries alert.
+        case loopOutcomeAccepted = "loop_outcome_accepted"
+        case loopOutcomeRejected = "loop_outcome_rejected"
+        case loopOutcomePending = "loop_outcome_pending"
+        case loopOutcomeTimedOut = "loop_outcome_timed_out"
+        case loopOutcomeUnknown = "loop_outcome_unknown"
+        case loopActionRefused = "loop_action_refused"
+        case loopPublished = "loop_published"
+        case loopAutoSuspended = "loop_auto_suspended"
+        case loopManifestSignFailed = "loop_manifest_sign_failed"
     }
 
     private let lock = NSLock()
@@ -138,6 +148,19 @@ struct MetricsService {
         }
         await gauge("viadere_businesses_suspended", "Suspended businesses.") {
             Double(try await BusinessRecord.query(on: db).filter(\.$verificationStatus == VerificationStatus.suspended.rawValue).count())
+        }
+        await gauge("viadere_loop_inbox_oldest_new_seconds", "Age of the oldest new hosted-inbox item (0 = none).") {
+            guard let oldest = try await InboxItemRecord.query(on: db).filter(\.$state == "new").sort(\.$createdAt, .ascending).first() else { return 0 }
+            return max(0, now.timeIntervalSince(oldest.createdAt))
+        }
+        await gauge("viadere_loop_delivery_dead_letters", "Dead-lettered loop-delivery messages retained.") {
+            Double(try await QueueDeadLetterRecord.query(on: db).filter(\.$queue == QueueName.loopDelivery.rawValue).count())
+        }
+        await gauge("viadere_loop_reviews_waiting", "Loop revisions waiting for Viadere review.") {
+            Double(try await LoopRevisionRecord.query(on: db).filter(\.$state == LoopRevisionState.inReview.rawValue).count())
+        }
+        await gauge("viadere_loops_switch", "1 while the platform loops kill switch is on.") {
+            await PlatformFlags(db: db, ctx: ctx).isStopped(.loops) ? 1 : 0
         }
         await gauge("viadere_maintenance_mode", "1 while maintenance (read-only) mode is on.") {
             try await PlatformFlags(db: db, ctx: ctx).maintenance() == nil ? 0 : 1

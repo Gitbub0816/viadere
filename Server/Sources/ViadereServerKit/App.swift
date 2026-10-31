@@ -37,8 +37,14 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
         guard let kms else { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL (for AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY)") }
         config.approve.linkDescriptorKey = try await KMSSigningKey.load(kms: kms, keyRef: ref)
     }
+    // The Loop publication key likewise (WP-3.2); elsewhere the environment secret `LOOP_PUBLICATION_SIGNING_KEY`.
+    if let ref = config.azure.loopPublicationKey {
+        guard let kms else { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL (for AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY)") }
+        config.loops.publicationKey = try await KMSSigningKey.load(kms: kms, keyRef: ref)
+    }
     // One key, one role, checked again now that Key Vault public keys are known.
     try config.requireDistinctSigningKeys()
+    try config.requireDistinctLoopKey()
     var auditStore = overrides.auditObjectStore
     if auditStore == nil, let export = config.operations.auditExport, export.kind == .azureBlob, let endpoint = export.endpoint {
         guard let tokens else { throw ServerConfigError.missing("a managed identity (for AZURE_AUDIT_BLOB_ENDPOINT)") }
