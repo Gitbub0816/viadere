@@ -42,6 +42,7 @@ enum PolicyOperatorRoutes {
         let pages = app.routes.grouped(DashboardPageErrorMiddleware()).grouped(DashboardAuthMiddleware(realm: .operator))
 
         pages.get("operator", "businesses", ":id", "entitlements") { req in try await entitlementsPage(req) }
+        ProfileOperatorRoutes.register(app)
         pages.post("operator", "businesses", ":id", "entitlements", "grant") { req -> Response in
             let (p, id, next) = try prepare(req, "/operator/businesses/%@/entitlements")
             guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: next) }
@@ -179,6 +180,7 @@ enum PolicyOperatorRoutes {
         \(snapshot.legacyApproval ? "" : "<label for=\"ld\">Days (1 to 180)</label><input id=\"ld\" name=\"expiresInDays\" type=\"number\" min=\"1\" max=\"180\" required>")\
         <label for="lj">Justification: why, and the plan to move to Approve v2 (20+ characters)</label><textarea id="lj" name="justification" maxlength="1000" required></textarea>\
         <button class="btn \(snapshot.legacyApproval ? "d" : "")" type="submit">\(snapshot.legacyApproval ? "Revoke legacy approval" : "Grant legacy approval")</button></form></div>\
+        <div class="card"><h2>Customer profile categories</h2><p>\(snapshot.profileCategories.isEmpty ? "None allowed." : DashboardUI.esc(snapshot.profileCategories.sorted().map(\.title).joined(separator: ", ")))</p><p><a class="btn s sm" href="/operator/businesses/\(id.uuidString.lowercased())/profile-categories">Review profile category requests</a></p></div>\
         <div class="card"><h2>History</h2>\(DashboardFormat.table(["Entitlement", "By", "When", "Justification", "State"], historyRows, empty: "No grants: Tier M defaults only.", caption: "Entitlement history"))</div>
         """
         return DashboardUI.operatorPage(p, title: "Entitlements", active: "/operator/businesses", subtitle: "Risk tiers and capabilities.", flash: flash(req), body: body)

@@ -119,6 +119,9 @@ enum ConsoleOrganization {
         steps += item(state.identityVerified, "3. Public identity", state.identityVerified ? "Handle and code issued." : "Issued when Viadere approves your application.")
         steps += item(state.contractsCurrent, "4. Agreements", state.contractsCurrent ? "All required agreements are accepted at their current version." : "\(outstanding.count) to accept. <a href=\"/dashboard/compliance\">Open Compliance &gt; Agreements</a>")
         steps += item(state.integrationComplete, "5. Integration", "Sandbox key \(state.sandboxKey ? "✓" : "○"), test customer \(state.testCustomer ? "✓" : "○"), test event \(state.testEvent ? "✓" : "○"). <a href=\"/dashboard/developers/sandbox\">Open the sandbox</a>")
+        let profileAllowed = try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: businessId).profileCategories
+        let profilePending = try await ProfileCategoryRequestRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$status == "pending").count()
+        steps += item(!profileAllowed.isEmpty, "Customer profile access", ProfileConsole.checklistDetail(allowed: profileAllowed, pending: profilePending))
         steps += item(state.securityContact, "Security contact", state.securityContact ? "Set." : "Add an operational security contact. <a href=\"/dashboard/security/alerts\">Security &gt; Alerts and contacts</a>")
         steps += item(state.goLive == .approved, "6. Go-live review", goLiveDetail(row: row, state: state))
         steps += item(state.goLive == .approved && !state.suspended, "7. Ongoing assurance", assuranceDetail(row: row, state: state, grace: req.ctx.config.operations.assuranceGrace))

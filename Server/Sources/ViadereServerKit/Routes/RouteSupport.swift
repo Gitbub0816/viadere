@@ -68,5 +68,6 @@ enum Routes {
         MetricsRoutes.register(app)
         ConsumerExportRoutes.register(api)
         OrganizationRoutes.register(api)
+        ProfileRoutes.register(api)
     }
 }

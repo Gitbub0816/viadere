@@ -92,6 +92,8 @@ struct AccountService {
             try await VerifyService.wipe(consumer: id, on: tx)
             // Organization rows (WP-1.1): per-business preferences, conversation archive/mute, alert seen marks.
             try await PreferenceService.wipe(consumer: id, on: tx)
+            // Customer profile (docs/PROFILES.md): values, custom public name, verified facts, requests; remaining grants end.
+            try await ProfileService.wipe(consumer: id, on: tx, ctx: ctx)
             // Phone numbers: unlink, and overwrite the encrypted number and masked display. Everything that holds the same number
             // (outbound queues, link tokens, SMS thread state) is found by its phone hash *before* the hash is replaced.
             let links = try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == id).all()

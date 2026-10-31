@@ -111,6 +111,8 @@ struct BackgroundJobs {
         let ctx = app.ctx
         // Verify: finish expired requests, purge provider sessions, erase spent results (runs even while Verify is switched off).
         try await VerifyService(db: db, ctx: ctx, runtime: app.verify).runMaintenance()
+        // Profiles: abandoned verification attempts, provider purges, expired profile requests (docs/PROFILES.md).
+        await guarded("profile-maintenance") { try await ProfileVerificationService(db: db, ctx: ctx, runtime: app.verify).runMaintenance() }
         // Relationships created before `subject_ref` existed get theirs (a read first; nothing to do once all have one).
         try await SubjectResolver.backfill(db: db, ctx: ctx)
         await guarded("api-key-sweep") { _ = try await APIKeyLifecycle(db: db, ctx: ctx).sweep() }

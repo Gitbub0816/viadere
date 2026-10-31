@@ -28,7 +28,7 @@ enum BusinessAPIKeys {
         /// Business link sessions (WP-C1): create, read, confirm, cancel. The capabilities a session grants are checked as well.
         static let linksManage = "links:manage"
         static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
-                                    linksManage]
+                                    linksManage, profilesRead]
     }
 
     struct Issued {

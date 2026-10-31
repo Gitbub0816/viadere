@@ -155,7 +155,8 @@ struct RelationshipService {
                                        subjectId: record.id?.uuidString.lowercased(), metadata: ["source": effectiveSource.rawValue])
             try await WebhookService(db: db, ctx: ctx).enqueue(.relationshipConnected, businessId: summary.id,
                 payload: RelationshipEventPayload(relationshipId: RelationshipID(record.id!), subjectRef: ctx.subjects.subjectRef(businessId: summary.id, consumerId: consumer),
-                                                       source: effectiveSource, occurredAt: now))
+                                                       source: effectiveSource, occurredAt: now,
+                                                       publicName: try await ProfileService(db: db, ctx: ctx).publicName(consumer: consumer.uuid)))
         }
         return (dto(record, business: summary), created)
     }
@@ -179,6 +180,8 @@ struct RelationshipService {
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
             // Disconnecting ends the business's ability to ask for approvals: its keys for this relationship are revoked and the requests stop.
             try await ApproveKeyService(db: tx, ctx: ctx).revokeKeys(where: .relationship(record.id!), reason: "disconnected")
+            // Profile grants end with the connection; the business is told which keys it lost (no values).
+            try await ProfileService(db: tx, ctx: ctx).revokeAll(relationship: record, reason: "disconnected")
             try await WebhookService(db: tx, ctx: ctx).enqueue(.relationshipDisconnected, businessId: businessId,
                 payload: RelationshipEventPayload(relationshipId: relationshipId, subjectRef: ctx.subjects.subjectRef(businessId: businessId, consumerId: consumer),
                                                        source: nil, occurredAt: now))
@@ -194,6 +197,8 @@ struct RelationshipEventPayload: Codable, Sendable {
     var subjectRef: SubjectRef?
     var source: ConnectSource?
     var occurredAt: Date
+    /// The customer's public name (docs/PROFILES.md): not private, sent with `relationship.connected`.
+    var publicName: String? = nil
 }
 
 struct ConsentEventPayload: Codable, Sendable {

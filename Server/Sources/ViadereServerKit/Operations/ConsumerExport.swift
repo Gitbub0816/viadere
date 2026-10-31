@@ -167,6 +167,7 @@ struct ConsumerExports {
         let loyalty = try await LoyaltyAccountRecord.query(on: db).filter(\.$consumerId == consumerId).all()
         out["loyalty"] = loyalty.map { ["businessId": $0.businessId.uuidString.lowercased(), "points": $0.pointsBalance] }
         let notices = try await SecurityNoticeRecord.query(on: db).filter(\.$consumerId == consumerId).sort(\.$createdAt, .descending).limit(500).all()
+        out["profile"] = try await ProfileService(db: db, ctx: ctx).exportSection(consumer: consumerId)
         out["securityNotices"] = notices.map { ["kind": $0.kind, "message": $0.message, "at": iso($0.createdAt)] }
         return out
     }

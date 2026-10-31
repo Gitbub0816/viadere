@@ -15,7 +15,7 @@ struct WebhookService {
         .interactionDecided, .interactionExpired, .interactionCancelled, .messageReceived, .relationshipConnected,
         .relationshipDisconnected, .consentUpdated, .rewardRedeemed, .verificationCompleted,
         .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
-        .linkCompleted, .linkExpired,
+        .linkCompleted, .linkExpired, .profileAccessGranted, .profileAccessRevoked, .profileRequestExpired,
     ]
     static let rotationOverlap: TimeInterval = 24 * 3600
 
@@ -190,8 +190,8 @@ struct WebhookService {
         needles += try await InteractionRecord.query(on: db).filter(\.$consumerId == consumer).all().compactMap { $0.id?.uuidString.lowercased() }
         guard !needles.isEmpty else { return }
         let businesses = Set(try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer).all().map(\.businessId))
-        // Only events that carry what the person wrote or decided; lifecycle events hold opaque ids and stay deliverable.
-        let carrying = [WebhookEventType.messageReceived, .interactionDecided].map(\.rawValue)
+        // Only events that carry what the person wrote or decided, or their public name (`relationship.connected`); other lifecycle events hold opaque ids.
+        let carrying = [WebhookEventType.messageReceived, .interactionDecided, .relationshipConnected].map(\.rawValue)
         for delivery in try await WebhookDeliveryRecord.query(on: db).filter(\.$businessId ~~ Array(businesses)).filter(\.$eventType ~~ carrying).all() {
             guard let data = deliveryBody(delivery), let text = String(data: data, encoding: .utf8), needles.contains(where: { text.contains($0) }) else { continue }
             delivery.body = try ctx.cipher.seal(Data(#"{"erased":true}"#.utf8), context: "webhook_deliveries.body", rowId: delivery.id!)
