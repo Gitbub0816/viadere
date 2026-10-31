@@ -129,6 +129,91 @@ public struct BrandSchedule: Sendable, Hashable {
     }
 }
 
+extension BrandSchedule {
+    /// Canonical JSON form (the `schedule` member of the manifest; also what the server stores per business).
+    public var jsonValue: JSONValue {
+        var o: [String: JSONValue] = [
+            "timezone": .string(timezone),
+            "windows": .array(windows.map { w in
+                var o: [String: JSONValue] = ["kit": .string(w.kit), "starts_at": .string(w.startsAt.description), "priority": .integer(Int64(w.priority))]
+                if let end = w.endsAt { o["ends_at"] = .string(end.description) }
+                return .object(o)
+            }),
+            "random_pool": .array(randomPool.map { .object(["kit": .string($0.kit), "weight": .integer(Int64($0.weight))]) }),
+        ]
+        if let defaultKit { o["default_kit"] = .string(defaultKit) }
+        return .object(o)
+    }
+
+    /// Strict parse of a schedule object (unknown members refused). Returns the schedule and its issues; semantic rules (kit references,
+    /// overlap, order) are checked by `validationIssues(kitIds:)`.
+    public static func parse(_ value: JSONValue) -> (schedule: BrandSchedule?, issues: [ContractIssue]) {
+        let sink = ContractIssueSink()
+        let schedule = parse(value, path: "schedule", sink: sink)
+        return (sink.issues.isEmpty ? schedule : nil, sink.issues)
+    }
+
+    /// The schedule rules of a publishable manifest (time zone, kit references, window order, the **overlap rule**, pool weights), checked
+    /// against the ids of the kits that will be published with it. Studio and server run it when a schedule is saved, too.
+    public func validationIssues(kitIds ids: Set<String>) -> [ContractIssue] {
+        var issues: [ContractIssue] = []
+        func add(_ code: String, _ path: String) { issues.append(ContractIssue(code: code, path: path)) }
+        let schedule = self
+        guard let zone = TimeZone(identifier: schedule.timezone), !schedule.timezone.isEmpty else {
+            add(ContractIssue.invalidValue, "schedule.timezone")
+            return issues
+        }
+        if let d = schedule.defaultKit, !ids.contains(d) { add("unknown_kit", "schedule.default_kit") }
+        if schedule.windows.count > BrandManifest.maxWindows { add("invalid_count", "schedule.windows") }
+        for (i, w) in schedule.windows.enumerated() {
+            if !ids.contains(w.kit) { add("unknown_kit", "schedule.windows[\(i)].kit") }
+            if !(0...1000).contains(w.priority) { add(ContractIssue.invalidValue, "schedule.windows[\(i)].priority") }
+            if let end = w.endsAt, end.instant(in: zone) <= w.startsAt.instant(in: zone) { add("empty_window", "schedule.windows[\(i)]") }
+        }
+        for (i, a) in schedule.windows.enumerated() {
+            for j in (i + 1)..<max(i + 1, schedule.windows.count) {
+                let b = schedule.windows[j]
+                guard a.priority == b.priority else { continue }
+                let (aStart, bStart) = (a.startsAt.instant(in: zone), b.startsAt.instant(in: zone))
+                let aEnd = a.endsAt.map { $0.instant(in: zone) } ?? .max
+                let bEnd = b.endsAt.map { $0.instant(in: zone) } ?? .max
+                if aStart < bEnd && bStart < aEnd { add("ambiguous_overlap", "schedule.windows[\(i)],schedule.windows[\(j)]") }
+            }
+        }
+        if schedule.randomPool.count > BrandManifest.maxPool { add("invalid_count", "schedule.random_pool") }
+        var poolIds = Set<String>()
+        for (i, p) in schedule.randomPool.enumerated() {
+            if !ids.contains(p.kit) { add("unknown_kit", "schedule.random_pool[\(i)].kit") }
+            if !poolIds.insert(p.kit).inserted { add("duplicate_id", "schedule.random_pool[\(i)].kit") }
+            if !(1...100).contains(p.weight) { add(ContractIssue.invalidValue, "schedule.random_pool[\(i)].weight") }
+        }
+        return issues
+    }
+
+    static func parse(_ value: JSONValue?, path: String, sink: ContractIssueSink) -> BrandSchedule? {
+        guard let s = StrictObject(value, path: path, allowed: ["timezone", "default_kit", "windows", "random_pool"],
+                                   required: ["timezone", "windows", "random_pool"], sink: sink) else { return nil }
+        var schedule = BrandSchedule(timezone: s.string("timezone") ?? "")
+        schedule.defaultKit = s.string("default_kit")
+        for (i, item) in (s.array("windows") ?? []).enumerated() {
+            let path = "\(path).windows[\(i)]"
+            guard let w = StrictObject(item, path: path, allowed: ["kit", "starts_at", "ends_at", "priority"], required: ["kit", "starts_at", "priority"], sink: sink) else { continue }
+            guard let start = w.string("starts_at").flatMap(LocalDateTime.init) else { sink.add(ContractIssue.invalidValue, "\(path).starts_at"); continue }
+            var end: LocalDateTime?
+            if w.has("ends_at") {
+                guard let e = w.string("ends_at").flatMap(LocalDateTime.init) else { sink.add(ContractIssue.invalidValue, "\(path).ends_at"); continue }
+                end = e
+            }
+            schedule.windows.append(BrandScheduleWindow(kit: w.string("kit") ?? "", startsAt: start, endsAt: end, priority: Int(clamping: w.int("priority") ?? -1)))
+        }
+        for (i, item) in (s.array("random_pool") ?? []).enumerated() {
+            guard let p = StrictObject(item, path: "\(path).random_pool[\(i)]", allowed: ["kit", "weight"], required: ["kit", "weight"], sink: sink) else { continue }
+            schedule.randomPool.append(BrandPoolEntry(kit: p.string("kit") ?? "", weight: Int(clamping: p.int("weight") ?? 0)))
+        }
+        return schedule
+    }
+}
+
 /// What a device downloads per connected business (plan section 4.6; schema `docs/protocol/schemas/brand-manifest-v1.schema.json`):
 /// small, versioned, signed with the KMS key `brand-manifest` (JWS `typ` `viadere-brand-manifest+jws`), `ETag` = `manifestHash`.
 public struct BrandManifest: Sendable, Hashable {
@@ -175,18 +260,8 @@ public struct BrandManifest: Sendable, Hashable {
             }
             return .object(o)
         }
-        var schedule: [String: JSONValue] = [
-            "timezone": .string(self.schedule.timezone),
-            "windows": .array(self.schedule.windows.map { w in
-                var o: [String: JSONValue] = ["kit": .string(w.kit), "starts_at": .string(w.startsAt.description), "priority": .integer(Int64(w.priority))]
-                if let end = w.endsAt { o["ends_at"] = .string(end.description) }
-                return .object(o)
-            }),
-            "random_pool": .array(self.schedule.randomPool.map { .object(["kit": .string($0.kit), "weight": .integer(Int64($0.weight))]) }),
-        ]
-        if let d = self.schedule.defaultKit { schedule["default_kit"] = .string(d) }
         return .object(["v": .integer(Self.version), "business_id": .string(businessId.description), "version": .integer(manifestVersion),
-                        "kits": .array(kitValues), "schedule": .object(schedule), "issued_at": .integer(issuedAt), "not_after": .integer(notAfter),
+                        "kits": .array(kitValues), "schedule": self.schedule.jsonValue, "issued_at": .integer(issuedAt), "not_after": .integer(notAfter),
                         "kid": .string(kid)])
     }
 
@@ -219,26 +294,7 @@ public struct BrandManifest: Sendable, Hashable {
             }
             kits.append(kit)
         }
-        var schedule = BrandSchedule(timezone: "")
-        if let s = root.object("schedule", allowed: ["timezone", "default_kit", "windows", "random_pool"], required: ["timezone", "windows", "random_pool"]) {
-            schedule.timezone = s.string("timezone") ?? ""
-            schedule.defaultKit = s.string("default_kit")
-            for (i, item) in (s.array("windows") ?? []).enumerated() {
-                let path = "schedule.windows[\(i)]"
-                guard let w = StrictObject(item, path: path, allowed: ["kit", "starts_at", "ends_at", "priority"], required: ["kit", "starts_at", "priority"], sink: sink) else { continue }
-                guard let start = w.string("starts_at").flatMap(LocalDateTime.init) else { sink.add(ContractIssue.invalidValue, "\(path).starts_at"); continue }
-                var end: LocalDateTime?
-                if w.has("ends_at") {
-                    guard let e = w.string("ends_at").flatMap(LocalDateTime.init) else { sink.add(ContractIssue.invalidValue, "\(path).ends_at"); continue }
-                    end = e
-                }
-                schedule.windows.append(BrandScheduleWindow(kit: w.string("kit") ?? "", startsAt: start, endsAt: end, priority: Int(clamping: w.int("priority") ?? -1)))
-            }
-            for (i, item) in (s.array("random_pool") ?? []).enumerated() {
-                guard let p = StrictObject(item, path: "schedule.random_pool[\(i)]", allowed: ["kit", "weight"], required: ["kit", "weight"], sink: sink) else { continue }
-                schedule.randomPool.append(BrandPoolEntry(kit: p.string("kit") ?? "", weight: Int(clamping: p.int("weight") ?? 0)))
-            }
-        }
+        let schedule = BrandSchedule.parse(root.members["schedule"], path: "schedule", sink: sink) ?? BrandSchedule(timezone: "")
         guard let businessId = business else { return (nil, sink.issues) }
         let manifest = BrandManifest(businessId: businessId, manifestVersion: root.int("version") ?? 0, kits: kits, schedule: schedule,
                                      issuedAt: root.int("issued_at") ?? 0, notAfter: root.int("not_after") ?? 0, kid: root.string("kid") ?? "")
@@ -265,34 +321,7 @@ public struct BrandManifest: Sendable, Hashable {
             if let frame = kit.frameId, frames.definition(frame) == nil { add("unknown_frame", "kits[\(i)].frame_id") }
             for (slot, ref) in kit.assets where !ref.fits(slot) { add("invalid_asset", "kits[\(i)].assets.\(slot.rawValue)") }
         }
-        guard let zone = TimeZone(identifier: schedule.timezone), !schedule.timezone.isEmpty else {
-            add(ContractIssue.invalidValue, "schedule.timezone")
-            return issues
-        }
-        if let d = schedule.defaultKit, !ids.contains(d) { add("unknown_kit", "schedule.default_kit") }
-        if schedule.windows.count > Self.maxWindows { add("invalid_count", "schedule.windows") }
-        for (i, w) in schedule.windows.enumerated() {
-            if !ids.contains(w.kit) { add("unknown_kit", "schedule.windows[\(i)].kit") }
-            if !(0...1000).contains(w.priority) { add(ContractIssue.invalidValue, "schedule.windows[\(i)].priority") }
-            if let end = w.endsAt, end.instant(in: zone) <= w.startsAt.instant(in: zone) { add("empty_window", "schedule.windows[\(i)]") }
-        }
-        for (i, a) in schedule.windows.enumerated() {
-            for j in (i + 1)..<max(i + 1, schedule.windows.count) {
-                let b = schedule.windows[j]
-                guard a.priority == b.priority else { continue }
-                let (aStart, bStart) = (a.startsAt.instant(in: zone), b.startsAt.instant(in: zone))
-                let aEnd = a.endsAt.map { $0.instant(in: zone) } ?? .max
-                let bEnd = b.endsAt.map { $0.instant(in: zone) } ?? .max
-                if aStart < bEnd && bStart < aEnd { add("ambiguous_overlap", "schedule.windows[\(i)],schedule.windows[\(j)]") }
-            }
-        }
-        if schedule.randomPool.count > Self.maxPool { add("invalid_count", "schedule.random_pool") }
-        var poolIds = Set<String>()
-        for (i, p) in schedule.randomPool.enumerated() {
-            if !ids.contains(p.kit) { add("unknown_kit", "schedule.random_pool[\(i)].kit") }
-            if !poolIds.insert(p.kit).inserted { add("duplicate_id", "schedule.random_pool[\(i)].kit") }
-            if !(1...100).contains(p.weight) { add(ContractIssue.invalidValue, "schedule.random_pool[\(i)].weight") }
-        }
+        issues += schedule.validationIssues(kitIds: ids)
         if notAfter <= issuedAt || notAfter - issuedAt > Self.maxLifetime { add("invalid_lifetime", "not_after") }
         if manifestVersion < 1 { add(ContractIssue.invalidValue, "version") }
         if !ManifestJWS.isValidKid(kid) { add(ContractIssue.invalidValue, "kid") }

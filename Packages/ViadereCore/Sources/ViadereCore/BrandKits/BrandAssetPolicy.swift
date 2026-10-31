@@ -82,6 +82,19 @@ public enum BrandAssetPolicy {
         case contentTypeMismatch = "content_type_mismatch"
         case dimensionsTooLarge = "dimensions_too_large"
         case dimensionsInvalid = "dimensions_invalid"
+        // Structural checks of the server's decoder front end (WP-2.2): reason codes shared with the Studio and metrics.
+        /// The file ends before its structure does.
+        case truncated
+        /// Bad chunk or segment structure, checksum, header values or an encoding the decoder does not support.
+        case malformed
+        /// Animated PNG (APNG `acTL`/`fcTL`/`fdAT`).
+        case animated
+        /// Bytes after the image's end marker (`IEND`, `EOI`): the shape of a polyglot file.
+        case trailingData = "trailing_data"
+        /// The decoder refused the pixel data.
+        case decodeFailed = "decode_failed"
+        /// The re-encoded PNG is larger than the slot allows.
+        case outputTooLarge = "output_too_large"
     }
 
     /// Format from the first bytes. Markup is detected after skipping a UTF-8 BOM and whitespace, case-insensitively.
