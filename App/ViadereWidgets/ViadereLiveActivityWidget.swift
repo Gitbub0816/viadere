@@ -17,17 +17,22 @@ import WidgetKit
 /// and buttons that run `ViadereDecisionIntent` in the app (which answers through the notification action's signed path and refuses
 /// while the phone is locked). Business text appears only after the app enriched the activity on the device; until then, or if that
 /// failed, the wording is Viadere's own, and Confirm is never offered without the question.
+///
+/// Brand Kits (WP-2.7): the only business styling is the accent (`ViadereActivityAttributes.accent`: the kit's `accent` token if the
+/// contrast clamp kept it, never for security requests), on the trailing word or countdown, the keyline and the stage dot. Titles,
+/// status text, alert colors and the answer buttons stay Viadere's.
 struct ViadereLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ViadereActivityAttributes.self) { context in
             Group {
                 if case .decision(let decision) = context.state {
                     let presentation = LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName)
-                    DecisionLockScreenView(interactionId: context.attributes.interactionId, presentation: presentation)
+                    DecisionLockScreenView(interactionId: context.attributes.interactionId, presentation: presentation, accent: context.attributes.accent)
                         .widgetURL(presentation.openURL)
                 } else {
                     LockScreenActivityView(business: context.attributes.businessName,
-                                           presentation: LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName))
+                                           presentation: LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName),
+                                           accent: context.attributes.accent)
                 }
             }
             .activityBackgroundTint(ViadereColor.background)
@@ -35,7 +40,8 @@ struct ViadereLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             if case .decision(let decision) = context.state {
                 return DecisionIsland.make(interactionId: context.attributes.interactionId,
-                                           presentation: LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName))
+                                           presentation: LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName),
+                                           accent: context.attributes.accent)
             }
             let presentation = LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName)
             return DynamicIsland {
@@ -46,7 +52,7 @@ struct ViadereLiveActivityWidget: Widget {
                         .padding(.top, 2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 20)
+                    ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 20, accent: context.attributes.accent)
                         .padding(.trailing, 6)
                         .padding(.top, 2)
                 }
@@ -85,12 +91,12 @@ struct ViadereLiveActivityWidget: Widget {
                     .frame(height: 16)
                     .padding(.leading, 2)
             } compactTrailing: {
-                ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 13)
+                ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 13, accent: context.attributes.accent)
                     .frame(maxWidth: 52, alignment: .trailing)
             } minimal: {
                 ViadereMark(style: .onDark).frame(height: 14)
             }
-            .keylineTint(ViadereColor.accent)
+            .keylineTint(context.attributes.accent)
         }
     }
 }
@@ -100,6 +106,7 @@ struct ActivityTrailingText: View {
     let trailing: LiveActivityPresentation.Trailing
     let isAlert: Bool
     let size: CGFloat
+    var accent: Color = ViadereColor.accent
 
     var body: some View {
         Group {
@@ -114,7 +121,7 @@ struct ActivityTrailingText: View {
             }
         }
         .font(.system(size: size, weight: .semibold, design: .rounded))
-        .foregroundStyle(isAlert ? ViadereColor.danger : ViadereColor.accent)
+        .foregroundStyle(isAlert ? ViadereColor.danger : accent)
     }
 }
 
@@ -122,6 +129,7 @@ struct ActivityTrailingText: View {
 struct LockScreenActivityView: View {
     let business: String
     let presentation: LiveActivityPresentation
+    var accent: Color = ViadereColor.accent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -132,7 +140,7 @@ struct LockScreenActivityView: View {
                     .foregroundStyle(ViadereColor.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 15)
+                ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 15, accent: accent)
             }
             Text(presentation.headline)
                 .font(.system(size: 20, weight: .semibold))
@@ -154,7 +162,7 @@ struct LockScreenActivityView: View {
 
 /// Dynamic Island for a pending decision: the mark and "Decide" when compact; the question and its answers when expanded.
 enum DecisionIsland {
-    static func make(interactionId: String, presentation: LiveDecisionPresentation) -> DynamicIsland {
+    static func make(interactionId: String, presentation: LiveDecisionPresentation, accent: Color = ViadereColor.accent) -> DynamicIsland {
         DynamicIsland {
             DynamicIslandExpandedRegion(.leading) {
                 ViadereMark(style: .onDark)
@@ -163,7 +171,7 @@ enum DecisionIsland {
                     .padding(.top, 2)
             }
             DynamicIslandExpandedRegion(.trailing) {
-                DecisionTrailing(presentation: presentation, size: 18)
+                DecisionTrailing(presentation: presentation, size: 18, accent: accent)
                     .padding(.trailing, 6)
                     .padding(.top, 2)
             }
@@ -191,7 +199,7 @@ enum DecisionIsland {
                             .lineLimit(1)
                             .privacySensitive()
                     }
-                    DecisionActions(interactionId: interactionId, presentation: presentation, height: 36)
+                    DecisionActions(interactionId: interactionId, presentation: presentation, height: 36, accent: accent)
                 }
                 .padding(.horizontal, 6)
                 .padding(.top, 4)
@@ -203,14 +211,14 @@ enum DecisionIsland {
         } compactTrailing: {
             Text(presentation.compact)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(ViadereColor.accent)
+                .foregroundStyle(accent)
                 .lineLimit(1)
                 .frame(maxWidth: 56, alignment: .trailing)
         } minimal: {
             ViadereMark(style: .onDark).frame(height: 14)
         }
         .widgetURL(presentation.openURL)
-        .keylineTint(ViadereColor.accent)
+        .keylineTint(accent)
     }
 }
 
@@ -218,6 +226,7 @@ enum DecisionIsland {
 struct DecisionLockScreenView: View {
     let interactionId: String
     let presentation: LiveDecisionPresentation
+    var accent: Color = ViadereColor.accent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -228,7 +237,7 @@ struct DecisionLockScreenView: View {
                     .foregroundStyle(ViadereColor.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                DecisionTrailing(presentation: presentation, size: 14)
+                DecisionTrailing(presentation: presentation, size: 14, accent: accent)
             }
             Text(presentation.headline)
                 .font(.system(size: 17, weight: .semibold))
@@ -242,7 +251,7 @@ struct DecisionLockScreenView: View {
                     .lineLimit(2)
                     .privacySensitive()
             }
-            DecisionActions(interactionId: interactionId, presentation: presentation, height: 40)
+            DecisionActions(interactionId: interactionId, presentation: presentation, height: 40, accent: accent)
                 .padding(.top, 2)
         }
         .padding(16)
@@ -254,11 +263,12 @@ struct DecisionActions: View {
     let interactionId: String
     let presentation: LiveDecisionPresentation
     let height: CGFloat
+    var accent: Color = ViadereColor.accent
 
     var body: some View {
         if let stage = presentation.stageText {
             HStack(spacing: 6) {
-                Circle().fill(ViadereColor.accent).frame(width: 6, height: 6)
+                Circle().fill(accent).frame(width: 6, height: 6)
                 Text(stage)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(ViadereColor.textSecondary)
@@ -289,6 +299,7 @@ struct DecisionActions: View {
 struct DecisionTrailing: View {
     let presentation: LiveDecisionPresentation
     let size: CGFloat
+    var accent: Color = ViadereColor.accent
 
     var body: some View {
         Group {
@@ -303,7 +314,7 @@ struct DecisionTrailing: View {
             }
         }
         .font(.system(size: size, weight: .semibold, design: .rounded))
-        .foregroundStyle(ViadereColor.accent)
+        .foregroundStyle(accent)
     }
 }
 

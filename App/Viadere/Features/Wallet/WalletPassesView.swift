@@ -57,7 +57,8 @@ struct WalletPassesView: View {
                 ForEach(Array(list.enumerated()), id: \.element.id) { index, pass in
                     let presentation = vm.presentation(for: pass, businessName: names[pass.businessId])
                     NavigationLink {
-                        WalletPassDetailView(passId: pass.id, passes: vm, wallet: model.wallet, businessName: names[pass.businessId])
+                        WalletPassDetailView(passId: pass.id, passes: vm, wallet: model.wallet, businessName: names[pass.businessId],
+                                             brandAccent: WalletPassBrandAccent.make(business: pass.businessId, brand: model.services.brandKits))
                     } label: {
                         ViadereRow(presentation.businessName, subtitle: "\(presentation.kindTitle) · \(presentation.statusText)") {
                             ViadereIconTile(systemName: presentation.symbol)
@@ -73,12 +74,15 @@ struct WalletPassesView: View {
 }
 
 /// One pass: a charcoal card in the brand's colors, the Wallet action (Apple's add button, or "In Wallet"), and the code to show
-/// when it is still valid. The code is the same signed code the pass carries; it identifies the pass, never the person.
+/// when it is still valid. The code is the same signed code the pass carries; it identifies the pass, never the person. With a verified
+/// Brand Kit the card gains the kit's clamped primary as an accent strip (`BrandSurfacePolicy` via `WalletPassBrandAccent`); the text,
+/// code, Beta label and Wallet state are unchanged, and the pass Apple Wallet shows keeps the server's colors.
 struct WalletPassDetailView: View {
     let passId: WalletPassID
     let passes: WalletPassesViewModel
     let wallet: WalletPassCoordinator
     let businessName: String?
+    var brandAccent: WalletPassBrandAccent = .none
 
     var body: some View {
         ScrollView {
@@ -139,8 +143,15 @@ struct WalletPassDetailView: View {
         }
         .padding(ViadereSpace.l)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            // The card is always charcoal, so the dark-appearance clamp applies; decorative only.
+            if let accent = brandAccent.dark {
+                Rectangle().fill(Color(brandLight: accent, dark: accent)).frame(height: 4).accessibilityHidden(true)
+            }
+        }
         // Charcoal, ivory and champagne: the same colors the server puts on the pass itself.
         .background(shape.fill(Color(red: 0.122, green: 0.122, blue: 0.122)))
+        .clipShape(shape)
         .overlay(shape.strokeBorder(ViadereColor.hairline, lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(presentation.accessibilityLabel))

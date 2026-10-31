@@ -69,6 +69,14 @@ public struct WalletPassBrandAccent: Sendable, Hashable {
     public var light: BrandColor?
     public var dark: BrandColor?
 
+    public init(light: BrandColor?, dark: BrandColor?) {
+        self.light = light
+        self.dark = dark
+    }
+
+    /// Viadere's own card (no strip).
+    public static let none = WalletPassBrandAccent(light: nil, dark: nil)
+
     public static func make(business: BusinessID?, brand: BrandKitStore?) -> WalletPassBrandAccent {
         guard let business, let resolved = brand?.resolution(for: business, surface: .walletPass), resolved.isBranded else {
             return WalletPassBrandAccent(light: nil, dark: nil)

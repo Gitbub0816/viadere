@@ -94,6 +94,10 @@
 	<string>$(VIADERE_WALLET_BETA_LABEL)</string>
 	<key>ViadereLinkDescriptorKeys</key>
 	<string>$(VIADERE_LINK_DESCRIPTOR_KEYS)</string>
+	<key>ViadereBrandManifestKeys</key>
+	<string>$(VIADERE_BRAND_MANIFEST_KEYS)</string>
+	<key>ViadereLoopPublicationKeys</key>
+	<string>$(VIADERE_LOOP_PUBLICATION_KEYS)</string>
 	<key>ViadereKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
 	<key>ViadereVaultKeychainAccessGroup</key>

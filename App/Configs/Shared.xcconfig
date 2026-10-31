@@ -17,6 +17,14 @@ VIADERE_LINK_DOMAIN = $(VIADERE_WEB_DOMAIN)
 // Viadere's `link-descriptor` public key(s) (base64url X9.63, comma separated; the second during a rotation). The app accepts a business link
 // session only if one of these signed its descriptor; empty = link sessions fail closed. Print it with `ViadereServer link-descriptor-key`.
 VIADERE_LINK_DESCRIPTOR_KEYS =
+// Brand Kits and hosted Loops (SECURITY.md §2.92, §2.93): Viadere's `brand-manifest` and `loop-publication` public keys, each entry
+// `kid:publicKey` (kid = base64url SHA-256 of the SPKI, publicKey = base64url X9.63; a bare publicKey also works), comma separated (the
+// second during a rotation). Print the brand key with `ViadereServer brand-manifest-key`; the loop key is served by `GET /v1/loops/keys`
+// (compare it with the Key Vault key before pinning). Pinned in the build:
+// a key from the network is never trusted. Empty = every Brand Kit renders neutral and every Loop shows "This request can't be shown";
+// Release and Staging archives refuse empty or malformed values (Scripts/check-release-pins.sh). Placeholders until the owner sets them.
+VIADERE_BRAND_MANIFEST_KEYS =
+VIADERE_LOOP_PUBLICATION_KEYS =
 // Which APNs environment the app registers its push token for (`sandbox` | `production`; read from Info.plist `ViadereAPNsEnvironment`).
 // It must equal the server's APNS_ENVIRONMENT. ViadereConfiguration honours `sandbox` only for a host other than the production API.
 VIADERE_APNS_ENVIRONMENT = production

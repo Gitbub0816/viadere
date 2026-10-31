@@ -13,6 +13,33 @@ public struct EnrichedNotification: Sendable, Equatable {
     public var requiresSecureFlow: Bool
     /// True when details could not be fetched and a generic "open Viadere" notification is shown instead.
     public var isFallback: Bool
+    /// Who and what the notification is about, for the Brand Kit attachment (WP-2.7). `nil` for fallbacks and handled requests.
+    public var brand: NotificationBrandContext? = nil
+
+    /// The approved logo (else mark) to attach, with its verified bytes from the local Brand Kit cache, or `nil` (the system shows the app
+    /// icon). Never for a fallback, a security request (`BrandSurfacePolicy`) or a security-sensitive kind; never fetched from the network
+    /// here, so it cannot delay the notification.
+    public func brandAttachment(from store: BrandKitStore?) -> (slot: BrandAssetSlot, data: Data)? {
+        guard !isFallback, let brand, let store, !brand.kind.isSecuritySensitive,
+              let found = store.notificationAttachment(business: brand.businessId, interactionId: brand.interactionId,
+                                                       purpose: brand.purpose, kind: brand.kind) else { return nil }
+        return (found.slot, found.data)
+    }
+}
+
+/// The interaction facts the attachment policy needs (no business text).
+public struct NotificationBrandContext: Sendable, Equatable {
+    public var businessId: BusinessID
+    public var interactionId: InteractionID
+    public var purpose: InteractionPurpose
+    public var kind: InteractionKind
+
+    public init(businessId: BusinessID, interactionId: InteractionID, purpose: InteractionPurpose, kind: InteractionKind) {
+        self.businessId = businessId
+        self.interactionId = interactionId
+        self.purpose = purpose
+        self.kind = kind
+    }
 }
 
 /// The compact approval card shown by the notification *content* extension for sign-in and approval requests.
@@ -165,7 +192,9 @@ public struct NotificationEnricher: Sendable {
             title: business.text, subtitle: subtitle, body: body, threadIdentifier: rendering.threadIdentifier,
             interruptionLevel: rendering.interruptionLevel,
             category: NotificationCategoryModel(identifier: rendering.category.identifier, actions: actions), userInfo: userInfo,
-            requiresSecureFlow: rendering.requiresSecureFlow, isFallback: false)
+            requiresSecureFlow: rendering.requiresSecureFlow, isFallback: false,
+            brand: NotificationBrandContext(businessId: envelope.business.id, interactionId: envelope.interaction.id,
+                                            purpose: envelope.interaction.purpose, kind: envelope.interaction.kind))
     }
 
     /// Lock-screen text that names only who is asking, never what for.
@@ -195,8 +224,12 @@ public struct NotificationEnricher: Sendable {
         actions: [NotificationActionModel(identifier: SecurityPush.reviewActionIdentifier, title: "Review", style: .normal,
                                           requiresAuthentication: true, opensApp: true)])
 
-    /// Everything the app registers at launch: the renderer's static categories plus the security-cancel category.
-    public static func registeredCategorySpecs() -> [NotificationCategoryModel] { staticCategorySpecs() + [securityCancelCategory] }
+    /// The opaque Loop update push (`viadere.loop`, SECURITY.md §2.98): no actions; a tap opens the app, which fetches the instance over
+    /// the authenticated API (`LoopNotificationRoute`).
+    public static let loopCategory = NotificationCategoryModel(identifier: LoopNotificationRoute.category, actions: [])
+
+    /// Everything the app registers at launch: the renderer's static categories plus the security-cancel and Loop categories.
+    public static func registeredCategorySpecs() -> [NotificationCategoryModel] { staticCategorySpecs() + [securityCancelCategory, loopCategory] }
 
     /// Static categories (`ChannelRenderer.staticCategories`) with their actions, so the app registers the
     /// same shapes the renderer produces. Built by rendering a representative interaction per category.

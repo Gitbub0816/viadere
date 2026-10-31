@@ -36,6 +36,8 @@
 	<string>$(VIADERE_APNS_ENVIRONMENT)</string>
 	<key>ViadereRelyingPartyID</key>
 	<string>$(VIADERE_RP_DOMAIN)</string>
+	<key>ViadereBrandManifestKeys</key>
+	<string>$(VIADERE_BRAND_MANIFEST_KEYS)</string>
 	<key>ViadereKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
 	<key>NSAppTransportSecurity</key>
