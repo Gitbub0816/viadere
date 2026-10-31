@@ -99,3 +99,46 @@ private struct LoopReportSheet: View {
         }
     }
 }
+
+#if DEBUG
+/// A started pickup-time Loop from Northfield Market in the mock world (consent given, manifest signed with the mock key the mock
+/// configuration pins).
+private struct LoopPreview: View {
+    let services: ViadereServices
+    @State private var model: AppModel?
+    @State private var presented: LoopCenter.Presented?
+
+    var body: some View {
+        Group {
+            if let model, let presented {
+                LoopInstanceSheet(presented: presented, model: model)
+            } else {
+                ViadereLoading()
+            }
+        }
+        .task {
+            guard let api = services.loopsAPI as? MockLoopsAPI else { return }
+            let text = LoopConsentCatalog.current
+            let answers = Dictionary(uniqueKeysWithValues: text.checks.map { ($0.id, $0.correctOptionId) })
+            _ = try? await api.enableLoops(LoopGlobalConsentRequest(textVersion: text.version, textDigest: text.digest, answers: answers, agree: true))
+            _ = try? await api.authorizeBusiness(PreviewData.northfield.id,
+                                                 LoopBusinessConsentRequest(textVersion: text.version, textDigest: text.digest, agree: true))
+            let summary = await api.publish(MockLoopsAPI.pickupDefinition, business: PreviewData.northfield.id)
+            let appModel = AppModel(services: services)
+            await appModel.refreshOrganization()
+            guard let view = try? await api.startInstance(LoopInstanceCreateRequest(publicationId: summary.publicationId, entryPoint: .businessPage))
+            else { return }
+            model = appModel
+            presented = LoopCenter.Presented(id: view.id, initial: view)
+        }
+    }
+}
+
+#Preview("Loop instance") {
+    PreviewHost { services in LoopPreview(services: services) }
+}
+
+#Preview("Loops consent") {
+    PreviewHost { services in LoopConsentFlowView(consent: LoopConsentViewModel(api: services.loopsAPI)) }
+}
+#endif

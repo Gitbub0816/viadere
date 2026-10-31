@@ -28,14 +28,14 @@ the `com.apple.developer.pass-type-identifiers` entitlement.
 | App: add / already added | PKAddPassButton, PKPassLibrary | Add flow done; **"In Wallet" could never show**: `PKPassLibrary.pass(…)` returns nil without the pass-type entitlement, which was deliberately not requested | Entitlement `$(TeamIdentifierPrefix)$(VIADERE_PASS_TYPE_IDENTIFIER)` added (owner portal step). |
 | App: pass list and detail | Benefits/Rewards | Wallet button on rewards, loyalty and activity rows only | Benefits → **Wallet passes**: current and used/ended passes, detail with the brand pass card, Apple's add button / "In Wallet", and the signed code as a QR (hidden once used or void). `WalletPassesViewModel` / `WalletPassPresentation` in ViadereKit, tested. |
 | "Beta" label | Open owner decision | None | Configurable and **on** by default: server `WALLET_BETA_LABEL` (back of every pass), app `VIADERE_WALLET_BETA_LABEL` (badge on Wallet screens). |
-| Brand kits on passes | Later task | Viadere colors and a champagne icon | Unchanged on purpose (a later task applies brand kits). |
+| Brand kits on passes | Later task | Viadere colors and a champagne icon | In-app pass card only: a strip in the business's verified, contrast-clamped primary (`WalletPassBrandAccent`, `BrandSurfacePolicy`; WP-2.6). The signed `.pkpass` keeps Viadere's colors and icon (server pass colors unchanged). |
 
 ## Remaining gaps and decisions
 
 * **Owner decision: Beta label.** Keep or drop (two switches above). Default: keep.
 * **Owner decision: location relevance.** Needs business places (and whether showing a pass near a store is wanted).
 * **Owner decision: one Pass Type ID or one per environment.** A single ID is simplest; separate IDs keep staging passes from looking like production ones.
-* **Not done: NFC (VAS) passes** (Apple entitlement and terminals), **brand-kit styling**, a dashboard UI for passes (API only), per-business pass images, an expiry metric for the pass certificate.
+* **Not done: NFC (VAS) passes** (Apple entitlement and terminals), **brand-kit styling of the signed pass** (the in-app card has it), a dashboard UI for passes (API only), per-business pass images, an expiry metric for the pass certificate.
 * **Residual risks** are listed in `SECURITY.md` (static QR between rotations; pepper rotation invalidates codes and tokens; voiding reaches the device only on refresh).
 
 ## Owner actions
