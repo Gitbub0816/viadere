@@ -155,12 +155,15 @@ struct ConversationView: View {
     let conversation: ConversationSummary
     let model: AppModel
     @State private var vm: ConversationViewModel
+    /// The business's card decoration (an accent line at most; never its name or badge). From the verified local cache.
+    @State private var decoration: MessageCardDecoration
     @Environment(\.dismiss) private var dismiss
 
     init(conversation: ConversationSummary, model: AppModel) {
         self.conversation = conversation
         self.model = model
         _vm = State(initialValue: ConversationViewModel(conversation: conversation, services: model.services))
+        _decoration = State(initialValue: MessageCardDecoration.make(business: conversation.business, brand: model.services.brandKits))
     }
 
     var body: some View {
@@ -171,7 +174,7 @@ struct ConversationView: View {
                 ScrollView {
                     LazyVStack(spacing: ViadereSpace.s) {
                         ForEach(vm.rows) { row in
-                            MessageBubble(row: row, now: Date()) { option in
+                            MessageBubble(row: row, now: Date(), decoration: decoration) { option in
                                 Task { await vm.choose(option, in: row) }
                             }
                             .id(row.id)
@@ -253,6 +256,8 @@ struct ConversationView: View {
 struct MessageBubble: View {
     let row: MessageRow
     let now: Date
+    /// Brand decoration of business messages: an accent line beside the bubble. The sender line (name, verified mark) stays neutral.
+    var decoration: MessageCardDecoration? = nil
     let onChoose: (ChoiceOption) -> Void
 
     var body: some View {
@@ -264,14 +269,18 @@ struct MessageBubble: View {
                     Image(systemName: "checkmark.seal.fill").font(.system(size: 10)).foregroundStyle(ViadereColor.accent).accessibilityHidden(true)
                 }
             }
-            Text(UntrustedText.paragraphs(row.message.body, max: 4_000))
-                .font(ViadereType.body)
-                .foregroundStyle(mine ? ViadereColor.onPrimary : ViadereColor.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(mine ? ViadereColor.primaryFill : ViadereColor.surface))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(mine ? .clear : ViadereColor.hairline, lineWidth: 1))
-                .frame(maxWidth: 300, alignment: mine ? .trailing : .leading)
+            HStack(alignment: .top, spacing: 6) {
+                if !mine { BrandAccentLine(decoration) }
+                Text(UntrustedText.paragraphs(row.message.body, max: 4_000))
+                    .font(ViadereType.body)
+                    .foregroundStyle(mine ? ViadereColor.onPrimary : ViadereColor.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(mine ? ViadereColor.primaryFill : ViadereColor.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(mine ? .clear : ViadereColor.hairline, lineWidth: 1))
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 300, alignment: mine ? .trailing : .leading)
             let options = row.openOptions(now: now)
             if !options.isEmpty {
                 ViadereFlowLayout {

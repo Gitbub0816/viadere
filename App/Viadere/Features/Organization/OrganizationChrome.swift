@@ -140,6 +140,11 @@ enum AlertOpener {
             AppEnvironment.shared.profile.presentedRequest = id
         case .securityNotice:
             await model.securityNotices.load()
+        case .loopInstance:
+            // A Loop task: open the instance (its tree names its own business; consent is checked on the device and by the server).
+            guard let id = LoopInstanceID(target.id) else { return }
+            if let business = entry.business?.id { model.organization.open(itemFrom: business) }
+            AppEnvironment.shared.loops.present(id)
         case .unknown:
             break
         }

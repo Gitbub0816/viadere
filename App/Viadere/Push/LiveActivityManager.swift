@@ -143,9 +143,12 @@ final class LiveActivityManager {
         case .start(let status):
             // ActivityKit only lets an app *start* an activity while it is in the foreground.
             guard UIApplication.shared.applicationState == .active else { return false }
+            // Brand accent from the verified local cache only (never awaited); BrandSurfacePolicy refuses security requests.
+            let accent = services.brandKits?.liveActivityAccent(business: envelope.business.id, interactionId: interaction.id,
+                                                                purpose: interaction.purpose, kind: interaction.kind)
             let attributes = ViadereActivityAttributes(
                 businessName: envelope.business.safeName, businessId: envelope.business.id.description,
-                interactionId: interaction.id.description)
+                interactionId: interaction.id.description, accentLight: accent?.light?.hex, accentDark: accent?.dark?.hex)
             do {
                 let activity = try Activity.request(
                     attributes: attributes, content: ActivityContent(state: status, staleDate: interaction.expiresAt), pushType: .token)

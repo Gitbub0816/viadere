@@ -78,6 +78,10 @@ public final class AppModel {
     public let alerts: AlertsViewModel
     public let benefits: BenefitsViewModel
     public let businesses: BusinessesViewModel
+    /// Loop consent (global and per business; WP-3.5). Entry points are hidden unless it allows them.
+    public let loopConsent: LoopConsentViewModel
+    /// The Loop publication keys the renderer verifies with (build pins, narrowed by the server's list).
+    public let loopKeys: LoopKeyRing
     private var queuedLink: DeepLink?
     /// Links and notification opens that arrived while the app was locked, replayed in order after unlock.
     private var lockedQueue: [DeepLink] = []
@@ -100,10 +104,15 @@ public final class AppModel {
         alerts = AlertsViewModel(api: services.organizationAPI, clock: services.clock)
         benefits = BenefitsViewModel(api: services.organizationAPI)
         businesses = BusinessesViewModel(api: services.organizationAPI)
+        loopConsent = LoopConsentViewModel(api: services.loopsAPI)
+        loopKeys = LoopKeyRing(pinned: services.configuration.loopPublicationKeys, api: services.loopsAPI)
         businesses.onChange = { [weak self] directory in
             guard let self else { return }
             self.organization.update(directory: directory)
-            for entry in directory where !entry.isActive { self.alerts.forget(business: entry.business.id) }
+            for entry in directory where !entry.isActive {
+                self.alerts.forget(business: entry.business.id)
+                self.services.brandKits?.forget(entry.business.id)
+            }
         }
         // The API client reports "the server no longer trusts this device" through this notifier.
         services.revocation.setHandler { [weak self] in
@@ -150,9 +159,38 @@ public final class AppModel {
     /// Businesses first (the selector's options), then the lists. The server is the source of truth; a missed push is healed here.
     public func refreshOrganization() async {
         await businesses.load()
+        refreshBrandKits()
         await alerts.refresh()
         await alerts.ensureLoaded(organization.effective)
         await benefits.load()
+        if services.loopsAPI != nil {
+            await loopConsent.load()
+            await loopKeys.refresh()
+        }
+    }
+
+    /// Fetches Brand Kits of the active businesses in the background. Nothing waits for it: every surface renders neutral at once and
+    /// adopts a verified kit when it arrives (spec B4.4).
+    public func refreshBrandKits() {
+        guard let store = services.brandKits else { return }
+        let ids = businesses.active.filter { $0.business.isVerified }.map(\.business.id)
+        Task.detached(priority: .utility) { await store.refresh(ids) }
+    }
+
+    /// What a Loop screen needs, as a snapshot of the device's verified directory and consent (WP-3.6).
+    public func loopRenderContext() -> LoopRenderContext {
+        let directory = Dictionary(businesses.directory.map { ($0.business.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let consent = loopConsent.status
+        let keys = loopKeys
+        return LoopRenderContext(
+            keys: { keys.keys },
+            publisher: { id in
+                guard let entry = directory[id], entry.isActive else { return nil }
+                return VerifiedBusinessRecord(id: entry.business.id, displayName: entry.business.displayName,
+                                              verificationStatus: entry.business.verificationStatus, category: entry.category ?? .other)
+            },
+            consent: { LoopConsentGate.decision(status: consent, business: $0) },
+            brand: services.brandKits, clock: services.clock)
     }
 
     public func completeOnboarding() async {
@@ -382,6 +420,8 @@ public final class AppModel {
         alerts.reset()
         benefits.reset()
         businesses.reset()
+        loopConsent.clear()
+        services.brandKits?.removeAll()
         isLocked = false
         phase = .onboarding(.welcome)
     }

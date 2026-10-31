@@ -2,21 +2,27 @@ import SwiftUI
 import ViadereCore
 import ViadereKit
 
-/// A business home (spec C3, C6.2; WP-1.6): Viadere's standard modules in the order the business chose, always starting with the verified
-/// profile. Neutral Viadere appearance only (no Brand Kit in this release); the page renders at once with Viadere's default order and adopts
-/// the business's order when it arrives. Modules with nothing to show are left out rather than drawn as empty placeholders (C8.3). The
-/// business controls none of the navigation, wording or security surfaces here.
+/// A business home (spec C3, C6.2; WP-1.6, WP-2.6): Viadere's standard modules in the order the business chose, always starting with the
+/// verified profile. The page renders at once in Viadere's neutral style with the default order, then adopts the business's order and its
+/// verified Brand Kit (clamped colors, a registered frame, the hash-checked logo) when they arrive; nothing waits for either. The kit
+/// decorates the header band and accents only: the name, verified badge, handle, every action, wording, navigation and security surface
+/// stay Viadere's. Modules with nothing to show are left out rather than drawn as empty placeholders (C8.3).
 struct BusinessHomeView: View {
     let entry: ConnectedBusiness
     let model: AppModel
     @State private var home: BusinessHomeViewModel
+    @State private var decoration: BusinessHomeDecoration
     @Environment(\.dismiss) private var dismiss
 
     init(entry: ConnectedBusiness, model: AppModel) {
         self.entry = entry
         self.model = model
         _home = State(initialValue: BusinessHomeViewModel(business: entry.business, api: model.services.organizationAPI))
+        // From the verified local cache only: instant, and neutral when there is nothing verified.
+        _decoration = State(initialValue: BusinessHomeDecoration.make(business: entry.business, brand: model.services.brandKits))
     }
+
+    private var brand: BrandStyle { BrandStyle(decoration.style) }
 
     private var business: BusinessSummary { entry.business }
     private var scope: OrganizationContext { .business(business.id) }
@@ -27,6 +33,9 @@ struct BusinessHomeView: View {
                 ViadereBackButton("Businesses") { dismiss() }
                 ForEach(home.modules, id: \.module) { module in
                     moduleView(module.module)
+                }
+                if !home.modules.contains(where: { $0.module == "loops" }) {
+                    BusinessLoopsSection(business: business, model: model)
                 }
                 ViadereRowGroup {
                     NavigationLink {
@@ -43,10 +52,17 @@ struct BusinessHomeView: View {
         }
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
+        .environment(\.brandStyle, brand)
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await home.load()
             await model.alerts.ensureLoaded(scope)
+        }
+        .task {
+            // Separate task: branding never delays the page or its modules.
+            guard let store = model.services.brandKits, business.isVerified else { return }
+            await store.refresh(business.id)
+            decoration = BusinessHomeDecoration.make(business: business, brand: store)
         }
     }
 
@@ -59,6 +75,7 @@ struct BusinessHomeView: View {
         case "offers": offers
         case "rewards": BusinessRewardsEntry(business: business, model: model)
         case "recent_activity": recentActivity
+        case "loops": BusinessLoopsSection(business: business, model: model)
         default: EmptyView()
         }
     }
@@ -67,7 +84,7 @@ struct BusinessHomeView: View {
 
     private var profile: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.m) {
-            ViadereAvatar(name: business.safeName, size: 72, isVerified: business.isVerified)
+            brandBand
             VStack(alignment: .leading, spacing: ViadereSpace.xs) {
                 Text(business.safeName)
                     .font(ViadereType.display)
@@ -85,6 +102,24 @@ struct BusinessHomeView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The logo (verified bytes, else the monogram) on the kit's band. Decoration only: the identity below is neutral.
+    @ViewBuilder private var brandBand: some View {
+        if brand.isBranded {
+            HStack {
+                BrandLogo(data: decoration.logo, name: business.safeName, isVerified: business.isVerified, size: 64,
+                          accessibilityLabel: decoration.logoAccessibilityLabel)
+                Spacer()
+            }
+            .padding(ViadereSpace.m)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: brand.cornerRadius, style: .continuous).fill(brand.surface))
+            .overlay(RoundedRectangle(cornerRadius: brand.cornerRadius, style: .continuous).strokeBorder(brand.accent, lineWidth: brand.borderWidth))
+            .brandFrameBackground(brand)
+        } else {
+            ViadereAvatar(name: business.safeName, size: 72, isVerified: business.isVerified)
+        }
     }
 
     private var message: some View {

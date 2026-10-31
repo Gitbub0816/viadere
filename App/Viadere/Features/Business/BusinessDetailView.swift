@@ -35,6 +35,7 @@ struct BusinessDetailView: View {
                 BusinessRewardsEntry(business: vm.business, model: model)
                 notifications
                 permissions
+                BusinessLoopAuthorizationRow(business: vm.business, model: model)
                 profileAccess
                 history
                 disconnect

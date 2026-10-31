@@ -8,6 +8,10 @@ import ViadereKit
 /// extension fetches the interaction over the authenticated, device-signed API (using the shared Keychain
 /// session), renders it with ViadereCore's `ChannelRenderer`, and registers the per-interaction `choose`
 /// category before the notification is shown. If anything fails it falls back to a generic "Open Viadere" banner.
+///
+/// Brand Kits (WP-2.7): a non-security request may carry the business's approved logo as an attachment, taken only from the verified
+/// local cache (`BrandKitStore`, re-hashed on read) under `BrandSurfacePolicy`; nothing is downloaded here, so branding can never delay
+/// or replace the notification. Sign-in approvals, payment authorizations and security purposes never get one.
 final class NotificationService: UNNotificationServiceExtension {
     private static let services = ViadereServices.live(configuration: ViadereRuntime.configuration)
     private var pending: PendingDelivery?
@@ -25,9 +29,10 @@ final class NotificationService: UNNotificationServiceExtension {
         let delivery = PendingDelivery(content: mutable, handler: contentHandler)
         pending = delivery
         let enricher = Self.services.notificationEnricher
+        let brandKits = Self.services.brandKits
         task = Task {
             let enriched = await enricher.enrich(interactionId: id)
-            await delivery.deliver(enriched)
+            await delivery.deliver(enriched, logo: enriched.brandAttachment(from: brandKits)?.data)
         }
     }
 
@@ -57,10 +62,11 @@ private final class PendingDelivery: @unchecked Sendable {
         return true
     }
 
-    func deliver(_ enriched: EnrichedNotification) async {
+    func deliver(_ enriched: EnrichedNotification, logo: Data?) async {
         // The category must exist before the notification is presented.
         await NotificationCategories.register(enriched.category)
         guard claim() else { return }
+        if let logo, let attachment = Self.attachment(logo) { content.attachments = [attachment] }
         content.title = enriched.title
         content.subtitle = enriched.subtitle
         content.body = enriched.body
@@ -72,6 +78,19 @@ private final class PendingDelivery: @unchecked Sendable {
         for (key, value) in enriched.userInfo { userInfo[key] = value }
         content.userInfo = userInfo
         handler(content)
+    }
+
+    /// A PNG attachment from verified bytes, via a uniquely named temporary file (the system moves it into its own store).
+    private static func attachment(_ data: Data) -> UNNotificationAttachment? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("viadere-brand-\(UUID().uuidString).png")
+        do {
+            try data.write(to: url, options: [.atomic])
+            return try UNNotificationAttachment(identifier: "viadere.brand.logo", url: url,
+                                                options: [UNNotificationAttachmentOptionsTypeHintKey: "public.png"])
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
     }
 
     func deliverBestAttempt() {
