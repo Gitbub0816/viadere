@@ -27,8 +27,10 @@ enum BusinessAPIKeys {
         static let keyDirectoryManage = "keydirectory:manage"
         /// Business link sessions (WP-C1): create, read, confirm, cancel. The capabilities a session grants are checked as well.
         static let linksManage = "links:manage"
+        /// Wallet passes: issue, list, update and void passes for connected customers, and validate scanned pass codes (live keys).
+        static let walletWrite = "wallet:write"
         static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
-                                    linksManage]
+                                    linksManage, walletWrite]
     }
 
     struct Issued {

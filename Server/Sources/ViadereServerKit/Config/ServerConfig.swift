@@ -125,6 +125,8 @@ public struct ServerConfig: Sendable {
     public var dashboardOrigin: String?
     /// Wallet pass signing material. `nil` disables pass issuance (the pass endpoints answer `501`).
     public var passes: PassConfig?
+    /// Whether passes carry the "Wallet passes are in beta" note on their back (`WALLET_BETA_LABEL`, default on; an owner decision).
+    public var walletBetaLabel = true
     /// HMAC key of the audit hash chain (`AUDIT_CHAIN_KEY`). Keeping it out of the database means an attacker who can
     /// write the database cannot recompute a forged chain.
     public var auditChainKey: SymmetricKey = SymmetricKey(data: Data(repeating: 0x44, count: 32))
@@ -412,6 +414,10 @@ public struct RateLimitSettings: Sendable {
     public var walletWebServicePerIP: RateRule = .perMinute(120, burst: 60)
     /// Failed PassKit authentications per pass.
     public var walletAuthFailurePerPass: RateRule = .perMinute(10, burst: 10)
+    /// Wallet pass codes a business validates per minute (`POST /v1/business/wallet/scan`; failures and successes alike).
+    public var walletScan: RateRule = .perMinute(60, burst: 30)
+    /// Business updates per pass (schedule/venue changes, code rotation): pass updates are operational, never a marketing channel.
+    public var walletUpdatePerPass: RateRule = RateRule(capacity: 6, perMinute: 6.0 / 1440)
     /// Device-first sign-up (§2.5a): ceremonies opened across the platform (`POST /v1/accounts/enroll/begin`; per IP: `authCeremony`).
     public var accountEnrollGlobal: RateRule = .perHour(6000, burst: 600)
     /// Accounts created across the platform (`POST /v1/accounts`).

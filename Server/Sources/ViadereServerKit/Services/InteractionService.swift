@@ -226,6 +226,8 @@ struct InteractionService {
         record.status = InteractionStatus.cancelled.rawValue
         record.outcomeJSON = String(decoding: try ViadereJSON.encode(outcome), as: UTF8.self)
         try await InteractionRecord.query(on: db).filter(\.$id == record.id!).set(\.$outcomeJSON, to: record.outcomeJSON).update()
+        // A cancelled ticket or reservation: its Wallet pass is void (the code stops scanning; Wallet updates on the push).
+        if record.kind == InteractionKind.ticket.rawValue { try await WalletService(db: db, ctx: ctx).voidAll(interactionId: record.id!) }
         if notify { try await WebhookService(db: db, ctx: ctx).enqueue(.interactionCancelled, businessId: outcome.businessId, payload: outcome,
                                                                                      opaque: OpaqueWebhookEvent(requestId: outcome.interactionId.description, resultRef: nil)) }
         _ = try await AuditService(db: db, ctx: ctx).record("interaction.cancelled", actor: AuditActor(kind: .system),

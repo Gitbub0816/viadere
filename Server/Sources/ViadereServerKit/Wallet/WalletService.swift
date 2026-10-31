@@ -3,12 +3,14 @@ import Fluent
 import Foundation
 import ViadereCore
 
-/// Wallet pass issuance, signing, the PassKit web service and update pushes.
+/// Wallet pass issuance, signing, the PassKit web service, update pushes, the business pass API and pass scanning.
 ///
 /// * Each pass has an `authenticationToken`, derived as `HMAC(pepper, id ‖ salt)` so it can be re-embedded in every download,
 ///   while the database stores only its keyed hash, compared in constant time.
+/// * The pass's QR carries a signed presentation code (`WalletScanCode`): `HMAC(pepper, "wallet-scan-v1" ‖ id ‖ generation)`, checked
+///   in constant time. It identifies the pass to its own business only; redemption and check-in are single use on the server.
 /// * Updates are announced through a durable outbox; a worker sends the empty PassKit push to every registered device.
-/// * The server signs; the app never builds or signs a pass.
+/// * The server signs; the app never builds or signs a pass. A test-mode key never produces one.
 struct WalletService {
     let db: any Database
     let ctx: ServerContext
@@ -17,14 +19,23 @@ struct WalletService {
     static let maxLogMessages = 20
     static let maxLogLength = 500
     static let maxPushAttempts = 5
+    static let maxTextLength = 80
 
     // MARK: Identity and tokens
 
+    /// Metadata without the presentation code (embedded in rewards and loyalty responses).
     static func metadata(_ record: WalletPassRecord) -> WalletPassMetadata? {
         guard let id = record.id else { return nil }
         return WalletPassMetadata(id: WalletPassID(id), businessId: BusinessID(record.businessId), kind: record.kindValue,
                                   passTypeIdentifier: record.passTypeIdentifier, serialNumber: record.serialNumber,
-                                  updatedAt: record.updatedAt, voided: record.voided)
+                                  updatedAt: record.updatedAt, voided: record.voided, usedAt: record.usedAt)
+    }
+
+    /// The holder's own view: adds the presentation code while the pass is valid, so the app can show the same QR as Wallet.
+    func holderMetadata(_ record: WalletPassRecord) -> WalletPassMetadata? {
+        guard var metadata = Self.metadata(record) else { return nil }
+        if !record.voided { metadata.scanCode = scanCode(for: record) }
+        return metadata
     }
 
     /// The per-pass secret Wallet echoes back as `Authorization: ApplePass <token>`.
@@ -47,14 +58,54 @@ struct WalletService {
         return signer
     }
 
+    // MARK: Presentation code (QR)
+
+    static func scanPayload(id: UUID, generation: Int) -> Data {
+        var data = withUnsafeBytes(of: id.uuid) { Data($0) }
+        let value = UInt32(truncatingIfNeeded: generation).bigEndian
+        withUnsafeBytes(of: value) { data.append(contentsOf: $0) }
+        return data
+    }
+
+    private func scanTag(_ payload: Data) -> Data {
+        let key = SymmetricKey(data: ctx.config.pepper)
+        let mac = HMAC<SHA256>.authenticationCode(for: Data("wallet-scan-v1\n".utf8) + payload, using: key)
+        return Data(Data(mac).prefix(WalletScanCode.tagByteCount))
+    }
+
+    func scanCode(for pass: WalletPassRecord) -> String {
+        let payload = Self.scanPayload(id: pass.id!, generation: pass.scanGeneration)
+        return WalletScanCode.prefix + Base64URL.encode(payload + scanTag(payload))
+    }
+
+    /// The pass id and generation of a genuine code, or nil for anything else (malformed, forged, altered). The tag is compared in
+    /// constant time; the caller still checks the generation, the tenant and the pass's state.
+    func verifyScanCode(_ raw: String) -> (id: UUID, generation: Int)? {
+        let code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard WalletScanCode.isWellFormed(code), let bytes = Base64URL.decode(String(code.dropFirst(WalletScanCode.prefix.count))),
+              bytes.count == WalletScanCode.payloadByteCount + WalletScanCode.tagByteCount else { return nil }
+        let payload = Data(bytes.prefix(WalletScanCode.payloadByteCount))
+        guard ConstantTime.equals(Data(bytes.suffix(WalletScanCode.tagByteCount)), scanTag(payload)) else { return nil }
+        let id = payload.prefix(16).withUnsafeBytes { UUID(uuid: $0.loadUnaligned(as: uuid_t.self)) }
+        let generation = payload.suffix(4).reduce(0) { ($0 << 8) | Int($1) }
+        return (id, generation)
+    }
+
     // MARK: Issue
 
     func list(consumer: ConsumerID) async throws -> [WalletPassMetadata] {
         try await WalletPassRecord.query(on: db).filter(\.$consumerId == consumer.uuid).sort(\.$updatedAt, .descending).limit(200).all()
-            .compactMap(Self.metadata)
+            .compactMap(holderMetadata)
     }
 
     func issue(consumer: ConsumerID, request: WalletPassIssueRequest) async throws -> WalletPassMetadata {
+        let record = try await issueRecord(consumer: consumer, request: request, issuer: nil).record
+        guard let metadata = holderMetadata(record) else { throw APIError.internalError }
+        return metadata
+    }
+
+    /// Issues (or returns the existing) pass. `issuer` is nil for the customer, or the business principal for the business API.
+    func issueRecord(consumer: ConsumerID, request: WalletPassIssueRequest, issuer: BusinessPrincipal?) async throws -> (record: WalletPassRecord, created: Bool) {
         let signer = try requireSigner()
         guard let business = try await DirectoryService(db: db).verified(id: request.businessId.uuid),
               try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$businessId == business.id!)
@@ -77,17 +128,17 @@ struct WalletService {
             subjectKey = "coupon:\(id)"
         case .eventTicket, .boardingPass, .generic:
             guard let id = request.interactionId, let record = try await InteractionRecord.query(on: db).filter(\.$id == id.uuid)
-                .filter(\.$consumerId == consumer.uuid).filter(\.$businessId == businessId).first() else { throw APIError.notFound }
+                .filter(\.$consumerId == consumer.uuid).filter(\.$businessId == businessId).filter(\.$livemode == true).first() else { throw APIError.notFound }
             // Tickets and rewards carry what a pass shows; other interaction kinds have no pass.
             guard record.kind == InteractionKind.ticket.rawValue || (request.kind == .generic && record.kind == InteractionKind.reward.rawValue) else {
                 throw APIError.conflict("This request can't be added to Wallet.")
             }
+            guard record.statusValue != .cancelled else { throw APIError.gone("This ticket was cancelled.") }
             interactionId = id.uuid
             subjectKey = "ticket:\(id)"
         }
         if let existing = try await WalletPassRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$subjectKey == subjectKey).first() {
-            guard let metadata = Self.metadata(existing) else { throw APIError.internalError }
-            return metadata
+            return (existing, false)
         }
         let now = ctx.now
         let record = WalletPassRecord()
@@ -103,22 +154,24 @@ struct WalletService {
         record.rewardId = rewardId
         record.interactionId = interactionId
         record.voided = false
+        record.scanGeneration = 0
+        record.issuedBy = issuer == nil ? nil : BusinessWalletPass.Issuer.business.rawValue
         record.createdAt = now
         record.updatedAt = now
+        let actor = issuer.map { AuditActor(kind: .businessAPIKey, id: $0.keyId.uuidString.lowercased()) } ?? AuditActor(kind: .consumer, id: consumer.description)
         do {
             try await db.transaction { tx in
                 try await record.create(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_issued", actor: AuditActor(kind: .consumer, id: consumer.description),
+                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_issued", actor: actor,
                     consumerId: consumer, businessId: BusinessID(businessId), subjectType: "wallet_pass", subjectId: record.id?.uuidString.lowercased(),
-                    metadata: ["kind": request.kind.rawValue])
+                    metadata: ["kind": request.kind.rawValue, "issuer": issuer == nil ? "customer" : "business"])
             }
         } catch {
             if error.isConstraintViolation, let existing = try await WalletPassRecord.query(on: db).filter(\.$consumerId == consumer.uuid)
-                .filter(\.$subjectKey == subjectKey).first(), let metadata = Self.metadata(existing) { return metadata }
+                .filter(\.$subjectKey == subjectKey).first() { return (existing, false) }
             throw error
         }
-        guard let metadata = Self.metadata(record) else { throw APIError.internalError }
-        return metadata
+        return (record, true)
     }
 
     // MARK: Build
@@ -130,43 +183,58 @@ struct WalletService {
             kind: pass.kindValue, passTypeIdentifier: pass.passTypeIdentifier, teamIdentifier: signer.teamIdentifier,
             serialNumber: pass.serialNumber, authenticationToken: authenticationToken(id: pass.id!, salt: pass.authSalt),
             webServiceURL: ctx.config.publicBaseURL + "/wallet", organizationName: name, description: "\(name) pass", logoText: name,
-            barcodeMessage: pass.serialNumber, voided: pass.voided)
-        d.back = [PassDescriptor.Field(key: "issuer", label: "ISSUED BY", value: .text("\(name), through Viadere"))]
+            barcodeMessage: pass.voided ? nil : scanCode(for: pass), voided: pass.voided)
+        d.back = [PassDescriptor.Field(key: "issuer", label: PassStrings.issuedBy, value: .text(name)),
+                  PassDescriptor.Field(key: "platform", label: PassStrings.deliveredBy, value: .text("Viadere"))]
         switch pass.kindValue {
         case .storeCard:
             let account = try await LoyaltyAccountRecord.query(on: db).filter(\.$businessId == pass.businessId).filter(\.$consumerId == pass.consumerId).first()
             let program = try await LoyaltyProgramRecord.query(on: db).filter(\.$businessId == pass.businessId).first()
             d.description = "\(name) loyalty card"
-            d.primary = [.init(key: "points", label: "POINTS", value: .number(account?.pointsBalance ?? 0))]
+            d.primary = [.init(key: "points", label: PassStrings.points, value: .number(account?.pointsBalance ?? 0))]
             if let program, let account, let tier = program.tiers.last(where: { $0.minimumPoints <= account.pointsBalance }) {
-                d.secondary = [.init(key: "status", label: "STATUS", value: .text(tier.name))]
+                d.secondary = [.init(key: "status", label: PassStrings.status, value: .text(tier.name))]
             }
-            if let program { d.back.append(.init(key: "program", label: "PROGRAM", value: .text(program.programName))) }
+            if let program { d.back.append(.init(key: "program", label: PassStrings.program, value: .text(program.programName))) }
         case .coupon:
             if let id = pass.rewardId, let reward = try await RewardRecord.find(id, on: db) {
                 d.description = "\(name) offer"
-                d.primary = [.init(key: "offer", label: "OFFER", value: .text(reward.title))]
-                if let details = reward.details { d.secondary = [.init(key: "details", label: "DETAILS", value: .text(details))] }
+                d.primary = [.init(key: "offer", label: PassStrings.offer, value: .text(reward.title))]
+                if let details = reward.details { d.secondary = [.init(key: "details", label: PassStrings.details, value: .text(details))] }
                 d.expirationDate = reward.validUntil
             }
         case .eventTicket, .boardingPass, .generic:
             if let id = pass.interactionId, let record = try await InteractionRecord.find(id, on: db), let interaction = try? record.interaction() {
                 switch interaction.payload {
                 case .ticket(let ticket):
+                    let label = pass.kindValue == .boardingPass ? PassStrings.flight : (pass.kindValue == .generic ? PassStrings.reservation : PassStrings.event)
                     d.description = "\(name) \(ticket.title)"
-                    d.primary = [.init(key: "title", label: pass.kindValue == .boardingPass ? "FLIGHT" : "EVENT", value: .text(ticket.title))]
-                    if let venue = ticket.venue { d.secondary.append(.init(key: "venue", label: "VENUE", value: .text(venue))) }
-                    if let seat = ticket.seat { d.secondary.append(.init(key: "seat", label: "SEAT", value: .text(seat))) }
-                    d.relevantDate = ticket.startsAt ?? ticket.validFrom
+                    d.primary = [.init(key: "title", label: label, value: .text(ticket.title))]
+                    if let venue = pass.ticketVenue ?? ticket.venue {
+                        d.secondary.append(.init(key: "venue", label: PassStrings.venue, value: .text(venue), changeMessage: PassStrings.venueChanged))
+                    }
+                    if let seat = pass.ticketSeat ?? ticket.seat {
+                        d.secondary.append(.init(key: "seat", label: PassStrings.seat, value: .text(seat), changeMessage: PassStrings.seatChanged))
+                    }
+                    let starts = pass.ticketStartsAt ?? ticket.startsAt
+                    if let starts {
+                        d.auxiliary.append(.init(key: "starts", label: PassStrings.starts, value: .date(starts), changeMessage: PassStrings.startChanged))
+                    }
+                    if pass.usedAt != nil { d.auxiliary.append(.init(key: "entry", label: PassStrings.entry, value: .text(PassStrings.checkedIn))) }
+                    if let relevant = starts ?? ticket.validFrom {
+                        d.relevantDate = relevant
+                        d.relevantInterval = (relevant, ticket.validUntil.flatMap { $0 > relevant ? $0 : nil } ?? relevant.addingTimeInterval(4 * 3600))
+                    }
                     d.expirationDate = ticket.validUntil
                 case .reward(let reward):
-                    d.primary = [.init(key: "title", label: "REWARD", value: .text(reward.title))]
+                    d.primary = [.init(key: "title", label: PassStrings.reward, value: .text(reward.title))]
                     d.expirationDate = reward.redeemBy
                 default:
                     break
                 }
             }
         }
+        if ctx.config.walletBetaLabel { d.back.append(.init(key: "beta", label: PassStrings.about, value: .text(PassStrings.beta))) }
         return d
     }
 
@@ -222,6 +290,18 @@ struct WalletService {
         try await touch(pass)
     }
 
+    /// Voids every live pass matching the filter (a disconnected relationship, a cancelled ticket).
+    func voidAll(consumer: UUID, businessId: UUID) async throws {
+        for pass in try await WalletPassRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$businessId == businessId)
+            .filter(\.$voided == false).all() { try await void(pass) }
+    }
+
+    func voidAll(interactionId: UUID) async throws {
+        for pass in try await WalletPassRecord.query(on: db).filter(\.$interactionId == interactionId).filter(\.$voided == false).all() {
+            try await void(pass)
+        }
+    }
+
     /// Sends queued pass-update pushes. Claims each row with a compare-and-swap, so concurrent workers never double-send.
     @discardableResult
     func deliverDue(limit: Int = 50) async throws -> Int {
@@ -268,6 +348,177 @@ struct WalletService {
         let cutoff = ctx.now.addingTimeInterval(-7 * 86_400)
         try await WalletPushOutboxRecord.query(on: db).filter(\.$status == "sent").filter(\.$createdAt < cutoff).delete()
         try await WalletLogRecord.query(on: db).filter(\.$createdAt < cutoff).delete()
+    }
+
+    // MARK: Business API
+
+    private func businessDTO(_ pass: WalletPassRecord) async throws -> BusinessWalletPass {
+        let relationship = try await RelationshipRecord.query(on: db).filter(\.$consumerId == pass.consumerId).filter(\.$businessId == pass.businessId)
+            .sort(\.$connectedAt, .descending).first()
+        return BusinessWalletPass(
+            id: WalletPassID(pass.id!), kind: pass.kindValue, relationshipId: relationship.flatMap { $0.id.map { RelationshipID($0) } },
+            subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(pass.businessId), consumerId: ConsumerID(pass.consumerId)),
+            rewardId: pass.rewardId.map { RewardID($0) }, interactionId: pass.interactionId.map { InteractionID($0) },
+            issuedBy: pass.issuedBy == BusinessWalletPass.Issuer.business.rawValue ? .business : .customer, voided: pass.voided,
+            usedAt: pass.usedAt, createdAt: pass.createdAt, updatedAt: pass.updatedAt)
+    }
+
+    /// The business's own live pass, or `404` (another business's pass, or any pass for a test-mode key, is indistinguishable from none).
+    private func ownedPass(principal: BusinessPrincipal, id: WalletPassID) async throws -> WalletPassRecord {
+        try Sandbox.requireLive(principal, "manage Wallet passes")
+        guard let pass = try await WalletPassRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$businessId == principal.businessId.uuid).first() else {
+            throw APIError.notFound
+        }
+        return pass
+    }
+
+    func businessIssue(principal: BusinessPrincipal, request: BusinessIssueWalletPassRequest) async throws -> (pass: BusinessWalletPass, created: Bool) {
+        // A pass reaches a real person's Wallet: a test-mode key never produces one.
+        try Sandbox.requireLive(principal, "issue Wallet passes")
+        guard let relationshipId = request.relationshipId, let relationship = try await RelationshipRecord.query(on: db)
+            .filter(\.$id == relationshipId.uuid).filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
+        guard relationship.isActive else { throw APIError.conflict("The customer is not connected to your business.") }
+        try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
+        let result = try await issueRecord(consumer: ConsumerID(relationship.consumerId), request: WalletPassIssueRequest(
+            kind: request.kind, businessId: principal.businessId, rewardId: request.rewardId, interactionId: request.interactionId), issuer: principal)
+        return (try await businessDTO(result.record), result.created)
+    }
+
+    func businessList(principal: BusinessPrincipal, limit: Int) async throws -> [BusinessWalletPass] {
+        guard principal.livemode else { return [] }
+        var out: [BusinessWalletPass] = []
+        for pass in try await WalletPassRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid).sort(\.$createdAt, .descending)
+            .limit(limit).all() { out.append(try await businessDTO(pass)) }
+        return out
+    }
+
+    func businessVoid(principal: BusinessPrincipal, id: WalletPassID) async throws -> BusinessWalletPass {
+        let pass = try await ownedPass(principal: principal, id: id)
+        if !pass.voided {
+            try await db.transaction { tx in
+                try await WalletService(db: tx, ctx: ctx).void(pass)
+                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_voided", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                    consumerId: ConsumerID(pass.consumerId), businessId: principal.businessId, subjectType: "wallet_pass", subjectId: id.description)
+            }
+        }
+        return try await businessDTO(pass)
+    }
+
+    private func validatedText(_ value: String?, field: String) throws -> String?? {
+        guard let value else { return .none }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .some(nil) }
+        guard trimmed.count <= Self.maxTextLength, !trimmed.contains(where: { $0.isNewline }),
+              !trimmed.unicodeScalars.contains(where: { $0.properties.generalCategory == .control || $0.properties.generalCategory == .format }) else {
+            throw APIError.validation("\(field) is not valid.", details: [field: "invalid"])
+        }
+        return .some(trimmed)
+    }
+
+    func businessUpdate(principal: BusinessPrincipal, id: WalletPassID, request: UpdateWalletPassRequest) async throws -> BusinessWalletPass {
+        let pass = try await ownedPass(principal: principal, id: id)
+        guard !pass.voided else { throw APIError.gone("This pass was voided.") }
+        let venue = try validatedText(request.venue, field: "venue")
+        let seat = try validatedText(request.seat, field: "seat")
+        let ticketChange = venue != nil || seat != nil || request.startsAt != nil
+        let rotate = request.rotateScanCode == true
+        guard ticketChange || rotate else { throw APIError.validation("Nothing to update.", details: ["body": "empty"]) }
+        if ticketChange {
+            guard [.eventTicket, .generic, .boardingPass].contains(pass.kindValue) else {
+                throw APIError.conflict("Only ticket and reservation passes have a venue, seat or start time.")
+            }
+            if let starts = request.startsAt, starts < ctx.now.addingTimeInterval(-86_400) {
+                throw APIError.validation("startsAt is in the past.", details: ["startsAt": "invalid"])
+            }
+        }
+        // Updates are operational: a pass takes a few a day, so they cannot become a notification channel.
+        try await ctx.limiter.enforce("wallet-update", key: id.description, rule: ctx.config.rateLimits.walletUpdatePerPass)
+        var fields: [String] = []
+        if let venue { pass.ticketVenue = venue; fields.append("venue") }
+        if let seat { pass.ticketSeat = seat; fields.append("seat") }
+        if let starts = request.startsAt { pass.ticketStartsAt = starts; fields.append("startsAt") }
+        if rotate { pass.scanGeneration += 1; fields.append("scanCode") }
+        let changed = fields
+        try await db.transaction { tx in
+            try await WalletPassRecord.query(on: tx).filter(\.$id == pass.id!).set(\.$ticketVenue, to: pass.ticketVenue).set(\.$ticketSeat, to: pass.ticketSeat)
+                .set(\.$ticketStartsAt, to: pass.ticketStartsAt).set(\.$scanGeneration, to: pass.scanGeneration).update()
+            try await WalletService(db: tx, ctx: ctx).touch(pass)
+            _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_updated", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                consumerId: ConsumerID(pass.consumerId), businessId: principal.businessId, subjectType: "wallet_pass", subjectId: id.description,
+                metadata: ["fields": changed.joined(separator: ",")])
+        }
+        return try await businessDTO(pass)
+    }
+
+    // MARK: Scan
+
+    func scan(principal: BusinessPrincipal, request: WalletScanRequest) async throws -> WalletScanResult {
+        // Every attempt costs budget, so neither forging tags nor replaying old codes can be done at volume.
+        try await ctx.limiter.enforce("wallet-scan", key: principal.businessId.description, rule: ctx.config.rateLimits.walletScan)
+        let location = try RewardsService.validatedLocation(request.locationCode)
+        // Forged, altered, malformed, rotated-out, another business's, a sandbox key's or a disconnected customer's: the same 404.
+        guard principal.livemode, let parsed = verifyScanCode(request.code),
+              let pass = try await WalletPassRecord.query(on: db).filter(\.$id == parsed.id).filter(\.$businessId == principal.businessId.uuid).first(),
+              parsed.generation == pass.scanGeneration,
+              try await Sandbox(db: db).matches(consumerId: pass.consumerId, livemode: true),
+              let relationship = try await RelationshipRecord.query(on: db).filter(\.$consumerId == pass.consumerId)
+                .filter(\.$businessId == principal.businessId.uuid).filter(\.$status == "active").first(), let relationshipId = relationship.id else {
+            throw APIError(.notFound, .notFound, "This pass isn't valid here.")
+        }
+        guard !pass.voided else { throw APIError.gone("This pass is no longer valid.") }
+        let now = ctx.now
+        let consumer = ConsumerID(pass.consumerId)
+        let subjectRef = ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: consumer)
+        let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
+        func result(_ outcome: WalletScanResult.Outcome, title: String? = nil, points: Int? = nil, redemption: RedemptionReceipt? = nil) -> WalletScanResult {
+            WalletScanResult(outcome: outcome, passId: WalletPassID(pass.id!), kind: pass.kindValue, relationshipId: RelationshipID(relationshipId),
+                             subjectRef: subjectRef, title: title, pointsBalance: points, redemption: redemption, scannedAt: now)
+        }
+        switch pass.kindValue {
+        case .storeCard:
+            let account = try await LoyaltyAccountRecord.query(on: db).filter(\.$businessId == pass.businessId).filter(\.$consumerId == pass.consumerId).first()
+            _ = try await AuditService(db: db, ctx: ctx).record("wallet.pass_scanned", actor: actor, consumerId: consumer, businessId: principal.businessId,
+                subjectType: "wallet_pass", subjectId: pass.id!.uuidString.lowercased(), metadata: ["outcome": "member"])
+            return result(.member, points: account?.pointsBalance ?? 0)
+        case .coupon:
+            guard let rewardId = pass.rewardId, let reward = try await RewardRecord.find(rewardId, on: db), !reward.isRevoked else {
+                throw APIError.gone("This pass is no longer valid.")
+            }
+            if let until = reward.validUntil, now >= until { throw APIError.gone("This offer has expired.") }
+            let receipt = try await RewardsService(db: db, ctx: ctx).redeemPresentedPass(principal: principal, consumerId: pass.consumerId,
+                                                                                        rewardId: rewardId, location: location)
+            return result(.redeemed, title: receipt.rewardTitle, redemption: receipt)
+        case .eventTicket, .boardingPass, .generic:
+            guard let interactionId = pass.interactionId, let record = try await InteractionRecord.find(interactionId, on: db),
+                  record.statusValue != .cancelled, let interaction = try? record.interaction() else {
+                throw APIError.gone("This pass is no longer valid.")
+            }
+            var title: String?
+            if case .ticket(let ticket) = interaction.payload {
+                title = ticket.title
+                if let from = ticket.validFrom, now < from {
+                    throw APIError(.conflict, .conflict, "This ticket isn't valid yet.", details: ["state": "notYetValid", "validFrom": ViadereDate.format(from)])
+                }
+                if let until = ticket.validUntil, now >= until { throw APIError.gone("This ticket has expired.") }
+            } else if case .reward(let reward) = interaction.payload {
+                title = reward.title
+                if let until = reward.redeemBy, now >= until { throw APIError.gone("This pass has expired.") }
+            }
+            // Single entry: exactly one scan flips used_at from NULL; every later one learns when it was used.
+            let checkedIn = try await db.transaction { tx -> Bool in
+                guard try await DB.swapFromNull(tx, table: WalletPassRecord.schema, id: pass.id!, column: "used_at", newValue: now) else { return false }
+                pass.usedAt = now
+                try await WalletService(db: tx, ctx: ctx).touch(pass)
+                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_checked_in", actor: actor, consumerId: consumer, businessId: principal.businessId,
+                    subjectType: "wallet_pass", subjectId: pass.id!.uuidString.lowercased(), metadata: location.map { ["location": $0] } ?? [:])
+                return true
+            }
+            guard checkedIn else {
+                let used = try await WalletPassRecord.find(pass.id!, on: db)?.usedAt
+                throw APIError(.conflict, .conflict, "This pass was already used.", details: used.map { ["usedAt": ViadereDate.format($0)] })
+            }
+            return result(.checkedIn, title: title)
+        }
     }
 
     // MARK: PassKit web service

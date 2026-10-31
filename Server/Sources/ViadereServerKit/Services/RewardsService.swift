@@ -318,20 +318,26 @@ struct RewardsService {
         try await ctx.limiter.enforce("reward-redeem", key: consumer.description, rule: ctx.config.rateLimits.rewardRedeem)
         let (reward, summary) = try await visible(rewardId, consumer: consumer, on: db)
         let location = try Self.validatedLocation(request.locationCode)
+        let actor = AuditActor(kind: .device, id: principal.deviceId?.description)
+        let result = try await issueCode(reward: reward, summary: summary, consumer: consumer, actor: actor, location: location)
+        let issued = RewardEntry(reward: result.2.reward, kind: result.2.kind, eligibility: result.2.eligibility,
+                                 pointsCost: result.2.pointsCost, claimedAt: result.2.claimedAt)
+        return RewardRedemption(reward: issued.reward, redemptionCode: result.1, expiresAt: result.0.expiresAt,
+                                validForSeconds: Int(Self.codeTTL), serverTime: ctx.now)
+    }
+
+    /// Reserves a slot (and held points) and issues a code, re-evaluating eligibility inside the transaction.
+    private func issueCode(reward: RewardRecord, summary: BusinessSummary, consumer: ConsumerID, actor: AuditActor,
+                           location: String?) async throws -> (RewardRedemptionRecord, String, RewardEntry) {
         // Free the slot and points of this person's expired codes first, so they don't block a fresh one.
-        try await releaseExpired(rewardId: rewardId.uuid, consumerId: consumer.uuid)
+        try await releaseExpired(rewardId: reward.id!, consumerId: consumer.uuid)
         for _ in 0..<6 {
             do {
-                let result: (RewardRedemptionRecord, String, RewardEntry) = try await DB.retryingTransient {
+                return try await DB.retryingTransient {
                     try await db.transaction { tx in
-                        try await reserve(on: tx, reward: reward, summary: summary, principal: principal, location: location)
+                        try await reserve(on: tx, reward: reward, summary: summary, consumer: consumer, actor: actor, location: location)
                     }
                 }
-                let now = ctx.now
-                let issued = RewardEntry(reward: result.2.reward, kind: result.2.kind, eligibility: result.2.eligibility,
-                                         pointsCost: result.2.pointsCost, claimedAt: result.2.claimedAt)
-                return RewardRedemption(reward: issued.reward, redemptionCode: result.1, expiresAt: result.0.expiresAt,
-                                        validForSeconds: Int(Self.codeTTL), serverTime: now)
             } catch is RetryReservation {
                 continue
             } catch {
@@ -343,9 +349,37 @@ struct RewardsService {
         throw APIError.conflict("This reward can't be redeemed right now. Try again.")
     }
 
-    private func reserve(on tx: any Database, reward: RewardRecord, summary: BusinessSummary, principal: ConsumerPrincipal,
+    /// A coupon pass scanned at the till (`POST /v1/business/wallet/scan`): the same eligibility, limits, single use, webhook and
+    /// metering as a code the customer asked for and the business consumed, in one call. Showing the pass is the customer's act of
+    /// using the offer, so an unclaimed coupon is claimed first. The code never leaves the server.
+    func redeemPresentedPass(principal: BusinessPrincipal, consumerId: UUID, rewardId: UUID, location: String?) async throws -> RedemptionReceipt {
+        let consumer = ConsumerID(consumerId)
+        let (reward, summary) = try await visible(RewardID(rewardId), consumer: consumer, on: db)
+        guard reward.businessId == principal.businessId.uuid else { throw APIError.notFound }
+        let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
+        let current = try await currentEntry(reward, business: summary, consumer: consumer, on: db)
+        if current.eligibility.state == .eligible, current.eligibility.nextAction == .claim {
+            let claim = RewardClaimRecord()
+            claim.id = UUID()
+            claim.rewardId = rewardId
+            claim.consumerId = consumerId
+            claim.claimedAt = ctx.now
+            do {
+                try await db.transaction { tx in
+                    try await claim.create(on: tx)
+                    _ = try await AuditService(db: tx, ctx: ctx).record("reward.claimed", actor: actor, consumerId: consumer, businessId: principal.businessId,
+                        subjectType: "reward", subjectId: rewardId.uuidString.lowercased(), metadata: ["via": "wallet_pass"])
+                }
+            } catch {
+                if !error.isConstraintViolation { throw error }
+            }
+        }
+        let (_, code, _) = try await issueCode(reward: reward, summary: summary, consumer: consumer, actor: actor, location: location)
+        return try await consume(principal: principal, request: ConsumeRedemptionRequest(code: code, locationCode: location))
+    }
+
+    private func reserve(on tx: any Database, reward: RewardRecord, summary: BusinessSummary, consumer: ConsumerID, actor: AuditActor,
                          location: String?) async throws -> (RewardRedemptionRecord, String, RewardEntry) {
-        let consumer = principal.consumerId
         let now = ctx.now
         let state = try await loadState(consumer: consumer.uuid, rewardIds: [reward.id!], businessIds: [reward.businessId], on: tx)
         let facts = facts(reward, state: state, now: now)
@@ -392,7 +426,7 @@ struct RewardsService {
         record.issuedAt = now
         record.expiresAt = now.addingTimeInterval(Self.codeTTL)
         try await record.create(on: tx)
-        _ = try await AuditService(db: tx, ctx: ctx).record("reward.redemption_issued", principal: principal, businessId: BusinessID(reward.businessId),
+        _ = try await AuditService(db: tx, ctx: ctx).record("reward.redemption_issued", actor: actor, consumerId: consumer, businessId: BusinessID(reward.businessId),
             subjectType: "reward", subjectId: reward.id!.uuidString.lowercased(), metadata: ["window": window, "points": String(held)])
         var refreshed = state
         refreshed.redemptions[reward.id!, default: []].append(record)

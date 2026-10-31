@@ -203,8 +203,13 @@ final class PKPassFormatTests: XCTestCase {
         XCTAssertEqual(try ZipArchive.read(zip).map(\.data), entries.map(\.data))
         XCTAssertEqual(try ZipArchive.build(entries), zip, "deterministic bytes")
         XCTAssertEqual(zip.prefix(4), Data([0x50, 0x4B, 0x03, 0x04]))
-        for bad in ["../evil", "/abs", "dir/file", "a\\b", ".hidden", ""] {
+        for bad in ["../evil", "/abs", "dir/file", "a\\b", ".hidden", "", "../x.lproj/pass.strings", "en.lproj/../pass.json", "en.lproj/sub/x",
+                    "en.lproj/.x", ".lproj/pass.strings", "e n.lproj/pass.strings", "en.lproj/", "fr.lproj\\pass.strings"] {
             XCTAssertThrowsError(try ZipArchive.build([ZipArchive.Entry(name: bad, data: Data())]), bad)
+        }
+        // One level of Apple's localization folders is allowed.
+        for good in ["en.lproj/pass.strings", "zh-Hans.lproj/pass.strings", "fr.lproj/logo@2x.png"] {
+            XCTAssertNoThrow(try ZipArchive.build([ZipArchive.Entry(name: good, data: Data())]), good)
         }
         var corrupt = zip
         corrupt[40] ^= 0xFF
@@ -328,7 +333,8 @@ final class WalletFlowTests: XCTestCase {
             XCTAssertLessThan(response.body.count, 5 * 1024 * 1024)
             XCTAssertNotNil(response.headers.first(name: .lastModified))
             let pass = try PKPassContents(response.body)
-            XCTAssertEqual(Set(pass.files.keys), ["pass.json", "manifest.json", "signature", "icon.png", "icon@2x.png", "icon@3x.png"])
+            XCTAssertEqual(Set(pass.files.keys), ["pass.json", "manifest.json", "signature", "icon.png", "icon@2x.png", "icon@3x.png",
+                                                  "en.lproj/pass.strings", "es.lproj/pass.strings", "fr.lproj/pass.strings"])
             // pass.json identity matches the metadata the app was promised.
             XCTAssertEqual(pass.passJSON["passTypeIdentifier"] as? String, metadata.passTypeIdentifier)
             XCTAssertEqual(pass.passJSON["serialNumber"] as? String, metadata.serialNumber)
@@ -344,7 +350,8 @@ final class WalletFlowTests: XCTestCase {
             let secondary = try XCTUnwrap(card["secondaryFields"] as? [[String: Any]])
             XCTAssertEqual(secondary.first?["value"] as? String, "Silver")
             // The manifest is Apple's: a SHA-1 for every file except itself and the signature.
-            XCTAssertEqual(Set(pass.manifest.keys), ["pass.json", "icon.png", "icon@2x.png", "icon@3x.png"])
+            XCTAssertEqual(Set(pass.manifest.keys), ["pass.json", "icon.png", "icon@2x.png", "icon@3x.png",
+                                                     "en.lproj/pass.strings", "es.lproj/pass.strings", "fr.lproj/pass.strings"])
             for (name, hash) in pass.manifest { XCTAssertEqual(hash, pass.sha1(name), name) }
             XCTAssertTrue(pass.manifest.values.allSatisfy { $0.count == 40 })
             // The signature was made over exactly that manifest.
@@ -413,7 +420,9 @@ final class WalletFlowTests: XCTestCase {
             let secondary = try XCTUnwrap(style["secondaryFields"] as? [[String: Any]])
             XCTAssertEqual(secondary.compactMap { $0["value"] as? String }, ["Orpheum Theatre", "Row F · Seat 12"])
             XCTAssertEqual(content.passJSON["relevantDate"] as? String, PassDescriptor.wallet(starts))
-            XCTAssertNil((content.passJSON["barcodes"] as? [[String: Any]])?.first?["message"] as? Int)
+            let barcode = try XCTUnwrap((content.passJSON["barcodes"] as? [[String: Any]])?.first?["message"] as? String)
+            XCTAssertTrue(WalletScanCode.isWellFormed(barcode), "the QR is the signed presentation code")
+            XCTAssertEqual(barcode, try pass.json(WalletPassMetadata.self).scanCode)
             // Someone else's ticket, or an interaction that is not a ticket, cannot become a pass.
             let other = try await h.readyConsumer(name: "Other")
             _ = try await h.connect(other, to: s.business)

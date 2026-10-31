@@ -179,6 +179,8 @@ struct RelationshipService {
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
             // Disconnecting ends the business's ability to ask for approvals: its keys for this relationship are revoked and the requests stop.
             try await ApproveKeyService(db: tx, ctx: ctx).revokeKeys(where: .relationship(record.id!), reason: "disconnected")
+            // The business's passes end with the connection: their codes stop scanning and Wallet shows them as void.
+            try await WalletService(db: tx, ctx: ctx).voidAll(consumer: consumer.uuid, businessId: record.businessId)
             try await WebhookService(db: tx, ctx: ctx).enqueue(.relationshipDisconnected, businessId: businessId,
                 payload: RelationshipEventPayload(relationshipId: relationshipId, subjectRef: ctx.subjects.subjectRef(businessId: businessId, consumerId: consumer),
                                                        source: nil, occurredAt: now))

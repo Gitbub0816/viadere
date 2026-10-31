@@ -165,7 +165,8 @@ enum RoleGrantPolicy {
 /// Key scopes that widen what a credential can do beyond messaging (needs `elevateKeyScope`).
 enum KeyScopePolicy {
     static let baselineScopes: Set<String> = [BusinessAPIKeys.Scope.interactionsWrite, BusinessAPIKeys.Scope.interactionsRead, BusinessAPIKeys.Scope.messagesWrite,
-                                              BusinessAPIKeys.Scope.statusesWrite, BusinessAPIKeys.Scope.webhooksManage, BusinessAPIKeys.Scope.rewardsWrite]
+                                              BusinessAPIKeys.Scope.statusesWrite, BusinessAPIKeys.Scope.webhooksManage, BusinessAPIKeys.Scope.rewardsWrite,
+                                              BusinessAPIKeys.Scope.walletWrite]
 
     /// True if any requested operational scope or capability goes beyond the messaging baseline.
     static func elevates(scopes: [String], capabilities: [String]) -> Bool {
