@@ -19,7 +19,7 @@ enum BK {
 
     /// Hostile tokens: ivory primary on ivory, white accent, near-invisible secondary, a surface that defeats both foregrounds.
     static let hostile = BrandTokens(primary: BrandColor("#F5F2EC")!, secondary: BrandColor("#F0F0F0")!, accent: BrandColor("#FFFFFF")!,
-                                     surface: BrandColor("#777777")!, radius: .none, border: .none, typeScale: .large)
+                                     surface: BrandColor("#777777")!, radius: BrandRadius.none, border: BrandBorder.none, typeScale: .large)
     static let good = BrandTokens(primary: BrandColor("#2F5D50")!, secondary: BrandColor("#4A4A48")!, accent: BrandColor("#B5683A")!,
                                   surface: BrandColor("#FFFDF7")!, radius: .large, border: .hairline, typeScale: .standard)
 

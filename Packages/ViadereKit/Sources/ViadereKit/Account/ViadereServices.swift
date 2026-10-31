@@ -26,6 +26,10 @@ public struct ViadereServices: Sendable {
     public var approveAPI: (any ApproveAPI)?
     /// The Organization API (alerts, benefits, businesses; `nil` in extensions and the App Clip).
     public var organizationAPI: (any OrganizationAPI)?
+    /// Hosted Loops (consent, instances, keys; `nil` in the App Clip and extensions that do not render Loops).
+    public var loopsAPI: (any LoopsAPI)?
+    /// Brand Kits (`nil` in the App Clip). Synchronous reads; no security flow awaits it.
+    public var brandKits: BrandKitStore?
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -103,8 +107,20 @@ public struct ViadereServices: Sendable {
         if !isAppClip {
             services.approveAPI = LiveApproveAPI(client: client)
             services.organizationAPI = LiveOrganizationAPI(client: client)
+            services.loopsAPI = LiveLoopsAPI(client: client)
+            services.brandKits = BrandKitStore(api: LiveBrandKitAPI(client: client), assets: TransportBrandAssetFetcher(transport: transport),
+                                               cache: makeBrandKitCache(appGroupID: groupID), keys: configuration.brandManifestKeys,
+                                               apiHost: configuration.apiBaseURL.host)
         }
         return services
+    }
+
+    /// The Brand Kit cache in the app group (shared with the notification service extension), or memory when there is no container.
+    static func makeBrandKitCache(appGroupID: String) -> any BrandKitCache {
+        guard !appGroupID.isEmpty, let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
+            return InMemoryBrandKitCache()
+        }
+        return FileBrandKitCache(directory: container.appendingPathComponent("BrandKits", isDirectory: true))
     }
 
     /// `DCAppAttestService` where DeviceCheck exists, "unsupported" elsewhere.
@@ -158,11 +174,17 @@ public struct ViadereServices: Sendable {
         let records = SecretDeviceRecordStore(secrets: secrets)
         let tokens = SecretTokenStore(secrets: secrets)
         let sessions = SessionManager(store: tokens, refresher: FailingRefresher(), clock: clock)
-        var services = ViadereServices(configuration: .local, api: api, sessions: sessions, keys: keys, records: records,
+        var configuration = ViadereConfiguration.local
+        configuration.brandManifestKeys = [MockBrandKitAPI.pinnedKey]
+        configuration.loopPublicationKeys = [MockLoopsAPI.pinnedKey]
+        var services = ViadereServices(configuration: configuration, api: api, sessions: sessions, keys: keys, records: records,
                                        preferences: InMemoryPreferences(), secrets: secrets, passkeys: MockPasskeyService(),
                                        notificationPermission: MockNotificationPermissionService(), appLock: MockAppLockAuthenticator(),
                                        appAttest: appAttest, clock: clock)
         services.organizationAPI = api
+        services.loopsAPI = MockLoopsAPI(clock: clock)
+        let brand = MockBrandKitAPI()
+        services.brandKits = BrandKitStore(api: brand, assets: brand, cache: InMemoryBrandKitCache(), keys: configuration.brandManifestKeys, clock: clock)
         if signedIn {
             let consumerId = api.consumerId
             try? await sessions.set(TokenSet(consumerId: consumerId, accessToken: "mock", accessExpiresAt: clock().addingTimeInterval(3_600)))
