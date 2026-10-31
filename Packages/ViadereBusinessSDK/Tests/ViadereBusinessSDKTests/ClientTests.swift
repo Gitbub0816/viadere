@@ -118,7 +118,9 @@ struct ClientTests {
                                     "business.keyDirectory.publish", "business.keyDirectory.entries",
                                     "business.webhooks.verify", "business.webhooks.test", "business.webhooks.pause", "business.webhooks.resume",
                                     "business.approve.settings.get", "business.approve.settings.put",
-                                    "business.linkSessions.create", "business.linkSessions.get", "business.linkSessions.confirm", "business.linkSessions.cancel"]
+                                    "business.linkSessions.create", "business.linkSessions.get", "business.linkSessions.confirm", "business.linkSessions.cancel",
+                                    "business.wallet.passes.issue", "business.wallet.passes.list", "business.wallet.passes.update", "business.wallet.passes.void",
+                                    "business.wallet.scan"]
         #expect(Set(business).subtracting(covered).isEmpty)
     }
 
