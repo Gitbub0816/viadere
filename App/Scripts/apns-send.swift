@@ -1,10 +1,10 @@
 // Sends one test push straight to APNs (sandbox) from a Mac, for a Debug or Staging build. Swift + CryptoKit only.
 //
-//   swift App/Scripts/apns-send.swift --key ~/secrets/AuthKey_NH9V2KR4LK.p8 --token <device token hex> \
+//   swift App/Scripts/apns-send.swift --key ~/secrets/AuthKey_39XK88V25C.p8 --token <device token hex> \
 //       [--title "Viadere"] [--body "Test notification"] [--subtitle ""] [--category ""] [--production]
 //
 // The device token is printed in Xcode's console (event `push.token.sandbox`) when the app runs from Xcode with notifications allowed.
-// The key file never leaves the Mac; the signed JWT is used for this one request and not printed. Team M669H43X63, key NH9V2KR4LK,
+// The key file never leaves the Mac; the signed JWT is used for this one request and not printed. Team M669H43X63, key 39XK88V25C,
 // topic com.viadere.app (override with --team, --key-id, --topic).
 import CryptoKit
 import Foundation
@@ -14,7 +14,7 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-var options: [String: String] = ["team": "M669H43X63", "key-id": "NH9V2KR4LK", "topic": "com.viadere.app",
+var options: [String: String] = ["team": "M669H43X63", "key-id": "39XK88V25C", "topic": "com.viadere.app",
                                  "title": "Viadere", "body": "Test notification", "subtitle": "", "category": ""]
 var production = false
 var arguments = CommandLine.arguments.dropFirst()

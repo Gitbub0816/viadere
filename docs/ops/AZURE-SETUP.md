@@ -270,7 +270,7 @@ python3 -I Infra/fly/generate_secrets.py --check "$WORK/s.env"
 python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/map.json --env-file "$WORK/s.env" --dry-run
 python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/map.json --env-file "$WORK/s.env"
 # multi-line values go one by one from a file (stdin keeps the newlines):
-python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name apns-p8 < AuthKey_NH9V2KR4LK.p8
+python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name apns-p8 < AuthKey_39XK88V25C.p8
 ```
 
 `put-env` lists every mapped secret it did not find in the file (`NOT SET ...`): at this point that should be only `APNS_KEY_P8` (the command above), plus `DATABASE_URL` and `DATABASE_MIGRATION_URL` if you opted into the password fallback (section 8).
