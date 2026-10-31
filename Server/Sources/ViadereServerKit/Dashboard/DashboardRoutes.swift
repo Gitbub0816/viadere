@@ -117,6 +117,8 @@ enum DashboardRoutes {
         }
         pub.get("dashboard", "invite", ":token") { req in try await invitePage(req, token: req.parameters.get("token") ?? "") }
         pub.get("dashboard", "verify") { _ in verifyPage() }
+        // Business console passkey enrollment: opens and spends links only; links are minted by `staging-demo --console-owner`.
+        ConsoleEnrollmentRoutes.register(app)
 
         let ceremonies = routes.grouped(authLimiter)
         @Sendable func sessionResponse(_ created: DashboardSessionStore.Created, req: Request, realm: DashboardRealm) async throws -> Response {

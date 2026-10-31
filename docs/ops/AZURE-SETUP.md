@@ -416,6 +416,39 @@ Verification checklist:
 - [ ] Budget alert e-mail address confirmed; Cost Management shows the staging subscription below USD 30 projected.
 - [ ] Policy check of a fresh `tofu plan` shows only the five recorded lean exceptions.
 
+### 10.1 Staging demo business "Atlas Demo" (staging only)
+
+`ViadereServer staging-demo` refuses to run unless `ENVIRONMENT=staging`. Run it inside the api container so its output (keys, links) reaches only your terminal, never the logs. Every step is idempotent; re-running never duplicates the business, the owner, the kit, the image or the Loop. Nothing it does approves, publishes or signs: the kit, its image and every Loop revision wait for a Viadere operator exactly like a business's own submissions.
+
+```sh
+X() { az containerapp exec -n ca-viadere-api -g "$RG_APP" --command "/app/ViadereServer staging-demo $*"; }
+
+# 0. An operator for the reviews (once): open the printed link, create the passkey.
+az containerapp exec -n ca-viadere-api -g "$RG_APP" --command "/app/ViadereServer create-operator --email ops@example.com --name 'Ops Name'"
+az containerapp exec -n ca-viadere-api -g "$RG_APP" --command "/app/ViadereServer grant-operator-permission --email ops@example.com --permission loop_reviewer"
+
+# 1. Console owner: an active Owner of Atlas Demo (no email code: staging has no mail delivery) and a one-time, one-hour passkey link.
+X --console-owner owner@example.com --name Dana   # --name is optional (default "Atlas Demo Owner")
+#    Open the link, "Create passkey" (lands on /dashboard). Later sign-ins: /dashboard/login. Run it again for a fresh link (the old one is revoked).
+
+# 2. Brand Kit: a generated logo through the real upload pipeline + the "atlas" kit (deep teal on ivory), both pending review.
+X --seed-brand-kit
+#    Operator: /operator/brand -> Confirm with passkey -> Approve the logo image, then Approve the kit (a kit waits for its images).
+
+# 3. Loop: a Loop Studio draft from the locked "pickup_time" template (single-reviewer risk class), submitted through the Studio.
+X --seed-loop
+#    It names the "atlas" kit if that kit is already approved, else it is neutral (after approving the kit, run --seed-loop again for a
+#    branded revision). Operator (needs loop_reviewer, not the author): /operator/loops -> the revision -> Approve with a reason + passkey.
+#    Then /operator/loops/publications/<id> -> rollout 100% with a reason (customers outside the rollout cannot start it).
+
+# 4. Where everything stands, and the publication id once published.
+X --status
+```
+
+In the app: Businesses → `@atlasdemo` → Connect, turn on requests built by businesses (global and for Atlas Demo), then start "Choose a pickup time" from the business page. `--issue-key` prints a live API key for the messaging and approval demos.
+
+The console owner can only reach Atlas Demo: the command refuses an address that belongs to an operator, an unverified or disabled account, or a member of any other organization, and the enrollment link (`console_enrollments`: token stored as SHA-256, single use, one hour, origin-checked, rate limited, audited `staging_demo.console_enrollment_issued` / `dashboard.console_enrolled`) is minted only by this command, never by an HTTP route. Brand Kit Studio and Loop Studio need no other onboarding step: they require a verified, non-suspended business in an eligible category (Atlas Demo is created verified, category `retail`) and the `manageBrandKits` / `submitLoops` permissions (Owner has both).
+
 ---
 
 ## 11. Server environment variables (WP-B2/B3)

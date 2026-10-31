@@ -524,6 +524,56 @@ struct DashboardAuthService {
         return try await store.create(userId: user.id!, realm: .operator, businessId: nil, replacing: previousCookie)
     }
 
+    // MARK: Business console enrollment (staging demo owner)
+
+    /// The enrollment behind a business console link: open, unexpired, for an active business user who still holds a live membership in
+    /// the enrollment's organization. Unknown, used, revoked, expired and orphaned tokens are indistinguishable (`nil`). Links are minted
+    /// only by `StagingDemo.issueConsoleEnrollment` (the `staging-demo --console-owner` command); no route creates one.
+    func openConsoleEnrollment(token: String) async throws -> ConsoleEnrollmentRecord? {
+        guard Base64URL.isValid(token, minLength: 20, maxLength: 64),
+              let enrollment = try await ConsoleEnrollmentRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(token)).first(),
+              enrollment.state == "open", enrollment.expiresAt > ctx.now,
+              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business", user.status == "active",
+              try await OrgMembershipRecord.query(on: db).filter(\.$userId == enrollment.userId).filter(\.$businessId == enrollment.businessId)
+                  .filter(\.$removedAt == nil).first() != nil else { return nil }
+        return enrollment
+    }
+
+    func consoleEnrollBegin(_ body: EnrollBeginBody) async throws -> PasskeyRegistrationOptions {
+        guard let enrollment = try await openConsoleEnrollment(token: body.token), let user = try await DashboardUserRecord.find(enrollment.userId, on: db) else {
+            throw APIError.validation("This enrollment link is not valid.", details: ["token": "invalid"])
+        }
+        let email = try ctx.cipher.openString(user.emailCiphertext, context: "dashboard_users.email", rowId: user.id!)
+        let payload = String(decoding: try JSONEncoder().encode(["enrollmentId": enrollment.id!.uuidString]), as: UTF8.self)
+        let (ceremony, challenge) = try await newCeremony(kind: "console-enroll", userId: user.id, payload: payload)
+        return registrationOptions(ceremony, challenge: challenge, handle: user.userHandle, email: email, displayName: user.displayName)
+    }
+
+    /// Registers the passkey and spends the link in one transaction (exactly one finish can flip `open` → `used`), then signs the user in
+    /// to the enrollment's organization only.
+    func consoleEnrollFinish(_ finish: PasskeyRegistrationFinishRequest, previousCookie: String?) async throws -> DashboardSessionStore.Created {
+        let ceremony = try await consume(finish.ceremonyId, kind: "console-enroll")
+        guard let json = ceremony.payloadJSON, let payload = try? JSONDecoder().decode([String: String].self, from: Data(json.utf8)),
+              let idText = payload["enrollmentId"], let enrollmentId = UUID(uuidString: idText),
+              let enrollment = try await ConsoleEnrollmentRecord.find(enrollmentId, on: db), ceremony.userId == enrollment.userId,
+              enrollment.state == "open", enrollment.expiresAt > ctx.now,
+              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business", user.status == "active",
+              try await OrgMembershipRecord.query(on: db).filter(\.$userId == enrollment.userId).filter(\.$businessId == enrollment.businessId)
+                  .filter(\.$removedAt == nil).first() != nil else { throw APIError.unauthorized }
+        let verified = try await verifyRegistration(finish, ceremony: ceremony)
+        try await db.transaction { tx in
+            guard try await DB.swap(tx, table: ConsoleEnrollmentRecord.schema, id: enrollmentId, column: "state", expected: "open", newValue: "used",
+                                    extra: [("used_at", ctx.now)])
+            else { throw APIError.unauthorized }
+            try await savePasskey(verified, userId: user.id!, on: tx)
+            _ = try await AuditService(db: tx, ctx: ctx).record("dashboard.console_enrolled", actor: AuditActor(kind: .business, id: user.id?.uuidString.lowercased()),
+                                                               businessId: BusinessID(enrollment.businessId), subjectType: "user", subjectId: user.id?.uuidString.lowercased())
+        }
+        user.lastLoginAt = ctx.now
+        try await user.update(on: db)
+        return try await store.create(userId: user.id!, realm: .business, businessId: enrollment.businessId, replacing: previousCookie)
+    }
+
     /// Creates a pending operator and a one-time enrollment token (shown once by the `create-operator` command).
     func createOperator(email rawEmail: String, displayName: String) async throws -> String {
         guard let email = Self.normalizeEmail(rawEmail), let name = cleanName(displayName, max: 64) else { throw APIError.validation("Invalid operator details.") }
