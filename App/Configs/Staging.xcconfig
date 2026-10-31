@@ -35,6 +35,9 @@ VIADERE_PIN_ISRG_X1 = C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=
 VIADERE_PIN_ISRG_X2 = diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=
 VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP),$(VIADERE_PIN_ISRG_X1),$(VIADERE_PIN_ISRG_X2)
 
+// Azure staging Key Vault `brand-manifest` key (kv-vdr-stgcbo3l), printed by `ViadereServer brand-manifest-key` on 2026-10-31.
+VIADERE_BRAND_MANIFEST_KEYS = dUPwpEj4t4LEQNhmJaX2KuXagJnOgaHHOMli_sEaaKM:BPQWQouXRTqnVvN3wD4FSbbBXaSHTVi_a0V2a3pSjQZdyP9OMKEFcjpOz7rRhnIlG0pINwWqq3XJr9jmfKUl_Ms
+
 // ---- push and App Attest ---------------------------------------------------------------------------------------------
 // Defaults match fly.staging.toml (APNS_ENVIRONMENT = sandbox, APP_ATTEST_ENVIRONMENT = development): builds run from Xcode on a device.
 // TestFlight builds are signed for distribution; Apple issues them PRODUCTION push tokens, so for a TestFlight round put these in

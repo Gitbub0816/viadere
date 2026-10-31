@@ -118,10 +118,16 @@ case "${CONFIGURATION:-}" in
     esac
     # Staging: an EMPTY manifest-key set is a warning, not an error, so the app keeps building before the staging keys exist (the app
     # fails closed at runtime: neutral Brand Kits, no Loops). A malformed set is still an error; Release stays strict.
-    if [ -z "${VIADERE_BRAND_MANIFEST_KEYS:-}" ] && [ -z "${VIADERE_LOOP_PUBLICATION_KEYS:-}" ]; then
-      echo "warning: VIADERE_BRAND_MANIFEST_KEYS and VIADERE_LOOP_PUBLICATION_KEYS are not set: this Staging build shows no Brand Kits and no Loops."
+    # Each set is checked on its own: empty warns, anything else must be valid.
+    if [ -z "${VIADERE_BRAND_MANIFEST_KEYS:-}" ]; then
+      echo "warning: VIADERE_BRAND_MANIFEST_KEYS is not set: this Staging build shows no Brand Kits."
     else
-      check_all_manifest_keys || fail=1
+      check_manifest_keys VIADERE_BRAND_MANIFEST_KEYS "${VIADERE_BRAND_MANIFEST_KEYS}" || fail=1
+    fi
+    if [ -z "${VIADERE_LOOP_PUBLICATION_KEYS:-}" ]; then
+      echo "warning: VIADERE_LOOP_PUBLICATION_KEYS is not set: this Staging build shows no Loops."
+    else
+      check_manifest_keys VIADERE_LOOP_PUBLICATION_KEYS "${VIADERE_LOOP_PUBLICATION_KEYS}" || fail=1
     fi
     exit "$fail"
     ;;
