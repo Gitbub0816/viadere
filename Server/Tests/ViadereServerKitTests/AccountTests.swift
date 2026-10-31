@@ -56,6 +56,24 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(Set(json.keys), ["aps", "iid"])
     }
 
+    /// `viadere.loop` (SECURITY.md §2.98): the instance id is the only custom key, at the top level, as an opaque lowercase UUID; the alert
+    /// is the generic one (no business name, no content).
+    func testLoopPushPayloadCarriesOnlyTheOpaqueInstanceId() throws {
+        let id = UUID().uuidString.lowercased()
+        let message = PushMessage(deviceToken: String(repeating: "ab", count: 32), environment: .sandbox, topic: "com.viadere.app", title: PushPayloadBuilder.genericTitle,
+                                  body: LoopRuntimeService.pushBody, category: "viadere.loop", threadID: "viadere.loop", interruptionLevel: "active",
+                                  interactionId: nil, highPriority: true, collapseID: "loop.\(id)", loopInstanceId: id)
+        let data = try JSONEncoder().encode(APNSwiftSender.notification(for: message))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), ["aps", "loopInstanceId"], "no iid, no null keys, nothing else")
+        XCTAssertEqual(json["loopInstanceId"] as? String, id)
+        let aps = try XCTUnwrap(json["aps"] as? [String: Any])
+        XCTAssertEqual(aps["category"] as? String, "viadere.loop")
+        let alert = try XCTUnwrap(aps["alert"] as? [String: Any])
+        XCTAssertEqual(alert["title"] as? String, "Viadere")
+        XCTAssertEqual(alert["body"] as? String, LoopRuntimeService.pushBody)
+    }
+
     func testPhoneLinksAndSessionsManagement() async throws {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()

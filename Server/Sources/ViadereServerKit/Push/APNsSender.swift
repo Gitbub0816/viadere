@@ -18,10 +18,13 @@ public struct PushMessage: Sendable, Equatable {
     public var interactionId: String?
     public var highPriority: Bool
     public var collapseID: String?
+    /// Opaque Loop instance id (`loopInstanceId` at the top level of a `viadere.loop` payload, SECURITY.md §2.98): a lowercase UUID the app
+    /// uses to fetch the instance over the authenticated API. Never a business name or any content.
+    public var loopInstanceId: String?
 
     public init(deviceToken: String, environment: APNsTokenRegistration.Environment, topic: String, title: String, body: String,
                 category: String, threadID: String, interruptionLevel: String, mutableContent: Bool = true,
-                interactionId: String?, highPriority: Bool, collapseID: String? = nil) {
+                interactionId: String?, highPriority: Bool, collapseID: String? = nil, loopInstanceId: String? = nil) {
         self.deviceToken = deviceToken
         self.environment = environment
         self.topic = topic
@@ -34,6 +37,7 @@ public struct PushMessage: Sendable, Equatable {
         self.interactionId = interactionId
         self.highPriority = highPriority
         self.collapseID = collapseID
+        self.loopInstanceId = loopInstanceId
     }
 }
 

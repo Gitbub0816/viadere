@@ -180,10 +180,15 @@ public struct LoopInstanceView: Codable, Sendable, Hashable {
     /// The definition in canonical form (`LoopDefinition.parse`).
     public var definition: JSONValue
     public var events: [LoopActionEventView]
+    /// The Brand Kit key pinned when the instance started (the kit the reviewed definition names, if it was live in the business's signed
+    /// manifest then), or `nil` for neutral styling. Fixed for the life of the instance: withdrawing, taking down or rescheduling the kit
+    /// later does not change it. The device still renders a kit only from a manifest it verified itself. Additive: absent from older servers.
+    public var brandKitId: String?
 
     public init(id: LoopInstanceID, businessId: BusinessID, publicationId: LoopPublicationID, revision: Int64, state: LoopInstanceState,
                 currentStepId: String, entryPoint: LoopEntryPoint, expiresAt: Date, createdAt: Date, updatedAt: Date,
-                publicationStatus: LoopPublicationStatus, paused: Bool, manifest: String, definition: JSONValue, events: [LoopActionEventView]) {
+                publicationStatus: LoopPublicationStatus, paused: Bool, manifest: String, definition: JSONValue, events: [LoopActionEventView],
+                brandKitId: String? = nil) {
         self.id = id
         self.businessId = businessId
         self.publicationId = publicationId
@@ -199,6 +204,7 @@ public struct LoopInstanceView: Codable, Sendable, Hashable {
         self.manifest = manifest
         self.definition = definition
         self.events = events
+        self.brandKitId = brandKitId
     }
 }
 

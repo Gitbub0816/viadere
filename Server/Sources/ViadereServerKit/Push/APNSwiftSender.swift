@@ -78,10 +78,15 @@ public final class APNSwiftSender: APNsSender, Sendable {
         }
     }
 
-    struct Custom: Encodable, Sendable { var iid: String? }
+    /// Top-level custom keys. Absent values are omitted (never `null`): an interaction push carries only `iid`, a Loop push only
+    /// `loopInstanceId`.
+    struct Custom: Encodable, Sendable {
+        var iid: String?
+        var loopInstanceId: String?
+    }
 
     /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
-    /// top-level opaque `iid`.
+    /// top-level opaque `iid` (interactions) or `loopInstanceId` (Loops, SECURITY.md §2.98).
     static func notification(for message: PushMessage) -> APNSAlertNotification<Custom> {
         let level: APNSAlertNotificationInterruptionLevel
         switch message.interruptionLevel {
@@ -93,7 +98,7 @@ public final class APNSwiftSender: APNsSender, Sendable {
             alert: .init(title: .raw(message.title), body: .raw(message.body)),
             expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
             priority: message.highPriority ? .immediately : .consideringDevicePower,
-            topic: message.topic, payload: Custom(iid: message.interactionId), threadID: message.threadID,
+            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId), threadID: message.threadID,
             category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
     }
 }

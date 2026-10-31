@@ -222,6 +222,7 @@ struct LoopRuntimeService {
         instance.expiresAt = now.addingTimeInterval(Double(definition.limits.expiresInSeconds))
         instance.createdAt = now
         instance.updatedAt = now
+        instance.brandKitPin = await brandPin(definition: definition, businessId: publication.businessId)
         let ctx = self.ctx
         try await db.transaction { tx in
             try await instance.create(on: tx)
@@ -230,6 +231,24 @@ struct LoopRuntimeService {
                 subjectType: "loop_instance", subjectId: instance.id!.uuidString.lowercased(), metadata: ["publication_id": publication.id!.uuidString.lowercased()])
         }
         return try await view(instance)
+    }
+
+    /// The kit an instance pins when it starts: the kit the reviewed definition names (`appearance: brand_kit`), and only if that kit is in
+    /// the business's active signed manifest right now (so the pin is what customers could actually see). A `standard` Loop pins nothing:
+    /// it asked for neutral styling, so the schedule's selection does not apply. Same switches as interaction pins (kill switch, banned
+    /// category, no signing key). Never throws: branding must not affect starting a Loop.
+    func brandPin(definition: LoopDefinition, businessId: UUID) async -> String? {
+        guard case .brandKit(let key) = definition.appearance, ctx.config.brandKits.signingAvailable else { return nil }
+        do {
+            guard let business = try await BusinessRecord.find(businessId, on: db), !BrandKitService.isBanned(business),
+                  !(await PlatformFlags(db: db, ctx: ctx).brandKitsStopped(businessId: businessId)),
+                  let manifest = try await BrandKitService(db: db, ctx: ctx).activeManifest(businessId: businessId),
+                  manifest.kits.contains(where: { $0.kitId == key }) else { return nil }
+            return key
+        } catch {
+            ctx.logger.warning("loop brand pin skipped", metadata: ["type": "\(type(of: error))"])
+            return nil
+        }
     }
 
     func getInstance(principal: ConsumerPrincipal, id: UUID) async throws -> LoopInstanceView {
@@ -448,7 +467,7 @@ struct LoopRuntimeService {
                                 revision: Int64(publication.revision), state: instance.stateValue, currentStepId: instance.currentStepId,
                                 entryPoint: LoopEntryPoint(rawValue: instance.entryPoint) ?? .businessPage, expiresAt: instance.expiresAt,
                                 createdAt: instance.createdAt, updatedAt: instance.updatedAt, publicationStatus: publication.statusValue, paused: paused,
-                                manifest: manifest, definition: definition, events: views)
+                                manifest: manifest, definition: definition, events: views, brandKitId: instance.brandKitPin)
     }
 
     func eventView(_ event: LoopActionEventRecord) async throws -> LoopActionEventView {
@@ -467,9 +486,11 @@ struct LoopRuntimeService {
         try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$businessId == business).filter(\.$status == "active").first()
     }
 
-    /// The opaque outcome push: no business name, no content (the app fetches the instance over the authenticated API).
+    /// The opaque outcome push: no business name, no content. It carries the instance id as the top-level `loopInstanceId` (an opaque
+    /// UUID, like `iid` for interactions) so the app opens that instance and fetches it over the authenticated API.
     func pushOutcome(consumer: UUID, instanceId: UUID) async {
         let now = ctx.now
+        let id = instanceId.uuidString.lowercased()
         do {
             let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$revokedAt == nil).all().filter { $0.kind == .app && !$0.isExpired(at: now) }
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id)).filter(\.$invalidatedAt == nil).all()
@@ -478,7 +499,7 @@ struct LoopRuntimeService {
                                           topic: token.record.bundleId.isEmpty ? ctx.config.appBundleID : token.record.bundleId,
                                           title: PushPayloadBuilder.genericTitle, body: Self.pushBody, category: "viadere.loop", threadID: "viadere.loop",
                                           interruptionLevel: "active", mutableContent: true, interactionId: nil, highPriority: true,
-                                          collapseID: "loop.\(instanceId.uuidString.lowercased())")
+                                          collapseID: "loop.\(id)", loopInstanceId: id)
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: now).update()
                 }
