@@ -17,6 +17,7 @@ do {
     app.asyncCommands.use(MaintenanceCommand(), as: "maintenance")
     app.asyncCommands.use(SeedCommand(), as: "seed")
     app.asyncCommands.use(CreateOperatorCommand(), as: "create-operator")
+    app.asyncCommands.use(StagingDemoCommand(), as: "staging-demo")
     app.asyncCommands.use(AuditHeadCommand(), as: "audit-head")
     app.asyncCommands.use(KeyDirectoryLogKeyCommand(), as: "key-directory-log-key")
     app.asyncCommands.use(LinkDescriptorKeyCommand(), as: "link-descriptor-key")
