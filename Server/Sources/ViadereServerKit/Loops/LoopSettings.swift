@@ -1,4 +1,5 @@
 import Foundation
+import Vapor
 import ViadereCore
 
 /// Hosted Loops configuration (WP-3.2..3.5).
@@ -65,5 +66,24 @@ extension ServerConfig {
         if key == approve.logKey.publicKey || key == approve.linkDescriptorKey.publicKey {
             throw ServerConfigError.invalid("LOOP_PUBLICATION_SIGNING_KEY must differ from KEY_DIRECTORY_LOG_KEY and LINK_DESCRIPTOR_SIGNING_KEY")
         }
+    }
+}
+
+/// `ViadereServer loop-publication-key` prints the **public** `loop-publication` key and its key id as configured (the Key Vault key on Azure,
+/// else `LOOP_PUBLICATION_SIGNING_KEY`): the value the app pins (`VIADERE_LOOP_PUBLICATION_KEYS`) to verify Loop manifests. Never a private key.
+public struct LoopPublicationKeyCommand: AsyncCommand {
+    public struct Signature: CommandSignature { public init() {} }
+    public let signature = Signature()
+    public let help = "Prints the public loop-publication key (for the app build)."
+    public init() {}
+
+    public func run(using context: CommandContext, signature: Signature) async throws {
+        let key = context.application.ctx.config.loops.publicationKey
+        guard !(key is UnavailableSigningKey) else {
+            context.console.print("loops are off: no loop-publication key is configured")
+            return
+        }
+        context.console.print("kid=\(KeyIdentifier.make(try key.publicKey.signingKey()))")
+        context.console.print("public_key=\(key.publicKey.base64URL)")
     }
 }
