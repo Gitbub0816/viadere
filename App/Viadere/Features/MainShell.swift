@@ -55,6 +55,15 @@ struct MainShell: View {
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
+        .sheet(item: Binding(get: { AppEnvironment.shared.profile.presentedRequest.map(PresentedProfileRequest.init) },
+                             set: { value in
+                                 AppEnvironment.shared.profile.presentedRequest = value?.id
+                                 if value == nil { model.organization.endSensitiveFlow() }
+                             })) { presented in
+            ProfileRequestSheet(id: presented.id)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
         .sheet(isPresented: $model.settingsPresented) {
             SettingsView(model: model)
                 .presentationDetents([.large])

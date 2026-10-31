@@ -71,6 +71,7 @@ struct AlertService {
         add(try await interactions(scope: scope, query: query, limit: limit, now: now))
         add(try await approveRequests(principal: principal, scope: scope, query: query, limit: limit, now: now))
         add(try await verifications(scope: scope, query: query, limit: limit, now: now))
+        add(try await profileRequests(scope: scope, query: query, limit: limit, now: now))
         if filter == nil { add(try await securityNotices(consumer: principal.consumerId.uuid, query: query, limit: limit)) }
 
         if let cursor = query.cursor { drafts = drafts.filter { cursor.precedes(createdAt: $0.createdAt, alertId: $0.alertId) } }
@@ -336,6 +337,52 @@ struct AlertService {
                          status: status, title: title, expiresAt: record.expiresAt, actionRequired: true, canAct: true, createdAt: record.createdAt,
                          updatedAt: record.decidedAt ?? record.createdAt,
                          target: AlertTarget(kind: .verification, id: record.requestID.description))
+        }
+        return (drafts, full)
+    }
+
+    /// Profile requests from connected businesses (docs/PROFILES.md): the customer approves field by field in the app.
+    private func profileRequests(scope: OrganizationScope, query: AlertQuery, limit: Int, now: Date) async throws -> (drafts: [Draft], full: Bool) {
+        let me = scope.consumerId
+        let businesses = Array(scope.own)
+        guard !businesses.isEmpty else { return ([], false) }
+        let pending = ProfileRequestStatus.pending.rawValue
+        func make() -> QueryBuilder<ProfileRequestRecord> {
+            var q = ProfileRequestRecord.query(on: db).filter(\.$consumerId == me).filter(\.$livemode == true).filter(\.$businessId ~~ businesses)
+            switch query.status {
+            case .pending?: q = q.filter(\.$status == pending).filter(\.$expiresAt > now)
+            case .expired?:
+                q = q.group(.or) { or in
+                    or.filter(\.$status == ProfileRequestStatus.expired.rawValue)
+                    or.group(.and) { $0.filter(\.$status == pending).filter(\.$expiresAt <= now) }
+                }
+            case .completed?: q = q.filter(\.$status ~~ [ProfileRequestStatus.answered.rawValue, ProfileRequestStatus.declined.rawValue])
+            case nil: break
+            }
+            if let since = query.since {
+                q = q.group(.or) { or in
+                    or.filter(\.$createdAt > since)
+                    or.filter(\.$answeredAt > since)
+                    or.group(.and) { $0.filter(\.$expiresAt > since).filter(\.$expiresAt <= now) }
+                }
+            }
+            return q
+        }
+        let (rows, full) = try await keyset(make, createdAt: \.createdAt, cursor: query.cursor, limit: limit)
+        let drafts = rows.compactMap { record -> Draft? in
+            guard let id = record.id else { return nil }
+            let status: AlertStatus
+            switch record.statusValue {
+            case .pending: status = record.expiresAt > now ? .pending : .expired
+            case .expired: status = .expired
+            case .cancelled: status = .cancelled
+            default: status = .completed
+            }
+            return Draft(alertId: AlertIdentifier.make(.profileRequest, id), eventId: AlertDescriptor.eventId(kind: AlertSource.profileRequest.rawValue, id: id),
+                         source: .profileRequest, businessId: record.businessId, purpose: .accountService, category: .request, urgency: .normal,
+                         status: status, title: "Wants to see profile details", expiresAt: record.expiresAt, actionRequired: true, canAct: true,
+                         createdAt: record.createdAt, updatedAt: record.answeredAt ?? record.createdAt,
+                         target: AlertTarget(kind: .profileRequest, id: id.uuidString.lowercased()))
         }
         return (drafts, full)
     }

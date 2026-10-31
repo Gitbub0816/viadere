@@ -13,6 +13,7 @@ struct BusinessDetailView: View {
     @State private var confirmingBlock = false
     @State private var confirmingDisconnect = false
     @State private var copied = false
+    @State private var showingProfileAccess = false
     @Environment(\.dismiss) private var dismiss
 
     init(relationship: Relationship, model: AppModel) {
@@ -34,6 +35,7 @@ struct BusinessDetailView: View {
                 BusinessRewardsEntry(business: vm.business, model: model)
                 notifications
                 permissions
+                profileAccess
                 history
                 disconnect
                 block
@@ -155,6 +157,26 @@ struct BusinessDetailView: View {
         case .none: "Notifications from \(vm.business.safeName) arrive normally."
         case .promotional: "Offers and rewards arrive quietly. Everything still appears in Alerts and Benefits."
         case .allNonEssential: "Only security checks and requests that need your answer interrupt you. Everything still appears in Alerts."
+        }
+    }
+
+    /// "What this business can see" (docs/PROFILES.md): the public name and any profile details shared with it.
+    private var profileAccess: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Profile")
+            ViadereRowGroup {
+                Button { showingProfileAccess = true } label: {
+                    ViadereRow("What \(vm.business.safeName) can see", subtitle: "Your public name, and any details you choose") {
+                        ViadereIconTile(systemName: "person.text.rectangle")
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showingProfileAccess) {
+            BusinessProfileAccessView(api: AppEnvironment.shared.profileAPI, business: vm.business.id)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
         }
     }
 

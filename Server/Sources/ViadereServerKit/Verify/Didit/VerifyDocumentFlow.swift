@@ -66,6 +66,11 @@ extension VerifyService {
               let sessionId = body["session_id"]?.stringValue, (1...64).contains(sessionId.count) else { return .accepted }
         if (try? await VerificationProviderEventRecord.query(on: db).filter(\.$provider == "didit").filter(\.$eventId == eventId).count()) ?? 0 > 0 { return .accepted }
         guard let attempt = try? await VerificationAttemptRecord.query(on: db).filter(\.$providerSessionId == sessionId).first() else {
+            // A customer's own profile verification (docs/PROFILES.md) uses the same provider and the same handling.
+            if let handled = await ProfileVerificationService(db: db, ctx: ctx, runtime: runtime).handleDiditSession(sessionId) {
+                if handled == .accepted { try? await VerificationProviderEventRecord(provider: "didit", eventId: eventId, now: ctx.now).create(on: db) }
+                return handled
+            }
             // Not ours (or already purged and gone): acknowledge without saying which.
             return .accepted
         }

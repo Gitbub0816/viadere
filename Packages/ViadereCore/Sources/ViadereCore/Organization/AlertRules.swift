@@ -7,6 +7,8 @@ public enum AlertSource: String, Sendable, Codable, CaseIterable, Hashable {
     case verification
     case securityNotice = "security_notice"
     case loopTask = "loop_task"
+    /// A business asks for profile fields (docs/PROFILES.md).
+    case profileRequest = "profile_request"
 }
 
 // `AlertStatus` is the durable alert status of `Models/Alert.swift` (unknown values decode as `.unknown`, which is never actionable).

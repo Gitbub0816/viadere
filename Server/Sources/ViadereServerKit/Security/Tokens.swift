@@ -30,7 +30,7 @@ enum BusinessAPIKeys {
         /// Wallet passes: issue, list, update and void passes for connected customers, and validate scanned pass codes (live keys).
         static let walletWrite = "wallet:write"
         static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
-                                    linksManage, walletWrite]
+                                    linksManage, walletWrite, profilesRead]
     }
 
     struct Issued {

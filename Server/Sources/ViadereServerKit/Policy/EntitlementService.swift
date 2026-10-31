@@ -22,6 +22,8 @@ struct EntitlementSnapshot: Sendable {
     /// The operator-granted, expiring legacy approval entitlement (`LegacyApproval`): `authorize` and high/critical `authenticate` interactions
     /// decided on relay status alone, while Approve v2 exists.
     var legacyApproval = false
+    /// Customer-profile categories Viadere allowed the business (docs/PROFILES.md). None by default.
+    var profileCategories: Set<ProfileCategory> = []
 }
 
 struct EntitlementService {
@@ -39,6 +41,7 @@ struct EntitlementService {
         var tiers = BusinessRiskTier.baseline
         var capabilities = Set(Capability.messaging)
         var legacy = false
+        var profileCategories: Set<ProfileCategory> = []
         let rows = try await BusinessEntitlementRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$revokedAt == nil).all()
         for row in rows where row.isActive(at: now) {
             switch row.kind {
@@ -47,10 +50,11 @@ struct EntitlementService {
                 let capability = Capability(rawValue: row.value)
                 if capability.isKnown { capabilities.insert(capability) }
             case BusinessEntitlementRecord.legacyKind: if row.value == LegacyApproval.entitlementValue, now < LegacyApproval.sunset { legacy = true }
+            case BusinessEntitlementRecord.profileCategoryKind: if let category = ProfileCategory(rawValue: row.value) { profileCategories.insert(category) }
             default: break
             }
         }
-        return EntitlementSnapshot(tiers: tiers, capabilities: capabilities, legacyApproval: legacy)
+        return EntitlementSnapshot(tiers: tiers, capabilities: capabilities, legacyApproval: legacy, profileCategories: profileCategories)
     }
 
     /// Every entitlement row of a business, newest first (operator console).
@@ -112,6 +116,28 @@ struct EntitlementService {
         }
         return try await create(businessId: businessId, kind: BusinessEntitlementRecord.legacyKind, value: LegacyApproval.entitlementValue, actor: actor,
                                 justification: justification, reviewReference: nil, audited: "entitlement.legacy_approval_granted", expiresAt: expiresAt)
+    }
+
+    /// Allows a customer-profile category (docs/PROFILES.md §Access). Operator-only (called from `ProfileCategoryService.decide`, which checks
+    /// the business asked for it); a justification is always required, and the categories that release identity or age facts also need the
+    /// heightened-review reference (AGE-007).
+    @discardableResult
+    func grant(businessId: UUID, profileCategory: ProfileCategory, actor: EntitlementActor, justification: String,
+               reviewReference: String? = nil) async throws -> BusinessEntitlementRecord {
+        let reference = reviewReference?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if profileCategory.requiresReviewReference {
+            guard let reference, (4...120).contains(reference.count) else {
+                throw APIError.validation("This category needs the reference of the heightened review.", details: ["reviewReference": "required"])
+            }
+        }
+        return try await create(businessId: businessId, kind: BusinessEntitlementRecord.profileCategoryKind, value: profileCategory.rawValue, actor: actor,
+                                justification: justification, reviewReference: reference?.isEmpty == true ? nil : reference,
+                                audited: "entitlement.profile_category_granted")
+    }
+
+    func revoke(businessId: UUID, profileCategory: ProfileCategory, actor: EntitlementActor, justification: String) async throws {
+        try await revoke(businessId: businessId, kind: BusinessEntitlementRecord.profileCategoryKind, value: profileCategory.rawValue, actor: actor,
+                         justification: justification, cascade: [], audited: "entitlement.profile_category_revoked")
     }
 
     func revokeLegacyApproval(businessId: UUID, actor: EntitlementActor, justification: String) async throws {

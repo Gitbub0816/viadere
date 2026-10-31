@@ -104,6 +104,8 @@ public struct RelationshipEvent: Codable, Sendable, Equatable {
     public var subjectRef: SubjectRef?
     public var source: ConnectSource?
     public var occurredAt: Date
+    /// The customer's public name (first name and last initial, or a name they chose). Not private; sent with `relationship.connected`.
+    public var publicName: String? = nil
 }
 
 /// `consent.updated`.
@@ -128,6 +130,13 @@ public enum TypedWebhookEvent: Sendable, Equatable {
 }
 
 extension WebhookEvent {
+    /// `profile.access_granted`, `profile.access_revoked` and `profile.request_expired` (delivered as `.other` by `typed()`): the subject and the
+    /// field keys, never values. Read the values you are allowed with `ViadereBusinessClient.profile(subjectRef:)`. `nil` for any other type.
+    public func profileAccessEvent() throws -> ProfileAccessEvent? {
+        guard [WebhookEventType.profileAccessGranted, .profileAccessRevoked, .profileRequestExpired].contains(type) else { return nil }
+        do { return try decodeData(ProfileAccessEvent.self) } catch { throw WebhookVerificationError.malformedBody }
+    }
+
     /// Decodes `data` according to `type`.
     public func typed() throws -> TypedWebhookEvent {
         do {

@@ -457,7 +457,7 @@ struct LinkSessionService {
         if becameActive, let consumer = record.claimedConsumerId {
             try await WebhookService(db: db, ctx: ctx).enqueue(.relationshipConnected, businessId: principal.businessId,
                 payload: RelationshipEventPayload(relationshipId: RelationshipID(relationshipId), subjectRef: ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: ConsumerID(consumer)),
-                                                  source: .qr, occurredAt: now))
+                                                  source: .qr, occurredAt: now, publicName: try await ProfileService(db: db, ctx: ctx).publicName(consumer: consumer)))
         }
         // The customer's other devices are told (their out-of-band channel is the business's own notice).
         if let consumer = record.claimedConsumerId {

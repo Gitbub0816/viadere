@@ -133,6 +133,11 @@ enum AlertOpener {
             if let business = entry.business?.id { model.organization.open(itemFrom: business) }
             model.organization.beginSensitiveFlow()
             AppEnvironment.shared.verification.presented = id
+        case .profileRequest:
+            guard let id = ProfileRequestID(target.id) else { return }
+            if let business = entry.business?.id { model.organization.open(itemFrom: business) }
+            model.organization.beginSensitiveFlow()
+            AppEnvironment.shared.profile.presentedRequest = id
         case .securityNotice:
             await model.securityNotices.load()
         case .unknown:

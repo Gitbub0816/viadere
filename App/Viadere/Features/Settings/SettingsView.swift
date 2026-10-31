@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport, profile, profileReceipts
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -59,6 +59,8 @@ struct SettingsView: View {
                 case .approvals: ApproveSettingsView(controller: AppEnvironment.shared.approve, model: model)
                 case .dataExport: DataExportView(services: model.services)
                 case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
+                case .profile: ProfileView(api: AppEnvironment.shared.profileAPI)
+                case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
                 }
             }
             .task {
@@ -161,6 +163,10 @@ struct SettingsView: View {
                 navRow("Consent history", subtitle: "What you've allowed, and when", symbol: "checklist", route: .consents)
                 ViadereHairline(inset: 50)
                 navRow("Verification history", subtitle: "Age and ID checks, and what was shared", symbol: "person.badge.shield.checkmark", route: .verifications)
+                ViadereHairline(inset: 50)
+                navRow("Profile", subtitle: "Your public name and what you share", symbol: "person.text.rectangle", route: .profile)
+                ViadereHairline(inset: 50)
+                navRow("Sharing history", subtitle: "Profile details you shared or stopped sharing", symbol: "clock.arrow.circlepath", route: .profileReceipts)
                 ViadereHairline(inset: 50)
                 navRow("Download my data", subtitle: "A copy only this iPhone can open", symbol: "square.and.arrow.down", route: .dataExport)
                 if vm.sessionsAvailable {
