@@ -15,9 +15,16 @@ public struct WalletPassMetadata: Codable, Sendable, Hashable, Identifiable {
     public var serialNumber: String
     public var updatedAt: Date
     public var voided: Bool
+    /// The pass's presentation code (`WalletScanCode`), for showing the same QR in the app. Present only in the holder's own
+    /// responses for a pass that is still valid; never sent to a business.
+    public var scanCode: String?
+    /// When the ticket or reservation was checked in, if it was.
+    public var usedAt: Date?
 
     public init(id: WalletPassID, businessId: BusinessID, kind: WalletPassKind, passTypeIdentifier: String,
-                serialNumber: String, updatedAt: Date, voided: Bool = false) {
+                serialNumber: String, updatedAt: Date, voided: Bool = false, scanCode: String? = nil, usedAt: Date? = nil) {
+        self.scanCode = scanCode
+        self.usedAt = usedAt
         self.id = id
         self.businessId = businessId
         self.kind = kind

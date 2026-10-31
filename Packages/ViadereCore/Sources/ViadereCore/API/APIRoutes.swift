@@ -248,6 +248,22 @@ public enum APIRoutes {
     /// Validates and consumes a redemption code atomically: exactly one caller can ever succeed per code.
     public static let businessConsumeRedemption = Endpoint<ConsumeRedemptionRequest, RedemptionReceipt>(
         "business.redemptions.consume", .POST, "/v1/business/redemptions/consume", auth: .businessAPIKey)
+    /// Issues (or returns) a Wallet pass for a connected customer (scope `wallet:write`, live keys only). `201` new, `200` existing.
+    public static let businessWalletPassIssue = Endpoint<BusinessIssueWalletPassRequest, BusinessWalletPass>(
+        "business.wallet.passes.issue", .POST, "/v1/business/wallet/passes", auth: .businessAPIKey)
+    /// The business's own passes, newest first (query `limit` ≤ 200).
+    public static let businessWalletPassesList = Endpoint<EmptyBody, [BusinessWalletPass]>(
+        "business.wallet.passes.list", .GET, "/v1/business/wallet/passes", auth: .businessAPIKey)
+    /// Schedule/venue change on a ticket or reservation pass, or a fresh presentation code. Pushed to the customer's devices.
+    public static let businessWalletPassUpdate = Endpoint<UpdateWalletPassRequest, BusinessWalletPass>(
+        "business.wallet.passes.update", .PATCH, "/v1/business/wallet/passes/{passId}", auth: .businessAPIKey)
+    /// Voids a pass (final). Wallet shows it as void after its next refresh.
+    public static let businessWalletPassVoid = Endpoint<EmptyBody, BusinessWalletPass>(
+        "business.wallet.passes.void", .POST, "/v1/business/wallet/passes/{passId}/void", auth: .businessAPIKey)
+    /// Validates a scanned pass code: redeems a coupon, checks in a ticket, or identifies a loyalty member. `404` for anything not
+    /// a genuine, current code of this business's live pass.
+    public static let businessWalletScan = Endpoint<WalletScanRequest, WalletScanResult>(
+        "business.wallet.scan", .POST, "/v1/business/wallet/scan", auth: .businessAPIKey)
     /// Test-mode keys only: creates a sandbox consumer connected to the business. Test keys can target nothing else.
     public static let businessSandboxRelationship = Endpoint<EmptyBody, SandboxRelationship>(
         "business.sandbox.relationships.create", .POST, "/v1/business/sandbox/relationships", auth: .businessAPIKey)
@@ -456,6 +472,8 @@ public enum APIRoutes {
         businessSendMessage.descriptor, businessUpdateStatus.descriptor, businessIssueReward.descriptor,
         businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
         businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
+        businessWalletPassIssue.descriptor, businessWalletPassesList.descriptor, businessWalletPassUpdate.descriptor,
+        businessWalletPassVoid.descriptor, businessWalletScan.descriptor,
         businessWebhooksList.descriptor, businessWebhookCreate.descriptor, businessWebhookDelete.descriptor,
         businessWebhookRotate.descriptor, businessWebhookVerify.descriptor, businessWebhookTest.descriptor, businessWebhookPause.descriptor,
         businessWebhookResume.descriptor, accountExportCreate.descriptor, accountExportGet.descriptor, accountExportDownload.descriptor,
