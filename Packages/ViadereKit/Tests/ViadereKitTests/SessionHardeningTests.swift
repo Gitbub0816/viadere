@@ -169,7 +169,8 @@ struct SessionHardeningTests {
         let refresher = CountingRefresher()
         let sessions = SessionManager(store: store, refresher: refresher, lock: lock)
         let pending = Task { try await sessions.validAccessToken() }
-        try await Task.sleep(for: .milliseconds(250))
+        // Wait for the condition, not a fixed time: on a loaded machine the task may reach the lock late.
+        for _ in 0..<500 where lock.leaseDenials == 0 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(lock.leaseDenials >= 1)
         #expect(await refresher.calls == 0)
         // the other process finishes: it stores a fresh session and drops the lease
