@@ -71,6 +71,7 @@ struct AlertService {
         add(try await interactions(scope: scope, query: query, limit: limit, now: now))
         add(try await approveRequests(principal: principal, scope: scope, query: query, limit: limit, now: now))
         add(try await verifications(scope: scope, query: query, limit: limit, now: now))
+        add(try await loopTasks(scope: scope, query: query, limit: limit, now: now))
         if filter == nil { add(try await securityNotices(consumer: principal.consumerId.uuid, query: query, limit: limit)) }
 
         if let cursor = query.cursor { drafts = drafts.filter { cursor.precedes(createdAt: $0.createdAt, alertId: $0.alertId) } }
@@ -289,6 +290,58 @@ struct AlertService {
                                 urgency: AlertUrgency(risk: ActionRegistry.approval(for: capability)?.risk ?? .high), status: status, title: title,
                                 expiresAt: request.expiresAt, actionRequired: true, canAct: true, createdAt: request.createdAt,
                                 updatedAt: request.decidedAt ?? request.createdAt, target: target))
+        }
+        return (drafts, full)
+    }
+
+    /// Loop tasks (WP-3.9): the account's own Loop instances. An active instance waits for the customer (action required, with its
+    /// expiry); a submitted one waits for the business (shown pending, no action); outcomes arrive by the opaque push and the next sync.
+    private func loopTasks(scope: OrganizationScope, query: AlertQuery, limit: Int, now: Date) async throws -> (drafts: [Draft], full: Bool) {
+        let me = scope.consumerId
+        let businesses = Array(scope.own)
+        guard !businesses.isEmpty else { return ([], false) }
+        let open = [LoopInstanceState.active.rawValue, LoopInstanceState.submitted.rawValue]
+        func make() -> QueryBuilder<LoopInstanceRecord> {
+            var q = LoopInstanceRecord.query(on: db).filter(\.$consumerId == me).filter(\.$businessId ~~ businesses)
+            switch query.status {
+            case .pending?: q = q.filter(\.$state ~~ open)
+            case .expired?:
+                q = q.group(.or) { or in
+                    or.filter(\.$state == LoopInstanceState.expired.rawValue)
+                    or.group(.and) { $0.filter(\.$state == LoopInstanceState.active.rawValue).filter(\.$expiresAt <= now) }
+                }
+            case .completed?: q = q.filter(\.$state == LoopInstanceState.completed.rawValue)
+            case nil: break
+            }
+            if let since = query.since {
+                q = q.group(.or) { or in
+                    or.filter(\.$createdAt > since)
+                    or.filter(\.$updatedAt > since)
+                    or.group(.and) { $0.filter(\.$expiresAt > since).filter(\.$expiresAt <= now) }
+                }
+            }
+            return q
+        }
+        let (rows, full) = try await keyset(make, createdAt: \.createdAt, cursor: query.cursor, limit: limit)
+        let revisions = try await LoopRevisionRecord.query(on: db).filter(\.$id ~~ Set(rows.map(\.revisionId)).map { $0 }).all()
+        let titles = Dictionary(revisions.map { ($0.id!, LoopDefinition.parse(Data($0.definitionJSON.utf8)).definition?.title ?? "Request") }, uniquingKeysWith: { a, _ in a })
+        let drafts = rows.compactMap { record -> Draft? in
+            guard let id = record.id else { return nil }
+            let waitingForCustomer = record.stateValue == .active
+            let status: AlertStatus = switch record.stateValue {
+            case .active: record.expiresAt > now ? .pending : .expired
+            case .submitted: .pending
+            case .completed: .completed
+            case .expired: .expired
+            case .cancelled: .cancelled
+            }
+            let soon = record.expiresAt.timeIntervalSince(now) < 86_400
+            return Draft(alertId: AlertIdentifier.make(.loopTask, id), eventId: AlertDescriptor.eventId(kind: AlertSource.loopTask.rawValue, id: id),
+                         source: .loopTask, businessId: record.businessId, purpose: .transactional, category: .request,
+                         urgency: waitingForCustomer && soon ? .timeSensitive : .normal, status: status,
+                         title: DisplayTextSanitizer.sanitize(titles[record.revisionId] ?? "Request", maxCharacters: 120),
+                         expiresAt: waitingForCustomer ? record.expiresAt : nil, actionRequired: waitingForCustomer, canAct: true,
+                         createdAt: record.createdAt, updatedAt: record.updatedAt, target: AlertTarget(kind: .loopInstance, id: id.uuidString.lowercased()))
         }
         return (drafts, full)
     }

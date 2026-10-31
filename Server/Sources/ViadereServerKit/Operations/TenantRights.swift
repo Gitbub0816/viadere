@@ -167,6 +167,27 @@ struct TenantDataRequests {
         }
         let relationships = try await RelationshipRecord.query(on: db).filter(\.$businessId == businessId).all()
         out["customers"] = ["connected": relationships.filter { $0.status == "active" }.count, "disconnected": relationships.filter { $0.status != "active" }.count]
+        // Hosted Loops (WP-3.4): this tenant's definitions, revisions and inbox items with what customers entered; every query is scoped to
+        // `businessId`. Customers appear only as the instance id (no account id, no contact data).
+        let loopDefinitions = try await LoopDefinitionRecord.query(on: db).filter(\.$businessId == businessId).all()
+        let loopRevisions = try await LoopRevisionRecord.query(on: db).filter(\.$businessId == businessId).all()
+        out["loops"] = loopDefinitions.map { definition -> [String: Any] in
+            ["key": definition.key, "revisions": loopRevisions.filter { $0.definitionId == definition.id }.sorted { $0.revision < $1.revision }.map {
+                ["revision": $0.revision, "state": $0.state, "definitionHash": $0.definitionHash, "submittedAt": iso($0.createdAt)] as [String: Any]
+            }]
+        }
+        let runtime = LoopRuntimeService(db: db, ctx: ctx)
+        var inbox: [[String: Any]] = []
+        for item in try await InboxItemRecord.query(on: db).filter(\.$businessId == businessId).sort(\.$createdAt, .ascending).all() {
+            guard let event = try await LoopActionEventRecord.query(on: db).filter(\.$id == item.eventId).filter(\.$businessId == businessId).first() else { continue }
+            let events = try await LoopActionEventRecord.query(on: db).filter(\.$instanceId == item.instanceId).filter(\.$businessId == businessId).all()
+            var answers: [String: Any] = [:]
+            for e in events { for (key, value) in runtime.inputs(of: e) { answers["\(e.stepId).\(key)"] = LoopInbox.describe(value, field: nil) } }
+            let outcome = try await runtime.currentOutcome(eventId: event.id!)
+            inbox.append(["item": item.id!.uuidString.lowercased(), "instance": item.instanceId.uuidString.lowercased(), "queue": item.queueKey, "state": item.state,
+                          "receivedAt": iso(item.createdAt), "closedAt": iso(item.closedAt), "outcome": outcome?.outcome ?? NSNull(), "answers": answers])
+        }
+        out["inbox"] = inbox
         return out
     }
 }

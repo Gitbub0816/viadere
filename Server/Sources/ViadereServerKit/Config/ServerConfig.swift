@@ -160,6 +160,8 @@ public struct ServerConfig: Sendable {
     public var approve = ApproveSettings()
     /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).
     public var verify = VerifySettings()
+    /// Hosted Loops (WP-3.2..3.5): the `loop-publication` signing key and runtime limits.
+    public var loops = LoopSettings()
     /// Operations, edge lock, key rotation, webhook verification and audit export (WP6).
     public var operations = OperationsSettings()
     /// What this process does (`ROLE`: api, worker, migrate; unset = everything, as on Fly).
@@ -347,6 +349,7 @@ public struct ServerConfig: Sendable {
         try config.applyInfrastructureEnvironment(env, production: production)
         config.applyVaultEnvironment(env)
         try config.applyApproveEnvironment(env, production: production)
+        try config.applyLoopEnvironment(env, production: production)
         try config.applyVerifyEnvironment(env, production: production)
         try config.applyOperationsEnvironment(env, production: production)
         return config

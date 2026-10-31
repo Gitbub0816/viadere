@@ -81,7 +81,12 @@ final class SurfaceAndCoreTests: XCTestCase {
                 } else {
                     tables = try await sql.raw("SELECT name FROM sqlite_master WHERE type = 'table'").all().map { try $0.decode(column: "name", as: String.self) }
                 }
-                XCTAssertFalse(tables.contains { $0.hasPrefix("loop") || $0.hasPrefix("brand") }, "\(tables.filter { $0.hasPrefix("loop") || $0.hasPrefix("brand") })")
+                XCTAssertFalse(tables.contains { $0.hasPrefix("brand") }, "\(tables.filter { $0.hasPrefix("brand") })")
+                // Hosted Loops ship their tables (WP-3.2), but nothing core needs a Loop row: every Loop table stays empty below.
+                for table in tables where table.hasPrefix("loop_") || table.hasPrefix("inbox_") {
+                    let rows = try await sql.raw(SQLQueryString("SELECT COUNT(*) AS n FROM \(unsafeRaw: table)")).first()?.decode(column: "n", as: Int.self)
+                    XCTAssertEqual(rows, 0, table)
+                }
                 XCTAssertTrue(tables.contains("business_surfaces"))
             }
             let world = try await TenantWorld.build(h)

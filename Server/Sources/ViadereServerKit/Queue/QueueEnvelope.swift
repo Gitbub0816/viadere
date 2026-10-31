@@ -12,13 +12,17 @@ public enum QueueName: String, Sendable, CaseIterable, Codable {
     case consumerExport = "consumer-export"
     /// Scheduled messages: interaction and approval expiries, identity holds.
     case expiry
+    /// Hosted Loops (plan 4.5): action events to the hosted inbox (and, Phase 4, connected endpoints).
+    case loopDelivery = "loop-delivery"
+    /// Hosted Loops: response deadlines and instance expiries (scheduled messages).
+    case loopTimeout = "loop-timeout"
 
     /// Deliveries before a message is dead-lettered (the broker's `maxDeliveryCount`; the consumer dead-letters on the last one itself).
     public var maxDeliveries: Int {
         switch self {
         case .push: 5
         case .consumerExport: 3
-        case .expiry: 10
+        case .expiry, .loopTimeout: 10
         default: 8
         }
     }
