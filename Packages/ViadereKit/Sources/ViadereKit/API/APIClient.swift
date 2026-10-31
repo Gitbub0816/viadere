@@ -45,9 +45,29 @@ public final class APIClient: Sendable {
         try await perform(endpoint.descriptor, params: params, query: [], body: nil)
     }
 
+    /// A conditional `GET` (`If-None-Match`): `.notModified` on `304`, else the decoded body and the response `ETag`.
+    public func conditional<Res: Decodable & Sendable>(
+        _ endpoint: Endpoint<EmptyBody, Res>, params: [String: String] = [:], ifNoneMatch: String?
+    ) async throws -> ConditionalResponse<Res> {
+        var headers: [String: String] = [:]
+        if let ifNoneMatch, !ifNoneMatch.isEmpty, ifNoneMatch.utf8.count <= 256,
+           ifNoneMatch.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 0x20 && $0.value != 0x7F }) {
+            headers["If-None-Match"] = ifNoneMatch
+        }
+        let response = try await performResponse(endpoint.descriptor, params: params, query: [], body: nil, extraHeaders: headers, accepting: [304])
+        if response.status == 304 { return .notModified }
+        let etag = response.headers.first { $0.key.lowercased() == "etag" }?.value
+        return .fresh(try decode(Res.self, from: response.body), etag: etag)
+    }
+
     // MARK: Core
 
     private func perform(_ descriptor: AnyEndpoint, params: [String: String], query: [(String, String)], body: Data?) async throws -> Data {
+        try await performResponse(descriptor, params: params, query: query, body: body, extraHeaders: [:], accepting: []).body
+    }
+
+    private func performResponse(_ descriptor: AnyEndpoint, params: [String: String], query: [(String, String)], body: Data?,
+                                 extraHeaders: [String: String], accepting extraStatuses: Set<Int>) async throws -> HTTPResponse {
         let path: String
         do { path = try descriptor.path(params, query: query) } catch { throw APIError.invalidRequest("path") }
         let usesBearer = descriptor.auth == .bearer || descriptor.auth == .deviceSignedBearer
@@ -58,8 +78,8 @@ public final class APIClient: Sendable {
         while true {
             var bearer: String?
             if usesBearer { bearer = try await sessions.validAccessToken() }
-            let response = try await executor.run(descriptor, pathAndQuery: path, body: body, bearer: bearer)
-            if (200..<300).contains(response.status) { return response.body }
+            let response = try await executor.run(descriptor, pathAndQuery: path, body: body, bearer: bearer, extraHeaders: extraHeaders)
+            if (200..<300).contains(response.status) || extraStatuses.contains(response.status) { return response }
 
             let error = RequestExecutor.error(from: response)
             // A rejected device signature is not a token problem: retry once with a fresh nonce/timestamp, then
@@ -97,4 +117,11 @@ public final class APIClient: Sendable {
         if data.isEmpty, let empty = EmptyBody() as? T { return empty }
         do { return try ViadereJSON.decode(type, from: data) } catch { throw APIError.decoding(String(describing: type)) }
     }
+}
+
+/// The result of `APIClient.conditional`.
+public enum ConditionalResponse<Value: Sendable>: Sendable {
+    /// `304`: the cached representation is still current.
+    case notModified
+    case fresh(Value, etag: String?)
 }

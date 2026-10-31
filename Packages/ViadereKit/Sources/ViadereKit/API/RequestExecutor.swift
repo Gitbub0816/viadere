@@ -44,14 +44,19 @@ public struct RequestExecutor: Sendable {
     /// - Parameter signsWhenEnrolled: signs the request with the device's request key **even though the route is declared `.none`**,
     ///   when this installation has an enrolled device (`POST /v1/auth/refresh`, whose signature is required once the session is bound
     ///   to a device). With no enrolled device the request goes out unsigned, which is what a not-yet-bound session needs.
+    /// - Parameter extraHeaders: request headers that are not part of the signature string (`If-None-Match`). They can never replace the
+    ///   authentication, signature, content-type or accept headers set here.
     public func run(_ endpoint: AnyEndpoint, pathAndQuery: String, body: Data?, bearer: String?,
-                    signsWhenEnrolled: Bool = false) async throws -> HTTPResponse {
+                    signsWhenEnrolled: Bool = false, extraHeaders: [String: String] = [:]) async throws -> HTTPResponse {
         var base = baseURL.absoluteString
         while base.hasSuffix("/") { base.removeLast() }
         guard pathAndQuery.hasPrefix("/"), let url = URL(string: base + pathAndQuery) else {
             throw APIError.invalidRequest("url")
         }
-        var headers: [String: String] = ["Accept": "application/json", "User-Agent": userAgent]
+        var headers: [String: String] = [:]
+        for (name, value) in extraHeaders where Self.allowedExtraHeaders.contains(name.lowercased()) { headers[name] = value }
+        headers["Accept"] = "application/json"
+        headers["User-Agent"] = userAgent
         if body != nil { headers["Content-Type"] = "application/json" }
 
         switch endpoint.auth {
@@ -85,6 +90,9 @@ public struct RequestExecutor: Sendable {
             throw APIError.transport(String(describing: type(of: error)))
         }
     }
+
+    /// The only headers a caller may add (conditional requests).
+    static let allowedExtraHeaders: Set<String> = ["if-none-match"]
 
     /// Maps a non-2xx response to `APIError`.
     static func error(from response: HTTPResponse) -> APIError {
