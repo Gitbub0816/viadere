@@ -24,6 +24,9 @@ final class AppEnvironment {
     /// Verify (WP3): which verification request is open, and the client that talks to `/v1/verifications`.
     let verification = VerificationCenter()
     let verifyAPI: any VerifyAPI = LiveVerifyAPI.make(services: AppEnvironment.services)
+    /// Customer profile (docs/PROFILES.md): which profile request is open, and the client for `/v1/profile`.
+    let profile = ProfileCenter()
+    let profileAPI: any ProfileAPI = LiveProfileAPI.make(services: AppEnvironment.services)
 
     /// Approve v2 (WP1): pairwise approval keys, the verified key directory, freeze. Closed (and says so) when the build pins no log key.
     let approve: ApproveController

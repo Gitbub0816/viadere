@@ -18,15 +18,7 @@ struct ProfileVerificationService {
     static let attemptLifetime: TimeInterval = 600
     static let attemptRate = RateRule(capacity: 5, perMinute: 0.2)
 
-    /// The Wallet plans a profile verification asks for: always the document (the Verified badge), plus the name and age checks the customer
-    /// chose to keep.
-    static func plans(for keep: [ProfileVerifiedFactKind]) -> [WalletElementPlan.Request] {
-        var plans: [WalletElementPlan.Request] = [.documentPresented]
-        if keep.contains(.legalName) { plans.append(.givenAndFamilyName) }
-        if keep.contains(.ageOver18) { plans.append(.ageAtLeast(18)) }
-        if keep.contains(.ageOver21) { plans.append(.ageAtLeast(21)) }
-        return plans
-    }
+    static func plans(for keep: [ProfileVerifiedFactKind]) -> [WalletElementPlan.Request] { ProfileVerificationBegin.walletPlans(for: keep) }
 
     // MARK: Begin
 

@@ -130,3 +130,28 @@ struct ProfileKitTests {
         #expect(APIRoutes.profileRequestAnswer.method == .POST)
     }
 }
+
+private struct FakeProfileWallet: ProfileWalletPresenter {
+    let cancel: Bool
+    func present(plans: [WalletElementPlan.Request], nonce: Data, merchantIdentifier: String) async throws -> Data {
+        if cancel { throw WalletPresentationError.cancelled }
+        // Always the document; the name only when a legal-name match is kept.
+        guard plans.first == .documentPresented else { throw WalletPresentationError.unavailable }
+        return Data("envelope".utf8)
+    }
+}
+
+@Suite("Profile verification flow (Kit)")
+@MainActor
+struct ProfileVerificationFlowTests {
+    @Test func walletFlowCompletesOrReturnsToChoosingWhenCancelled() async {
+        let api = MockProfileAPI(accountName: "Jane Doe")
+        let model = ProfileVerificationViewModel(api: api)
+        model.keep = [.identity, .legalName]
+        #expect(ProfileVerificationBegin.walletPlans(for: [.identity, .legalName]) == [.documentPresented, .givenAndFamilyName])
+        await model.verifyWithWallet(presenter: FakeProfileWallet(cancel: true))
+        #expect(model.phase == .choosing)
+        await model.verifyWithWallet(presenter: FakeProfileWallet(cancel: false))
+        #expect(model.phase == .finished(.verified))
+    }
+}

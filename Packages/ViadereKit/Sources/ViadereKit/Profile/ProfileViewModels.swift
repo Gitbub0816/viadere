@@ -382,4 +382,6 @@ public final class ProfileVerificationViewModel {
     }
 
     public func reset() { phase = .choosing }
+
+    func failVerification(_ text: String) { phase = .failed(text) }
 }

@@ -334,6 +334,19 @@ public struct ProfileVerificationBegin: Codable, Sendable, Hashable {
     }
 }
 
+extension ProfileVerificationBegin {
+    /// The Wallet plans a profile verification asks for, shared by the app (the `PKIdentityRequest`) and the server (what it extracts): always
+    /// the document (the Verified badge), plus the name and the age checks the customer chose to keep. Viadere keeps none of the element
+    /// values (only the boolean facts), so every element is declared `willNotStore`.
+    public static func walletPlans(for keep: [ProfileVerifiedFactKind]) -> [WalletElementPlan.Request] {
+        var plans: [WalletElementPlan.Request] = [.documentPresented]
+        if keep.contains(.legalName) { plans.append(.givenAndFamilyName) }
+        if keep.contains(.ageOver18) { plans.append(.ageAtLeast(18)) }
+        if keep.contains(.ageOver21) { plans.append(.ageAtLeast(21)) }
+        return plans
+    }
+}
+
 public struct ProfileVerificationStart: Codable, Sendable, Hashable {
     public var attemptId: ProfileAttemptID
     public var method: ProfileVerificationMethod
