@@ -58,7 +58,7 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 | `webhook_delivery_attempts` | per-attempt status/duration/error | OPS | | | Deleted with their delivery | |
 | `loyalty_programs`, `loyalty_accounts`, `loyalty_ledger` | program rules, points balance, **member reference ciphertext**, ledger | OPS | P | member ref E | Until account deletion; ledger kept for accounting `[counsel]` | |
 | `rewards`, `reward_claims`, `reward_redemptions` | offers, claims, redemption code **hash**, slot | OPS | P | H | Until account deletion; codes valid ~2 min | |
-| `wallet_passes`, `wallet_registrations` | pass serial, auth token hash, device library id, push token | OPS | P | H | Until voided/deleted | pass content carries no phone/name |
+| `wallet_passes`, `wallet_registrations` | pass serial, auth token hash, scan-code generation, check-in time, issuer (customer/business), business ticket overrides (venue, seat, start), device library id, push token | OPS | P | H | Until voided/deleted | pass content carries no phone/name; the business never sees registrations |
 | `wallet_push_outbox`, `wallet_logs` | pass-update queue, device logs | OPS | | | Purged after 7 days (job loop) | |
 | `delegation_grants`, `delegation_invitations` | household grants, **label ciphertext**, code hash | SEC | P | E + H | Until revoked/expired and account deletion | labels erased on deletion |
 | `dashboard_users` | email **ciphertext** + hash, display name | OPS | P | E + H | Unverified sign-ups purged after 24 h; verified kept while a member | removal of a business user: retention `[counsel]` |

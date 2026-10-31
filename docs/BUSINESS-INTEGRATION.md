@@ -26,6 +26,7 @@ get the customer's decision back, exchange messages, and let customers connect w
 | `rewards:write` | loyalty program, rewards, points and redemption validation (`/v1/business/loyalty/*`, `/v1/business/rewards*`, `/v1/business/redemptions/consume`) |
 | `approvals:manage` | Approve v2: enrollments, requests, results, freeze (`/v1/business/approve/*`) |
 | `keydirectory:manage` | publish and read your key-directory entries (`/v1/business/key-directory/*`) |
+| `wallet:write` | Wallet passes: issue, list, update and void passes for connected customers, and validate scanned pass codes (`/v1/business/wallet/*`; live keys) |
 
 ### 1a. Onboarding: from workspace to production
 
@@ -312,16 +313,34 @@ reserved when the code is issued and released if it expires unused. The call is 
 If a response is lost, a repeat answers `409`; confirm with the customer rather than assuming. Subscribe to `reward.redeemed` to reconcile.
 
 ### 5. Wallet passes
-Customers add passes from the app; you do not call a pass API. Viadere signs the passes with its own Pass Type ID certificate (see the server README) and
-updates them for you:
+Viadere signs every pass with its own Pass Type ID certificate and keeps it up to date; you never handle a `.pkpass`. A customer can add a
+pass from the app, or you can offer one (`POST /v1/business/wallet/passes`, scope `wallet:write`, **live keys only**) and it appears in their
+app, ready to add to Apple Wallet.
 
-| Pass | Issued when the customer adds | Updates |
+| Pass | Comes from | Updates |
 |---|---|---|
-| Loyalty card (`storeCard`) | the card from their membership | points and status change when you adjust points |
-| Coupon | a claimed coupon | voided when redeemed or when you revoke the reward |
-| Event ticket / boarding pass | a `ticket` interaction you sent (`venue`, `seat`, `startsAt` appear on the pass) | not yet |
+| Loyalty card (`storeCard`) | their membership | points and status when you adjust points |
+| Coupon | a reward they can see | voided when redeemed (also by scanning) or when you revoke the reward |
+| Event ticket (`eventTicket`), boarding pass, reservation or appointment (`generic`) | a `ticket` interaction you sent | `PATCH /v1/business/wallet/passes/{id}` with `venue`, `seat` or `startsAt` (six updates a day); voided when you cancel the interaction |
 
-Passes never contain a phone number, email, name, member number or redemption code. Wallet pass updates are not a way to send promotional notifications.
+**At the till or the door**, scan the pass's QR (`VQ1.` + 48 characters) and send it to `POST /v1/business/wallet/scan`: a coupon is
+redeemed (exactly once, same receipt and `reward.redeemed` webhook as a redemption code), a ticket or reservation is checked in once
+(a second scan is `409` with `usedAt`), a loyalty card returns the member and balance. Anything that is not a current pass of yours is the
+same `404`. If you suspect a QR was copied, rotate it (`PATCH … {"rotateScanCode": true}`): the old one stops working and the customer's
+pass updates. `POST /v1/business/wallet/passes/{id}/void` ends a pass for good. Disconnecting customers' passes are voided automatically.
+
+```swift
+let result = try await client.scanWalletPass(code: scanned, locationCode: "door-2")
+switch result.outcome {
+case .redeemed: print(result.redemption?.rewardTitle ?? "")
+case .checkedIn: print("Welcome")
+case .member: print("Balance:", result.pointsBalance ?? 0)
+}
+```
+
+Passes never contain a phone number, email, name (not even the ticket holder's), member number or redemption code, and you are never told
+whether a customer added a pass to Wallet. Pass updates carry only operational changes (venue, seat, start time); they are not a way to send
+promotional notifications.
 
 ### 6. Ongoing events, tickets and Live Activities
 Give an order, trip or appointment a stable `correlationId` and send it on every related interaction: the `status` updates (`BusinessStatusUpdateRequest.correlationId`),

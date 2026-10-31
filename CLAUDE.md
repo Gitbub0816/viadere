@@ -53,6 +53,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Container base | `swift:6.4.1-resolute` (build) / `ubuntu:26.04` (runtime) | Ubuntu 26.04 LTS is the newest LTS the Swift image supports; both stages on the same LTS |
 | Python (tooling only) | 3.15.x | |
 | MailerSend API (partner) | v1 (`/v1/email`, `/v1/sms`) | Staging and production email and SMS (US/CA); Twilio remains a supported alternative |
+| Apple Wallet (partner) | PassKit web service `v1`, `pass.json` `formatVersion` 1, `relevantDates` (iOS 18) next to `relevantDate` (iOS 17 target) | Checked 2026-10-31 on Apple's documentation (`docs/WALLET.md`); update pushes over production APNs with the Pass Type ID certificate |
 | Xcode / iOS SDK | Xcode 27.1 (latest stable; 27.2 is RC) | `App/project.yml` `xcodeVersion: "2710"` |
 | OpenTofu | 1.13.2 | `Infra/terraform`, `Infra/azure`; CI downloads it checksum-pinned (`get.opentofu.org/tofu/api.json`) |
 | hashicorp/azurerm / azure/azapi (OpenTofu providers) | 5.12.0 / 2.13.0 | `Infra/azure/versions.tf`, exact pins; both served by `registry.opentofu.org` on 2026-10-29 |
