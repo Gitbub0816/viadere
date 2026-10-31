@@ -26,16 +26,33 @@ enum ZipArchive {
 
     enum Failure: Error { case tooLarge, badName }
 
+    /// Flat names, plus exactly one level of Apple's localization folders (`fr.lproj/pass.strings`): no other directories, no
+    /// traversal, no absolute paths, no hidden files.
+    static func isAllowedName(_ name: String) -> Bool {
+        func plain(_ part: Substring) -> Bool {
+            !part.isEmpty && !part.hasPrefix(".") && part.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "@._-".contains($0)) }
+        }
+        let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+        switch parts.count {
+        case 1: return plain(parts[0])
+        case 2:
+            let folder = parts[0]
+            guard folder.hasSuffix(".lproj") else { return false }
+            let language = folder.dropLast(".lproj".count)
+            guard (2...16).contains(language.count), language.first?.isLetter == true,
+                  language.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return false }
+            return plain(parts[1])
+        default: return false
+        }
+    }
+
     static func build(_ entries: [Entry]) throws -> Data {
         guard entries.count < 0xFFFF else { throw Failure.tooLarge }
         var out = Data()
         var central = Data()
         for entry in entries {
             let name = Data(entry.name.utf8)
-            // Flat names only: no directories, no traversal, no absolute paths.
-            guard !name.isEmpty, name.count < 256, !entry.name.contains("/"), !entry.name.contains("\\"), !entry.name.hasPrefix(".") else {
-                throw Failure.badName
-            }
+            guard !name.isEmpty, name.count < 256, isAllowedName(entry.name) else { throw Failure.badName }
             guard entry.data.count < 0x7FFF_FFFF, out.count < 0x7FFF_FFFF else { throw Failure.tooLarge }
             let crc = CRC32.checksum(entry.data)
             let offset = UInt32(out.count)

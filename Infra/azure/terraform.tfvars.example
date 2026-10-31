@@ -78,6 +78,7 @@ app_env = {
   APNS_KEY_ID                              = "39XK88V25C"
   APNS_TEAM_ID                             = "M669H43X63"
   PASS_TYPE_IDENTIFIER                     = ""
+  WALLET_BETA_LABEL                        = "true"
   EMAIL_API_URL                            = "https://api.mailersend.com/v1/email"
   EMAIL_API_FORMAT                         = "mailersend"
   EMAIL_FROM_ADDRESS                       = "Viadere Staging <no-reply@viadere.cksites.dev>"

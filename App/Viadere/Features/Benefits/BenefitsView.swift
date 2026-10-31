@@ -22,6 +22,19 @@ struct BenefitsView: View {
                     ViadereHeader("Benefits", subtitle: model.organization.selectedBusiness.map { "Coupons and rewards from \($0.safeName)" } ?? "Coupons, rewards and passes")
                     ViadereFilterBar("Benefit filters", selection: Binding(get: { benefits.filter }, set: { benefits.filter = $0 }),
                                      options: Self.filters.map { ViadereFilterBar<BenefitFilter?>.Option($0.0, $0.1, count: benefits.count($0.0, context: context)) })
+                    if benefits.filter == .available || benefits.filter == nil {
+                        ViadereRowGroup {
+                            NavigationLink {
+                                WalletPassesView(model: model)
+                            } label: {
+                                ViadereRow("Wallet passes", subtitle: "Cards, offers, tickets and reservations") {
+                                    ViadereIconTile(systemName: "wallet.pass")
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, ViadereSpace.m)
+                    }
                     content
                 }
                 .padding(.horizontal, ViadereSpace.screen)

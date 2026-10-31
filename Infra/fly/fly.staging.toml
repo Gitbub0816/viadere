@@ -87,6 +87,7 @@ kill_timeout = 30         # seconds; lets in-flight requests and the job loop fi
   APNS_KEY_ID = "39XK88V25C"           # identifier of the .p8 key (not secret; the key itself is APNS_KEY_P8). Must be a Sandbox & Production key: staging sends to development builds
   APNS_TEAM_ID = "M669H43X63"
   PASS_TYPE_IDENTIFIER = ""             # set with the three PASS_*_PEM secrets, or leave all four unset (passes off)
+  WALLET_BETA_LABEL = "true"            # the beta note on the back of passes (owner decision, docs/WALLET.md)
   # ---- provider endpoints / senders (public values) -------------------------------------------------
   EMAIL_API_URL = "https://api.mailersend.com/v1/email"
   EMAIL_API_FORMAT = "mailersend"

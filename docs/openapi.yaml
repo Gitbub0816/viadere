@@ -79,6 +79,7 @@ tags:
   - name: Statuses
   - name: Webhooks
   - name: Rewards
+  - name: Wallet
   - name: Capabilities
   - name: Verification
   - name: Approve
@@ -1129,6 +1130,136 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/wallet/passes:
+    post:
+      tags: [Wallet]
+      operationId: issueWalletPass
+      summary: Issue a Wallet pass for a connected customer
+      description: |
+        Requires scope `wallet:write` and the `message.send` capability. **Live keys only**: a test-mode key never produces a pass
+        (`403`). `storeCard` needs the customer's loyalty membership, `coupon` a reward the customer can see, `eventTicket` and
+        `generic` (reservations, appointments) a `ticket` interaction you sent them. One pass per customer and subject: a repeat returns
+        the existing pass with `200`. The customer adds it to Apple Wallet from the Viadere app; you never receive the `.pkpass`.
+        Pass content is only what the customer's own card shows; Viadere never puts a name, phone, e-mail or member number in a pass.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessIssueWalletPassRequest" }
+      responses:
+        "200":
+          description: The existing pass.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "201":
+          description: Issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [Wallet]
+      operationId: listWalletPasses
+      summary: List your Wallet passes
+      description: Requires scope `wallet:write`. Newest first; query `limit` (1-200, default 50). Whether a customer added a pass to Wallet is not disclosed.
+      responses:
+        "200":
+          description: Passes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/BusinessWalletPass" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/business/wallet/passes/{passId}:
+    patch:
+      tags: [Wallet]
+      operationId: updateWalletPass
+      summary: Change a ticket or reservation pass, or rotate its code
+      description: |
+        Requires scope `wallet:write`, live keys. `venue`, `seat` and `startsAt` apply to `eventTicket` and `generic` passes (`409` for
+        others); the customer's Wallet shows "Venue changed to ..." style notices for them. `rotateScanCode` invalidates the QR currently
+        in the pass (for any kind) and pushes a new one. Updates are operational, never marketing: a pass accepts 6 updates a day (`429`).
+      parameters:
+        - { name: passId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWalletPassRequest" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/wallet/passes/{passId}/void:
+    post:
+      tags: [Wallet]
+      operationId: voidWalletPass
+      summary: Void a Wallet pass
+      description: Requires scope `wallet:write`, live keys. Final. The code stops scanning at once; Wallet shows the pass as void after its next refresh (pushed now).
+      parameters:
+        - { name: passId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: Voided (also when it already was).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/business/wallet/scan:
+    post:
+      tags: [Wallet]
+      operationId: scanWalletPass
+      summary: Validate a scanned pass code
+      description: |
+        Requires scope `wallet:write` and `message.send`. Codes look like `VQ1.` followed by 48 base64url characters; only Viadere can
+        mint or check one. What happens depends on the pass:
+
+        | Pass | Result |
+        |---|---|
+        | `coupon` | **Redeemed**, atomically and once (the same rules, limits, webhook and receipt as `POST /v1/business/redemptions/consume`). |
+        | `eventTicket`, `generic` | **Checked in**, once. A second scan is `409` with `details.usedAt`. Before the ticket's validity window: `409` `notYetValid`; after it: `410`. |
+        | `storeCard` | **Member** identified, with the points balance (add points with `POST /v1/business/loyalty/points`). |
+
+        `404` for a forged, altered, rotated-out or malformed code, another business's pass, or a pass whose customer disconnected (all the
+        same on purpose). `410` for a voided pass or an expired coupon. `429` when the per-business budget is spent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WalletScanRequest" }
+      responses:
+        "200":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WalletScanResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/verification-requests:
@@ -2291,6 +2422,61 @@ components:
         redeemedAt: { $ref: "#/components/schemas/Timestamp" }
         pointsSpent: { type: integer }
         locationCode: { type: string }
+
+    WalletPassKind:
+      type: string
+      enum: [storeCard, coupon, eventTicket, boardingPass, generic]
+    BusinessIssueWalletPassRequest:
+      type: object
+      required: [kind]
+      description: Name the customer with `relationshipId` or `subjectRef` (both must agree when sent together).
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+    BusinessWalletPass:
+      type: object
+      required: [id, kind, issuedBy, voided, createdAt, updatedAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        issuedBy: { type: string, enum: [customer, business] }
+        voided: { type: boolean }
+        usedAt: { $ref: "#/components/schemas/Timestamp" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+    UpdateWalletPassRequest:
+      type: object
+      properties:
+        venue: { type: string, maxLength: 80 }
+        seat: { type: string, maxLength: 80 }
+        startsAt: { $ref: "#/components/schemas/Timestamp" }
+        rotateScanCode: { type: boolean }
+    WalletScanRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "The scanned QR text, VQ1.<48 base64url characters>." }
+        locationCode: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+    WalletScanResult:
+      type: object
+      required: [outcome, passId, kind, relationshipId, scannedAt]
+      properties:
+        outcome: { type: string, enum: [redeemed, checkedIn, member] }
+        passId: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        title: { type: string }
+        pointsBalance: { type: integer }
+        redemption: { $ref: "#/components/schemas/RedemptionReceipt" }
+        scannedAt: { $ref: "#/components/schemas/Timestamp" }
 
     Capability:
       type: string

@@ -26,6 +26,7 @@ struct MockP3State {
     var audit: [HouseholdAuditEntry] = []
     var acknowledgments: [AcknowledgmentRecord] = []
     var issuedRedemptionCodes: [String: RewardID] = [:]
+    var walletPassesFailure: APIError?
 }
 
 extension MockViadereAPI {
@@ -151,13 +152,23 @@ extension MockViadereAPI {
 
     // MARK: Wallet
 
-    public func walletPasses() async throws -> [WalletPassMetadata] { p3.passes.values.sorted { $0.updatedAt > $1.updatedAt } }
+    public func walletPasses() async throws -> [WalletPassMetadata] {
+        if let failure = p3.walletPassesFailure { throw failure }
+        return p3.passes.values.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Test hook: replace (or add) a pass as the server would after a business change (void, check-in, new code).
+    public func setWalletPass(_ pass: WalletPassMetadata) { p3.passes[pass.id] = pass }
+
+    /// Test hook: make `walletPasses()` fail.
+    public func setWalletPassesFailure(_ failure: APIError?) { p3.walletPassesFailure = failure }
 
     public func issueWalletPass(_ request: WalletPassIssueRequest) async throws -> WalletPassMetadata {
         let id = WalletPassID()
         let pass = WalletPassMetadata(id: id, businessId: request.businessId, kind: request.kind,
                                       passTypeIdentifier: request.kind == .storeCard || request.kind == .coupon ? PreviewData.passTypeLoyalty : PreviewData.passTypeTicket,
-                                      serialNumber: "SN-" + id.description.prefix(8).uppercased(), updatedAt: clock())
+                                      serialNumber: "SN-" + id.description.prefix(8).uppercased(), updatedAt: clock(),
+                                      scanCode: PreviewData.mockScanCode(id))
         p3.passes[id] = pass
         if request.kind == .storeCard, var account = p3.accounts[request.businessId] {
             account.walletPass = pass

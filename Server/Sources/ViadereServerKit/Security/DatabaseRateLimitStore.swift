@@ -28,7 +28,7 @@ public struct DatabaseRateLimitStore: RateLimitStore {
     /// Namespaces (or namespace prefixes) refused while the shared store is down.
     public static let defaultFailClosed: [String] = [
         "phonelink", "link-", "phone-confirm", "household-invite", "enroll", "device-confirm", "dashboard-", "auth-", "otp", "recovery",
-        "redemption-consume", "reward-redeem", "wallet-auth-fail",
+        "redemption-consume", "reward-redeem", "wallet-auth-fail", "wallet-scan", "wallet-update",
     ]
 
     let database: @Sendable () -> (any Database)?

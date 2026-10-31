@@ -9,6 +9,11 @@ extension ServerConfig {
             if let file = env[path], !file.isEmpty, let text = try? String(contentsOfFile: file, encoding: .utf8) { return text }
             return nil
         }
+        // The beta note on the back of every pass: on unless explicitly turned off (owner decision, docs/WALLET.md).
+        if let beta = env["WALLET_BETA_LABEL"]?.lowercased(), !beta.isEmpty {
+            guard ["true", "false", "1", "0"].contains(beta) else { throw ServerConfigError.invalid("WALLET_BETA_LABEL (true or false)") }
+            walletBetaLabel = beta == "true" || beta == "1"
+        }
         let identifier = env["PASS_TYPE_IDENTIFIER"].flatMap { $0.isEmpty ? nil : $0 }
         let certificate = pem("PASS_CERTIFICATE_PEM", "PASS_CERTIFICATE_PATH")
         let key = pem("PASS_PRIVATE_KEY_PEM", "PASS_PRIVATE_KEY_PATH")

@@ -295,6 +295,31 @@ A plain and a wrapped value of the same variable together refuse the boot. After
 
 Cloudflare must send the same `EDGE_TOKEN` value as the `edge-token` secret (section 9): read it from `"$WORK/s.env"` before that directory is deleted. Writing secrets through ARM needs `Microsoft.KeyVault/vaults/secrets/write` (Owner, Contributor or Key Vault Contributor on the vault); reading them back needs a data-plane role, which nobody but the workloads has. Container Apps picks up a new secret version within 30 minutes or on the next revision (`az containerapp revision restart`).
 
+### 7.1 Apple Wallet passes (optional; docs/WALLET.md)
+
+Passes stay off (the pass endpoints answer `501`) until all four values exist. The server signs every pass and sends the update pushes with the same certificate; nothing else ever holds it. **(owner)**
+
+1. **Apple Developer portal** (Certificates, Identifiers & Profiles, as Account Holder or Admin):
+   * Identifiers → **+** → *Pass Type IDs* → description "Viadere Wallet", identifier `pass.com.viadere.wallet` (one per environment if staging and production must stay apart, e.g. `pass.com.viadere.wallet.staging`; the app's `VIADERE_PASS_TYPE_IDENTIFIER` must match the server it talks to).
+   * Select the Pass Type ID → *Create Certificate*: upload a CSR made **on your machine** (`openssl req -new -newkey rsa:2048 -nodes -keyout pass.key -out pass.csr -subj "/CN=Viadere Wallet/emailAddress=<you>"`; keep `pass.key` in `"$WORK"` only), download `pass.cer`, convert it: `openssl x509 -inform DER -in pass.cer -out pass.pem`.
+   * Apple's **WWDR intermediate** that issued it (the Pass Type ID certificate names it; currently the G4 intermediate) from <https://www.apple.com/certificateauthority/>: `openssl x509 -inform DER -in AppleWWDRCAG4.cer -out wwdr.pem`. Check the chain: `openssl verify -partial_chain -CAfile wwdr.pem pass.pem`.
+   * Identifiers → the app ID `com.viadere.app` → enable **Wallet** and select the Pass Type ID (the app reads "In Wallet" through the `com.apple.developer.pass-type-identifiers` entitlement); regenerate the provisioning profiles.
+2. **Key Vault secrets** (the existing secret handling; values never on a command line). In `terraform.tfvars`, add to `app_secret_env`:
+   ```hcl
+   PASS_CERTIFICATE_PEM      = "pass-certificate"
+   PASS_PRIVATE_KEY_PEM      = "pass-private-key"
+   PASS_WWDR_CERTIFICATE_PEM = "pass-wwdr-certificate"
+   ```
+   and to `app_env`: `PASS_TYPE_IDENTIFIER = "pass.com.viadere.wallet"` (and `WALLET_BETA_LABEL = "true"` or `"false"`, an owner decision). `tofu apply` creates the placeholders and the api/worker read grants; then store the values from the files:
+   ```sh
+   python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name pass-certificate < "$WORK/pass.pem"
+   python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name pass-private-key < "$WORK/pass.key"     # unencrypted PKCS#8/PKCS#1 PEM
+   python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name pass-wwdr-certificate < "$WORK/wwdr.pem"
+   ```
+   Delete `pass.key` with the rest of `"$WORK"`. The server validates the three at boot (parseable, the key matches the certificate, unexpired) and refuses to start otherwise, so a bad value fails the deploy, not the first pass.
+3. **Renewal.** The Pass Type ID certificate lasts about a year. Before it expires, create a new one (same Pass Type ID), store the new certificate and key as new secret versions and restart the revision. Existing passes keep working: Wallet trusts any valid certificate for the same Pass Type ID and team. There is no expiry metric yet: keep a calendar reminder a month ahead (a server with an expired certificate refuses to start, and pass pushes fail as soon as it expires).
+4. **Check** with a real device: add a loyalty card from the app, confirm "In Wallet", add points from the dashboard or API, and watch the pass update (pass pushes use production APNs only, also for a staging server).
+
 ---
 
 ## 8. PostgreSQL roles

@@ -176,6 +176,45 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
                                                               body: ConsumeRedemptionRequest(code: code, locationCode: locationCode)))
     }
 
+    // MARK: Wallet passes (scope `wallet:write`, live keys)
+
+    /// Issues (or returns the existing) Wallet pass for a connected customer. The customer adds it to Apple Wallet from the Viadere
+    /// app; you never receive the pass file. Naturally idempotent (one pass per customer and subject). `wasCreated` is `false` for an
+    /// existing pass. Test-mode keys are refused.
+    public func issueWalletPass(_ request: BusinessIssueWalletPassRequest) async throws -> (pass: BusinessWalletPass, wasCreated: Bool) {
+        let response = try await perform(APIRoutes.businessWalletPassIssue.descriptor, body: request, naturallyIdempotent: true)
+        return (try decode(BusinessWalletPass.self, response), response.status == 201)
+    }
+
+    /// Your passes, newest first.
+    public func listWalletPasses(limit: Int = 50) async throws -> [BusinessWalletPass] {
+        try decode([BusinessWalletPass].self, try await perform(APIRoutes.businessWalletPassesList.descriptor, query: [("limit", String(min(max(limit, 1), 200)))]))
+    }
+
+    /// A schedule or venue change on a ticket or reservation pass, or a fresh code (`rotateScanCode`). Pushed to the customer's devices.
+    /// Limited to a few updates per pass per day: passes are not a notification channel. Not retried automatically.
+    public func updateWalletPass(id: WalletPassID, _ update: UpdateWalletPassRequest) async throws -> BusinessWalletPass {
+        try decode(BusinessWalletPass.self, try await perform(APIRoutes.businessWalletPassUpdate.descriptor, parameters: ["passId": id.description], body: update))
+    }
+
+    /// Voids a pass (final). Safe to repeat.
+    public func voidWalletPass(id: WalletPassID) async throws -> BusinessWalletPass {
+        try decode(BusinessWalletPass.self, try await perform(APIRoutes.businessWalletPassVoid.descriptor, parameters: ["passId": id.description],
+                                                              naturallyIdempotent: true))
+    }
+
+    /// Validates a scanned pass QR: redeems a coupon, checks in a ticket or reservation, or identifies a loyalty member. Like
+    /// `consumeRedemption`, this is **not** retried automatically (a lost response followed by a repeat would report "already used").
+    /// Obviously malformed input is refused locally without a request.
+    public func scanWalletPass(code: String, locationCode: String? = nil) async throws -> WalletScanResult {
+        guard WalletScanCode.isWellFormed(code) else {
+            throw ViadereAPIError(status: 404, code: .notFound, message: "This pass isn't valid here.", requestId: nil, details: nil, retryAfter: nil)
+        }
+        return try decode(WalletScanResult.self, try await perform(APIRoutes.businessWalletScan.descriptor,
+                                                                   body: WalletScanRequest(code: code.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                                                           locationCode: locationCode)))
+    }
+
     // MARK: Webhooks (scope `webhooks:manage`)
 
     public func listWebhooks() async throws -> [WebhookSubscription] {

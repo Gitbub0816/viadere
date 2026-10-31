@@ -149,6 +149,16 @@ final class WalletPassRecord: Model, @unchecked Sendable {
     @Field(key: "voided") var voided: Bool
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "updated_at") var updatedAt: Date
+    /// Part of the signed presentation code; incremented to invalidate every code issued before.
+    @Field(key: "scan_generation") var scanGeneration: Int
+    /// The one check-in of a ticket or reservation pass.
+    @OptionalField(key: "used_at") var usedAt: Date?
+    /// `business` when issued through the business API; nil when the customer asked for it.
+    @OptionalField(key: "issued_by") var issuedBy: String?
+    /// A business's schedule or venue change, overriding the ticket interaction's own values.
+    @OptionalField(key: "ticket_venue") var ticketVenue: String?
+    @OptionalField(key: "ticket_seat") var ticketSeat: String?
+    @OptionalField(key: "ticket_starts_at") var ticketStartsAt: Date?
 
     init() {}
 

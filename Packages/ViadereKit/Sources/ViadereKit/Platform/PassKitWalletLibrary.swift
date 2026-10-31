@@ -3,8 +3,9 @@ import Foundation
 #if canImport(PassKit) && !os(watchOS)
 import PassKit
 
-/// `WalletLibrary` over PassKit. Reading Wallet state needs no entitlement for passes this app added; seeing passes
-/// added by other means requires the `com.apple.developer.pass-type-identifiers` entitlement (not requested).
+/// `WalletLibrary` over PassKit. Adding a pass needs no entitlement, but reading Wallet does: `pass(withPassTypeIdentifier:serialNumber:)`
+/// returns nil unless the app holds `com.apple.developer.pass-type-identifiers` for that Pass Type ID (Apple documentation, checked
+/// 2026-10-31). The app requests the server's Pass Type ID (`VIADERE_PASS_TYPE_IDENTIFIER`).
 public struct PassKitWalletLibrary: WalletLibrary {
     public init() {}
 

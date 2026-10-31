@@ -55,6 +55,40 @@ enum WalletRoutes {
             return pkpass(result.data, updatedAt: result.pass.updatedAt)
         }
         registerWebService(routes)
+        registerBusiness(routes)
+    }
+
+    /// The business Wallet API (scope `wallet:write`, the `message.send` capability, live keys for anything that touches a pass).
+    private static func registerBusiness(_ routes: any RoutesBuilder) {
+        let scope = BusinessAPIKeys.Scope.walletWrite
+        routes.api(APIRoutes.businessWalletPassIssue, scope: scope) { req in
+            var body: BusinessIssueWalletPassRequest = try req.decodeBody()
+            let principal = try req.business
+            try await req.requireCapability(.messageSend)
+            try await SubjectResolver(db: req.db, ctx: req.ctx, request: req).resolve(relationshipId: &body.relationshipId, subjectRef: &body.subjectRef,
+                                                                                     businessId: principal.businessId)
+            let result = try await WalletService(db: req.db, ctx: req.ctx).businessIssue(principal: principal, request: body)
+            return try req.jsonResponse(result.pass, status: result.created ? .created : .ok)
+        }
+        routes.api(APIRoutes.businessWalletPassesList, scope: scope) { req in
+            try req.jsonResponse(try await WalletService(db: req.db, ctx: req.ctx).businessList(principal: try req.business,
+                                                                                              limit: req.queryInt("limit", default: 50, range: 1...200)))
+        }
+        routes.api(APIRoutes.businessWalletPassUpdate, scope: scope) { req in
+            let id: WalletPassID = try req.uuidParameter("passId")
+            let body: UpdateWalletPassRequest = try req.decodeBody()
+            try await req.requireCapability(.messageSend)
+            return try req.jsonResponse(try await WalletService(db: req.db, ctx: req.ctx).businessUpdate(principal: try req.business, id: id, request: body))
+        }
+        routes.api(APIRoutes.businessWalletPassVoid, scope: scope) { req in
+            let id: WalletPassID = try req.uuidParameter("passId")
+            return try req.jsonResponse(try await WalletService(db: req.db, ctx: req.ctx).businessVoid(principal: try req.business, id: id))
+        }
+        routes.api(APIRoutes.businessWalletScan, scope: scope) { req in
+            let body: WalletScanRequest = try req.decodeBody()
+            try await req.requireCapability(.messageSend)
+            return try req.jsonResponse(try await WalletService(db: req.db, ctx: req.ctx).scan(principal: try req.business, request: body))
+        }
     }
 
     private static func pkpass(_ data: Data, updatedAt: Date) -> Response {

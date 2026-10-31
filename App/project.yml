@@ -130,9 +130,11 @@ targets:
         # It is NOT listed here on purpose: until Apple approves the request the provisioning profile does not carry it and signing would fail.
         # After approval add it from Xcode (Signing & Capabilities → Verify with Wallet) and commit the value Apple issued; Wallet is
         # simply unavailable in the app until then (`checkCanRequestDocument` answers false) and the document method still works.
-        # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement. The pass-type-identifiers
-        # entitlement is only needed to read passes this app did not add, so it is deliberately not requested:
-        #   com.apple.developer.pass-type-identifiers: [$(TeamIdentifierPrefix)pass.com.viadere.*]
+        # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement, but reading them does: PKPassLibrary's
+        # pass(withPassTypeIdentifier:serialNumber:) returns nil without it (Apple documentation, checked 2026-10-31), so "In Wallet"
+        # needs the server's Pass Type ID here. Owner: enable Wallet on the App ID and select the Pass Type ID (docs/WALLET.md).
+        com.apple.developer.pass-type-identifiers:
+          - $(TeamIdentifierPrefix)$(VIADERE_PASS_TYPE_IDENTIFIER)
     # Fails an archive (Release, Staging) while the certificate pins are placeholders. Debug is never checked.
     preBuildScripts:
       - name: Check release certificate pins
