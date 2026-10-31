@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prints the recent console and system log lines of a Container Apps job or app from Log Analytics (ingestion lags 1-5 minutes).
+# Prints the newest 200 console and system log lines (oldest first) of a Container Apps job or app from Log Analytics (ingestion lags 1-5 minutes).
 # Usage: SUB_ID=... bash Infra/azure/cloudshell/job-logs.sh job-viadere-dbadmin [hours]
 set -uo pipefail
 source "$(dirname "$0")/common.sh"
@@ -20,5 +20,5 @@ union isfuzzy=true ContainerAppConsoleLogs, ContainerAppSystemLogs, ContainerApp
 | where who has '$NAME'
 | extend line = strcat(column_ifexists('Log', ''), column_ifexists('Log_s', ''), column_ifexists('Reason', ''), ' ', column_ifexists('Msg', ''), column_ifexists('Message', ''))
 | project TimeGenerated, Type, line
-| order by TimeGenerated asc
-| take 200" || fail "query (logs can take a few minutes to arrive; retry shortly)"
+| top 200 by TimeGenerated desc
+| order by TimeGenerated asc" || fail "query (logs can take a few minutes to arrive; retry shortly)"
