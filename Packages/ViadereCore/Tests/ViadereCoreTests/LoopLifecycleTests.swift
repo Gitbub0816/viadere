@@ -97,4 +97,21 @@ struct LoopLifecycleTests {
         let future = try ViadereJSON.decode(AlertTarget.self, from: Data(#"{"kind":"something_new","id":"x"}"#.utf8))
         #expect(future.kind == .unknown)
     }
+
+    /// `brandKitId` is additive: an older server's view (no key) decodes as neutral, and a pinned view round-trips.
+    @Test func instanceViewBrandKitIdIsAdditive() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let view = LoopInstanceView(id: LoopInstanceID(), businessId: BusinessID(), publicationId: LoopPublicationID(), revision: 1, state: .active,
+                                    currentStepId: "s1", entryPoint: .businessPage, expiresAt: now, createdAt: now, updatedAt: now, publicationStatus: .active,
+                                    paused: false, manifest: "m", definition: .object([:]), events: [], brandKitId: "everyday")
+        let data = try ViadereJSON.encode(view)
+        #expect(try ViadereJSON.decode(LoopInstanceView.self, from: data).brandKitId == "everyday")
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object.removeValue(forKey: "brandKitId") != nil)
+        let older = try ViadereJSON.decode(LoopInstanceView.self, from: try JSONSerialization.data(withJSONObject: object))
+        #expect(older.brandKitId == nil)
+        var neutral = view
+        neutral.brandKitId = nil
+        #expect(!String(decoding: try ViadereJSON.encode(neutral), as: UTF8.self).contains("brandKitId"))
+    }
 }

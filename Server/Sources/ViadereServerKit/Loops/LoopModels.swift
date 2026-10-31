@@ -153,6 +153,8 @@ final class LoopInstanceRecord: Model, @unchecked Sendable {
     @Field(key: "expires_at") var expiresAt: Date
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "updated_at") var updatedAt: Date
+    /// The Brand Kit key pinned at creation (`LoopInstanceBrandPin.v1`); never changes for the life of the instance.
+    @OptionalField(key: "brand_kit_pin") var brandKitPin: String?
     init() {}
 
     var stateValue: LoopInstanceState { LoopInstanceState(rawValue: state) ?? .cancelled }

@@ -215,6 +215,43 @@ final class LoopRuntimeTests: XCTestCase {
         }
     }
 
+    /// `LoopInstanceView.brandKitId`: the kit the reviewed definition names, pinned at creation only if it is live then, and kept for the
+    /// life of the instance when the schedule changes or the kit is taken down (WP-2.4 pinning, applied to Loops).
+    func testAnInstancePinsItsLiveKitAndKeepsItWhenTheKitIsRescheduledOrWithdrawn() async throws {
+        try await withHarness { h in
+            let w = try await BrandKitServerTests.world(h)
+            let world = try await LoopWorld.build(h, business: w.business, tag: "pin")
+            let branded = Data(String(decoding: LoopFixtures.pickup(key: "branded-pickup"), as: UTF8.self)
+                .replacingOccurrences(of: "{\"mode\":\"standard\"}", with: "{\"mode\":\"brand_kit\",\"kit\":\"everyday\"}").utf8)
+            let publication = try await world.publish(branded)
+            let pinned = try await world.instance(world.alice, publication)
+            XCTAssertEqual(pinned.brandKitId, "everyday")
+            try await eq(try await LoopInstanceRecord.find(pinned.id.uuid, on: h.db)?.brandKitPin, "everyday")
+            // A standard Loop asked for neutral styling: no pin, whatever the schedule selects.
+            let plain = try await world.instance(world.alice, try await world.publish(LoopFixtures.pickup(key: "plain-pickup")))
+            XCTAssertNil(plain.brandKitId)
+
+            // Rescheduled: another approved kit becomes the default. Then the pinned kit is taken down (withdrawn from the manifest).
+            let service = BrandKitService(db: h.db, ctx: h.ctx)
+            let winter = try await service.save(businessId: w.business.record.id!, kitId: nil, draft: .init(kitKey: "winter", name: "Winter",
+                tokens: BrandTokens(primary: BrandColor("#1D3557")!), frameId: nil, assets: [:]), actor: BrandKitServerTests.system)
+            try await service.approveKit(id: winter.id!, actor: BrandKitServerTests.operatorActor, note: nil)
+            try await service.saveSchedule(businessId: w.business.record.id!, schedule: BrandSchedule(timezone: "UTC", defaultKit: "winter"), actor: BrandKitServerTests.system)
+            try await eq(try await h.signed(world.alice, .GET, "/v1/loops/instances/\(pinned.id)").json(LoopInstanceView.self).brandKitId, "everyday")
+            try await service.takeDownKit(id: w.kit.id!, actor: BrandKitServerTests.operatorActor, reason: "Withdrawn for this test")
+            let reloaded = try await h.signed(world.alice, .GET, "/v1/loops/instances/\(pinned.id)")
+            XCTAssertEqual(reloaded.status, .ok, reloaded.text)
+            XCTAssertEqual(try reloaded.json(LoopInstanceView.self).brandKitId, "everyday", "the pin never changes mid-flow")
+            // Acting on the instance keeps the pin too.
+            let first = try await world.act(world.alice, pinned.id, step: "s1", action: "next", inputs: ["slot": .string("am")])
+            XCTAssertEqual(first.status, .created, first.text)
+            XCTAssertEqual(try first.json(LoopActionResult.self).instance.brandKitId, "everyday")
+            // A new instance after the takedown pins nothing: the kit is no longer live.
+            let after = try await world.instance(world.alice, publication)
+            XCTAssertNil(after.brandKitId)
+        }
+    }
+
     func testADeadLetteredDeliveryMarksTheEventUnknownAndDeadlinesTimeOut() async throws {
         try await withHarness { h in
             let world = try await LoopWorld.build(h)
