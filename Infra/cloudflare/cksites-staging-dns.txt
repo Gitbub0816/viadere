@@ -1,0 +1,5 @@
+$ORIGIN cksites.dev.
+$TTL 300
+viadere-api.cksites.dev.	300	IN	CNAME	viadere-server-staging.fly.dev. ; cf_tags=cf-proxied:true
+viadere.cksites.dev.	300	IN	CNAME	viadere-server-staging.fly.dev. ; cf_tags=cf-proxied:true
+_dmarc.viadere.cksites.dev.	300	IN	TXT	"v=DMARC1; p=none"
