@@ -77,6 +77,18 @@ final class WP6EdgeTests: XCTestCase {
         XCTAssertEqual(EdgeLockMiddleware.decide(settings: OperationsSettings(), token: nil, path: "/v1/x", method: .GET, headerNames: [], peer: nil), .allow(viaEdge: false))
     }
 
+    func testARefusalLogsOnlyThePeersNetworkAndWhetherProxyHeadersWereSent() {
+        let metadata = EdgeLockMiddleware.refusalMetadata(decision: .rejectMissingToken, peer: "100.100.7.42", headerNames: ["Accept"], requestID: "r1")
+        XCTAssertEqual(metadata["peerNetwork"]?.description, "100.100.7.0", "the network only, never the full address")
+        XCTAssertEqual(metadata["proxyHeaders"]?.description, "absent")
+        XCTAssertEqual(metadata["reason"]?.description, "no_token")
+        XCTAssertFalse(metadata.values.contains { $0.description.contains("100.100.7.42") })
+        let proxied = EdgeLockMiddleware.refusalMetadata(decision: .rejectBadToken, peer: nil, headerNames: ["CF-Ray"], requestID: "r2")
+        XCTAssertEqual(proxied["peerNetwork"]?.description, "none")
+        XCTAssertEqual(proxied["proxyHeaders"]?.description, "present")
+        XCTAssertEqual(proxied["reason"]?.description, "bad_token")
+    }
+
     func testProductionConfigurationRequiresAnEdgeTokenAndRejectsWeakOnes() throws {
         var env = [
             "ENVIRONMENT": "production", "AZURE_AUDIT_BLOB_ENDPOINT": "https://stviaderetestaudit.blob.core.windows.net/", "AZURE_AUDIT_BLOB_CONTAINER": "audit-heads", "AZURE_KEY_VAULT_URL": "https://kv-vdr-test.vault.azure.net/", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY": "audit-head-signing", "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001", "IDENTITY_ENDPOINT": "http://localhost:42356/msi/token", "IDENTITY_HEADER": "test-identity-header",

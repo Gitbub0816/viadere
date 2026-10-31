@@ -76,13 +76,25 @@ struct EdgeLockMiddleware: AsyncMiddleware {
         case .rejectMissingToken, .rejectBadToken:
             ctx.metrics.count(.edgeRejected)
             // No detail beyond the status: the response must not help someone probing for the origin.
-            request.logger.warning("origin lock refused a request", metadata: ["reason": "\(decision == .rejectBadToken ? "bad_token" : "no_token")",
-                                                                              "requestId": "\(request.requestID)"])
+            request.logger.warning("origin lock refused a request", metadata: Self.refusalMetadata(
+                decision: decision, peer: request.remoteAddress?.ipAddress, headerNames: request.headers.map(\.name),
+                requestID: request.requestID))
             let response = Response(status: .misdirectedRequest)
             response.headers.contentType = .json
             response.body = .init(string: #"{"error":{"code":"forbidden","message":"Misdirected request."}}"#)
             return response
         }
+    }
+
+    /// Log fields of a refusal. The peer is reduced to its network (`IPNetwork.masked`: IPv4 /24, IPv6 /48), never the full address, and
+    /// only the fact that proxy headers were present is recorded: enough to tell a platform health prober outside `HEALTH_PEER_NETWORKS`
+    /// from a request that bypassed Cloudflare, without logging client addresses.
+    static func refusalMetadata(decision: Decision, peer: String?, headerNames: [String], requestID: String) -> Logger.Metadata {
+        let proxied = headerNames.contains(where: { proxyHeaders.contains($0.lowercased()) })
+        return ["reason": "\(decision == .rejectBadToken ? "bad_token" : "no_token")",
+                "peerNetwork": "\(peer.map(IPNetwork.masked) ?? "none")",
+                "proxyHeaders": "\(proxied ? "present" : "absent")",
+                "requestId": "\(requestID)"]
     }
 
     /// A lowercase hex value of the expected length (colons stripped), or `nil`. Anything else is ignored rather than trusted.
