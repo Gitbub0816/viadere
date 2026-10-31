@@ -97,7 +97,7 @@ output "egress_ip" {
 }
 
 output "health_peer_networks" {
-  value = local.subnets.cae
+  value = local.health_peer_networks
 }
 
 output "key_vault_secret_map" {

@@ -402,7 +402,7 @@ The module sets these on the processes; the server implements all of them (WP-B2
 | `DATABASE_APP_ROLE` | x | x | x | `viadere_app` | runtime-role grants |
 | `DATABASE_WORKER_ROLE` | | | `viadere_worker` | | worker-role grants (`GrantWorkerRolePrivileges.v1`) |
 | `DATABASE_URL`, `DATABASE_MIGRATION_URL` | secret, password fallback only | secret, password fallback only | migration URL, password fallback only | | as on Fly |
-| `HEALTH_PEER_NETWORKS` | x | x | | the Container Apps subnet (`10.40.0.0/23` staging) | the only peers whose `/healthz` and `/readyz` pass the origin lock without the edge token |
+| `HEALTH_PEER_NETWORKS` | x | x | | `127.0.0.1/32`: Container Apps sends its probes from the replica's sidecar over loopback (measured on staging 2026-10-31), not from the subnet | the only peers whose `/healthz` and `/readyz` pass the origin lock without the edge token (and only without proxy headers) |
 | `METRICS_BIND_HOST` | via `app_env` when `METRICS_PORT` is set | | | a private address | replaces `FLY_PRIVATE_IP` (still read on Fly) |
 | other secrets (`EDGE_TOKEN`, the five service keys or their `*_WRAPPED` forms, `EMAIL_API_KEY`, `APNS_KEY_P8`, `MAILERSEND_SMS_*`) | Key Vault references | same | **none** | | the migrate job references no service secret |
 | all other `[env]` values of `fly.staging.toml` (`PUBLIC_BASE_URL`, `RP_ID`, `TRUSTED_PROXY_COUNT`, …) | from `app_env` | same | same | | as on Fly |

@@ -69,7 +69,7 @@ locals {
     DATABASE_NAME         = local.database_name
     DATABASE_AUTH         = var.postgres_password_auth_enabled ? "password" : "entra"
     QUEUE_TRANSPORT       = var.enable_worker ? "servicebus" : "database"
-    HEALTH_PEER_NETWORKS  = local.subnets.cae
+    HEALTH_PEER_NETWORKS  = local.health_peer_networks
   }
 
   process_env = {
@@ -120,6 +120,10 @@ locals {
   acrpull_ids = local.p.registry ? [azurerm_user_assigned_identity.acrpull[0].id] : []
 
   probe_headers = { "X-Forwarded-Proto" = "https" }
+  # Container Apps runs the health probes through the replica's own sidecar: measured on staging (2026-10-31, the origin lock's refusal
+  # log) every probe arrived from 127.0.0.1 with no proxy header, never from snet-cae. Only loopback is exempt: ingress traffic (the
+  # tunnel included) passes the environment's proxy, which adds X-Forwarded-For, so it always needs the edge token.
+  health_peer_networks = "127.0.0.1/32"
 }
 
 # ---- API ---------------------------------------------------------------------------------------------------------------
@@ -217,8 +221,8 @@ resource "azurerm_container_app" "api" {
           }
         }
       }
-      # Liveness: the process answers HTTP (no dependency state). Probes come from the platform inside snet-cae without proxy headers, which
-      # the server's origin lock exempts for /healthz and /readyz only (healthPeerNetworks; HEALTH_PEER_NETWORKS in WP-B2).
+      # Liveness: the process answers HTTP (no dependency state). Probes arrive from loopback without proxy headers (see
+      # local.health_peer_networks), which the server's origin lock exempts for GET /healthz and /readyz only.
       liveness_probe {
         transport               = "HTTP"
         port                    = 8080
