@@ -44,7 +44,7 @@ final class StagingDemoConsoleTests: XCTestCase {
             XCTAssertEqual(memberships.map(\.role), [OrgRole.owner.rawValue])
 
             let link = try await demo.issueConsoleEnrollment(userId: owner.id!, businessId: atlas)
-            XCTAssertTrue(link.hasPrefix(h.ctx.config.publicBaseURL + "/dashboard/enroll/"))
+            XCTAssertTrue(link.hasPrefix((h.ctx.config.dashboardOrigin ?? h.ctx.config.relyingPartyOrigin) + "/dashboard/enroll/"), "the passkey ceremony runs on the dashboard origin")
             let token = String(link.split(separator: "/").last!)
             let stored = try await ConsoleEnrollmentRecord.query(on: h.db).first()!
             XCTAssertEqual(stored.tokenHash, SecureToken.hash(token))

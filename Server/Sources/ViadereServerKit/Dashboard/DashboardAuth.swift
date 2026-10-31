@@ -591,6 +591,7 @@ struct DashboardAuthService {
             try await enrollment.create(on: tx)
             _ = try await AuditService(db: tx, ctx: ctx).record("operator.created", actor: AuditActor(kind: .system), subjectType: "operator", subjectId: userId.uuidString.lowercased())
         }
-        return ctx.config.publicBaseURL + "/operator/enroll/" + token
+        // The passkey ceremony runs on the dashboard origin (the RP ID's host), not the API host.
+        return (ctx.config.dashboardOrigin ?? ctx.config.relyingPartyOrigin) + "/operator/enroll/" + token
     }
 }

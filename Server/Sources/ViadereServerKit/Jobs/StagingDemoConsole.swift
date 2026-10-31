@@ -111,7 +111,8 @@ extension StagingDemo {
                 businessId: BusinessID(businessId), subjectType: "user", subjectId: userId.uuidString.lowercased(),
                 metadata: ["expires_at": ViadereDate.format(enrollment.expiresAt)])
         }
-        return ctx.config.publicBaseURL + ConsoleEnrollmentRoutes.pagePrefix + token
+        // The passkey ceremony runs on the dashboard origin (the RP ID's host), not the API host.
+        return (ctx.config.dashboardOrigin ?? ctx.config.relyingPartyOrigin) + ConsoleEnrollmentRoutes.pagePrefix + token
     }
 
     /// The live Atlas Demo owner (the first one), if any.
