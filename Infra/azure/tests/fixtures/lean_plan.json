@@ -75,6 +75,20 @@
      "mode": "managed",
      "name": "sb_sender",
      "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.brand_assets_api",
+     "expressions": {
+      "scope": {
+       "references": [
+        "azurerm_storage_container.brand_assets.id",
+        "azurerm_storage_container.brand_assets"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "brand_assets_api",
+     "type": "azurerm_role_assignment"
     }
    ]
   }
@@ -385,6 +399,44 @@
     "before_sensitive": false
    },
    "index": "link-descriptor",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
+   "address": "azapi_resource.kv_key[\"brand-manifest\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "curveName": "P-256",
+       "keyOps": [
+        "sign",
+        "verify"
+       ],
+       "kty": "EC"
+      }
+     },
+     "name": "brand-manifest",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "brand-manifest",
    "mode": "managed",
    "name": "kv_key",
    "provider_name": "registry.opentofu.org/azure/azapi",
@@ -997,6 +1049,95 @@
    "index": "api",
    "mode": "managed",
    "name": "telemetry",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_storage_account.brand",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "allow_nested_items_to_be_public": false,
+     "min_tls_version": "TLS1_2",
+     "name": "stvdrbrandstgabc1l",
+     "network_rules": [
+      {
+       "bypass": [
+        "None"
+       ],
+       "default_action": "Deny",
+       "ip_rules": []
+      }
+     ],
+     "public_network_access": "Enabled",
+     "shared_access_key_enabled": false
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "network_rules": [
+      {
+       "virtual_network_subnet_ids": true
+      }
+     ],
+     "primary_blob_endpoint": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "brand",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_storage_account"
+  },
+  {
+   "address": "azurerm_storage_container.brand_assets",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "container_access_type": "private",
+     "name": "brand-assets"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "storage_account_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "brand_assets",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_storage_container"
+  },
+  {
+   "address": "azurerm_role_assignment.brand_assets_api",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: create and read brand asset blobs (create-only writes, content-addressed names)",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Storage Blob Data Contributor"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "brand_assets_api",
    "provider_name": "registry.opentofu.org/hashicorp/azurerm",
    "type": "azurerm_role_assignment"
   }

@@ -69,7 +69,7 @@ class Baselines(unittest.TestCase):
         report = policy_check.evaluate(load("lean"))
         self.assertEqual(report.profile, "lean")
         self.assertEqual(report.violations, [])
-        self.assertEqual(exception_rules(report), {"KV-PUBLIC", "SB-PUBLIC", "KV-SOFTWARE-KEYS", "PG-NO-HA", "PG-PASSWORD-AUTH"})
+        self.assertEqual(exception_rules(report), {"KV-PUBLIC", "SB-PUBLIC", "KV-SOFTWARE-KEYS", "PG-NO-HA", "PG-PASSWORD-AUTH", "ST-BRAND-PUBLIC"})
 
     def test_standard_fixture_passes(self):
         report = policy_check.evaluate(load("standard"))
@@ -192,6 +192,54 @@ class Storage(unittest.TestCase):
         del st["public_network_access"]
         st["public_network_access_enabled"] = True
         self.assertIn("ST-PUBLIC", rules(policy_check.evaluate(plan)))
+
+
+class BrandStorage(unittest.TestCase):
+    """WP-2.1: the Brand Kit asset container is never public. Lean may keep the account's public endpoint only behind a subnet-only firewall."""
+
+    def test_standard_brand_storage_is_private(self):
+        plan = load("standard")
+        self.assertEqual(after(plan, "azurerm_storage_account.brand")["public_network_access"], "Disabled")
+        after(plan, "azurerm_storage_account.brand")["public_network_access"] = "Enabled"
+        report = policy_check.evaluate(plan)
+        self.assertIn("ST-PUBLIC", rules(report))
+        self.assertNotIn("ST-BRAND-PUBLIC", exception_rules(report))
+
+    def test_lean_exception_needs_a_subnet_only_firewall(self):
+        for mutate in (lambda r: r.update(default_action="Allow"), lambda r: r.update(bypass=["AzureServices"]),
+                       lambda r: r.update(ip_rules=["203.0.113.0/24"])):
+            plan = load("lean")
+            mutate(after(plan, "azurerm_storage_account.brand")["network_rules"][0])
+            report = policy_check.evaluate(plan)
+            self.assertIn("ST-PUBLIC", rules(report))
+            self.assertNotIn("ST-BRAND-PUBLIC", exception_rules(report))
+
+    def test_lean_exception_needs_entra_only_and_no_public_blobs(self):
+        for key, rule in (("shared_access_key_enabled", "ST-SHARED-KEY"), ("allow_nested_items_to_be_public", "ST-PUBLIC-BLOBS")):
+            plan = load("lean")
+            after(plan, "azurerm_storage_account.brand")[key] = True
+            report = policy_check.evaluate(plan)
+            self.assertTrue({rule, "ST-PUBLIC"} <= rules(report), key)
+
+    def test_the_exception_is_only_for_the_brand_account(self):
+        plan = load("lean")
+        add_resource(plan, "azurerm_storage_account", "other", {"public_network_access": "Enabled", "shared_access_key_enabled": False,
+                                                                "allow_nested_items_to_be_public": False,
+                                                                "network_rules": [{"default_action": "Deny", "bypass": ["None"], "ip_rules": [],
+                                                                                   "virtual_network_subnet_ids": ["/subnet"]}]})
+        self.assertIn("ST-PUBLIC", rules(policy_check.evaluate(plan)))
+
+    def test_brand_container_role_is_workload_scoped_and_not_privileged(self):
+        plan = load("lean")
+        assignment = after(plan, "azurerm_role_assignment.brand_assets_api")
+        self.assertEqual(assignment["role_definition_name"], "Storage Blob Data Contributor")
+        assignment["role_definition_name"] = "Owner"
+        self.assertIn("RBAC-PRIVILEGED", rules(policy_check.evaluate(plan)))
+
+    def test_brand_manifest_key_is_hsm_in_standard(self):
+        plan = load("standard")
+        after(plan, 'azapi_resource.kv_key["brand-manifest"]')["body"]["properties"]["kty"] = "EC"
+        self.assertIn("KV-HSM", rules(policy_check.evaluate(plan)))
 
 
 class ServiceBus(unittest.TestCase):

@@ -130,6 +130,14 @@ run "lean_is_the_default_and_has_no_fixed_fee_extras" {
     error_message = "lean Key Vault must be Standard, RBAC, purge protection"
   }
   assert {
+    condition     = azurerm_storage_account.brand.shared_access_key_enabled == false && azurerm_storage_account.brand.allow_nested_items_to_be_public == false && azurerm_storage_account.brand.network_rules[0].default_action == "Deny" && length(azurerm_storage_account.brand.network_rules[0].ip_rules) == 0 && azurerm_storage_container.brand_assets.container_access_type == "private" && length(azurerm_private_endpoint.brand_blob) == 0
+    error_message = "lean brand storage: Entra only, private container, subnet-only firewall, no private endpoint"
+  }
+  assert {
+    condition     = azapi_resource.kv_key["brand-manifest"].body.properties.curveName == "P-256" && azapi_resource.kv_key["brand-manifest"].body.properties.kty == "EC"
+    error_message = "the brand-manifest key is EC P-256"
+  }
+  assert {
     condition     = azurerm_postgresql_flexible_server.this.sku_name == "B_Standard_B1ms" && azurerm_postgresql_flexible_server.this.version == "18" && azurerm_postgresql_flexible_server.this.storage_mb == 32768 && azurerm_postgresql_flexible_server.this.backup_retention_days == 7
     error_message = "lean PostgreSQL must be 18 on B1ms, 32 GiB, 7-day PITR"
   }
@@ -206,6 +214,10 @@ run "standard_profile" {
   assert {
     condition     = azurerm_storage_account.audit[0].shared_access_key_enabled == false && azurerm_storage_account.audit[0].public_network_access == "Disabled"
     error_message = "audit storage: Entra only, private"
+  }
+  assert {
+    condition     = azurerm_storage_account.brand.public_network_access == "Disabled" && azurerm_storage_account.brand.shared_access_key_enabled == false && length(azurerm_private_endpoint.brand_blob) == 1 && azapi_resource.kv_key["brand-manifest"].body.properties.kty == "EC-HSM"
+    error_message = "standard brand storage: private endpoint, public access disabled, Entra only; brand-manifest key EC-HSM"
   }
   assert {
     condition     = azurerm_container_registry.this[0].admin_enabled == false && azurerm_container_registry.this[0].public_network_access_enabled == false
