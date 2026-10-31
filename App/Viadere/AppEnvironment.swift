@@ -27,6 +27,8 @@ final class AppEnvironment {
     /// Customer profile (docs/PROFILES.md): which profile request is open, and the client for `/v1/profile`.
     let profile = ProfileCenter()
     let profileAPI: any ProfileAPI = LiveProfileAPI.make(services: AppEnvironment.services)
+    /// Hosted Loops (WP-3.6): which instance is open and which consent prompt a start attempt needs.
+    let loops = LoopCenter()
 
     /// Approve v2 (WP1): pairwise approval keys, the verified key directory, freeze. Closed (and says so) when the build pins no log key.
     let approve: ApproveController

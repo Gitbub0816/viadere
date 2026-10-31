@@ -130,8 +130,13 @@ struct LoopConsentTests {
             #expect(model.paragraphIndex == expected)
             #expect(model.currentParagraph == LP.text.paragraphs[expected])
         }
+        // On the last paragraph the questions are not offered yet: Continue moves on to them.
+        #expect(!model.hasReadAll)
+        model.advance()
+        #expect(model.hasReadAll)
         model.back()
         #expect(!model.hasReadAll)
+        #expect(model.currentParagraph == LP.text.paragraphs.last)
         model.advance()
         #expect(model.hasReadAll)
         #expect(model.canEnable)

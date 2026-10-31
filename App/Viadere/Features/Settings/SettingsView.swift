@@ -4,7 +4,7 @@ import ViadereCore
 import ViadereKit
 
 enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport, profile, profileReceipts
+    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport, profile, profileReceipts, loops
 }
 
 /// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
@@ -61,6 +61,7 @@ struct SettingsView: View {
                 case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
                 case .profile: ProfileView(api: AppEnvironment.shared.profileAPI)
                 case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
+                case .loops: LoopSettingsView(model: model)
                 }
             }
             .task {
@@ -213,6 +214,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             ViadereSectionHeader("Notifications")
             ViadereRowGroup {
+                if model.services.loopsAPI != nil {
+                    navRow("Requests built by businesses", subtitle: model.loopConsent.isEnabled ? "On" : "Off",
+                           symbol: "square.stack", route: .loops)
+                    ViadereHairline(inset: 50)
+                }
                 Button {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
                 } label: {

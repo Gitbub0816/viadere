@@ -65,6 +65,11 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
             AppEnvironment.shared.verification.present(id)
             return
         }
+        // A Loop update: opaque push (no business, no content); open the instance if the payload names one, else Alerts.
+        if let route = LoopNotificationRoute.route(categoryIdentifier: content.categoryIdentifier, userInfo: PushPayload.stringify(content.userInfo)) {
+            await AppEnvironment.shared.loops.handle(route, model: AppEnvironment.shared.model)
+            return
+        }
         let info = NotificationResponseInfo(
             actionIdentifier: response.actionIdentifier,
             categoryIdentifier: content.categoryIdentifier,

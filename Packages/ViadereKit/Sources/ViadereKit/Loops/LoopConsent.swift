@@ -65,8 +65,8 @@ public final class LoopConsentViewModel {
     // Education state.
     /// The paragraph on screen.
     public private(set) var paragraphIndex = 0
-    /// Highest paragraph the customer reached (paragraphs are read in order).
-    public private(set) var furthestParagraph = 0
+    /// The customer pressed Continue on the last paragraph (every paragraph was shown, in order).
+    public private(set) var finishedReading = false
     public private(set) var answers: [String: String] = [:]
     public var agreed = false
 
@@ -110,18 +110,25 @@ public final class LoopConsentViewModel {
     /// "Paragraph 2 of 4" for VoiceOver and the progress label.
     public var progressLabel: String { "Part \(min(paragraphIndex + 1, max(paragraphCount, 1))) of \(max(paragraphCount, 1))" }
 
-    /// True once every paragraph has been shown: only then are the checks offered.
-    public var hasReadAll: Bool { paragraphCount > 0 && furthestParagraph >= paragraphCount - 1 && paragraphIndex >= paragraphCount - 1 }
+    /// True once every paragraph has been shown and the customer continued past the last one: only then are the checks offered.
+    public var hasReadAll: Bool { paragraphCount > 0 && finishedReading }
 
-    /// One paragraph forward. There is no skip.
+    /// One paragraph forward; on the last paragraph, on to the questions. There is no skip.
     public func advance() {
-        guard paragraphIndex < paragraphCount - 1 else { return }
-        paragraphIndex += 1
-        furthestParagraph = max(furthestParagraph, paragraphIndex)
+        guard paragraphCount > 0 else { return }
+        if paragraphIndex < paragraphCount - 1 {
+            paragraphIndex += 1
+        } else {
+            finishedReading = true
+        }
     }
 
-    /// Back to re-read (never skips forward).
+    /// Back to re-read (from the questions to the last paragraph, then one paragraph at a time).
     public func back() {
+        if finishedReading {
+            finishedReading = false
+            return
+        }
         guard paragraphIndex > 0 else { return }
         paragraphIndex -= 1
     }
@@ -175,7 +182,7 @@ public final class LoopConsentViewModel {
 
     public func resetEducation() {
         paragraphIndex = 0
-        furthestParagraph = 0
+        finishedReading = false
         answers = [:]
         agreed = false
     }

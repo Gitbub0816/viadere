@@ -64,6 +64,25 @@ struct MainShell: View {
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
+        .sheet(item: Binding(get: { AppEnvironment.shared.loops.presented },
+                             set: { AppEnvironment.shared.loops.presented = $0 })) { presented in
+            LoopInstanceSheet(presented: presented, model: model)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: Binding(get: { AppEnvironment.shared.loops.consentPrompt },
+                             set: { AppEnvironment.shared.loops.consentPrompt = $0 })) { prompt in
+            switch prompt {
+            case .enableLoops:
+                LoopConsentFlowView(consent: model.loopConsent)
+                    .presentationDetents([.large])
+                    .presentationBackground(ViadereColor.background)
+            case .authorize(let business):
+                LoopBusinessAuthorizationSheet(consent: model.loopConsent, business: business)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(ViadereColor.background)
+            }
+        }
         .sheet(isPresented: $model.settingsPresented) {
             SettingsView(model: model)
                 .presentationDetents([.large])
