@@ -37,6 +37,8 @@ VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP),$(VIADERE_PIN_IS
 
 // Azure staging Key Vault `brand-manifest` key (kv-vdr-stgcbo3l), printed by `ViadereServer brand-manifest-key` on 2026-10-31.
 VIADERE_BRAND_MANIFEST_KEYS = dUPwpEj4t4LEQNhmJaX2KuXagJnOgaHHOMli_sEaaKM:BPQWQouXRTqnVvN3wD4FSbbBXaSHTVi_a0V2a3pSjQZdyP9OMKEFcjpOz7rRhnIlG0pINwWqq3XJr9jmfKUl_Ms
+// Azure staging Key Vault `loop-publication` key (kv-vdr-stgcbo3l), printed by `ViadereServer loop-publication-key` on 2026-10-31.
+VIADERE_LOOP_PUBLICATION_KEYS = p6LAkYzgN__FDWgdy9ol0Ph10qGLOrbOljoUq7jyePE:BI2lEi_FKZMGbN2POdBa2MIxke-ae1qPw6iD8jcE60OJj2dovdwxzmDgkOChpMnh3PNXrG0dV0qYtKgzBYdyFtw
 
 // ---- push and App Attest ---------------------------------------------------------------------------------------------
 // Defaults match fly.staging.toml (APNS_ENVIRONMENT = sandbox, APP_ATTEST_ENVIRONMENT = development): builds run from Xcode on a device.
