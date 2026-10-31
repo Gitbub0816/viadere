@@ -122,10 +122,11 @@ class Put(unittest.TestCase):
 
 
 class PsqlJob(unittest.TestCase):
+    ROOTS = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
     ENV = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-viadere-stg-app/providers/Microsoft.App/managedEnvironments/cae-viadere-stg"
 
     def test_sql_is_mounted_and_token_is_a_secret_reference(self):
-        spec = kv_tool.psql_job_spec(self.ENV, "psql-x.postgres.database.azure.com", "SELECT 1;", "eyJ0eXAi-entra-token", "centralus")
+        spec = kv_tool.psql_job_spec(self.ENV, "psql-x.postgres.database.azure.com", "SELECT 1;", "eyJ0eXAi-entra-token", "centralus", self.ROOTS)
         container = spec["properties"]["template"]["containers"][0]
         env = {e["name"]: e for e in container["env"]}
         self.assertEqual(env["PGPASSWORD"], {"name": "PGPASSWORD", "secretRef": "pgtoken"})
@@ -134,14 +135,28 @@ class PsqlJob(unittest.TestCase):
         self.assertIn("@sha256:", container["image"])
         self.assertEqual(spec["properties"]["configuration"]["replicaRetryLimit"], 0)
         self.assertEqual(spec["location"], "centralus")  # the job must be created in the environment's region
+        # verify-full against the pinned Azure roots, mounted from a secret (the image has no system trust store)
+        self.assertEqual(env["PGSSLMODE"]["value"], "verify-full")
+        self.assertEqual(env["PGSSLROOTCERT"]["value"], "/mnt/sql/pgroots")
+        mounted = {item["path"] for item in spec["properties"]["template"]["volumes"][0]["secrets"]}
+        self.assertEqual(mounted, {"rolesql", "pgroots"})
 
     def test_rejects_bad_environment_id(self):
         with self.assertRaises(SystemExit):
-            kv_tool.psql_job_spec("cae-viadere-stg", "h", "SELECT 1;", "tok", "centralus")
+            kv_tool.psql_job_spec("cae-viadere-stg", "h", "SELECT 1;", "tok", "centralus", self.ROOTS)
 
     def test_rejects_bad_location(self):
         with self.assertRaises(SystemExit):
-            kv_tool.psql_job_spec(self.ENV, "h", "SELECT 1;", "tok", "Central US; rm")
+            kv_tool.psql_job_spec(self.ENV, "h", "SELECT 1;", "tok", "Central US; rm", self.ROOTS)
+
+    def test_rejects_missing_roots(self):
+        with self.assertRaises(SystemExit):
+            kv_tool.psql_job_spec(self.ENV, "h", "SELECT 1;", "tok", "centralus", "")
+
+    def test_pinned_roots_file_holds_the_three_azure_roots(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "postgres-roots.pem")
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(handle.read().count("-----BEGIN CERTIFICATE-----"), 3)
 
     def test_token_errors_are_reported(self):
         failing = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "no login")  # noqa: E731

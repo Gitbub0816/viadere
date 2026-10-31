@@ -124,7 +124,8 @@ GRANT CONNECT ON DATABASE {database} TO viadere_app;
 """
 
 
-def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location: str, admin_group: str = "grp-viadere-db-admins") -> dict:
+def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location: str, roots_pem: str,
+                  admin_group: str = "grp-viadere-db-admins") -> dict:
     """Container Apps job (az containerapp job create --yaml) that runs `sql` once as the PostgreSQL Entra admin group."""
     if not ENV_ID_RE.match(environment_id):
         raise SystemExit("--environment-id must be the Container Apps environment's ARM id")
@@ -132,6 +133,8 @@ def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location
         raise SystemExit("empty token or SQL")
     if not re.match(r"^[a-z0-9]{3,32}$", location):
         raise SystemExit("--location must be the environment's Azure region (e.g. centralus)")
+    if "-----BEGIN CERTIFICATE-----" not in roots_pem:
+        raise SystemExit("--ca-file holds no PEM certificate")
     return {
         "location": location,
         "properties": {
@@ -142,7 +145,7 @@ def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location
                 "replicaTimeout": 600,
                 "replicaRetryLimit": 0,
                 "manualTriggerConfig": {"parallelism": 1, "replicaCompletionCount": 1},
-                "secrets": [{"name": "pgtoken", "value": token}, {"name": "rolesql", "value": sql}],
+                "secrets": [{"name": "pgtoken", "value": token}, {"name": "rolesql", "value": sql}, {"name": "pgroots", "value": roots_pem}],
             },
             "template": {
                 "containers": [{
@@ -155,12 +158,14 @@ def psql_job_spec(environment_id: str, host: str, sql: str, token: str, location
                         {"name": "PGDATABASE", "value": "postgres"},
                         {"name": "PGUSER", "value": admin_group},
                         {"name": "PGSSLMODE", "value": "verify-full"},
-                        {"name": "PGSSLROOTCERT", "value": "system"},
+                        # The postgres image has no system trust store: verify against the pinned Azure roots.
+                        {"name": "PGSSLROOTCERT", "value": "/mnt/sql/pgroots"},
                         {"name": "PGPASSWORD", "secretRef": "pgtoken"},
                     ],
                     "volumeMounts": [{"volumeName": "sql", "mountPath": "/mnt/sql"}],
                 }],
-                "volumes": [{"name": "sql", "storageType": "Secret", "secrets": [{"secretRef": "rolesql", "path": "rolesql"}]}],
+                "volumes": [{"name": "sql", "storageType": "Secret", "secrets": [{"secretRef": "rolesql", "path": "rolesql"},
+                                                                                 {"secretRef": "pgroots", "path": "pgroots"}]}],
             },
         },
     }
@@ -296,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
     p_job.add_argument("--sql", required=True)
     p_job.add_argument("--out", required=True, help="new file (mode 600); holds your token: delete it after `job create`")
     p_job.add_argument("--location", required=True, help="the Container Apps environment's region (tofu output / az containerapp env show)")
+    p_job.add_argument("--ca-file", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "postgres-roots.pem"),
+                       help="PEM roots for verify-full (default: the pinned Azure roots next to this tool)")
     p_job.add_argument("--admin-group", default="grp-viadere-db-admins")
     args = parser.parse_args(argv)
 
@@ -309,7 +316,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "psql-job":
         with open(args.sql, encoding="utf-8") as handle:
             sql = handle.read()
-        spec = psql_job_spec(args.environment_id, args.host, sql, entra_postgres_token(), args.location, args.admin_group)
+        with open(args.ca_file, encoding="utf-8") as handle:
+            roots = handle.read()
+        spec = psql_job_spec(args.environment_id, args.host, sql, entra_postgres_token(), args.location, roots, args.admin_group)
         write_private_file(args.out, json.dumps(spec, indent=1))
         print(f"wrote {args.out}; run: az containerapp job create -n job-viadere-dbadmin -g <app rg> --yaml {args.out}")
         return 0
