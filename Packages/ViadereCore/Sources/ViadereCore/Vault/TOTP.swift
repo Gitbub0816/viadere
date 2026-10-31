@@ -126,7 +126,8 @@ public enum TOTP {
     /// Whole seconds until the current code changes (1...period).
     public static func secondsRemaining(period: Int, at date: Date) -> Int {
         let p = max(1, period)
-        let elapsed = Int(max(0, date.timeIntervalSince1970.rounded(.down))) % p
+        // Int64: on watchOS (`arm64_32`) `Int` is 32-bit and Unix seconds pass Int32.max in 2038.
+        let elapsed = Int(Int64(max(0, date.timeIntervalSince1970.rounded(.down))) % Int64(p))
         return p - elapsed
     }
 }

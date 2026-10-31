@@ -78,12 +78,14 @@ public struct CapabilityParameter: Sendable, Codable, Hashable {
     /// Closed set of strings.
     public var allowedStrings: [String]?
     public var maxLength: Int?
-    public var minimum: Int?
-    public var maximum: Int?
+    /// Bounds of an `.integer` value. `Int64`, like the values they bound: on watchOS (`arm64_32`) `Int` is 32-bit, and money in minor
+    /// units passes 2^31 (the transaction maximum is 999 999 999 999).
+    public var minimum: Int64?
+    public var maximum: Int64?
     public var summary: String
 
     public init(name: String, type: SchemaType, required: Bool = true, allowedIntegers: [Int]? = nil, allowedStrings: [String]? = nil,
-                maxLength: Int? = nil, minimum: Int? = nil, maximum: Int? = nil, summary: String) {
+                maxLength: Int? = nil, minimum: Int64? = nil, maximum: Int64? = nil, summary: String) {
         self.name = name
         self.type = type
         self.required = required
@@ -100,8 +102,8 @@ public struct CapabilityParameter: Sendable, Codable, Hashable {
         switch (type, value) {
         case (.integer, .integer(let n)):
             if let allowed = allowedIntegers, !allowed.contains(Int(clamping: n)) { return "not_allowed" }
-            if let minimum, n < Int64(minimum) { return "too_small" }
-            if let maximum, n > Int64(maximum) { return "too_large" }
+            if let minimum, n < minimum { return "too_small" }
+            if let maximum, n > maximum { return "too_large" }
             return nil
         case (.string, .string(let s)), (.timestamp, .string(let s)):
             if let maxLength, s.count > maxLength { return "too_long" }
