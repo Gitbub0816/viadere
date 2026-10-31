@@ -211,3 +211,19 @@ Migrations `Organization.v1` and `Surfaces.v1`. No Loops or Brand Kit table exis
 | `business_surfaces` | a business's module layout versions (module ids and order only), who published | OPS | | none | Deleted with the tenant (`TenantRights`) | no customer data |
 
 The Alerts and Benefits lists are read models over existing tables; they store nothing beyond the rows above.
+
+## 9. Addendum (2026-10-31, customer profiles; `docs/PROFILES.md`, SECURITY.md §2.97)
+
+Migration `Profiles.v1`.
+
+| Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `consumer_profiles` | the custom public name | PII | P | field cipher (row-bound) | Deleted with the account (`ProfileService.wipe`) | the public name is shared with every connected business by design |
+| `profile_values` | profile values (contact, personal, birth date, travel, memberships, vehicle, home, work) | PII | P | field cipher (row-bound, `profile_values.value#{rowId}`) | Deleted with the account | no operator or support view; closed catalog |
+| `profile_grants` | per (customer, business, field key): granted and revoked times, reason | OPS | P | none (keys only) | Kept without values after the account is deleted (grant history) | gap: no age-based purge yet; propose 400 days after revocation |
+| `profile_receipts` | customer-visible disclosure receipts: business name, action, keys, purpose, request id | OPS | P | none (no values) | Kept like consent history | gap as above |
+| `profile_requests` | a business's request: keys, purpose (business text), status, approved keys | OPS | P | none | Deleted with the account | gap: no age-based purge of answered requests yet |
+| `profile_verified_facts` | booleans established with an ID, method, assurance, policy version, time | PII (derived) | P | none | Deleted with the account or when the customer removes them | never a document number, image, name or birth date |
+| `profile_verification_attempts` | nonce (until used), provider session id, purge state | OPS | P | none | Abandoned attempts fail after their lifetime; rows without a pending purge are deleted after 30 days and with the account | provider sessions are purged with the Verify backoff |
+| `profile_category_requests` | a business's request to be allowed a profile category, justification, operator decision | OPS | | none | Deleted with the tenant | no customer data |
+
