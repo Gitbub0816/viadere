@@ -116,11 +116,12 @@ locals {
     "audit-head-signing" = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "kd-log-signing"     = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "link-descriptor"    = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
+    "loop-publication"   = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] } # Loop publication manifests only (WP-3.2)
     "kek-data"           = { kty = local.p.rsa_kty, curve = null, size = 3072, ops = ["wrapKey", "unwrapKey"] }
   }
   # Which identity may use which key (Key Vault Crypto User at KEY scope, section 5.3).
   key_grants = {
-    api    = ["kek-data", "kd-log-signing", "link-descriptor"]
+    api    = ["kek-data", "kd-log-signing", "link-descriptor", "loop-publication"]
     worker = ["kek-data", "audit-head-signing"]
   }
 
@@ -164,6 +165,8 @@ locals {
     "operator-notices" = { max_delivery = 8, ttl = "P3D" }
     "consumer-export"  = { max_delivery = 3, ttl = "P3D" }
     "expiry"           = { max_delivery = 10, ttl = "P14D" } # scheduled interaction.expire / approve.expire / identity holds
+    "loop-delivery"    = { max_delivery = 8, ttl = "P3D" }   # hosted Loops: action events to the business inbox (WP-3.3)
+    "loop-timeout"     = { max_delivery = 10, ttl = "P31D" } # hosted Loops: response deadlines and instance expiries (scheduled)
   }
 
   workload_identities = ["api", "worker", "migrator", "cloudflared"]

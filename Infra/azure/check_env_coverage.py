@@ -24,6 +24,7 @@ EXEMPT = {
     "WALLET_ENCRYPTION_KEY_PATHS": "development only; refused in staging/production (use WALLET_ENCRYPTION_KEY_WRAPPED)",
     "KEY_DIRECTORY_LOG_KEY": "replaced on Azure by the Key Vault key AZURE_KEY_VAULT_KD_LOG_KEY (the server refuses both at once)",
     "LINK_DESCRIPTOR_SIGNING_KEY": "replaced on Azure by the Key Vault key AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY (the server refuses both at once)",
+    "LOOP_PUBLICATION_SIGNING_KEY": "replaced on Azure by the Key Vault key AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY (the server refuses both at once)",
     "DATABASE_URL": "Key Vault secret database-url, referenced only while postgres_password_auth_enabled (locals.tf db_password_secret)",
     "DATABASE_MIGRATION_URL": "Key Vault secret database-migration-url, migrate job only, only while postgres_password_auth_enabled",
     "DATABASE_PORT": "default 5432 (Azure Database for PostgreSQL listens there)",

@@ -159,6 +159,27 @@ class KeyVault(unittest.TestCase):
         self.assertIn("KV-HSM", rules(found))
         self.assertIn('azapi_resource.kv_key["kek-data"]', {f.address for f in found.violations})
 
+    def test_loop_publication_key_is_hsm_in_standard_and_software_only_in_lean(self):
+        # WP-3.2: the Loop publication manifest key is a Key Vault key like link-descriptor (one key, one role).
+        address = 'azapi_resource.kv_key["loop-publication"]'
+        standard = load("standard")
+        self.assertEqual(after(standard, address)["body"]["properties"]["kty"], "EC-HSM")
+        self.assertNotIn(address, {f.address for f in policy_check.evaluate(standard).violations})
+        after(standard, address)["body"]["properties"]["kty"] = "EC"
+        found = policy_check.evaluate(standard)
+        self.assertIn(address, {f.address for f in found.violations})
+        lean = policy_check.evaluate(load("lean"))
+        self.assertIn(address, {a.address for a in lean.exceptions if a.rule == "KV-SOFTWARE-KEYS"})
+
+    def test_loop_publication_key_is_granted_to_the_api_only(self):
+        text = (Path(__file__).resolve().parents[1] / "locals.tf").read_text()
+        grants = text[text.index("key_grants = {"):]
+        grants = grants[:grants.index("}")]
+        api = next(line for line in grants.splitlines() if line.strip().startswith("api"))
+        worker = next(line for line in grants.splitlines() if line.strip().startswith("worker"))
+        self.assertIn('"loop-publication"', api)
+        self.assertNotIn('"loop-publication"', worker)
+
     def test_lean_must_not_buy_premium(self):
         plan = load("lean")
         after(plan, "azurerm_key_vault.this")["sku_name"] = "premium"

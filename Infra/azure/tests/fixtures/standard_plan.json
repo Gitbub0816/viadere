@@ -409,6 +409,44 @@
    "type": "azapi_resource"
   },
   {
+   "address": "azapi_resource.kv_key[\"loop-publication\"]",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "body": {
+      "properties": {
+       "attributes": {
+        "enabled": true,
+        "exportable": false
+       },
+       "curveName": "P-256",
+       "keyOps": [
+        "sign",
+        "verify"
+       ],
+       "kty": "EC-HSM"
+      }
+     },
+     "name": "loop-publication",
+     "type": "Microsoft.KeyVault/vaults/keys@2026-02-01"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "parent_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "index": "loop-publication",
+   "mode": "managed",
+   "name": "kv_key",
+   "provider_name": "registry.opentofu.org/azure/azapi",
+   "type": "azapi_resource"
+  },
+  {
    "address": "azapi_resource.kv_key[\"kek-data\"]",
    "change": {
     "actions": [

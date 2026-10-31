@@ -396,6 +396,7 @@ The module sets these on the processes; the server implements all of them (WP-B2
 | `AZURE_KEY_VAULT_KEK_KEY` | `kek-data` | `kek-data` | | RSA 3072 | unwraps `*_WRAPPED` secrets at boot and the Wallet keys |
 | `AZURE_KEY_VAULT_KD_LOG_KEY` | `kd-log-signing` | | | EC P-256 | signs key-directory tree heads (replaces `KEY_DIRECTORY_LOG_KEY`; the worker holds a stand-in that refuses to sign) |
 | `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY` | `link-descriptor` | | | EC P-256 | signs link-session descriptors and results (WP-C1; replaces `LINK_DESCRIPTOR_SIGNING_KEY`; the worker holds a stand-in that refuses to sign) |
+| `AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY` | `loop-publication` | | | EC P-256 | signs Loop publication manifests only (WP-3.2; replaces `LOOP_PUBLICATION_SIGNING_KEY`; without either key staging and production refuse to publish Loops) |
 | `AZURE_KEY_VAULT_AUDIT_HEAD_KEY` | | `audit-head-signing` | | EC P-256 | signs exported audit heads (required in production for every role but `api`) |
 | `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER` | | standard: `https://<account>.blob.core.windows.net/`, `audit-heads`; lean: empty | | | create-only export to the immutable container (`AUDIT_HEAD_EXPORT=azure-blob` is inferred) |
 | `DATABASE_AUTH`, `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER` | `viadere_app` | `viadere_worker` | `viadere_migrator` | `entra` (default) or `password`; host FQDN, `viadere`, role | Entra token per new connection, `verify-full`, no fallback |
