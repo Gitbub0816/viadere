@@ -229,7 +229,7 @@ final class BrandKitServerTests: XCTestCase {
     func testTheAssetHostAnswersOnlyAssetsAndTheAPIHostServesNoAssets() async throws {
         try await withHarness({ $0.brandKits.assetDomain = LinkDomain("assets.viadere-cdn.example") }) { h in
             let w = try await Self.world(h)
-            let asset = ["Host": "assets.viadere-cdn.example"]
+            let asset = [AssetHostMiddleware.header: "assets.viadere-cdn.example"]
             let ok = try await h.request(.GET, "/b/\(w.logo.sha256).png", headers: asset)
             XCTAssertEqual(ok.status, .ok)
             XCTAssertNil(ok.headers.first(name: .setCookie))
@@ -243,9 +243,9 @@ final class BrandKitServerTests: XCTestCase {
             }
             try await eq(try await h.request(.POST, "/b/\(w.logo.sha256).png", headers: asset).status, .notFound)
             // The API host does not serve assets once an asset host exists.
-            try await eq(try await h.request(.GET, "/b/\(w.logo.sha256).png", headers: ["Host": "viadere.com"]).status, .notFound)
+            try await eq(try await h.request(.GET, "/b/\(w.logo.sha256).png").status, .notFound)
             // The AASA file is unaffected on the API host.
-            let aasa = try await h.request(.GET, "/.well-known/apple-app-site-association", headers: ["Host": "viadere.com"])
+            let aasa = try await h.request(.GET, "/.well-known/apple-app-site-association")
             XCTAssertEqual(aasa.status, .ok, aasa.text)
             // The manifest tells devices where assets live.
             try await eq(try await Self.brand(h, w.customer, w.business.id).json(BrandManifestResponse.self).assetHost, "assets.viadere-cdn.example")

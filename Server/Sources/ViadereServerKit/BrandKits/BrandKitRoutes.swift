@@ -47,12 +47,14 @@ enum BrandKitRoutes {
 
 /// The asset host answers exactly one thing (ADR-0017): `GET`/`HEAD /b/{64 lowercase hex}.png` without a query. Everything else on that
 /// host, including the AASA file, the API, the console and the link routes, is a bare `404`; no response from it ever sets a cookie.
+///
+/// The server never reads `Host` (SECURITY.md §1). Asset-host traffic is recognised by `X-Viadere-Asset-Host`, which the Cloudflare
+/// transform rule of the asset hostname sets (overwriting any client value) to `ASSET_DOMAIN`; the origin is reachable only through the
+/// tunnel with the edge token. A client that sends the header itself on the API host only restricts its own request to assets.
 struct AssetHostMiddleware: AsyncMiddleware {
-    static func host(of request: Request) -> String {
-        let raw = request.headers.first(name: .host) ?? ""
-        // Strip a port; IPv6 literals are not valid asset hosts anyway.
-        return String(raw.split(separator: ":", maxSplits: 1).first ?? "").lowercased()
-    }
+    static let header = "X-Viadere-Asset-Host"
+
+    static func host(of request: Request) -> String { (request.headers.first(name: header) ?? "").lowercased() }
 
     static func isAssetPath(_ path: String) -> Bool {
         guard path.hasPrefix("/b/"), path.hasSuffix(".png") else { return false }

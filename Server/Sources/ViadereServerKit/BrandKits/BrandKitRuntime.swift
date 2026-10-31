@@ -122,3 +122,22 @@ struct CollectBodyMiddleware: AsyncMiddleware {
         return try await next.respond(to: request)
     }
 }
+
+
+/// `ViadereServer brand-manifest-key` prints the **public** `brand-manifest` key and its key id as configured (the Key Vault key on Azure,
+/// else `BRAND_MANIFEST_SIGNING_KEY`): the value the app pins (`VIADERE_BRAND_MANIFEST_KEYS`) to verify brand manifests. Never a private key.
+public struct BrandManifestKeyCommand: AsyncCommand {
+    public struct Signature: CommandSignature { public init() {} }
+    public let signature = Signature()
+    public let help = "Prints the public brand-manifest key (for the app build)."
+    public init() {}
+
+    public func run(using context: CommandContext, signature: Signature) async throws {
+        guard let key = context.application.ctx.config.brandKits.manifestKey, !(key is UnavailableSigningKey) else {
+            context.console.print("brand kits are off: no brand-manifest key is configured")
+            return
+        }
+        context.console.print("kid=\(KeyIdentifier.make(try key.publicKey.signingKey()))")
+        context.console.print("public_key=\(key.publicKey.base64URL)")
+    }
+}

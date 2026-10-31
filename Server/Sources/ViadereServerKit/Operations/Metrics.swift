@@ -155,6 +155,10 @@ struct MetricsService {
             guard let oldest = try await purgeable().filter(\.$finishedAt != nil).sort(\.$finishedAt, .ascending).first()?.finishedAt else { return 0 }
             return max(0, now.timeIntervalSince(oldest))
         }
+        await gauge("viadere_brand_review_pending", "Brand kits and images waiting for operator review.") {
+            Double(try await BrandKitRecord.query(on: db).filter(\.$status == BrandKitService.KitStatus.pendingReview.rawValue).count()
+                + (try await BrandAssetRecord.query(on: db).filter(\.$state == BrandKitService.AssetState.pendingReview.rawValue).count()))
+        }
         await gauge("viadere_businesses_suspended", "Suspended businesses.") {
             Double(try await BusinessRecord.query(on: db).filter(\.$verificationStatus == VerificationStatus.suspended.rawValue).count())
         }
