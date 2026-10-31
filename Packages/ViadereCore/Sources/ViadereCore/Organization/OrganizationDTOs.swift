@@ -11,6 +11,8 @@ public struct AlertTarget: Codable, Sendable, Hashable {
         case approveDelivery = "approve_delivery"
         case verification
         case securityNotice = "security_notice"
+        /// A Loop instance waiting for the customer (WP-3.9): open it with `GET /v1/loops/instances/{id}`.
+        case loopInstance = "loop_instance"
         case unknown
 
         public init(from decoder: any Decoder) throws {
