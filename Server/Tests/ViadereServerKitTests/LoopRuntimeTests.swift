@@ -202,6 +202,9 @@ final class LoopRuntimeTests: XCTestCase {
             XCTAssertEqual(pushes.count, 1)
             XCTAssertEqual(pushes.first?.body, LoopRuntimeService.pushBody)
             XCTAssertNil(pushes.first?.interactionId)
+            // The instance id rides as the opaque top-level `loopInstanceId` (SECURITY.md §2.98) so the app opens this instance.
+            XCTAssertEqual(pushes.first?.loopInstanceId, instance.id.uuid.uuidString.lowercased())
+            XCTAssertEqual(pushes.first?.category, "viadere.loop")
             XCTAssertFalse(pushes.contains { $0.title.contains("Corner") || $0.body.contains("Corner") || $0.threadID.contains("Corner") })
             let view = try await h.signed(world.alice, .GET, "/v1/loops/instances/\(instance.id)")
             let loaded = try view.json(LoopInstanceView.self)
