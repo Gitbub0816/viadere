@@ -116,7 +116,13 @@ case "${CONFIGURATION:-}" in
     case "${VIADERE_PLIST_DEFS:-}" in
       *VIADERE_LOCAL_DEV*) echo "error: VIADERE_LOCAL_DEV (the plain-HTTP ATS exception) must not be defined in a Staging build." >&2; fail=1 ;;
     esac
-    check_all_manifest_keys || fail=1
+    # Staging: an EMPTY manifest-key set is a warning, not an error, so the app keeps building before the staging keys exist (the app
+    # fails closed at runtime: neutral Brand Kits, no Loops). A malformed set is still an error; Release stays strict.
+    if [ -z "${VIADERE_BRAND_MANIFEST_KEYS:-}" ] && [ -z "${VIADERE_LOOP_PUBLICATION_KEYS:-}" ]; then
+      echo "warning: VIADERE_BRAND_MANIFEST_KEYS and VIADERE_LOOP_PUBLICATION_KEYS are not set: this Staging build shows no Brand Kits and no Loops."
+    else
+      check_all_manifest_keys || fail=1
+    fi
     exit "$fail"
     ;;
   *)
