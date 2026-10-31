@@ -11,6 +11,8 @@ public struct AlertTarget: Codable, Sendable, Hashable {
         case approveDelivery = "approve_delivery"
         case verification
         case securityNotice = "security_notice"
+        /// A profile request (`ProfileRequestID`).
+        case profileRequest = "profile_request"
         case unknown
 
         public init(from decoder: any Decoder) throws {

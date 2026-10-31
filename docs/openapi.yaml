@@ -105,6 +105,75 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/business/profile-requests:
+    post:
+      tags: [Profiles]
+      operationId: createProfileRequest
+      summary: Ask a customer for profile fields
+      description: |
+        Scope `profiles:read`. Every `fieldKeys` entry must be a catalog key (docs/PROFILES.md) in a category Viadere allowed your business at
+        onboarding; anything else is `403 not_entitled` before the customer is looked up (no category is allowed by default). `purpose` is shown to
+        the customer verbatim and must pass the display-text rules (no control or invisible characters, no line breaks, at most 200 characters,
+        no "Viadere"). The customer approves field by field (partial approval is normal) or declines. A test key reaches sandbox customers only, and
+        a sandbox request is answered at once with simulated values. Idempotent on `Idempotency-Key`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProfileRequest" }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "200":
+          description: Replay of the same idempotency key and body.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/profile-requests/{requestId}:
+    get:
+      tags: [Profiles]
+      operationId: getProfileRequest
+      summary: One of your profile requests
+      description: Scope `profiles:read`. `answered` carries `approvedKeys` (possibly fewer than asked, possibly none). Another business's request is `404`.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The request.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/profiles/{subjectRef}:
+    get:
+      tags: [Profiles]
+      operationId: getProfile
+      summary: The public name and currently granted fields of a customer
+      description: |
+        Scope `profiles:read`. Always returns the customer's public name. Other fields only while the customer grants them **and** your business
+        holds the field's category entitlement; a revocation by the customer or by Viadere takes effect on the next call. Every read is audited
+        (field keys only). `Cache-Control: no-store`. A customer of another business, or in the other environment, is `404`.
+      parameters:
+        - { name: subjectRef, in: path, required: true, schema: { $ref: "#/components/schemas/SubjectRef" } }
+      responses:
+        "200":
+          description: The profile view.
+          content: { application/json: { schema: { $ref: "#/components/schemas/BusinessProfileView" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/business/interactions:
     post:
       tags: [Interactions]
@@ -2434,6 +2503,7 @@ components:
       properties:
         relationshipId: { $ref: "#/components/schemas/Uuid" }
         subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        publicName: { type: string, maxLength: 32, description: "The customer's public name (first name and last initial, or a name they chose). Not private; sent to every connected business. Absent when the customer has none." }
         source: { type: string, enum: [handle, code, qr, button, link, search, sms, appClip] }
         occurredAt: { $ref: "#/components/schemas/Timestamp" }
     ConsentUpdatedData:
@@ -2444,4 +2514,76 @@ components:
         subjectRef: { $ref: "#/components/schemas/SubjectRef" }
         purpose: { $ref: "#/components/schemas/InteractionPurpose" }
         granted: { type: boolean }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }
+    ProfileValue:
+      description: A string, an address object, or (derived fields such as `birthdate.age_over_18` and `verified.*`) a boolean.
+      oneOf:
+        - { type: string }
+        - { type: boolean }
+        - type: object
+          required: [line1, locality, country]
+          properties:
+            line1: { type: string }
+            line2: { type: string }
+            locality: { type: string }
+            region: { type: string }
+            postalCode: { type: string }
+            country: { type: string, minLength: 2, maxLength: 2 }
+    CreateProfileRequest:
+      type: object
+      required: [subjectRef, fieldKeys, purpose]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+        purpose: { type: string, minLength: 1, maxLength: 200 }
+        expiresInSeconds: { type: integer, minimum: 3600, maximum: 2592000 }
+    ProfileRequestResource:
+      type: object
+      required: [id, subjectRef, fieldKeys, purpose, status, livemode, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, items: { type: string } }
+        purpose: { type: string }
+        status: { type: string, enum: [pending, answered, declined, expired, cancelled] }
+        approvedKeys: { type: array, items: { type: string } }
+        livemode: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        answeredAt: { $ref: "#/components/schemas/Timestamp" }
+    BusinessProfileView:
+      type: object
+      required: [subjectRef, fields, grantedWithoutValue, catalogVersion, livemode]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        publicName: { type: string, maxLength: 32 }
+        fields:
+          type: array
+          items:
+            type: object
+            required: [key, value]
+            properties:
+              key: { type: string }
+              entry: { type: string, description: "Multi-entry fields: the airline code or program name." }
+              value: { $ref: "#/components/schemas/ProfileValue" }
+              verification:
+                type: object
+                description: Provenance of a verified fact (method, time, assurance). Never a document number or image.
+                properties:
+                  fact: { type: string }
+                  method: { type: string }
+                  verifiedAt: { $ref: "#/components/schemas/Timestamp" }
+                  assurance: { type: string }
+                  policyVersion: { type: string }
+        grantedWithoutValue: { type: array, items: { type: string } }
+        catalogVersion: { type: integer }
+        livemode: { type: boolean }
+    ProfileAccessEventData:
+      type: object
+      description: "Data of `profile.access_granted`, `profile.access_revoked` and `profile.request_expired`: field keys only, never values."
+      required: [subjectRef, fieldKeys, occurredAt]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, items: { type: string } }
+        requestId: { $ref: "#/components/schemas/Uuid" }
         occurredAt: { $ref: "#/components/schemas/Timestamp" }
