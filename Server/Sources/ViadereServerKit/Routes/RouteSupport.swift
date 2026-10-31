@@ -70,5 +70,6 @@ enum Routes {
         OrganizationRoutes.register(api)
         ProfileRoutes.register(api)
         LoopRoutes.register(api)
+        BrandKitRoutes.register(app)
     }
 }

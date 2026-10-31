@@ -193,6 +193,7 @@ variable "app_secret_env" {
     MAILERSEND_SMS_API_TOKEN      = "mailersend-sms-api-token"
     MAILERSEND_SMS_INBOUND_SECRET = "mailersend-sms-inbound-secret"
     MAILERSEND_SMS_WEBHOOK_SECRET = "mailersend-sms-webhook-secret"
+    BRAND_SELECTION_KEY           = "brand-selection-key" # Brand Kits daily rotation seed key; empty = no rotation
   }
   validation {
     condition     = alltrue([for k, v in var.app_secret_env : can(regex("^[A-Z][A-Z0-9_]+$", k)) && can(regex("^[a-z0-9][a-z0-9-]{0,62}$", v))])

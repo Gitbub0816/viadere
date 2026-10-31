@@ -73,7 +73,7 @@ final class SurfaceAndCoreTests: XCTestCase {
 
     func testCoreFeaturesWorkWithNoLoopNoBrandKitAndNoSurfaceRows() async throws {
         try await withHarness { h in
-            // No Loops or Brand Kit tables exist in this release: there is nothing to configure, so nothing can be required.
+            // Loop and Brand Kit tables exist but hold nothing: core features must not need a row in them.
             if let sql = h.db as? any SQLDatabase {
                 let tables: [String]
                 if DB.isPostgres(h.db) {
@@ -81,9 +81,8 @@ final class SurfaceAndCoreTests: XCTestCase {
                 } else {
                     tables = try await sql.raw("SELECT name FROM sqlite_master WHERE type = 'table'").all().map { try $0.decode(column: "name", as: String.self) }
                 }
-                XCTAssertFalse(tables.contains { $0.hasPrefix("brand") }, "\(tables.filter { $0.hasPrefix("brand") })")
-                // Hosted Loops ship their tables (WP-3.2), but nothing core needs a Loop row: every Loop table stays empty below.
-                for table in tables where table.hasPrefix("loop_") || table.hasPrefix("inbox_") {
+                // Hosted Loops (WP-3.2) and Brand Kits (Phase 2) ship their tables, but nothing core needs a row in them: every Loop and Brand Kit table stays empty below.
+                for table in tables where table.hasPrefix("loop_") || table.hasPrefix("inbox_") || table.hasPrefix("brand_") {
                     let rows = try await sql.raw(SQLQueryString("SELECT COUNT(*) AS n FROM \(unsafeRaw: table)")).first()?.decode(column: "n", as: Int.self)
                     XCTAssertEqual(rows, 0, table)
                 }
@@ -92,6 +91,9 @@ final class SurfaceAndCoreTests: XCTestCase {
             let world = try await TenantWorld.build(h)
             let surfaces = try await BusinessSurfaceRecord.query(on: h.db).count()
             XCTAssertEqual(surfaces, 0)
+            let brandRows = try await BrandKitRecord.query(on: h.db).count() + (try await BrandAssetRecord.query(on: h.db).count())
+                + (try await BrandManifestRecord.query(on: h.db).count())
+            XCTAssertEqual(brandRows, 0)
             // Approvals (signed decision), messaging, rewards and connection all work on a business with nothing configured.
             let id = world.interactions["alice/shop/confirm"]!
             let interaction = try await h.consumerInteraction(world.alice, id: id)

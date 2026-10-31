@@ -20,6 +20,10 @@ EXEMPT = {
     "PASS_PRIVATE_KEY_PATH": "alternative to PASS_PRIVATE_KEY_PEM; use the inline PEM secrets on Fly",
     "PASS_WWDR_CERTIFICATE_PATH": "alternative to PASS_WWDR_CERTIFICATE_PEM; use the inline PEM secrets on Fly",
     "WALLET_ENCRYPTION_KEY_PATHS": "development only; refused in staging/production (use WALLET_ENCRYPTION_KEY_WRAPPED)",
+    "ASSET_DOMAIN": "Brand Kits are not offered on Fly (no asset store): unset, so no brand image is served",
+    "BRAND_MANIFEST_SIGNING_KEY": "Brand Kits are not offered on Fly: unset, so every business is served neutral",
+    "BRAND_SELECTION_KEY": "Brand Kits are not offered on Fly",
+    "BRAND_ASSET_DIRECTORY": "development only; refused in staging/production",
 }
 # Azure-only settings (WP-B2/B3): Infra/azure sets them on Container Apps (checked by Infra/azure/check_env_coverage.py); on Fly they stay unset
 # and the server uses its defaults (one combined process, database queue transport, DATABASE_URL password auth, no Key Vault).
@@ -27,7 +31,7 @@ AZURE_ONLY = {
     "ROLE", "QUEUE_TRANSPORT", "AZURE_SERVICEBUS_FQDN", "AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_KEY_VAULT_URL", "AZURE_KEY_VAULT_KEK_KEY",
     "AZURE_KEY_VAULT_KD_LOG_KEY", "AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY", "AZURE_AUDIT_BLOB_ENDPOINT",
     "AZURE_AUDIT_BLOB_CONTAINER", "AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY", "DATABASE_AUTH", "DATABASE_HOST", "DATABASE_PORT", "DATABASE_NAME", "DATABASE_USER", "DATABASE_CA_FILE",
-    "DATABASE_WORKER_ROLE",
+    "DATABASE_WORKER_ROLE", "AZURE_KEY_VAULT_BRAND_MANIFEST_KEY", "AZURE_BRAND_BLOB_ENDPOINT", "AZURE_BRAND_BLOB_CONTAINER",
 }
 EXEMPT.update({name: "Azure only (Infra/azure); unset on Fly" for name in AZURE_ONLY})
 # Names the server reads that are not in .env.example (documented in Server/README.md).

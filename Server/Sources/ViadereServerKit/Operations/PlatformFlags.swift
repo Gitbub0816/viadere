@@ -25,8 +25,11 @@ enum PlatformFlag: String, CaseIterable, Sendable {
     case auditExportMark = "audit.export_mark"
     /// Plan 5.5: Loops kill switch. No new instances; existing ones show "paused" and nothing is actionable. Core features are unaffected.
     case loops = "loops"
+    /// Brand Kits kill switch (plan 5.5): no manifest is served and no asset is served; every client renders neutral. Scope `global` or a
+    /// business id (takedown of one business's branding).
+    case brandKits = "brand_kits"
 
-    var globalOnly: Bool { self != .webhooksPause && self != .messagingRestrict }
+    var globalOnly: Bool { self != .webhooksPause && self != .messagingRestrict && self != .brandKits }
 }
 
 /// What the G-6 switch restricts. Security-purpose traffic (sign-in and payment approvals) is never covered: stop those with a capability
@@ -140,6 +143,12 @@ struct PlatformFlags {
 
     func isStopped(_ flag: PlatformFlag) async -> Bool { await entry(flag) != nil }
 
+    /// Whether the Brand Kits kill switch is on for the platform or for this business.
+    func brandKitsStopped(businessId: UUID) async -> Bool {
+        let snap = await snapshot()
+        return snap[Self.key(.brandKits, Self.globalScope)] != nil || snap[Self.key(.brandKits, businessId.uuidString.lowercased())] != nil
+    }
+
     func webhooksPaused(businessId: UUID) async -> Bool {
         let snap = await snapshot()
         return snap[Self.key(.webhooksPause, Self.globalScope)] != nil || snap[Self.key(.webhooksPause, businessId.uuidString.lowercased())] != nil
@@ -236,7 +245,7 @@ struct PlatformFlags {
                 throw APIError.validation("Give a short status message (up to 200 characters).", details: ["message": "invalid"])
             }
             return message
-        case .signupConsumer, .signupBusiness, .inviteDashboard, .webhooksPause, .auditExportMark, .loops:
+        case .signupConsumer, .signupBusiness, .inviteDashboard, .webhooksPause, .auditExportMark, .loops, .brandKits:
             return "on"
         case .messagingRestrict:
             guard let restriction = try? JSONDecoder().decode(MessagingRestriction.self, from: Data(raw.utf8)),

@@ -167,6 +167,7 @@ enum OperatorRoutes {
         pages.get("operator", "abuse") { req in try await abuse(req) }
         OperatorOps.register(pages)
         OperatorLoops.register(pages)
+        OperatorBrand.register(pages)
     }
 
     private static func operatorPrincipal(_ req: Request) throws -> DashboardPrincipal {

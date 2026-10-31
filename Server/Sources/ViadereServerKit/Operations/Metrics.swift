@@ -54,6 +54,14 @@ final class MetricsRegistry: @unchecked Sendable {
         case loopPublished = "loop_published"
         case loopAutoSuspended = "loop_auto_suspended"
         case loopManifestSignFailed = "loop_manifest_sign_failed"
+        // Brand Kits (plan 5.5). Rejections are also counted per reason in `viadere_brand_asset_rejections_total`.
+        case brandAssetAccepted = "brand_asset_accepted"
+        case brandAssetRejected = "brand_asset_rejected"
+        case brandManifestPublished = "brand_manifest_published"
+        case brandManifestServed = "brand_manifest_served"
+        case brandManifestWithheld = "brand_manifest_withheld"
+        case brandManifestSignFailed = "brand_manifest_sign_failed"
+        case brandTakedown = "brand_takedown"
     }
 
     private let lock = NSLock()
@@ -61,6 +69,15 @@ final class MetricsRegistry: @unchecked Sendable {
     private var statusClasses: [String: Int] = [:]
     private var lastJobRun: Date?
     private var jobFailures = 0
+    private var brandRejections: [BrandAssetPolicy.Rejection: Int] = [:]
+
+    /// One brand asset refused by the ingestion pipeline (bounded vocabulary: the policy's reason codes).
+    func countBrandRejection(_ reason: BrandAssetPolicy.Rejection) {
+        lock.withLock { brandRejections[reason, default: 0] += 1 }
+        count(.brandAssetRejected)
+    }
+
+    func brandRejectionCount(_ reason: BrandAssetPolicy.Rejection) -> Int { lock.withLock { brandRejections[reason] ?? 0 } }
 
     func count(_ event: Event, by amount: Int = 1) { lock.withLock { events[event, default: 0] += amount } }
 
@@ -87,11 +104,13 @@ final class MetricsRegistry: @unchecked Sendable {
 
     /// The exposition text. `gauges` are computed from the database at scrape time by `MetricsService`.
     func render(gauges: [(name: String, help: String, value: Double)]) -> String {
-        let (e, s, job, failures) = lock.withLock { (events, statusClasses, lastJobRun, jobFailures) }
+        let (e, s, job, failures, rejections) = lock.withLock { (events, statusClasses, lastJobRun, jobFailures, brandRejections) }
         var out = "# HELP viadere_http_responses_total HTTP responses by status class.\n# TYPE viadere_http_responses_total counter\n"
         for key in ["1xx", "2xx", "3xx", "4xx", "5xx"] { out += "viadere_http_responses_total{class=\"\(key)\"} \(s[key] ?? 0)\n" }
         out += "# HELP viadere_security_events_total Security-relevant events (bounded vocabulary, no identifiers).\n# TYPE viadere_security_events_total counter\n"
         for event in Event.allCases { out += "viadere_security_events_total{event=\"\(event.rawValue)\"} \(e[event] ?? 0)\n" }
+        out += "# HELP viadere_brand_asset_rejections_total Brand asset uploads refused, by reason code.\n# TYPE viadere_brand_asset_rejections_total counter\n"
+        for (reason, value) in rejections.sorted(by: { $0.key.rawValue < $1.key.rawValue }) { out += "viadere_brand_asset_rejections_total{reason=\"\(reason.rawValue)\"} \(value)\n" }
         out += "# HELP viadere_job_failures_total Background job runs that threw.\n# TYPE viadere_job_failures_total counter\nviadere_job_failures_total \(failures)\n"
         if let job {
             out += "# HELP viadere_job_last_run_timestamp_seconds Last background job run.\n# TYPE viadere_job_last_run_timestamp_seconds gauge\n"
@@ -145,6 +164,10 @@ struct MetricsService {
         await gauge("viadere_verify_provider_purge_oldest_seconds", "Age of the oldest outstanding Didit deletion (0 = none).") {
             guard let oldest = try await purgeable().filter(\.$finishedAt != nil).sort(\.$finishedAt, .ascending).first()?.finishedAt else { return 0 }
             return max(0, now.timeIntervalSince(oldest))
+        }
+        await gauge("viadere_brand_review_pending", "Brand kits and images waiting for operator review.") {
+            Double(try await BrandKitRecord.query(on: db).filter(\.$status == BrandKitService.KitStatus.pendingReview.rawValue).count()
+                + (try await BrandAssetRecord.query(on: db).filter(\.$state == BrandKitService.AssetState.pendingReview.rawValue).count()))
         }
         await gauge("viadere_businesses_suspended", "Suspended businesses.") {
             Double(try await BusinessRecord.query(on: db).filter(\.$verificationStatus == VerificationStatus.suspended.rawValue).count())

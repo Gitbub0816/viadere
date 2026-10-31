@@ -117,11 +117,12 @@ locals {
     "kd-log-signing"     = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "link-descriptor"    = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "loop-publication"   = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] } # Loop publication manifests only (WP-3.2)
+    "brand-manifest"     = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "kek-data"           = { kty = local.p.rsa_kty, curve = null, size = 3072, ops = ["wrapKey", "unwrapKey"] }
   }
   # Which identity may use which key (Key Vault Crypto User at KEY scope, section 5.3).
   key_grants = {
-    api    = ["kek-data", "kd-log-signing", "link-descriptor", "loop-publication"]
+    api    = ["kek-data", "kd-log-signing", "link-descriptor", "loop-publication", "brand-manifest"]
     worker = ["kek-data", "audit-head-signing"]
   }
 

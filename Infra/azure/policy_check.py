@@ -16,7 +16,9 @@ exceptions table:
     Password authentication next to Entra is an exception until WP-B2 ships Entra token auth.
   * Key Vault: purge protection, RBAC authorization and a Deny-by-default network ACL are mandatory; access policies are forbidden. Public
     network access is a violation in standard and an exception in lean (only with RBAC). Software-protected keys / Standard SKU: violation in standard, exception in lean.
-  * Storage: public network access, shared-key access or public blobs are violations in both profiles.
+  * Storage: public network access, shared-key access or public blobs are violations in both profiles. One recorded lean exception: the
+    Brand Kit asset account (`azurerm_storage_account.brand`, WP-2.1) may keep its public endpoint in lean only when its firewall denies by
+    default, bypasses nothing, admits only subnets (no IP rules) and shared keys are off (`ST-BRAND-PUBLIC`); in standard it is a violation.
   * Service Bus: local (SAS) authentication must be disabled (both profiles); public network access is a violation in standard and an
     exception in lean (only with local auth disabled); minimum TLS below 1.2 is a violation.
   * Role assignments: none at subscription or management-group scope; workload identities only at resource scope (never a resource group);
@@ -332,12 +334,34 @@ def check_kv_key(address: str, kty: Any, rep: Report) -> None:
             rep.violate("KV-HSM", address, f"standard profile requires HSM keys (got {kty})")
 
 
+BRAND_STORAGE_NAMES = {"brand"}
+
+
+def _subnet_only_firewall(r: Resource) -> bool:
+    """Deny by default, bypass nothing, at least one subnet rule and no IP rule (the Container Apps subnet's service endpoint only)."""
+    rules = r.block("network_rules") or {}
+    if str(rules.get("default_action", "Allow")).lower() != "deny":
+        return False
+    bypass = rules.get("bypass") or []
+    if any(str(b).lower() != "none" for b in bypass):
+        return False
+    if rules.get("ip_rules"):
+        return False
+    subnets_value, subnets_unknown = r.get("network_rules", 0, "virtual_network_subnet_ids")
+    return bool(subnets_value) or subnets_unknown
+
+
 def check_storage(r: Resource, rep: Report) -> None:
     access, access_unknown = r.get("public_network_access")
     legacy = is_true(r, "public_network_access_enabled")
     disabled = (isinstance(access, str) and access.lower() == "disabled") or (access is None and not access_unknown and legacy is False)
     if not disabled:
-        rep.violate("ST-PUBLIC", r.address, "storage public network access must be disabled (both profiles)")
+        if (rep.profile == "lean" and r.name in BRAND_STORAGE_NAMES and _subnet_only_firewall(r)
+                and is_true(r, "shared_access_key_enabled", default=True) is False
+                and is_true(r, "allow_nested_items_to_be_public", default=True) is False):
+            rep.allow("ST-BRAND-PUBLIC", r.address, "lean: brand-asset storage on its public endpoint, firewalled to the Container Apps subnet, Entra only")
+        else:
+            rep.violate("ST-PUBLIC", r.address, "storage public network access must be disabled (both profiles; lean brand assets need a subnet-only firewall)")
     if is_true(r, "shared_access_key_enabled", default=True) is not False:
         rep.violate("ST-SHARED-KEY", r.address, "storage shared-key access must be disabled (Entra only)")
     if is_true(r, "allow_nested_items_to_be_public", default=True) is not False:

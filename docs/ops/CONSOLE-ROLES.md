@@ -82,4 +82,5 @@ templates, support).
 | `viewInbox` | x | x |  |  |  | x |  |  | x |
 | `manageInbox` | x | x |  |  |  | x |  |  |  |
 | `submitLoops` | x | x |  | x |  |  |  |  |  |
+| `manageBrandKits` | x | x |  |  |  |  |  |  |  |
 <!-- matrix:end -->

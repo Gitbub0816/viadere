@@ -44,7 +44,10 @@ public struct RequestGuardMiddleware: AsyncMiddleware {
             // The dashboard and operator console post HTML forms; everything else is JSON-only.
             let isWebForm = request.url.path.hasPrefix(APIRoutes.Web.dashboardPrefix + "/") || request.url.path.hasPrefix(APIRoutes.Web.operatorPrefix + "/")
             if hasBody && isWebForm {
-                guard let type = request.headers.contentType, (type.type == "application" && (type.subType == "json" || type.subType == "x-www-form-urlencoded")) else {
+                // Multipart only on the one upload route (brand images, WP-2.2).
+                let multipartAllowed = request.url.path == ConsoleBrandStudio.uploadPath
+                guard let type = request.headers.contentType, (type.type == "application" && (type.subType == "json" || type.subType == "x-www-form-urlencoded"))
+                    || (multipartAllowed && type.type == "multipart" && type.subType == "form-data") else {
                     throw APIError(.unsupportedMediaType, .badRequest, "Unsupported content type.")
                 }
             } else if hasBody && !isProvider {

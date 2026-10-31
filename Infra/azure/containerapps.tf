@@ -82,6 +82,9 @@ locals {
       AZURE_KEY_VAULT_KD_LOG_KEY           = "kd-log-signing"
       AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY  = "link-descriptor"
       AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY = "loop-publication"
+      AZURE_KEY_VAULT_BRAND_MANIFEST_KEY   = "brand-manifest"
+      AZURE_BRAND_BLOB_ENDPOINT            = azurerm_storage_account.brand.primary_blob_endpoint
+      AZURE_BRAND_BLOB_CONTAINER           = azurerm_storage_container.brand_assets.name
     })
     worker = merge(var.app_env, local.base_env, {
       ROLE            = "worker"

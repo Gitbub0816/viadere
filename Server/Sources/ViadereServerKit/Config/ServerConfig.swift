@@ -174,6 +174,8 @@ public struct ServerConfig: Sendable {
     public var azure = AzureSettings()
     /// PostgreSQL with a Microsoft Entra token per new connection (`DATABASE_AUTH=entra`) instead of `DATABASE_URL`.
     public var databaseEntra: EntraDatabaseSettings?
+    /// Brand Kits (WP-2.1..2.8): asset host, manifest signing key, selection key, asset store, limits.
+    public var brandKits = BrandKitSettings()
 
     /// Whether a real database is configured (a password URL or Entra token authentication); `false` = in-memory SQLite (tests).
     public var hasDatabase: Bool { databaseURL != nil || databaseEntra != nil }
@@ -197,6 +199,8 @@ public struct ServerConfig: Sendable {
             freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true, smsMenuRaceWindow: 0)
         // Existing suites subscribe endpoints that cannot answer a challenge; the verification suites switch this on.
         config.operations.webhookOwnershipVerification = false
+        config.brandKits.manifestKey = SoftwareP256SigningKey()
+        config.brandKits.selectionKey = SymmetricKey(size: .bits256)
         return config
     }
 
@@ -354,6 +358,7 @@ public struct ServerConfig: Sendable {
         try config.applyLoopEnvironment(env, production: production)
         try config.applyVerifyEnvironment(env, production: production)
         try config.applyOperationsEnvironment(env, production: production)
+        try config.applyBrandKitEnvironment(env, production: production)
         return config
     }
 

@@ -376,6 +376,18 @@ az containerapp revision restart -n ca-cloudflared -g "$RG_APP" \
 
 The tunnel shows **Healthy** in the Zero Trust dashboard within a minute. The edge-token header value must equal the `edge-token` secret in Key Vault (the `EDGE_TOKEN` generated in section 7).
 
+### 9.1 Brand asset host (Brand Kits, WP-2.1, ADR-0017)
+
+Brand images are served by the api as `https://{ASSET_DOMAIN}/b/{sha256}.png` and the asset host answers nothing else (no AASA, no API, no console, never a cookie). It must be a host of its own: not `RP_ID`, `LINK_DOMAIN` or the console host, and not a subdomain of any of them (the server refuses the boot otherwise), for example `assets.viadere-cdn.example` (staging: a host in a separate zone from `cksites.dev`'s API hosts).
+
+1. In the same tunnel add a public hostname `ASSET_DOMAIN` → service `HTTP` → `ca-viadere-api` (HTTP Host Header `ca-viadere-api`, as for the API host) and add the host to the edge-token transform rule. Add a request-header transform rule for that hostname only that **sets** `X-Viadere-Asset-Host` to the `ASSET_DOMAIN` value (set, not add, so a client value is overwritten): the server never reads `Host` and recognises asset-host traffic by this header.
+2. Add a Cloudflare cache rule for that host: path starts with `/b/`, eligible for cache, edge TTL "respect origin" (the api sends `Cache-Control: public, max-age=31536000, immutable`; names are content hashes, a replaced image is a new URL). Keep the query string in the cache key: the origin answers any request with a query string `404`, and a rule that ignored it could serve an image for such a URL. Takedowns and the `brand_kits` kill switch make the origin answer `404`; purge the URL (or the host) in Cloudflare after an emergency takedown so the cached copy disappears too.
+3. Set `ASSET_DOMAIN` in `app_env` (section 11) and apply.
+
+The blob container `brand-assets` in `stvdrbrand…` is private in both profiles (shared keys off, Entra only); only `id-viadere-api` holds **Storage Blob Data Contributor** on that one container. Standard reaches it through a private endpoint; lean through the account's firewall, which admits only `snet-cae` (Microsoft.Storage service endpoint): a recorded CLAUDE.md exception (`ST-BRAND-PUBLIC`), refused by the policy check in standard. The api verifies every blob's SHA-256 against its name before serving it.
+
+The app pins the **public** brand-manifest key: after the first deploy run `ViadereServer brand-manifest-key` in the api container (prints `kid=` and `public_key=`) and put the pair into the app build setting `VIADERE_BRAND_MANIFEST_KEYS`. Rotation: create a new version of the Key Vault key `brand-manifest`, ship an app build that pins both, restart the api (new manifests are signed with the new version, `kid` changes), then drop the old pin.
+
 ---
 
 ## 10. First deploy and verification
@@ -423,6 +435,10 @@ The module sets these on the processes; the server implements all of them (WP-B2
 | `AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY` | `link-descriptor` | | | EC P-256 | signs link-session descriptors and results (WP-C1; replaces `LINK_DESCRIPTOR_SIGNING_KEY`; the worker holds a stand-in that refuses to sign) |
 | `AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY` | `loop-publication` | | | EC P-256 | signs Loop publication manifests only (WP-3.2; replaces `LOOP_PUBLICATION_SIGNING_KEY`; without either key staging and production refuse to publish Loops) |
 | `AZURE_KEY_VAULT_AUDIT_HEAD_KEY` | | `audit-head-signing` | | EC P-256 | signs exported audit heads (required in production for every role but `api`) |
+| `AZURE_KEY_VAULT_BRAND_MANIFEST_KEY` | `brand-manifest` | | | EC P-256 | signs brand manifests only (Brand Kits; replaces `BRAND_MANIFEST_SIGNING_KEY`; must differ from every other signing key; the worker holds a stand-in that refuses to sign) |
+| `AZURE_BRAND_BLOB_ENDPOINT`, `AZURE_BRAND_BLOB_CONTAINER` | `https://stvdrbrand….blob.core.windows.net/`, `brand-assets` | | | | create-only writes and reads of re-encoded brand images (`brand/{business}/{sha256}.png`) with the api's identity |
+| `ASSET_DOMAIN` | via `app_env` | | | the asset host (section 9.1) | the only host that serves `/b/{sha256}.png`; empty = no brand image is served in staging/production |
+| `BRAND_SELECTION_KEY` | Key Vault reference `brand-selection-key` | same | | base64url 32 bytes | per-customer daily kit rotation seed; empty = no rotation |
 | `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER` | | standard: `https://<account>.blob.core.windows.net/`, `audit-heads`; lean: empty | | | create-only export to the immutable container (`AUDIT_HEAD_EXPORT=azure-blob` is inferred) |
 | `DATABASE_AUTH`, `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER` | `viadere_app` | `viadere_worker` | `viadere_migrator` | `entra` (default) or `password`; host FQDN, `viadere`, role | Entra token per new connection, `verify-full`, no fallback |
 | `DATABASE_APP_ROLE` | x | x | x | `viadere_app` | runtime-role grants |
@@ -467,6 +483,7 @@ Prices: Azure Retail Prices API (<https://prices.azure.com/api/retail/prices>, `
 | Key Vault Standard | operations 0.03/10k (2015-08-01), RSA-3072/EC operations 0.15/10k (2017-07-01); no per-key fee for software keys | < 1.00 |
 | Log Analytics + App Insights | first 5 GB/month free, then 2.30/GB (2018-02-01); daily cap 0.15 GB keeps it inside the free allowance | 0.00 |
 | State storage account | Hot ZRS ~0.026/GB-month, a few MB | < 0.05 |
+| Brand-asset storage account (LRS, a few MB of PNGs; reads mostly served from the Cloudflare cache) | Hot LRS ~0.02/GB-month plus operations | < 0.10 |
 | **Total** | | **≈ 27–28 idle; up to ≈ 41 if the api is busy around the clock** |
 
 Ways to stay nearer USD 20: `api_min_replicas = 0` (scale to zero when idle: about −6/month, cold starts, and the in-process job loop pauses while idle), and a **new Azure account's 12-month free services** (750 h of B1ms and 32 GB of storage cover the PostgreSQL line, −16/month). The plan's estimate (USD 20–26, section 5.8a) counted only the api container; the separate cloudflared app adds about USD 4.30–5 at idle, the same as a sidecar would.
