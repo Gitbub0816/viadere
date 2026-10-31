@@ -98,6 +98,13 @@ final class LoopInboxTests: XCTestCase {
             XCTAssertFalse(text.contains(t.otherBusiness.uuidString.lowercased()))
             XCTAssertFalse(text.contains(t.world.alice.id.uuid.uuidString.lowercased()), "customers appear only as instance ids")
             XCTAssertEqual((document["loops"] as? [[String: Any]])?.count, 1)
+            // Tenant deletion removes this tenant's Loop and inbox rows (append-only events included) and nothing of the other tenant.
+            try await LoopTenantData.delete(businessId: t.businessId, on: h.db)
+            for count in [try await InboxItemRecord.query(on: h.db).filter(\.$businessId == t.businessId).count(),
+                          try await LoopActionEventRecord.query(on: h.db).filter(\.$businessId == t.businessId).count(),
+                          try await LoopRevisionRecord.query(on: h.db).filter(\.$businessId == t.businessId).count()] { XCTAssertEqual(count, 0) }
+            try await eq(try await InboxItemRecord.query(on: h.db).filter(\.$businessId == t.otherBusiness).count(), 1)
+            try await eq(try await LoopActionEventRecord.query(on: h.db).filter(\.$businessId == t.otherBusiness).count(), 2)
         }
     }
 

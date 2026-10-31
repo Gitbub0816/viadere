@@ -80,7 +80,7 @@ enum OperatorOps {
         pages.post("operator", "switches", "signup") { req -> Response in
             let p = try mutating(req, next: "/operator/switches")
             let form = try req.content.decode(SwitchForm.self)
-            guard let flag = PlatformFlag(rawValue: form.scope ?? ""), [.signupConsumer, .signupBusiness, .inviteDashboard].contains(flag) else { throw APIError.validation("Choose a sign-up switch.") }
+            guard let flag = PlatformFlag(rawValue: form.scope ?? ""), [.signupConsumer, .signupBusiness, .inviteDashboard, .loops].contains(flag) else { throw APIError.validation("Choose a sign-up switch.") }
             let flags = PlatformFlags(db: req.db, ctx: req.ctx)
             if form.action == "off" { try await flags.clear(flag, reason: form.reason, actor: actor(p)) } else { try await flags.set(flag, value: "on", reason: form.reason, actor: actor(p)) }
             return DashboardResponses.redirect("/operator/switches?m=switch")
@@ -284,6 +284,7 @@ enum OperatorOps {
             return "<form method=\"post\" action=\"/operator/switches/signup\">\(csrf)<input type=\"hidden\" name=\"scope\" value=\"\(flag.rawValue)\"><h3>\(DashboardUI.esc(title)) \(on ? DashboardFormat.badge("Stopped", "dg") : DashboardFormat.badge("Open", "ok"))</h3>\(reasonField("r-" + flag.rawValue.replacingOccurrences(of: ".", with: "-")))<div class=\"row\"><button class=\"btn d sm\" type=\"submit\" name=\"action\" value=\"on\">Stop</button><button class=\"btn s sm\" type=\"submit\" name=\"action\" value=\"off\">Reopen</button></div></form>"
         }
         body += "<div class=\"card\"><h2>Sign-ups</h2><p class=\"mu sm\">Existing accounts keep working.</p><div class=\"cols\">\(toggle(.signupConsumer, "New consumer accounts"))\(toggle(.signupBusiness, "New business organizations"))\(toggle(.inviteDashboard, "New dashboard invitations"))</div></div>"
+        body += "<div class=\"card\"><h2>Loops</h2><p class=\"mu sm\">Stops every hosted Loop: no new instances, existing ones show a neutral paused state and nothing is actionable. Messaging, approvals and every core feature keep working. Per-Loop and per-business switches are under Loops.</p>\(toggle(.loops, "Hosted Loops"))</div>"
         let webhookRows = snapshot.filter { $0.key.hasPrefix(PlatformFlag.webhooksPause.rawValue + "|") }.map { [DashboardUI.esc(String($0.key.split(separator: "|").last ?? "")), DashboardUI.esc($0.value.reason), DashboardFormat.date($0.value.updatedAt)] }
         body += """
         <div class="card"><h2>Webhook delivery pause</h2><p class="mu sm">Queued deliveries stay queued. Leave the business id empty to pause the whole platform.</p>\(DashboardFormat.table(["Scope", "Reason", "Since"], webhookRows, empty: "Not paused.", caption: "Webhook pauses"))\

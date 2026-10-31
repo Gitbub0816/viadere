@@ -427,10 +427,16 @@ struct CreateLoopsSchema: AsyncMigration {
 
 /// Database-level guards (defense in depth beside the services' compare-and-swap):
 /// * `loop_revisions`: content columns are never updated (an edit is a new revision, FX-3).
-/// * `loop_action_events`, `loop_action_outcomes`, `loop_reviews`: append-only (no UPDATE at all).
+/// * `loop_action_events`, `loop_action_outcomes`, `loop_reviews`: append-only. Every column is frozen except a field-encrypted one, which
+///   only `rotate-data-key` rewrites (same plaintext under the new data key, `SealedColumns`).
 enum LoopImmutability {
     static let contentColumns = "definition_json, definition_hash, revision, definition_id, business_id, schema_version"
     static let appendOnly = [LoopActionEventRecord.schema, LoopActionOutcomeRecord.schema, LoopReviewRecord.schema]
+    static let frozenColumns: [String: String] = [
+        LoopActionEventRecord.schema: "id, instance_id, business_id, consumer_id, device_id, step_id, action_id, action_type, action_schema_version, delivers, request_digest, idempotency_key, correlation_id, response_due_at, created_at",
+        LoopActionOutcomeRecord.schema: "id, event_id, business_id, seq, outcome, source, actor_id, reason, at",
+        LoopReviewRecord.schema: "id, revision_id, business_id, stage, reviewer_id, decision, definition_hash, rule_hits_json, at",
+    ]
 
     static func install(on sql: any SQLDatabase, postgres: Bool) async throws {
         // Statements are compile-time constants.
@@ -441,12 +447,12 @@ enum LoopImmutability {
             """).run()
             try await sql.raw(SQLQueryString("CREATE TRIGGER loop_revisions_content_immutable BEFORE UPDATE OF \(unsafeRaw: contentColumns) ON loop_revisions FOR EACH ROW EXECUTE FUNCTION viadere_loop_immutable()")).run()
             for table in appendOnly {
-                try await sql.raw(SQLQueryString("CREATE TRIGGER \(unsafeRaw: table)_append_only BEFORE UPDATE ON \(unsafeRaw: table) FOR EACH ROW EXECUTE FUNCTION viadere_loop_immutable()")).run()
+                try await sql.raw(SQLQueryString("CREATE TRIGGER \(unsafeRaw: table)_append_only BEFORE UPDATE OF \(unsafeRaw: frozenColumns[table]!) ON \(unsafeRaw: table) FOR EACH ROW EXECUTE FUNCTION viadere_loop_immutable()")).run()
             }
         } else {
             try await sql.raw(SQLQueryString("CREATE TRIGGER loop_revisions_content_immutable BEFORE UPDATE OF \(unsafeRaw: contentColumns) ON loop_revisions BEGIN SELECT RAISE(ABORT, 'loop_revisions content is immutable'); END")).run()
             for table in appendOnly {
-                try await sql.raw(SQLQueryString("CREATE TRIGGER \(unsafeRaw: table)_append_only BEFORE UPDATE ON \(unsafeRaw: table) BEGIN SELECT RAISE(ABORT, '\(unsafeRaw: table) is append-only'); END")).run()
+                try await sql.raw(SQLQueryString("CREATE TRIGGER \(unsafeRaw: table)_append_only BEFORE UPDATE OF \(unsafeRaw: frozenColumns[table]!) ON \(unsafeRaw: table) BEGIN SELECT RAISE(ABORT, '\(unsafeRaw: table) is append-only'); END")).run()
             }
         }
     }

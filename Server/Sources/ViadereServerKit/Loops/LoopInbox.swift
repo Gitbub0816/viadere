@@ -320,3 +320,28 @@ struct LoopMaintenance {
         }
     }
 }
+
+/// Tenant deletion (`TenantDataRequests.complete`): every Loop and inbox row of the business, children first. Events are append-only
+/// (no UPDATE) but may be deleted with their tenant.
+enum LoopTenantData {
+    static func delete(businessId: UUID, on db: any Database) async throws {
+        let items = try await InboxItemRecord.query(on: db).filter(\.$businessId == businessId).all().compactMap(\.id)
+        if !items.isEmpty {
+            try await InboxNoteRecord.query(on: db).filter(\.$itemId ~~ items).delete()
+            try await InboxReadRecord.query(on: db).filter(\.$itemId ~~ items).delete()
+        }
+        try await InboxItemRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await InboxQueueRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopActionOutcomeRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopActionEventRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopReportRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopInstanceRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        let publications = try await LoopPublicationRecord.query(on: db).filter(\.$businessId == businessId).all().compactMap(\.id)
+        if !publications.isEmpty { try await LoopRolloutAllowRecord.query(on: db).filter(\.$publicationId ~~ publications).delete() }
+        try await LoopPublicationRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopReviewRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopRevisionRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopDefinitionRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopSwitchRecord.query(on: db).filter(\.$businessId == businessId).delete()
+    }
+}

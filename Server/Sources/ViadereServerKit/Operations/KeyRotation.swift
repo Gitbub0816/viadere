@@ -86,6 +86,9 @@ enum SealedColumns {
         SealedColumn(table: "business_security_settings", column: "contacts_ciphertext", context: "business_security_settings.contacts"),
         SealedColumn(table: "data_requests", column: "artifact", context: "data_requests.artifact"),
         SealedColumn(table: "pending_changes", column: "payload_json", context: "pending_changes.payload"),
+        SealedColumn(table: "loop_reviews", column: "notes_sealed", context: "loop_reviews.notes"),
+        SealedColumn(table: "loop_action_events", column: "inputs_sealed", context: "loop_action_events.inputs"),
+        SealedColumn(table: "inbox_notes", column: "body_sealed", context: "inbox_notes.body"),
     ]
 }
 

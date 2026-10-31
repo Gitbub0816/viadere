@@ -368,9 +368,9 @@ final class QueueTests: XCTestCase {
             XCTAssertThrowsError(try QueueEnvelope.decode(Data(bad.utf8)), bad)
         }
         // Every registered type maps to a queue the infrastructure creates, with matching delivery limits.
-        let infra = ["push": 5, "sms-outbound": 8, "channel-outbound": 8, "webhook-delivery": 8, "wallet-push": 8, "operator-notices": 8, "consumer-export": 3, "expiry": 10]
+        let infra = ["push": 5, "sms-outbound": 8, "channel-outbound": 8, "webhook-delivery": 8, "wallet-push": 8, "operator-notices": 8, "consumer-export": 3, "expiry": 10, "loop-delivery": 8, "loop-timeout": 10]
         for queue in QueueName.allCases { XCTAssertEqual(infra[queue.rawValue], queue.maxDeliveries, queue.rawValue) }
-        for type in QueueHandlers.all { XCTAssertTrue(QueueEnvelope.isTypeName(type.name), type.name) }
+        for type in QueueHandlers.all + LoopQueue.all { XCTAssertTrue(QueueEnvelope.isTypeName(type.name), type.name) }
         XCTAssertEqual(Set(QueueHandlers.all.map(\.key)).count, QueueHandlers.all.count, "no duplicate registrations")
     }
 }

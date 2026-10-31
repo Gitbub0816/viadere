@@ -133,6 +133,15 @@ final class LoopReviewPipelineTests: XCTestCase {
             for table in ["loop_action_events", "loop_action_outcomes", "loop_reviews"] {
                 do { try await world.raw("UPDATE \(table) SET business_id = business_id"); XCTFail("updated \(table)") } catch {}
             }
+            // Only the field-encrypted inputs may be rewritten (data-key rotation re-seals the same plaintext).
+            let event = try await LoopActionEventRecord.query(on: h.db).first()!
+            try await LoopActionEventRecord.query(on: h.db).filter(\.$id == event.id!).set(\.$inputsSealed, to: event.inputsSealed).update()
+            let rotation = try await DataKeyRotator(db: h.db, ctx: h.ctx).run(rewrite: true)
+            XCTAssertEqual(rotation.failed, 0)
+            do {
+                try await LoopActionEventRecord.query(on: h.db).filter(\.$id == event.id!).set(\.$stepId, to: "s2").update()
+                XCTFail("rewrote an event")
+            } catch {}
             // An edit is a new revision that starts the pipeline again.
             let next = try await world.submit(LoopFixtures.pickup(title: "Pickup slot"))
             XCTAssertEqual(next.revision, 2)
