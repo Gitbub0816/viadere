@@ -167,7 +167,7 @@ locals {
     "consumer-export"  = { max_delivery = 3, ttl = "P3D" }
     "expiry"           = { max_delivery = 10, ttl = "P14D" } # scheduled interaction.expire / approve.expire / identity holds
     "loop-delivery"    = { max_delivery = 8, ttl = "P3D" }   # hosted Loops: action events to the business inbox (WP-3.3)
-    "loop-timeout"     = { max_delivery = 10, ttl = "P31D" } # hosted Loops: response deadlines and instance expiries (scheduled)
+    "loop-timeout"     = { max_delivery = 10, ttl = "P14D" } # hosted Loops: response deadlines and instance expiries (scheduled); 14 days is the Basic-tier maximum and counts from the scheduled enqueue time
   }
 
   workload_identities = ["api", "worker", "migrator", "cloudflared"]
