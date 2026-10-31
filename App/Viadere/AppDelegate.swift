@@ -25,6 +25,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let services = AppEnvironment.services
+        // Sandbox builds only (Debug, Staging; Release is pinned to production APNs): log the token, `.private` as always, so a developer
+        // with Xcode attached can send a test push straight to APNs (App/Scripts/apns-send.swift). A sandbox token is useless against
+        // production APNs.
+        if services.configuration.apnsEnvironment == .sandbox {
+            Self.log.info("push.token.sandbox", detail: deviceToken.map { String(format: "%02x", $0) }.joined())
+        }
         Task {
             // Needs an enrolled device (device-signed route); retried on the next launch if not yet enrolled.
             guard (try? await services.records.load()) != nil else { return }
