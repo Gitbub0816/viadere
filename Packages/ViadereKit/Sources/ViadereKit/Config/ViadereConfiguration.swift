@@ -36,6 +36,9 @@ public struct ViadereConfiguration: Sendable {
     /// `ViadereLinkDescriptorKeys`). **Pinned in the build**: the app accepts a link-session descriptor only if one of these signed it.
     /// Empty = business link sessions fail closed.
     public var linkDescriptorKeys: [String] = []
+    /// Whether Wallet screens carry a "Beta" label (Info.plist `ViadereWalletBetaLabel`, build setting `VIADERE_WALLET_BETA_LABEL`).
+    /// On unless the build explicitly says `NO`/`false`: whether to drop it is an open owner decision (docs/WALLET.md).
+    public var walletBetaLabel = true
 
     public static let productionHost = "api.viadere.com"
 
@@ -117,6 +120,8 @@ public struct ViadereConfiguration: Sendable {
         if let raw = info["ViadereLinkDescriptorKeys"] as? String {
             config.linkDescriptorKeys = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { (try? DevicePublicKey(base64URL: $0)) != nil }
         }
+        if let raw = info["ViadereWalletBetaLabel"] as? String, ["no", "false", "0"].contains(raw.lowercased()) { config.walletBetaLabel = false }
+        if let flag = info["ViadereWalletBetaLabel"] as? Bool { config.walletBetaLabel = flag }
         #if DEBUG
         config.apnsEnvironment = .sandbox
         #endif

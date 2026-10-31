@@ -24,6 +24,11 @@ VIADERE_APNS_ENVIRONMENT = production
 VIADERE_API_PINS =
 VIADERE_DISPLAY_NAME = Viadere
 
+// Apple Wallet (docs/WALLET.md). The Pass Type ID the server signs passes with (its PASS_TYPE_IDENTIFIER); the app needs it in the
+// pass-type-identifiers entitlement to see whether a pass is already in Wallet. The Beta label on Wallet screens is an owner decision.
+VIADERE_PASS_TYPE_IDENTIFIER = pass.com.viadere.wallet
+VIADERE_WALLET_BETA_LABEL = YES
+
 // Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
 DEVELOPMENT_TEAM =
 

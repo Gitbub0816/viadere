@@ -251,11 +251,13 @@ tested on Linux; the SwiftUI files only lay it out. All of it is driven by `Mock
 
 ### Wallet entitlement
 
-Adding passes with `PKAddPassesViewController` needs **no entitlement**. The `com.apple.developer.pass-type-identifiers`
-entitlement (for example `$(TeamIdentifierPrefix)pass.com.viadere.*`) is only needed to read or update passes beyond what
-this app added, so it is **not requested**. The pass type id and its signing certificate belong to the server. If testing
-shows "In Wallet" going stale for passes added outside the app, add the entitlement to `Viadere/Viadere.entitlements`
-via `project.yml` and the pass type ids in the Developer portal.
+Adding passes with `PKAddPassesViewController` needs **no entitlement**, but reading them does: `PKPassLibrary`'s
+`pass(withPassTypeIdentifier:serialNumber:)` returns `nil` unless the app holds `com.apple.developer.pass-type-identifiers`
+for that Pass Type ID (Apple documentation, checked 2026-10-31). The app therefore requests
+`$(TeamIdentifierPrefix)$(VIADERE_PASS_TYPE_IDENTIFIER)` (`Configs/Shared.xcconfig`, default `pass.com.viadere.wallet`, the
+server's `PASS_TYPE_IDENTIFIER`). **Owner:** in the Developer portal enable the Wallet capability on the `com.viadere.app` App ID
+and select that Pass Type ID, then regenerate the profiles; signing fails until then. The pass signing certificate belongs to
+the server only (docs/WALLET.md). Wallet screens show a "Beta" label while `VIADERE_WALLET_BETA_LABEL = YES` (an open owner decision).
 
 ### Verify with Wallet entitlement and the Didit SDK (WP3)
 

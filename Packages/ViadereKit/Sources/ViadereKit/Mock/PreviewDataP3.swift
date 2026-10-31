@@ -35,7 +35,13 @@ extension PreviewData {
     public static func walletPass(_ passId: WalletPassID, business: BusinessSummary, kind: WalletPassKind, now: Date = Date()) -> WalletPassMetadata {
         WalletPassMetadata(id: passId, businessId: business.id, kind: kind,
                            passTypeIdentifier: kind == .storeCard || kind == .coupon ? passTypeLoyalty : passTypeTicket,
-                           serialNumber: "SN-" + passId.description.prefix(8).uppercased(), updatedAt: now)
+                           serialNumber: "SN-" + passId.description.prefix(8).uppercased(), updatedAt: now, scanCode: mockScanCode(passId))
+    }
+
+    /// A well-formed stand-in for the server's signed presentation code (the mock can't sign; only the shape matters to the app).
+    public static func mockScanCode(_ passId: WalletPassID) -> String {
+        let id = withUnsafeBytes(of: passId.uuid.uuid) { Data($0) }
+        return WalletScanCode.prefix + Base64URL.encode(id + Data(repeating: 0, count: 4) + Data(repeating: 0xA5, count: 16))
     }
 
     private static func scope(_ relationship: RelationshipID, account: String? = nil) -> RelationshipScope {
