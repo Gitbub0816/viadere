@@ -258,6 +258,7 @@ enum ConsoleRoutes {
     static func register(_ pages: any RoutesBuilder) {
         ConsoleOrganization.register(pages)
         ConsoleSurface.register(pages)
+        ConsoleBrandStudio.register(pages)
         ConsoleDevelopers.register(pages)
         ConsoleSecurity.register(pages)
         ConsoleCompliance.register(pages)

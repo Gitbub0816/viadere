@@ -259,6 +259,9 @@ enum DashboardRoutes {
         }
         pages.get("dashboard", "billing") { req in try await billingPage(req) }
         ConsoleRoutes.register(pages)
+        // Brand image uploads: the body is collected (bounded) before authentication reads its CSRF field (WP-2.2).
+        ConsoleBrandStudio.registerUpload(routes.grouped(DashboardPageErrorMiddleware()).grouped(CollectBodyMiddleware(max: ConsoleBrandStudio.uploadBodyLimit))
+            .grouped(DashboardAuthMiddleware(realm: .business)))
         pages.post("dashboard", "organization") { req -> Response in
             let (p, _) = try req.businessDashboard
             let form = try req.content.decode(ApplicationForm.self)

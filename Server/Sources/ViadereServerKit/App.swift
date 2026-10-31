@@ -39,6 +39,8 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     }
     // One key, one role, checked again now that Key Vault public keys are known.
     try config.requireDistinctSigningKeys()
+    // Brand Kits (WP-2.1): the `brand-manifest` key (Key Vault on Azure), one key, one role.
+    try await BrandKitRegistration.resolveSigningKey(config: &config, kms: kms)
     var auditStore = overrides.auditObjectStore
     if auditStore == nil, let export = config.operations.auditExport, export.kind == .azureBlob, let endpoint = export.endpoint {
         guard let tokens else { throw ServerConfigError.missing("a managed identity (for AZURE_AUDIT_BLOB_ENDPOINT)") }
@@ -115,6 +117,9 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
                             domains: domains, outbound: outbound, kms: kms, auditObjectStore: auditStore, accessTokens: tokens,
                             queueTransport: queueTransport)
+    app.brandKits = BrandKitRuntime(store: try BrandKitRegistration.store(config: config, override: overrides.brandAssetStore, tokens: tokens, http: outbound,
+                                                                          now: { clock.now() }),
+                                    maxConcurrent: config.brandKits.maxConcurrentIngestions)
 
     // MARK: Database
     // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL, or the migrator's Entra identity); every other process uses
@@ -140,6 +145,8 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
         app.lifecycle.use(TemporaryDatabaseCleanup(path: path))
     }
     app.migrations.add(Migrations.all)
+    // Brand Kits (WP-2.4): pin the selected kit to each new interaction.
+    app.databases.middleware.use(BrandPinMiddleware(ctx: app.ctx))
     // The database transport needs the database; Service Bus was chosen above.
     app.ctx.queue.install(DatabaseQueueTransport(database: { [app] in app.db }, now: { clock.now() }))
     // The serving process must not hold DDL rights: the role split is mandatory in staging and production (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
@@ -165,6 +172,8 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     app.middleware.use(RequestLoggingMiddleware())
     // Origin lock (G-10): before routing, authentication and any database access. It answers 421 itself, so it sits outside the error mapper.
     app.middleware.use(EdgeLockMiddleware())
+    // The dedicated asset host answers only `/b/{sha256}.png` and never sets a cookie (ADR-0017).
+    app.middleware.use(AssetHostMiddleware())
     app.middleware.use(APIErrorMiddleware())
     app.middleware.use(LegacyAddressingHeadersMiddleware())
     // Operator switches: read-only mode (G-1). The sign-up stops (G-15) are route-group middleware on the sign-up and invitation routes.
@@ -213,6 +222,8 @@ public struct Overrides: Sendable {
     public var queueTransport: (any QueueTransport)?
     /// Cloud API calls of the audit-head export. `nil` = the real HTTPS client.
     public var outboundHTTP: (any OutboundHTTP)?
+    /// Brand asset storage. `nil` = Azure Blob when configured, a development directory, or memory outside staging and production.
+    public var brandAssetStore: (any ObjectStore)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,

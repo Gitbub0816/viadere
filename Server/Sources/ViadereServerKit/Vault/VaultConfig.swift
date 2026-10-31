@@ -41,6 +41,8 @@ extension ServerConfig {
 
     /// The request-body ceiling for `path`: the global one, except on `/v1/vault` routes while sync is enabled.
     public func maxBodyBytes(forPath path: String) -> Int {
-        vaultSync.enabled && (path == "/v1/vault" || path.hasPrefix("/v1/vault/")) ? max(maxBodyBytes, vaultSync.maxRequestBytes) : maxBodyBytes
+        // Brand image uploads (WP-2.2): the 2 MB file plus multipart framing; the pipeline re-checks the file's own size.
+        if path == ConsoleBrandStudio.uploadPath { return max(maxBodyBytes, ConsoleBrandStudio.uploadBodyLimit) }
+        return vaultSync.enabled && (path == "/v1/vault" || path.hasPrefix("/v1/vault/")) ? max(maxBodyBytes, vaultSync.maxRequestBytes) : maxBodyBytes
     }
 }

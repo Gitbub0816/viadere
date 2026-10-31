@@ -79,4 +79,5 @@ templates, support).
 | `manageSupport` | x | x | x | x | x | x | x |  |  |
 | `approveChanges` | x | x | x |  |  |  |  |  |  |
 | `manageDataRequests` | x | x |  |  |  |  |  |  |  |
+| `manageBrandKits` | x | x |  |  |  |  |  |  |  |
 <!-- matrix:end -->

@@ -124,7 +124,7 @@ enum LeakageMatrix {
     /// Every consumer endpoint that takes a business filter or a business in its path: a foreign business must be `404`, never `403`.
     static func businessScoped(_ business: BusinessID) -> [String] {
         ["/v1/alerts?business_id=\(business)", "/v1/benefits?business_id=\(business)", "/v1/conversations?business_id=\(business)",
-         "/v1/businesses/\(business)/preferences", "/v1/businesses/\(business)/surface"]
+         "/v1/businesses/\(business)/preferences", "/v1/businesses/\(business)/surface", "/v1/businesses/\(business)/brand"]
     }
 
     static func assertNoLeak(_ world: TenantWorld, consumer name: String, file: StaticString = #filePath, line: UInt = #line) async throws {

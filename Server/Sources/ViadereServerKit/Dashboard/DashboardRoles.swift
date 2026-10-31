@@ -119,6 +119,8 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
     case approveChanges
     /// Request the tenant's data export or deletion.
     case manageDataRequests
+    /// Brand Kit Studio (WP-2.5): upload images, edit kits and the schedule, submit for Viadere review. Never publishes unreviewed content.
+    case manageBrandKits
 
     var roles: Set<OrgRole> {
         switch self {
@@ -151,6 +153,7 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
         case .manageSupport: [.owner, .orgAdmin, .developer, .messagingOperator, .verificationAdmin, .securityAdmin, .billingAdmin]
         case .approveChanges: [.owner, .securityAdmin, .orgAdmin]
         case .manageDataRequests: [.owner, .orgAdmin]
+        case .manageBrandKits: [.owner, .orgAdmin]
         }
     }
 }

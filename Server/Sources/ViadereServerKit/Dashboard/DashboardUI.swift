@@ -76,10 +76,12 @@ enum DashboardUI {
     static func sha256Base64(_ text: String) -> String { Data(SHA256.hash(data: Data(text.utf8))).base64EncodedString() }
 
     /// CSP for HTML pages. Scripts are allowed only where a page declares `needsScript` (passkey ceremonies).
-    static func csp(script: Bool) -> String {
+    /// `frames`: the page embeds same-origin sandboxed previews (the Brand Kit Studio only, WP-2.5).
+    static func csp(script: Bool, frames: Bool = false) -> String {
         var parts = ["default-src 'none'", "style-src 'sha256-\(sha256Base64(css))'", "img-src 'self' data:", "font-src 'none'",
                      "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'"]
         if script { parts.append("script-src 'sha256-\(sha256Base64(Self.script))'"); parts.append("connect-src 'self'") }
+        if frames { parts.append("frame-src 'self'") }
         return parts.joined(separator: "; ")
     }
 
@@ -123,10 +125,11 @@ enum DashboardUI {
 
     static let sections: [NavSection] = [
         NavSection(title: "Dashboard", path: "/dashboard", permissions: [.viewOverview], children: []),
-        NavSection(title: "Organization", path: "/dashboard/organization", permissions: [.viewOrganization, .viewTeam, .manageOrganization], children: [
+        NavSection(title: "Organization", path: "/dashboard/organization", permissions: [.viewOrganization, .viewTeam, .manageOrganization, .manageBrandKits], children: [
             NavItem(title: "Profile and onboarding", path: "/dashboard/organization", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Domains", path: "/dashboard/organization/domains", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Your Viadere page", path: "/dashboard/organization/page", permissions: [.viewOrganization, .manageOrganization]),
+            NavItem(title: "Brand Kits", path: "/dashboard/brand", permissions: [.viewOrganization, .manageBrandKits]),
             NavItem(title: "Team", path: "/dashboard/team", permissions: [.viewTeam]),
         ]),
         NavSection(title: "Developers", path: "/dashboard/developers", permissions: [.viewAPIKeys, .viewWebhooks, .viewTemplates], children: [
@@ -172,13 +175,13 @@ enum DashboardUI {
 
     static let operatorNav: [(String, String)] = [
         ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"), ("Capability policy", "/operator/policy"),
-        ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"),
+        ("Brand review", "/operator/brand"), ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"),
     ]
 
-    static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
+    static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
         let response = Response(status: status, body: .init(string: html))
         response.headers.contentType = .html
-        response.headers.replaceOrAdd(name: "Content-Security-Policy", value: csp(script: script))
+        response.headers.replaceOrAdd(name: "Content-Security-Policy", value: csp(script: script, frames: frames))
         response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
         response.headers.replaceOrAdd(name: "X-Robots-Tag", value: "noindex")
         return response
@@ -199,7 +202,7 @@ enum DashboardUI {
 
     /// Signed-in business page. Landmarks: skip link, `aside` with the console navigation, `header` with the page heading, `main`.
     static func businessPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, actions: String = "",
-                             flash: String? = nil, body: String, status: HTTPStatus = .ok, script: Bool = false) -> Response {
+                             flash: String? = nil, body: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
         let current = section(for: active)
         let items = sections.filter { $0.visible(to: p) }
             .map { "<a href=\"\($0.path)\"\($0.path == current?.path ? " aria-current=\"page\"" : "")>\(esc($0.title))</a>" }.joined()
@@ -227,7 +230,7 @@ enum DashboardUI {
         """
         let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div><div class=\"row\">\(actions)</div></header>"
         return response(document(title: title, body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(tabs)\(banner)\(flashHTML)\(body)</main></div>", script: script),
-                        status: status, script: script)
+                        status: status, script: script, frames: frames)
     }
 
     /// Signed-in operator page.
