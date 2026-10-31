@@ -4,7 +4,7 @@ import Foundation
 /// The state of one Loop revision in the review pipeline (plan section 4.12, FX-3). Every revision of every Loop walks the same path;
 /// there is no state that skips human review, and a revision past `draft` is immutable (an edit is a new revision).
 public enum LoopRevisionState: String, Sendable, Codable, CaseIterable, Hashable {
-    /// Being edited (Studio). The server stores no draft today: a submission creates the revision already past this state.
+    /// Being edited (Studio). Drafts live in `loop_studio_drafts`, not as revisions: a submission creates the revision already past this state.
     case draft
     /// The automated hard gate failed; a human cannot override it (only a rule-set change can).
     case validationFailed = "validation_failed"

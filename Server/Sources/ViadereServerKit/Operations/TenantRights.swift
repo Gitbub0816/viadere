@@ -182,6 +182,10 @@ struct TenantDataRequests {
                 ["revision": $0.revision, "state": $0.state, "definitionHash": $0.definitionHash, "submittedAt": iso($0.createdAt)] as [String: Any]
             }]
         }
+        // Loop Studio drafts (WP-3.7): business-authored text only.
+        out["loopDrafts"] = try await LoopStudioDraftRecord.query(on: db).filter(\.$businessId == businessId).sort(\.$createdAt, .ascending).all().map {
+            ["key": $0.loopKey, "template": ($0.templateKey as Any?) ?? NSNull(), "version": $0.version, "definition": $0.definitionJSON, "updatedAt": iso($0.updatedAt)] as [String: Any]
+        }
         let runtime = LoopRuntimeService(db: db, ctx: ctx)
         var inbox: [[String: Any]] = []
         for item in try await InboxItemRecord.query(on: db).filter(\.$businessId == businessId).sort(\.$createdAt, .ascending).all() {

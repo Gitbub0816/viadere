@@ -343,5 +343,6 @@ enum LoopTenantData {
         try await LoopRevisionRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopDefinitionRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopSwitchRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopStudioDraftRecord.query(on: db).filter(\.$businessId == businessId).delete()
     }
 }
