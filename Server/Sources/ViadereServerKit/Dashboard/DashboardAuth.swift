@@ -577,10 +577,26 @@ struct DashboardAuthService {
     /// Creates a pending operator and a one-time enrollment token (shown once by the `create-operator` command).
     func createOperator(email rawEmail: String, displayName: String) async throws -> String {
         guard let email = Self.normalizeEmail(rawEmail), let name = cleanName(displayName, max: 64) else { throw APIError.validation("Invalid operator details.") }
-        let userId = UUID()
         let token = SecureToken.generate()
+        let hash = emailHash(email)
         try await db.transaction { tx in
-            try await makeUser(kind: "operator", email: email, displayName: name, handle: SecureToken.generate(byteCount: 32), status: "pending", id: userId).create(on: tx)
+            let userId: UUID
+            if let existing = try await DashboardUserRecord.query(on: tx).filter(\.$emailHash == hash).first() {
+                // Re-running the command re-issues the link only for an operator that never enrolled (pending, no passkey); every
+                // earlier link of it is revoked. An enrolled operator, a disabled one, or any business account is refused.
+                let passkeys = try await DashboardPasskeyRecord.query(on: tx).filter(\.$userId == existing.id!).count()
+                guard existing.isOperator, existing.status == "pending", passkeys == 0 else {
+                    throw APIError.conflict("This address already belongs to an account that cannot be re-enrolled.")
+                }
+                userId = existing.id!
+                for open in try await OperatorEnrollmentRecord.query(on: tx).filter(\.$userId == userId).filter(\.$state == "open").all() {
+                    open.state = "revoked"
+                    try await open.update(on: tx)
+                }
+            } else {
+                userId = UUID()
+                try await makeUser(kind: "operator", email: email, displayName: name, handle: SecureToken.generate(byteCount: 32), status: "pending", id: userId).create(on: tx)
+            }
             let enrollment = OperatorEnrollmentRecord()
             enrollment.id = UUID()
             enrollment.userId = userId

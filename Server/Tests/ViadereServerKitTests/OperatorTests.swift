@@ -37,6 +37,47 @@ final class OperatorTests: XCTestCase {
         }
     }
 
+    func testRerunningCreateOperatorReissuesOnlyForAnOperatorThatNeverEnrolled() async throws {
+        try await withHarness { h in
+            let auth = DashboardAuthService(db: h.db, ctx: h.ctx)
+            let first = try await auth.createOperator(email: "ops@viadere.test", displayName: "Ops")
+            let firstToken = String(first.split(separator: "/").last!)
+            // The link expired unused: running the command again re-issues instead of failing on the unique email.
+            h.clock.advance(by: 3601)
+            let second = try await auth.createOperator(email: "ops@viadere.test", displayName: "Ops")
+            let secondToken = String(second.split(separator: "/").last!)
+            XCTAssertNotEqual(firstToken, secondToken)
+            let operators = try await DashboardUserRecord.query(on: h.db).filter(\.$kind == "operator").count()
+            XCTAssertEqual(operators, 1, "the same pending operator, not a second account")
+            try await eq(try await h.page("/operator/enroll/\(firstToken)", nil).status, .gone)
+            // A fresh re-issue also revokes a still-valid earlier link: only the newest works.
+            let third = try await auth.createOperator(email: "ops@viadere.test", displayName: "Ops")
+            let thirdToken = String(third.split(separator: "/").last!)
+            try await eq(try await h.page("/operator/enroll/\(secondToken)", nil).status, .gone)
+            // Enroll with the newest link; afterwards the command refuses (an enrolled operator is never re-linked).
+            let begin = try await h.jsonPost("/operator/auth/enroll/begin", EnrollBeginBody(token: thirdToken))
+            let options = try begin.json(PasskeyRegistrationOptions.self)
+            let cred = h.registrationCredential(for: options, credentialId: "op-cred-2", publicKey: SecureToken.generate(byteCount: 32))
+            try await eq(try await h.jsonPost("/operator/auth/enroll/finish", PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: cred)).status, .ok)
+            do {
+                _ = try await auth.createOperator(email: "ops@viadere.test", displayName: "Ops")
+                XCTFail("an enrolled operator must not receive a new enrollment link")
+            } catch {}
+            // A business account's address can never be turned into an operator.
+            let business = try await h.makeBusiness(name: "Acme", handle: "acmeops")
+            _ = business
+            let biz = DashboardUserRecord()
+            biz.id = UUID(); biz.kind = "business"; biz.emailHash = auth.emailHash("owner@viadere.test")
+            biz.emailCiphertext = "x"; biz.displayName = "Owner"; biz.userHandle = SecureToken.generate(byteCount: 32); biz.status = "pending"
+            biz.createdAt = h.clock.now()
+            try await biz.create(on: h.db)
+            do {
+                _ = try await auth.createOperator(email: "owner@viadere.test", displayName: "Owner")
+                XCTFail("a business account must not become an operator")
+            } catch {}
+        }
+    }
+
     func testOperatorSessionsAreShorterAndEveryMutationNeedsFreshReauth() async throws {
         try await withHarness { h in
             let (op, account) = try await h.makeOperator()
