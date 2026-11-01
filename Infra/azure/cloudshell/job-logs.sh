@@ -1,12 +1,14 @@
 #!/bin/bash
 # Prints the newest 200 console and system log lines (oldest first) of a Container Apps job or app from Log Analytics (ingestion lags 1-5 minutes).
-# Usage: SUB_ID=... bash Infra/azure/cloudshell/job-logs.sh job-viadere-dbadmin [hours]
+# Usage: SUB_ID=... bash Infra/azure/cloudshell/job-logs.sh job-viadere-dbadmin [hours] [text]
+# With [text], only lines containing it (case-insensitive) are kept, before the 200-line cap, so busy apps do not crowd them out.
 set -uo pipefail
 source "$(dirname "$0")/common.sh"
-NAME="${1:-}"; HOURS="${2:-3}"
+NAME="${1:-}"; HOURS="${2:-3}"; FILTER="${3:-}"
 [ -n "$NAME" ] || fail "usage: job-logs.sh <job or app name> [hours]"
 [[ "$NAME" =~ ^[a-z0-9-]{3,40}$ ]] || fail "invalid name"
 [[ "$HOURS" =~ ^[0-9]{1,3}$ ]] || fail "invalid hours"
+[[ "$FILTER" =~ ^[A-Za-z0-9/._\ -]{0,60}$ ]] || fail "invalid text (letters, digits, space and / . _ - only)"
 [ -z "${SUB_ID:-}" ] || az account set --subscription "$SUB_ID" || fail "az account set"
 # `az monitor log-analytics query` lives in the log-analytics extension (preview only); install it up front, because the interactive
 # install prompt is invisible when the output is piped.
@@ -19,6 +21,7 @@ union isfuzzy=true ContainerAppConsoleLogs, ContainerAppSystemLogs, ContainerApp
 | extend who = strcat(column_ifexists('JobName', ''), column_ifexists('ContainerAppName', ''), column_ifexists('ContainerJobName_s', ''), column_ifexists('ContainerAppName_s', ''))
 | where who has '$NAME'
 | extend line = strcat(column_ifexists('Log', ''), column_ifexists('Log_s', ''), column_ifexists('Reason', ''), ' ', column_ifexists('Msg', ''), column_ifexists('Message', ''))
+| where '$FILTER' == '' or line contains '$FILTER'
 | project TimeGenerated, Type, line
 | top 200 by TimeGenerated desc
 | order by TimeGenerated asc" || fail "query (logs can take a few minutes to arrive; retry shortly)"
