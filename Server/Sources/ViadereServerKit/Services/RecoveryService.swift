@@ -179,7 +179,7 @@ struct RecoveryService {
         let verified: VerifiedPasskeyRegistration
         do {
             verified = try await ctx.passkeys.verifyRegistration(request.credential, challenge: challenge) { credentialId in
-                let used = try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId == credentialId).count() > 0
+                let used = try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(credentialId)).count() > 0
                 let pending = try await AccountRecoveryRecord.query(on: database).filter(\.$newCredentialId == credentialId).count() > 0
                 return used || pending
             }
@@ -380,7 +380,7 @@ struct RecoveryService {
         } else {
             // Older apps: a fresh user-verified passkey assertion over the ceremony's challenge.
             guard let assertion = request.assertion, assertion.id.count <= 1024,
-                  let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId == assertion.id)
+                  let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(assertion.id))
                       .filter(\.$consumerId == principal.consumerId.uuid).first(), let publicKey = Base64URL.decode(credential.publicKey) else { throw required }
             if let handle = assertion.userHandle, !ConstantTime.equals(handle, consumer.userHandle ?? "") { throw required }
             guard try await DB.swap(db, table: PasskeyCeremonyRecord.schema, id: request.ceremonyId.uuid, column: "state", expected: "open", newValue: "used") else { throw required }

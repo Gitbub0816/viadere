@@ -144,6 +144,25 @@ final class DashboardAuthTests: XCTestCase {
         }
     }
 
+    /// Passkeys enrolled before credential ids were canonicalised are stored as padded standard base64 (webauthn-swift's form); the client
+    /// sends unpadded base64url. Sign-in must find them without waiting for a data migration (staging: the operator console answered 401).
+    func testPasskeyStoredInTheLegacyIdFormStillSignsIn() async throws {
+        try await withHarness { h in
+            let (_, account) = try await h.makeOperator()
+            let bytes = Data((0..<20).map { UInt8(($0 * 37 + 251) % 256) })   // 20 bytes, as Apple passkeys: always padded, with + and /
+            let canonical = Base64URL.encode(bytes)
+            let record = try await DashboardPasskeyRecord.query(on: h.db).filter(\.$credentialId == account.credentialId).first()!
+            record.credentialId = bytes.base64EncodedString()
+            try await record.update(on: h.db)
+            XCTAssertNotEqual(record.credentialId, canonical)
+            var legacy = account
+            legacy.credentialId = canonical
+            let (session, result) = try await h.dashLogin(legacy, realm: .operator)
+            XCTAssertEqual(result.status, .ok, result.text)
+            XCTAssertNotNil(session)
+        }
+    }
+
     func testCeremoniesAreSingleUseAndFailuresAreGeneric() async throws {
         try await withHarness { h in
             let (_, account, _) = try await h.dashSignup()

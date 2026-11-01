@@ -125,7 +125,7 @@ struct DashboardAuthService {
         let database = db
         do {
             return try await verifier.verifyRegistration(finish.credential, challenge: challenge) { credentialId in
-                try await DashboardPasskeyRecord.query(on: database).filter(\.$credentialId == credentialId).count() > 0
+                try await DashboardPasskeyRecord.query(on: database).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(credentialId)).count() > 0
             }
         } catch {
             _ = try? await AuditService(db: db, ctx: ctx).record("dashboard.register_failed", outcome: .failure, actor: AuditActor(kind: .system))
@@ -336,7 +336,7 @@ struct DashboardAuthService {
             return failure
         }
         guard let challenge = Base64URL.decode(ceremony.challenge), finish.credential.id.count <= 1024,
-              let credential = try await DashboardPasskeyRecord.query(on: db).filter(\.$credentialId == finish.credential.id).first(),
+              let credential = try await DashboardPasskeyRecord.query(on: db).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(finish.credential.id)).first(),
               let user = try await DashboardUserRecord.find(credential.userId, on: db),
               let publicKey = Base64URL.decode(credential.publicKey) else {
             throw await refuse("unknown_credential", actor: AuditActor(kind: .system))
@@ -383,7 +383,7 @@ struct DashboardAuthService {
         let failure = APIError(.unauthorized, .unauthorized, "Confirmation could not be verified.")
         // The assertion must come from a passkey owned by *this* user, on a ceremony minted for *this* user.
         guard ceremony.userId == principal.user.id, let challenge = Base64URL.decode(ceremony.challenge), finish.credential.id.count <= 1024,
-              let credential = try await DashboardPasskeyRecord.query(on: db).filter(\.$credentialId == finish.credential.id)
+              let credential = try await DashboardPasskeyRecord.query(on: db).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(finish.credential.id))
                   .filter(\.$userId == principal.user.id!).first(), let publicKey = Base64URL.decode(credential.publicKey) else { throw failure }
         let actorKind: AuditActor.Kind = principal.realm == .operator ? .operator_ : .business
         do {

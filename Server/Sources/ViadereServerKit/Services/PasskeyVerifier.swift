@@ -91,4 +91,18 @@ enum PasskeyCredentialID {
         while out.hasSuffix("=") { out.removeLast() }
         return out
     }
+
+    /// The padded standard base64 form passkeys registered before canonicalisation were stored under.
+    static func legacy(_ id: String) -> String {
+        var out = canonical(id).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while out.count % 4 != 0 { out.append("=") }
+        return out
+    }
+
+    /// Every stored form of one credential id, for lookups: rows written before canonicalisation keep working without a data migration.
+    /// The two forms encode the same bytes, so this never matches another credential.
+    static func storedForms(_ id: String) -> [String] {
+        let forms = [canonical(id), legacy(id)]
+        return forms[0] == forms[1] ? [forms[0]] : forms
+    }
 }

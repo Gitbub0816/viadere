@@ -82,7 +82,7 @@ struct RecoveryCredentialService {
         let verified: VerifiedPasskeyRegistration
         do {
             verified = try await ctx.passkeys.verifyRegistration(request.credential, challenge: challenge) { credentialId in
-                try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId == credentialId).count() > 0
+                try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(credentialId)).count() > 0
             }
         } catch {
             _ = try? await AuditService(db: db, ctx: ctx).record("recovery.passkey_failed", outcome: .failure, principal: principal, subjectType: "recovery")

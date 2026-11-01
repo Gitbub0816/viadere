@@ -90,26 +90,9 @@ final class PasskeyInteropTests: XCTestCase {
         XCTAssertEqual(PasskeyCredentialID.canonical("m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0"), "m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0")
     }
 
-    /// Passkeys stored before the fix (padded standard base64) are rewritten so sign-in finds them; already-canonical ids are untouched.
-    func testMigrationRewritesStoredCredentialIDsToTheFormSignInLooksUp() async throws {
-        let harness = try await TestHarness.make()
-        let db = harness.db
-        let consumer = UUID()
-        try await ConsumerRecord(id: consumer, displayName: "Alice", userHandle: SecureToken.generate(byteCount: 16), now: harness.clock.now()).create(on: db)
-        let legacy = PasskeyCredentialRecord(consumerId: consumer, credentialId: "m+6X4TctybA3diUfleIYg6wTGIKe1z+RY/pL9ofQwQ0=", publicKey: "AA",
-                                             signCount: 0, backupEligible: true, now: harness.clock.now())
-        let canonical = PasskeyCredentialRecord(consumerId: consumer, credentialId: "AbC-_dEf", publicKey: "AA", signCount: 0, backupEligible: true,
-                                                now: harness.clock.now())
-        do {
-            try await legacy.create(on: db)
-            try await canonical.create(on: db)
-            try await NormalizePasskeyCredentialIDs().prepare(on: db)
-            let ids = try await PasskeyCredentialRecord.query(on: db).all().map(\.credentialId).sorted()
-            XCTAssertEqual(ids, ["AbC-_dEf", "m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0"])
-        } catch {
-            try await harness.shutdown()
-            throw error
-        }
-        try await harness.shutdown()
+    func testStoredFormsCoverTheLegacyIdOfTheSameBytesOnly() {
+        let bytes = Data((0..<20).map { UInt8(($0 * 37 + 251) % 256) })
+        XCTAssertEqual(PasskeyCredentialID.storedForms(Base64URL.encode(bytes)), [Base64URL.encode(bytes), bytes.base64EncodedString()])
+        XCTAssertEqual(PasskeyCredentialID.storedForms("AbCd"), ["AbCd"])
     }
 }

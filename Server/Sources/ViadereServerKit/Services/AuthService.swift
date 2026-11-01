@@ -67,7 +67,7 @@ struct AuthService {
         let database = db
         do {
             verified = try await ctx.passkeys.verifyRegistration(request.credential, challenge: challenge) { credentialId in
-                try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId == credentialId).count() > 0
+                try await PasskeyCredentialRecord.query(on: database).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(credentialId)).count() > 0
             }
         } catch {
             _ = try? await AuditService(db: db, ctx: ctx).record("auth.register_failed", outcome: .failure, actor: AuditActor(kind: .system))
@@ -107,7 +107,7 @@ struct AuthService {
         let ceremony = try await consumeCeremony(request.ceremonyId, kind: "login")
         let failure = APIError(.unauthorized, .unauthorized, "Sign-in could not be verified.")
         guard let challenge = Base64URL.decode(ceremony.challenge), request.credential.id.count <= 1024,
-              let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId == request.credential.id).first(),
+              let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(request.credential.id)).first(),
               let consumer = try await ConsumerRecord.find(credential.consumerId, on: db), consumer.status == "active",
               let publicKey = Base64URL.decode(credential.publicKey) else {
             _ = try? await AuditService(db: db, ctx: ctx).record("auth.login_failed", outcome: .failure, actor: AuditActor(kind: .system),
@@ -427,7 +427,7 @@ struct AuthService {
         let required = APIError(.unauthorized, .passkeyAssertionRequired, "Confirm with your passkey to add this device.")
         if let assertion = request.assertion {
             guard assertion.id.count <= 1024, let challenge = Base64URL.decode(request.challenge),
-                  let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId == assertion.id)
+                  let credential = try await PasskeyCredentialRecord.query(on: db).filter(\.$credentialId ~~ PasskeyCredentialID.storedForms(assertion.id))
                       .filter(\.$consumerId == principal.consumerId.uuid).first(), let publicKey = Base64URL.decode(credential.publicKey),
                   let consumer = try await ConsumerRecord.find(principal.consumerId.uuid, on: db), consumer.status == "active" else {
                 _ = await enrollmentFailure(principal, "unknown_credential")
