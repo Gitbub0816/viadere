@@ -432,7 +432,7 @@ vrp1.{base64url(32 CSPRNG bytes)}.{first 32 hex of HMAC-SHA256(serverPepper, "rc
 
 * Session cookie: `__Host-vd_session` (operators `__Host-vd_operator`) = `vds_` + base64url(32 CSPRNG bytes); `Secure; HttpOnly; SameSite=Strict; Path=/`, no `Domain`. Stored: SHA-256 only.
 * Created on every successful passkey assertion (a presented old session is revoked). Idle timeout 30 min / absolute 12 h (operators 15 min / 8 h). `reauthAt` is set at sign-in and by a re-authentication ceremony.
-* CSRF token: first 43 hex characters of `HMAC-SHA256(serverPepper, "dashboard-csrf\n" + cookie value)`, sent as hidden field `_csrf` or header `X-CSRF-Token` on every non-`GET`; constant-time compare. A request with an `Origin` header must carry one of the configured origins.
+* CSRF token: first 43 hex characters of `HMAC-SHA256(serverPepper, "dashboard-csrf\n" + cookie value)`, sent as hidden field `_csrf` or header `X-CSRF-Token` on every non-`GET`; constant-time compare. A request with an `Origin` header must carry one of the configured origins (`null` is refused). Console pages are served with `Referrer-Policy: same-origin` (header and meta): under `no-referrer` browsers send `Origin: null` on form POSTs, which this check would refuse; `same-origin` still sends nothing to other sites.
 * Passkey ceremonies use the dashboard's own credential table and a single-use ceremony row (5 min); registration and assertion require user verification.
 
 ### 2.13 Reward eligibility and redemption codes

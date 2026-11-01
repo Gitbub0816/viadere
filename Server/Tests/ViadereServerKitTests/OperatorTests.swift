@@ -78,6 +78,30 @@ final class OperatorTests: XCTestCase {
         }
     }
 
+    /// Browsers send `Origin: null` on a form POST from a page whose referrer policy is `no-referrer` (Fetch: "append a request Origin
+    /// header"). The console's CSRF origin check rightly refuses `null`, so console pages must use a policy that keeps our own origin.
+    func testConsoleFormsSendTheirOriginBecauseThePagesUseSameOriginReferrerPolicy() async throws {
+        try await withHarness { h in
+            let op = try await h.makeOperator()
+            for path in ["/operator", "/operator/brand"] {
+                let page = try await h.page(path, op.session)
+                XCTAssertEqual(page.status, .ok, page.text)
+                let header = page.headers.first(name: "Referrer-Policy") ?? ""
+                XCTAssertEqual(header, "same-origin", path)
+                XCTAssertFalse(page.text.contains("content=\"no-referrer\""), "a no-referrer meta would make browsers send Origin: null (\(path))")
+                // What the browser then sends with a form on this page: its own origin, which the CSRF check accepts.
+                let browserOrigin = (header == "no-referrer" || page.text.contains("content=\"no-referrer\"")) ? "null" : h.origin
+                let post = try await h.formPost("/operator/brand/assets/\(UUID().uuidString.lowercased())/approve", op.session, origin: browserOrigin)
+                XCTAssertFalse(post.text.contains("Cross-origin request blocked"), "\(path): \(post.text)")
+            }
+            // A genuinely foreign or opaque origin is still refused.
+            for bad in ["null", "https://evil.example"] {
+                let post = try await h.formPost("/operator/brand/switch", op.session, origin: bad)
+                XCTAssertEqual(post.status, .forbidden)
+            }
+        }
+    }
+
     func testOperatorSessionsAreShorterAndEveryMutationNeedsFreshReauth() async throws {
         try await withHarness { h in
             let (op, account) = try await h.makeOperator()

@@ -189,13 +189,16 @@ enum DashboardUI {
         response.headers.replaceOrAdd(name: "Content-Security-Policy", value: csp(script: script, frames: frames))
         response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
         response.headers.replaceOrAdd(name: "X-Robots-Tag", value: "noindex")
+        // `same-origin`, not `no-referrer`: under no-referrer browsers send `Origin: null` on form POSTs, which the CSRF origin check
+        // (rightly) refuses. Nothing is sent to other sites either way.
+        response.headers.replaceOrAdd(name: "Referrer-Policy", value: "same-origin")
         return response
     }
 
     private static func document(title: String, body: String, script: Bool) -> String {
         """
         <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">\
-        <meta name="referrer" content="no-referrer"><meta name="robots" content="noindex"><title>\(esc(title)) · Viadere</title>\
+        <meta name="referrer" content="same-origin"><meta name="robots" content="noindex"><title>\(esc(title)) · Viadere</title>\
         <style>\(css)</style></head><body>\(body)\(script ? "<script>\(Self.script)</script>" : "")</body></html>
         """
     }
