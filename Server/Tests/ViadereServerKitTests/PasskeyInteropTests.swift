@@ -28,8 +28,10 @@ final class PasskeyInteropTests: XCTestCase {
         let registration = PasskeyRegistrationCredential(id: credentialId, rawId: credentialId, attestationObject: Base64URL.encode(created.attestationObject),
                                                          clientDataJSON: create.json)
         let verified = try await verifier.verifyRegistration(registration, challenge: challenge, credentialAlreadyRegistered: { _ in false })
-        // webauthn-swift reports the id as padded standard base64; it must be the same bytes.
-        XCTAssertEqual(Data(base64Encoded: verified.credentialId), created.credential.credentialId)
+        // The stored id is looked up with the `id` the browser sends at sign-in (unpadded base64url), so it must be that exact string.
+        // webauthn-swift reports padded standard base64; storing that made every sign-in with a 20-byte (Apple) credential id fail.
+        XCTAssertEqual(verified.credentialId, credentialId)
+        XCTAssertEqual(Base64URL.decode(verified.credentialId), created.credential.credentialId)
         XCTAssertEqual(verified.signCount, 0)
         XCTAssertTrue(verified.backupEligible)
 
@@ -81,5 +83,33 @@ final class PasskeyInteropTests: XCTestCase {
         } catch {
             // Expected today.
         }
+    }
+
+    func testCanonicalCredentialIDIsTheUnpaddedBase64URLTheClientSends() {
+        XCTAssertEqual(PasskeyCredentialID.canonical("m+6X4TctybA3diUfleIYg6wTGIKe1z+RY/pL9ofQwQ0="), "m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0")
+        XCTAssertEqual(PasskeyCredentialID.canonical("m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0"), "m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0")
+    }
+
+    /// Passkeys stored before the fix (padded standard base64) are rewritten so sign-in finds them; already-canonical ids are untouched.
+    func testMigrationRewritesStoredCredentialIDsToTheFormSignInLooksUp() async throws {
+        let harness = try await TestHarness.make()
+        let db = harness.db
+        let consumer = UUID()
+        try await ConsumerRecord(id: consumer, displayName: "Alice", userHandle: SecureToken.generate(byteCount: 16), now: harness.clock.now()).create(on: db)
+        let legacy = PasskeyCredentialRecord(consumerId: consumer, credentialId: "m+6X4TctybA3diUfleIYg6wTGIKe1z+RY/pL9ofQwQ0=", publicKey: "AA",
+                                             signCount: 0, backupEligible: true, now: harness.clock.now())
+        let canonical = PasskeyCredentialRecord(consumerId: consumer, credentialId: "AbC-_dEf", publicKey: "AA", signCount: 0, backupEligible: true,
+                                                now: harness.clock.now())
+        do {
+            try await legacy.create(on: db)
+            try await canonical.create(on: db)
+            try await NormalizePasskeyCredentialIDs().prepare(on: db)
+            let ids = try await PasskeyCredentialRecord.query(on: db).all().map(\.credentialId).sorted()
+            XCTAssertEqual(ids, ["AbC-_dEf", "m-6X4TctybA3diUfleIYg6wTGIKe1z-RY_pL9ofQwQ0"])
+        } catch {
+            try await harness.shutdown()
+            throw error
+        }
+        try await harness.shutdown()
     }
 }

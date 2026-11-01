@@ -54,8 +54,8 @@ public struct WebAuthnPasskeyVerifier: PasskeyVerifier {
             let decoded = try JSONDecoder().decode(RegistrationCredential.self, from: data)
             let verified = try await manager.finishRegistration(
                 challenge: [UInt8](challenge), credentialCreationData: decoded, requireUserVerification: true,
-                confirmCredentialIDNotRegisteredYet: { id in !(try await credentialAlreadyRegistered(id)) })
-            return VerifiedPasskeyRegistration(credentialId: verified.id, publicKey: Data(verified.publicKey),
+                confirmCredentialIDNotRegisteredYet: { id in !(try await credentialAlreadyRegistered(PasskeyCredentialID.canonical(id))) })
+            return VerifiedPasskeyRegistration(credentialId: PasskeyCredentialID.canonical(verified.id), publicKey: Data(verified.publicKey),
                                                signCount: verified.signCount, backupEligible: verified.backupEligible)
         } catch {
             throw PasskeyError.invalid
@@ -80,5 +80,15 @@ public struct WebAuthnPasskeyVerifier: PasskeyVerifier {
         } catch {
             throw PasskeyError.invalid
         }
+    }
+}
+
+/// The one stored form of a credential id: unpadded base64url, exactly the `id` a browser or `ASAuthorization` sends at sign-in, which is what
+/// every lookup compares against. webauthn-swift reports registered ids as padded standard base64, so they are converted before storage.
+enum PasskeyCredentialID {
+    static func canonical(_ id: String) -> String {
+        var out = id.replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+        while out.hasSuffix("=") { out.removeLast() }
+        return out
     }
 }
