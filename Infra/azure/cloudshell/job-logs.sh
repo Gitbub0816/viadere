@@ -18,8 +18,10 @@ WS="$(az monitor log-analytics workspace show -g rg-viadere-stg-ops -n log-viade
 az monitor log-analytics query -w "$WS" -o tsv --analytics-query "
 union isfuzzy=true ContainerAppConsoleLogs, ContainerAppSystemLogs, ContainerAppConsoleLogs_CL, ContainerAppSystemLogs_CL
 | where TimeGenerated > ago(${HOURS}h)
-| extend who = strcat(column_ifexists('JobName', ''), column_ifexists('ContainerAppName', ''), column_ifexists('ContainerJobName_s', ''), column_ifexists('ContainerAppName_s', ''))
-| where who has '$NAME'
+| extend who = strcat(column_ifexists('JobName', ''), ' ', column_ifexists('ContainerJobName', ''), ' ', column_ifexists('ContainerAppName', ''), ' ',
+    column_ifexists('ContainerGroupName', ''), ' ', column_ifexists('ContainerJobName_s', ''), ' ', column_ifexists('ContainerAppName_s', ''), ' ',
+    column_ifexists('ContainerGroupName_s', ''))
+| where who contains '$NAME'
 | extend line = strcat(column_ifexists('Log', ''), column_ifexists('Log_s', ''), column_ifexists('Reason', ''), ' ', column_ifexists('Msg', ''), column_ifexists('Message', ''))
 | where '$FILTER' == '' or line contains '$FILTER'
 | project TimeGenerated, Type, line
