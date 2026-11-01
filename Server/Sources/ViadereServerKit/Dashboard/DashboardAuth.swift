@@ -329,25 +329,30 @@ struct DashboardAuthService {
         let ceremony = try await consume(finish.ceremonyId, kind: "login:\(realm.rawValue)")
         let failure = APIError(.unauthorized, .unauthorized, "Sign-in could not be verified.")
         let audit = AuditService(db: db, ctx: ctx)
+        // The reason is logged (never the credential, handle or e-mail) so an operator can tell a stale passkey from a wrong realm.
+        func refuse(_ reason: String, actor: AuditActor) async -> APIError {
+            ctx.logger.warning("dashboard sign-in refused", metadata: ["reason": .string(reason), "realm": .string(realm.rawValue)])
+            _ = try? await audit.record("dashboard.login_failed", outcome: .failure, actor: actor, metadata: ["reason": reason, "realm": realm.rawValue])
+            return failure
+        }
         guard let challenge = Base64URL.decode(ceremony.challenge), finish.credential.id.count <= 1024,
               let credential = try await DashboardPasskeyRecord.query(on: db).filter(\.$credentialId == finish.credential.id).first(),
-              let user = try await DashboardUserRecord.find(credential.userId, on: db), user.status == "active",
-              user.isOperator == (realm == .operator), let publicKey = Base64URL.decode(credential.publicKey) else {
-            _ = try? await audit.record("dashboard.login_failed", outcome: .failure, actor: AuditActor(kind: .system),
-                                        metadata: ["reason": "unknown_credential", "realm": realm.rawValue])
-            throw failure
+              let user = try await DashboardUserRecord.find(credential.userId, on: db),
+              let publicKey = Base64URL.decode(credential.publicKey) else {
+            throw await refuse("unknown_credential", actor: AuditActor(kind: .system))
         }
-        if let handle = finish.credential.userHandle, !handleMatches(handle, stored: user.userHandle) { throw failure }
-        let actorKind: AuditActor.Kind = realm == .operator ? .operator_ : .business
+        let actorKind: AuditActor.Kind = user.isOperator ? .operator_ : .business
+        let actor = AuditActor(kind: actorKind, id: user.id?.uuidString.lowercased())
+        guard user.isOperator == (realm == .operator) else { throw await refuse("wrong_realm", actor: actor) }
+        guard user.status == "active" else { throw await refuse("inactive_user", actor: actor) }
+        if let handle = finish.credential.userHandle, !handleMatches(handle, stored: user.userHandle) { throw await refuse("handle_mismatch", actor: actor) }
         do {
             let result = try verifier.verifyAssertion(finish.credential, challenge: challenge, publicKey: publicKey, signCount: UInt32(clamping: credential.signCount))
             credential.signCount = Int(result.newSignCount)
             credential.lastUsedAt = ctx.now
             try await credential.update(on: db)
         } catch {
-            _ = try? await audit.record("dashboard.login_failed", outcome: .failure, actor: AuditActor(kind: actorKind, id: user.id?.uuidString.lowercased()),
-                                        metadata: ["reason": "assertion_invalid", "realm": realm.rawValue])
-            throw failure
+            throw await refuse("assertion_invalid", actor: actor)
         }
         var businessId: UUID?
         if realm == .business {
