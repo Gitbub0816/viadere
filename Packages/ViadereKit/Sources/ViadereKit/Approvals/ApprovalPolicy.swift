@@ -50,14 +50,10 @@ public enum ApprovalPolicy {
         return .actionable(plan)
     }
 
-    /// Slide-to-approve is used for anything that needs strong verification or moves money.
-    public static func usesSlideToApprove(_ interaction: Interaction) -> Bool {
-        switch interaction.kind {
-        case .authorize: interaction.effectiveSensitivity >= .standard
-        case .authenticate: interaction.effectiveSensitivity >= .high
-        default: false
-        }
-    }
+    /// Never: no authentication or payment item is approved with a single swipe (ADR-0022 §2.5, UX_COPY §0.2, finding F-16). Strong
+    /// verification is Face ID on a deliberate, equal-weight Approve button, with Deny first. Kept as a function so callers and the
+    /// test that pins "no slide-to-approve for any flow" read the policy, not a literal.
+    public static func usesSlideToApprove(_ interaction: Interaction) -> Bool { false }
 
     /// Maximum length of the Face ID / passcode sheet text.
     public static let promptLimit = 90

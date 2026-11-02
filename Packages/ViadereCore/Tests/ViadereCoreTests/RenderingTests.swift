@@ -54,15 +54,23 @@ struct RenderingTests {
         #expect(approve?.opensApp == true)
         #expect(approve?.requiresAuthentication == true)
         #expect(n.category.actions.contains { $0.identifier == "viadere.deny" && $0.style == .destructive })
+        // A6/A7 H1: Deny and Report never need the device unlocked and never open the app; Approve keeps the unlock and the foreground.
+        for id in ["viadere.deny", "viadere.report"] {
+            let refusal = n.category.actions.first { $0.identifier == id }
+            #expect(refusal?.requiresAuthentication == false && refusal?.opensApp == false, "\(id)")
+        }
+        #expect(n.interruptionLevel == .active)
         #expect(n.threadIdentifier == "business.\(business.id)")
         #expect(n.userInfo["interactionId"] == i.id.description)
     }
 
-    @Test func lowSensitivityLoginApprovesInBackground() {
+    @Test("F-14: approve on a low-assurance sign-in still foregrounds the app; Deny and Report stay unlock-free")
+    func lowSensitivityLoginApproveForegrounds() {
         let i = Fixtures.interaction(.authenticate(Fixtures.loginPayload), sensitivity: .low, purpose: .security)
         let n = ChannelRenderer.notification(i, business: business)
         #expect(n.category.identifier == "viadere.authenticate")
-        #expect(n.category.actions.first { $0.identifier == "viadere.approve" }?.opensApp == false)
+        #expect(n.category.actions.first { $0.identifier == "viadere.approve" }?.opensApp == true)
+        #expect(n.category.actions.first { $0.identifier == "viadere.deny" }?.requiresAuthentication == false)
         #expect(n.body.contains("Online Banking") && n.body.contains("Chrome on macOS") && n.body.contains("Mesa, AZ"))
     }
 

@@ -30,6 +30,13 @@ public struct ViadereServices: Sendable {
     public var loopsAPI: (any LoopsAPI)?
     /// Brand Kits (`nil` in the App Clip). Synchronous reads; no security flow awaits it.
     public var brandKits: BrandKitStore?
+    /// Auth delivery (links, push approvals' reduce-only answers): the live client arrives with the server API; until then every call
+    /// fails closed (`UnavailableAuthDeliveryAPI`).
+    public var authDelivery: any AuthDeliveryAPI = UnavailableAuthDeliveryAPI()
+    /// Posts the local "Deny not sent yet" notice (N-09). The app supplies the UserNotifications implementation.
+    public var localSecurityNotices: any LocalSecurityNoticePosting = NoLocalSecurityNotices()
+    /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
+    public var authDeliveryFlags: AuthDeliveryFlags = .shipping
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -42,7 +49,7 @@ public struct ViadereServices: Sendable {
     public var confirmations: ConfirmationService { ConfirmationService(api: api, keys: keys, records: records, clock: clock) }
 
     public var notificationHandler: NotificationActionHandler {
-        NotificationActionHandler(api: api, approvals: approvals, clock: clock)
+        NotificationActionHandler(api: api, approvals: approvals, clock: clock, authDelivery: authDelivery, notices: localSecurityNotices)
     }
 
     public var notificationEnricher: NotificationEnricher { NotificationEnricher(api: api, preferences: preferences, clock: clock) }

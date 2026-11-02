@@ -61,6 +61,13 @@ public final class AppModel {
     public var pendingLinkSession: PendingLinkSession?
     /// A verification session opened from a business's "Verify with Viadere" button, QR or typed code (`/v/…`); the root presents its review.
     public var pendingVerificationSession: PendingVerificationSession?
+    /// A sign-in link delivery (a tapped `viadere.auth.link` push or its "Open" action): the root presents the confirm screen
+    /// (`LinkConfirmationViewModel`). Nothing is opened or consumed until the person taps Continue.
+    public var pendingAuthDelivery: PendingAuthDelivery?
+    /// A `/h/` hand-off waiting for its confirm step (F-08): the token is redeemed only by `confirmHandoff()`, after an explicit Open.
+    public var pendingHandoff: HandoffConfirmationViewModel?
+    /// Set by the app: opens an Approve v2 request (`nil` key: the list of requests). Kept out of the Kit because the controller lives in the app.
+    public var openApproveRequest: (@MainActor (String?) async -> Void)?
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
     /// A Loop install link (`/lp/{loopId}`) waiting for the shell to present its install sheet (`LoopDetailView`).
@@ -264,6 +271,8 @@ public final class AppModel {
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil
+        pendingAuthDelivery = nil
+        pendingHandoff = nil
         conversationToOpen = nil
         businessToOpen = nil
         addBusinessPresented = false
@@ -313,21 +322,13 @@ public final class AppModel {
             pendingAccountLinkToken = token
             selectedTab = .you
         case .handoff(let token):
+            // F-08 (ADR-0021 §4 item 4): handling the link never redeems it. The confirm screen asks first; `confirmHandoff()` redeems.
             selectedTab = .alerts
-            guard let redeemed = try? await services.api.redeemHandoff(token: token) else {
-                toast = "That link has expired. Open Viadere to see your requests."
-                await home.load()
-                return
-            }
-            switch redeemed.purpose {
-            case .interaction:
-                if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
-            case .manageBusinesses:
-                selectedTab = .businesses
-                addBusinessPresented = true
-            case .accountHelp:
-                selectedTab = .you
-            }
+            pendingHandoff = HandoffConfirmationViewModel(token: token, api: services.api)
+        case .authDelivery(let id):
+            pendingAuthDelivery = PendingAuthDelivery(id: id)
+        case .approveRequest(let key):
+            await openApproveRequest?(key)
         case .interaction(let id):
             await openInteraction(id)
         case .conversation(let id):
@@ -349,6 +350,28 @@ public final class AppModel {
             pendingVerificationSession = PendingVerificationSession(code: code)
         }
     }
+
+    /// Open on the hand-off confirm screen: redeems the token (the one place it happens) and routes to what it was for.
+    public func confirmHandoff() async {
+        guard let confirmation = pendingHandoff else { return }
+        await confirmation.open()
+        guard case .redeemed(let redeemed) = confirmation.phase else {
+            await home.load()
+            return
+        }
+        pendingHandoff = nil
+        switch redeemed.purpose {
+        case .interaction:
+            if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
+        case .manageBusinesses:
+            selectedTab = .businesses
+            addBusinessPresented = true
+        case .accountHelp:
+            selectedTab = .you
+        }
+    }
+
+    public func dismissHandoff() { pendingHandoff = nil }
 
     /// Presents the secure approval sheet for an interaction.
     public func openInteraction(_ id: InteractionID) async {
@@ -384,6 +407,9 @@ public final class AppModel {
             // Opens wait for the unlock; refreshes and toasts would only touch hidden state, so they wait too.
             switch outcome {
             case .requiresApp(let id), .open(let id?): enqueueWhileLocked(.interaction(id))
+            case .openAuthDelivery(let id): enqueueWhileLocked(.authDelivery(id))
+            case .openApproveRequest(let key): enqueueWhileLocked(.approveRequest(key))
+            case .openRequests: enqueueWhileLocked(.approveRequest(nil))
             default: break
             }
             return
@@ -396,6 +422,11 @@ public final class AppModel {
             selectedTab = .alerts
             await securityNotices.load()
         case .submitted: await home.load()
+        case .reduced: await home.load()
+        // F-14/F-15: a tapped approval or link push opens that request (or the confirm screen), not the Alerts list.
+        case .openAuthDelivery(let id): pendingAuthDelivery = PendingAuthDelivery(id: id)
+        case .openApproveRequest(let key): await openApproveRequest?(key)
+        case .openRequests: await openApproveRequest?(nil)
         case .stale: toast = "That was already handled."; await home.load()
         case .expired: toast = "That request expired."; await home.load()
         case .failed(_, let message): toast = message
@@ -477,6 +508,12 @@ public struct PendingLinkSession: Sendable, Equatable {
         self.secret = secret
         self.checkCode = checkCode
     }
+}
+
+/// A link delivery to confirm before anything is opened.
+public struct PendingAuthDelivery: Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public init(id: UUID) { self.id = id }
 }
 
 /// A verification session to review: its code (from the link, the QR, or typed by the person).

@@ -38,6 +38,77 @@ public enum PushPayload {
     }
 }
 
+/// The categories and actions of the authentication-delivery pushes (ADR-0020 §6, ADR-0022 §5.5, ADR-0021 §4 item 5; UX_COPY §1).
+///
+/// - `viadere.approve`: **Review** (foreground: iOS unlocks first) and **Deny** (no authentication, no foreground: works on a locked phone
+///   after first unlock and signs a reduce-only deny). There is no Approve action and no Report action on an approval notification.
+/// - `viadere.auth.link`: **Open** (foreground) and **This wasn't me** (reduce-only report, no unlock).
+/// - `viadere.auth.code`: no actions; a tap opens the app, where the code is shown after unlock.
+public enum AuthNotificationCategory {
+    public static let approve = "viadere.approve"
+    public static let link = "viadere.auth.link"
+    public static let code = "viadere.auth.code"
+    public static let all: Set<String> = [approve, link, code]
+
+    public static let reviewAction = "viadere.review"
+    public static let openAction = "viadere.open"
+    public static let denyAction = "viadere.deny"
+    public static let reportAction = "viadere.report"
+
+    /// Neutral wording and style: equal prominence, no destructive (red) role on the safe action.
+    public static let approveCategory = NotificationCategoryModel(identifier: approve, actions: [
+        NotificationActionModel(identifier: reviewAction, title: AuthDeliveryCopy.review, style: .normal, requiresAuthentication: true, opensApp: true),
+        NotificationActionModel(identifier: denyAction, title: AuthDeliveryCopy.deny, style: .normal, requiresAuthentication: false, opensApp: false),
+    ])
+    public static let linkCategory = NotificationCategoryModel(identifier: link, actions: [
+        NotificationActionModel(identifier: openAction, title: AuthDeliveryCopy.open, style: .normal, requiresAuthentication: true, opensApp: true),
+        NotificationActionModel(identifier: reportAction, title: AuthDeliveryCopy.notMe, style: .normal, requiresAuthentication: false, opensApp: false),
+    ])
+    public static let codeCategory = NotificationCategoryModel(identifier: code, actions: [])
+    public static let categories = [approveCategory, linkCategory, codeCategory]
+}
+
+/// Where a tapped authentication-delivery push goes (F-14, F-15): the request itself, never the Alerts list.
+public enum NotificationTarget: Sendable, Equatable {
+    /// An Approve v2 request (`req`).
+    case approveRequest(String)
+    /// A link or code delivery (`adl`).
+    case authDelivery(UUID)
+    /// The category is ours but the payload names nothing usable: the request list in the app (still not "Alerts").
+    case pendingRequests
+    /// A legacy interaction (`iid`).
+    case interaction(InteractionID)
+}
+
+extension PushPayload {
+    public static let requestKey = "req"
+    public static let deliveryKey = "adl"
+
+    /// `req`: 1 to 64 characters of `[A-Za-z0-9_-]` (an opaque request id; anything else is ignored, never trusted).
+    public static func requestId(from userInfo: [String: String]) -> String? {
+        guard let value = userInfo[requestKey], (1...64).contains(value.utf8.count),
+              value.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }) else { return nil }
+        return value
+    }
+
+    public static func deliveryId(from userInfo: [String: String]) -> UUID? { userInfo[deliveryKey].flatMap { UUID(uuidString: $0) } }
+
+    /// Resolves a delivered push to its destination. The category decides which key is read, so a `req` on a link push is not followed.
+    public static func target(category: String, userInfo: [String: String]) -> NotificationTarget? {
+        switch category {
+        case AuthNotificationCategory.approve:
+            if let id = requestId(from: userInfo) { return .approveRequest(id) }
+            if let id = userInfo[interactionKey].flatMap({ InteractionID($0) }) { return .interaction(id) }
+            return .pendingRequests
+        case AuthNotificationCategory.link, AuthNotificationCategory.code:
+            if let id = deliveryId(from: userInfo) { return .authDelivery(id) }
+            return .pendingRequests
+        default:
+            return userInfo[interactionKey].flatMap { InteractionID($0) }.map(NotificationTarget.interaction)
+        }
+    }
+}
+
 /// A user's response to a delivered notification, in platform-neutral form.
 public struct NotificationResponseInfo: Sendable, Equatable {
     public var actionIdentifier: String
@@ -88,7 +159,7 @@ public enum NotificationActionParser {
         case "decline": return .decision(.decline, optionId: nil)
         case "acknowledge": return .decision(.acknowledge, optionId: nil)
         case "reply": return .decision(.reply, optionId: nil)
-        case "open": return .open
+        case "open", "review": return .open
         default: return .unknown
         }
     }

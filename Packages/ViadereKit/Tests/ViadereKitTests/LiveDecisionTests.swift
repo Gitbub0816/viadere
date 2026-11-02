@@ -57,7 +57,7 @@ struct LiveDecisionTests {
         // The server never starts one of these; even if it did, the app adds no buttons.
         let state = LiveDecisionEnrichment.enriched(neutral(four), businessId: four.business.id.description, from: four, now: now)
         #expect(state.options == nil)
-        let presentation = LiveDecisionPresentation(state: state, businessName: "Copperline", now: now)
+        let presentation = LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now)
         #expect(presentation.buttons.isEmpty)
         #expect(presentation.showsOpen)
     }
@@ -89,14 +89,14 @@ struct LiveDecisionTests {
     @Test func fallbackNeverOffersABlindConfirm() {
         let now = Date()
         let state = DecisionActivityState(interactionId: InteractionID(), kind: .confirm, expiresAt: now.addingTimeInterval(600))
-        let p = LiveDecisionPresentation(state: state, businessName: "Copperline Kitchen", now: now)
+        let p = LiveDecisionPresentation(state: state, businessName: "Copperline Kitchen", disclosure: .detailed, now: now)
         #expect(p.headline == "Copperline Kitchen needs a quick decision")
         #expect(p.buttons.map(\.actionIdentifier) == ["viadere.decline"])
         #expect(p.showsOpen)
         #expect(p.openURL?.absoluteString == "viadere://i/\(state.interactionId)")
         if let url = p.openURL { #expect(DeepLinkRouter.route(url) == .interaction(state.interactionId)) }
         let choose = LiveDecisionPresentation(state: DecisionActivityState(interactionId: InteractionID(), kind: .choose, expiresAt: now.addingTimeInterval(600)),
-                                              businessName: "Copperline Kitchen", now: now)
+                                              businessName: "Copperline Kitchen", disclosure: .detailed, now: now)
         #expect(choose.buttons.isEmpty)
         #expect(choose.showsOpen)
     }
@@ -104,7 +104,7 @@ struct LiveDecisionTests {
     @Test func enrichedPresentationOffersInlineAnswers() {
         let now = Date()
         var state = DecisionActivityState(interactionId: InteractionID(), kind: .confirm, expiresAt: now.addingTimeInterval(600), title: "Pick up at 4:30")
-        var p = LiveDecisionPresentation(state: state, businessName: "Copperline", now: now)
+        var p = LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now)
         #expect(p.buttons.map(\.actionIdentifier) == ["viadere.confirm", "viadere.decline"])
         #expect(p.buttons.map(\.accessibilityLabel) == ["Confirm Pick up at 4:30", "Decline Pick up at 4:30"])
         #expect(p.buttons.map(\.isPrimary) == [true, false])
@@ -113,29 +113,29 @@ struct LiveDecisionTests {
         #expect(p.isPending)
         state = DecisionActivityState(interactionId: InteractionID(), kind: .choose, expiresAt: now.addingTimeInterval(600), title: "Which time?",
                                       options: [.init(id: "tue_9", label: "Tue 9:00"), .init(id: "wed_14", label: "Wed 2:30")])
-        p = LiveDecisionPresentation(state: state, businessName: "Copperline", now: now)
+        p = LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now)
         #expect(p.buttons.map(\.actionIdentifier) == ["viadere.option.tue_9", "viadere.option.wed_14"])
         #expect(p.buttons.allSatisfy { !$0.isPrimary && !$0.isDestructive }, "no choice is nudged over another")
         // An option id that could smuggle another action is dropped, and then no options are offered at all.
         state.options = [.init(id: "tue_9", label: "Tue"), .init(id: "x confirm", label: "Bad")]
-        p = LiveDecisionPresentation(state: state, businessName: "Copperline", now: now)
+        p = LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now)
         #expect(p.buttons.isEmpty && p.showsOpen)
         // Text in the content state is sanitized again at render time.
         state = DecisionActivityState(interactionId: InteractionID(), kind: .confirm, expiresAt: now.addingTimeInterval(600), title: "Hi\u{202E}there")
-        #expect(LiveDecisionPresentation(state: state, businessName: "Copperline", now: now).headline == "Hithere")
+        #expect(LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now).headline == "Hithere")
     }
 
     @Test func finishedOrExpiredActivitiesHaveNoButtons() {
         let now = Date()
         for stage in [DecisionActivityState.Stage.answered, .expired, .cancelled] {
             let state = DecisionActivityState(interactionId: InteractionID(), kind: .confirm, expiresAt: now.addingTimeInterval(600), stage: stage, title: "T")
-            let p = LiveDecisionPresentation(state: state, businessName: "Copperline", now: now)
+            let p = LiveDecisionPresentation(state: state, businessName: "Copperline", disclosure: .detailed, now: now)
             #expect(p.buttons.isEmpty && !p.showsOpen && !p.isPending)
             #expect(p.stageText != nil)
         }
         // Past its expiry, a pending state reads as expired even before any push arrives.
         let late = DecisionActivityState(interactionId: InteractionID(), kind: .confirm, expiresAt: now.addingTimeInterval(-1), title: "T")
-        let p = LiveDecisionPresentation(state: late, businessName: "Copperline", now: now)
+        let p = LiveDecisionPresentation(state: late, businessName: "Copperline", disclosure: .detailed, now: now)
         #expect(p.stageText == "Expired" && p.buttons.isEmpty)
         // The generic status presentation uses only Viadere's wording.
         let generic = LiveActivityPresentation(status: .decision(late), businessName: "Copperline", now: now)

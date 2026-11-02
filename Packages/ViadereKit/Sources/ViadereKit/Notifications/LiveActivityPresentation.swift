@@ -30,7 +30,8 @@ public struct LiveActivityPresentation: Equatable, Sendable {
     /// A countdown is only worth showing inside this window; farther out, a status word is calmer.
     public static let countdownWindow: TimeInterval = 99 * 60
 
-    public init(status: LiveActivityStatus, businessName rawBusinessName: String, now: Date = Date()) {
+    /// - Parameter disclosure: for a decision activity, `.neutral` (the default) never names the business (F-09).
+    public init(status: LiveActivityStatus, businessName rawBusinessName: String, disclosure: LiveActivityDisclosure = .neutral, now: Date = Date()) {
         let businessName = UntrustedText.name(rawBusinessName, max: 40, attribution: nil).text
         switch status {
         case .order(let s):
@@ -97,13 +98,15 @@ public struct LiveActivityPresentation: Equatable, Sendable {
             if let provider = s.providerName ?? Optional(businessName), s.stage != .completed { detail += " · \(provider)" }
         case .decision(let s):
             // Viadere's own wording only: the decision's business text is drawn by `LiveDecisionPresentation`, never here.
-            headline = "Decision needed"
+            headline = AuthDeliveryCopy.liveActivityHeadline
             symbol = "checkmark.circle"
             target = s.stage == .pending ? s.expiresAt : nil
             isAlert = false
             progress = nil
             switch s.stage {
-            case .pending: detail = "\(businessName) needs a quick decision"; compact = "Decide"
+            case .pending:
+                detail = disclosure == .detailed ? "\(businessName) needs a quick decision" : AuthDeliveryCopy.liveActivityDetail
+                compact = "Decide"
             case .answered: detail = "Answered"; compact = "Done"
             case .expired: detail = "Expired"; compact = "Expired"
             case .cancelled: detail = "Withdrawn by the business"; compact = "Off"
