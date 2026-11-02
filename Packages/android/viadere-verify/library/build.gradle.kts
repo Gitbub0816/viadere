@@ -17,6 +17,13 @@ android {
         consumerProguardFiles("consumer-rules.pro")
     }
     buildFeatures { compose = true }
+    lint {
+        warningsAsErrors = true
+        abortOnError = true
+        // AndroidX's own lifecycle lint registry references Kotlin analysis APIs that lint 32.5 no longer has; lint skips it and says so.
+        // That is a tooling notice about a transitive library, not an issue in this code.
+        disable += "ObsoleteLintCustomCheck"
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

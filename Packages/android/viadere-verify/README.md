@@ -13,11 +13,17 @@ the hand-off table are in [`docs/VERIFY-BUTTON.md`](../../../docs/VERIFY-BUTTON.
 
 ## Build status
 
-- **Compiled and tested here:** `QrCode.kt`, `VerifyModel.kt` and the unit tests under `library/src/test` (Kotlin 2.4.21 on a JVM-only Gradle
-  build, 6/6 passing; the QR vectors are the web encoder's output cross-checked against the `qrcode` reference library).
-- **Not compiled here** (no Android SDK in the dev container): `VerifyLauncher.kt`, `VerifyWithViadereButton.kt`, and the Android Gradle build
-  itself (`compileSdk { version = release(37) { minorApiLevel = 2 } }` uses the AGP 9 DSL). Build it once in Android Studio or CI before release.
-- The Gradle wrapper JAR and scripts are not committed: run `gradle wrapper --gradle-version 9.8.2` once (the properties pin the distribution
-  checksum), then `./gradlew :library:testDebugUnitTest`.
-- Still to do on the first real build: commit Gradle dependency locks (`./gradlew dependencies --write-locks`) and verification metadata
-  (`./gradlew --write-verification-metadata sha256 help`), so the pinned tooling has a committed lockfile as CLAUDE.md rule 4 asks.
+Built and tested for real on 2026-11-02 (Linux, JDK 21, Android SDK command-line tools 23.0, platform 37.2, build-tools 36.0.0):
+`./gradlew :library:assembleRelease :library:testDebugUnitTest :library:lint` passes with no compiler warnings and no lint findings
+(`lint { warningsAsErrors = true }`); 6/6 unit tests pass (the QR vectors are the web encoder's output cross-checked against the `qrcode`
+reference library). That covers `VerifyLauncher.kt`, `VerifyWithViadereButton.kt`, the Android Gradle build and the `compileSdk` DSL.
+
+- **Not covered:** no emulator or device run (the App Link hand-off and the Compose UI are compiled and linted, not exercised); do that
+  once in Android Studio or CI before release.
+- **Setup:** `export ANDROID_HOME=<sdk>` (or `local.properties`) with the platform and build-tools above; AGP installs missing licensed
+  components itself once the licenses are accepted (`sdkmanager --licenses`).
+- **Reproducibility:** the wrapper JAR and scripts are committed (distribution SHA-256 pinned in `gradle-wrapper.properties`);
+  `gradle/dependency-locks/` and `settings-gradle.lockfile` lock every configuration (regenerate with
+  `./gradlew :library:assembleRelease :library:testDebugUnitTest :library:lint :library:dependencies --write-locks`);
+  `gradle/verification-metadata.xml` holds sha256 checksums for every artifact and plugin (regenerate by adding
+  `--write-verification-metadata sha256`). A dependency upgrade means re-running both and reviewing the diff.
