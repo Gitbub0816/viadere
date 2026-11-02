@@ -3,7 +3,7 @@ import Testing
 import ViadereCore
 @testable import ViadereKit
 
-/// The app side of "Verify with Viadere" (`docs/SECURITY.md` §2.60): the link routes strictly, the review shows only what Viadere signed, and the
+/// The app side of "Verify with Viadere" (`docs/SECURITY.md` §2.100): the link routes strictly, the review shows only what Viadere signed, and the
 /// app accepts exactly that, never opening a return URL outside the session's origin.
 @Suite("Verification sessions (app)")
 struct VerificationSessionFlowTests {

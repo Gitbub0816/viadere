@@ -2,7 +2,7 @@ import Foundation
 import ViadereCore
 
 /// The device side of verification sessions — what happens when a business's "Verify with Viadere" button (QR, universal link or typed code)
-/// opens the app (`docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.60). Separate from `VerifyAPI` so existing fakes keep compiling.
+/// opens the app (`docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.100). Separate from `VerifyAPI` so existing fakes keep compiling.
 public protocol VerificationSessionAPI: Sendable {
     func lookupVerificationSession(code: String) async throws -> VerificationSessionOffer
     func acceptVerificationSession(id: UUID, request: VerificationSessionAcceptRequest) async throws -> VerificationSessionAccepted
@@ -48,7 +48,7 @@ public struct VerificationSessionReview: Sendable, Equatable {
     public var purpose: String { VerificationPromptContent.purposeText(descriptor.purposeCode) }
     /// Accepting connects this account to the business (it can then send you messages you allow; you can disconnect any time).
     public var connects: Bool { !offer.alreadyConnected }
-    /// Real-time relay phishing (§2.60): the person must be on the business's own site, right now.
+    /// Real-time relay phishing (§2.100): the person must be on the business's own site, right now.
     public var warning: String {
         "Continue only if you are on \(originHost) right now and started this yourself. If someone sent you this code or link, stop."
     }

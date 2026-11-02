@@ -1,7 +1,7 @@
 import Fluent
 import Foundation
 
-/// Verification sessions ("Verify with Viadere", `docs/SECURITY.md` §2.60). **Additive and forward-only**: one new table, nothing else changes.
+/// Verification sessions ("Verify with Viadere", `docs/SECURITY.md` §2.100). **Additive and forward-only**: one new table, nothing else changes.
 ///
 /// * `verification_sessions`: one expiring (≤ 5 min), single-use session a business opens for one Verify capability on one of its verified web
 ///   origins. The code is stored only as a keyed hash. Once the app accepts it the row names the account (pairwise `subject_ref`), the

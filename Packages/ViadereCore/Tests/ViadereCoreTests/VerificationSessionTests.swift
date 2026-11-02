@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import ViadereCore
 
-/// Verification sessions ("Verify with Viadere", `docs/SECURITY.md` §2.60). Each test reproduces an attack on the hand-off and shows it is refused.
+/// Verification sessions ("Verify with Viadere", `docs/SECURITY.md` §2.100). Each test reproduces an attack on the hand-off and shows it is refused.
 @Suite("Verification sessions")
 struct VerificationSessionTests {
     let viadere = SoftwareP256SigningKey()          // the `link-descriptor` key (KMS-held on the server)

@@ -3,7 +3,7 @@ import Foundation
 import Vapor
 import ViadereCore
 
-/// One verification session ("Verify with Viadere", `docs/SECURITY.md` §2.60). The code is stored only as a keyed hash.
+/// One verification session ("Verify with Viadere", `docs/SECURITY.md` §2.100). The code is stored only as a keyed hash.
 final class VerificationSessionRecord: Model, @unchecked Sendable {
     static let schema = "verification_sessions"
     @ID(key: .id) var id: UUID?
@@ -46,7 +46,7 @@ final class VerificationSessionRecord: Model, @unchecked Sendable {
     var signedResult: ViadereSignedStatement? { result.flatMap { try? ViadereJSON.decode(ViadereSignedStatement.self, from: Data($0.utf8)) } }
 }
 
-/// Verification sessions: the server side of the "Verify with Viadere" button (`docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.60).
+/// Verification sessions: the server side of the "Verify with Viadere" button (`docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.100).
 ///
 /// 1. The business's **server** creates a ≤ 5 min, single-use session for one Verify capability it is entitled to, on one web origin inside one
 ///    of its **verified domains** (live keys only).

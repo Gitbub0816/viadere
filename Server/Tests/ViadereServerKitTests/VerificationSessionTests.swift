@@ -6,7 +6,7 @@ import ViadereCore
 import XCTest
 @testable import ViadereServerKit
 
-/// Verification sessions — the "Verify with Viadere" button (`docs/SECURITY.md` §2.60). Each test reproduces an attack on the hand-off (QR / universal
+/// Verification sessions — the "Verify with Viadere" button (`docs/SECURITY.md` §2.100). Each test reproduces an attack on the hand-off (QR / universal
 /// link) or on the result and shows it is refused: origin binding, single use, short expiry, descriptor binding, tenant isolation, signed results.
 private func aneq<T: Equatable>(_ lhs: T, _ rhs: T, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
     XCTAssertNotEqual(lhs, rhs, message, file: file, line: line)

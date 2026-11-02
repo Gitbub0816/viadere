@@ -37,7 +37,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
 9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
 
-### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then)
+### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then; Android and browser-test rows checked 2026-11-02)
 
 | Component | Required | Notes |
 |---|---|---|
@@ -63,6 +63,8 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Azure CLI (CI deploy, owner) | ≥ 2.91.0 | Preinstalled on GitHub runners; `.github/workflows/azure.yml` fails below this floor and disables dynamic extension installs |
 | Azure Database for PostgreSQL Flexible Server | 18 (Azure creates 18.6; minors applied by Azure in monthly maintenance) | `Infra/azure/postgres.tf`; CI keeps testing the community `postgres:18` image |
 | cloudflared (Cloudflare Tunnel connector) | 2026.10.6, digest-pinned | `Infra/azure` variable `cloudflared_image`; Go binary image |
+| Android library toolchain (`Packages/android/viadere-verify`) | Gradle 9.8.2 / AGP 9.5.0 / Kotlin 2.4.21 / Compose BOM 2026.09.00 (`ui`, `foundation` 1.12.1) / JUnit 4.13.2 | Checked 2026-11-02: Gradle on services.gradle.org (wrapper pins the distribution SHA-256), AGP and Compose on Google's Maven repository, Kotlin on Maven Central and the Gradle plugin portal (Compose compiler plugin = Kotlin version), JUnit on Maven Central. Compile SDK 37.2 (newest stable platform in Google's `repository2-4.xml`). AGP 9's built-in Kotlin, no other dependencies |
+| Browser-test tooling (Python) | playwright 1.64.1, qrcode 8.2 | `Server/Tests/browser`, CI `browser` job; PyPI 2026-11-02. `qrcode` is the reference the web button's QR encoder is checked against |
 
 ### Exceptions
 
@@ -71,6 +73,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Vapor | 4.x (not 5) | Vapor 5 is still beta | Vapor 5 has a stable release — plan the migration |
 | webauthn-swift (revision pin) | `main` @ `030acd1e` (after 1.0.0-beta.1) | The latest tagged release (1.0.0-beta.1) caps swift-crypto below 5.0.0; only an untagged main commit allows swift-crypto 5. `Server/Package.swift` pins that exact revision | A stable 1.x (or a tag allowing swift-crypto 5) ships — switch to `from:` the same week |
 | iOS / watchOS deployment target | iOS 17 / watchOS 10 | Product decision for device reach | The product owner raises the minimum |
+| Android library minimum SDK | `minSdk 30` (Android 11) | `FLAG_ACTIVITY_REQUIRE_NON_BROWSER` (the App Link hand-off that never falls back to a browser tab) exists from API 30; product decision for device reach like the iOS target | The product owner changes the minimum (below 30 needs another non-browser hand-off check) |
 | GitHub-hosted JavaScript actions (`actions/checkout`, `upload-artifact`, `download-artifact`, `attest-build-provenance`, `github/codeql-action/upload-sarif`) | Current stable, pinned to full commit SHAs | GitHub's own platform actions run on the Node runtime bundled with GitHub-hosted runners — GitHub infrastructure, not our code or tooling. No third-party JavaScript actions; scanners are checksum-pinned Go/Rust binaries | GitHub ships non-Node equivalents, or CI moves to a self-hosted runner without them |
 | TLS 1.2 client compatibility | Minimum TLS 1.2 at Cloudflare, ECDHE + AEAD suites only; TLS 1.3 preferred | SEC-TR-001 allows modern TLS 1.2 under a reviewed compatibility policy (`docs/ops/TLS-COMPATIBILITY-POLICY.md`) | That policy's telemetry gate shows TLS 1.2 traffic can be dropped |
 | Azure lean profile: public endpoints for Service Bus and Key Vault | Service Bus **Basic** (no private networking exists below Premium) with local SAS auth disabled; Key Vault **Standard** with RBAC only, purge protection and a firewall that admits only the Container Apps subnet (+ listed admin IPs) and trusted Azure services (`bypass = AzureServices`, needed for ARM key creation; network layer only, no data-plane role is granted to them). Entra tokens are the only way in | Testing budget of about USD 30/month (plan 5.8a): private endpoints cost USD 7.30/month each and Service Bus Premium USD 677/month. `Infra/azure/policy_check.py` records them as `SB-PUBLIC` / `KV-PUBLIC` and fails them in `standard` | The lean environment is replaced by the `standard` profile (private endpoints, public access disabled), before any real customer data |

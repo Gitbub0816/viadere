@@ -1,7 +1,7 @@
 import Crypto
 import Foundation
 
-// MARK: - Verification sessions ("Verify with Viadere", `docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.60)
+// MARK: - Verification sessions ("Verify with Viadere", `docs/VERIFY-BUTTON.md`, `docs/SECURITY.md` §2.100)
 //
 // A business shows a "Verify with Viadere" button on its website or in its app. Its **server** creates a short-lived, single-use verification
 // session for one capability (`age.minimum`, `identity.*`) and the web origin it will show the button on. The button hands the session's link
