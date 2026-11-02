@@ -140,7 +140,7 @@ struct VerifyService {
     }
 
     /// `callback_id` is an identifier of a webhook endpoint the business registered and verified, never a URL.
-    private func resolveCallback(_ raw: String?, principal: BusinessPrincipal) async throws -> UUID? {
+    func resolveCallback(_ raw: String?, principal: BusinessPrincipal) async throws -> UUID? {
         guard let raw else { return nil }
         guard let id = UUID(uuidString: raw), raw.count == 36,
               let subscription = try await WebhookSubscriptionRecord.query(on: db).filter(\.$id == id).filter(\.$businessId == principal.businessId.uuid)
@@ -402,6 +402,9 @@ struct VerifyService {
                     opaque: OpaqueWebhookEvent(requestId: record.requestID.description, resultRef: ref.rawValue))
             }
         }
+        // A request opened by a verification session completes that session with Viadere's signed result (best effort here; the business's next
+        // read of the session completes it otherwise).
+        await VerificationSessionService(db: db, ctx: ctx, runtime: runtime).requestConcluded(requestId: record.id!)
     }
 
     /// Concludes a request whose evidence was verified: `built == nil` means the evidence did not support the claim (under the threshold,

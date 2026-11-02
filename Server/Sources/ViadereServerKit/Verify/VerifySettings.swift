@@ -45,6 +45,10 @@ public struct VerifySettings: Sendable {
     /// How often the consumer may start verification attempts, and request creation per business.
     public var createRate: RateRule = .perMinute(60, burst: 30)
     public var attemptRate: RateRule = .perMinute(30, burst: 20)
+    /// Verification-session code lookups ("Verify with Viadere"): per account and globally, like link-session lookups (the 40-bit code space and the
+    /// five-minute lifetime then make a search hopeless).
+    public var sessionLookupRate: RateRule = .perHour(10, burst: 5)
+    public var sessionLookupRateGlobal: RateRule = .perMinute(120, burst: 60)
 
     public init() {}
 
