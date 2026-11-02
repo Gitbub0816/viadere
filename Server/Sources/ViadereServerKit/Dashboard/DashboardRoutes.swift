@@ -45,7 +45,7 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
         // A failed form submission offers a way back to the form it came from (a same-console path from the Referer, never another site).
         var back: String?
         if let p = principal, request.method == .POST, ![.forbidden, .notFound].contains(error.status) {
-            back = ConsoleUI.backPath(referer: request.headers.first(name: .referer), host: request.headers.first(name: .host), prefix: p.realm.home)
+            back = ConsoleUI.backPath(referer: request.headers.first(name: .referer), allowedOrigins: DashboardCSRF.allowedOrigins(request.ctx), prefix: p.realm.home)
         }
         let response = DashboardUI.errorPage(principal, status: error.status, title: title, message: error.message, fields: fields, back: back)
         for (name, value) in error.headers { response.headers.replaceOrAdd(name: name, value: value) }

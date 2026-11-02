@@ -325,7 +325,7 @@ enum ConsoleUI {
 
     private static func describedBy(_ id: String, help: Bool, error: Bool) -> String {
         let ids = (help ? ["\(id)-h"] : []) + (error ? ["\(id)-e"] : [])
-        return ids.isEmpty ? "" : " aria-describedby=\"\(ids.joined(separator: " "))\""
+        return ids.isEmpty ? "" : " aria-describedby=\"\(esc(ids.joined(separator: " ")))\""
     }
 
     private static func attributeString(_ attrs: [String: String]) -> String {
@@ -541,7 +541,7 @@ enum ConsoleUI {
     static func checklist(_ steps: [Step], label: String) -> String {
         let done = steps.filter(\.done).count
         let next = steps.firstIndex { !$0.done }
-        let items = steps.enumerated().map { index, step in
+        let items = steps.enumerated().map { index, step -> String in
             let mark = step.done ? icon(.check) : String(index + 1)
             let cls = step.done ? " class=\"done\"" : (index == next ? " class=\"now\"" : "")
             return "<li\(cls)><span class=\"dot\" aria-hidden=\"true\">\(mark)</span><div><p class=\"ct\">\(esc(step.title)) <span class=\"vh\">\(step.done ? "(done)" : (index == next ? "(next step)" : "(to do)"))</span></p><p class=\"cd\">\(step.detailHTML)</p></div></li>"
@@ -725,11 +725,16 @@ enum ConsoleUI {
 
     // MARK: - Navigation helpers
 
-    /// A same-origin path from the `Referer` header for a "go back" link, or nil. Only a relative path inside `prefix` is accepted (no scheme,
-    /// no host, no `//`), so the link can never lead off the console.
-    static func backPath(referer: String?, host: String?, prefix: String) -> String? {
+    /// A same-origin path from the `Referer` header for a "go back" link, or nil. An absolute Referer must be one of the console's own
+    /// origins (`DashboardCSRF.allowedOrigins`, never the request's Host header); only a path inside `prefix` is kept (no scheme, no host,
+    /// no `//`), so the link can never lead off the console.
+    static func backPath(referer: String?, allowedOrigins: Set<String>, prefix: String) -> String? {
         guard let referer, let url = URLComponents(string: referer) else { return nil }
-        if let refererHost = url.host { guard let host, refererHost.lowercased() == host.lowercased().split(separator: ":").first.map(String.init) else { return nil } }
+        if url.scheme != nil || url.host != nil {
+            guard let scheme = url.scheme, let host = url.host else { return nil }
+            let origin = "\(scheme.lowercased())://\(host.lowercased())" + (url.port.map { ":\($0)" } ?? "")
+            guard allowedOrigins.contains(where: { $0.lowercased() == origin }) else { return nil }
+        }
         let path = url.percentEncodedPath
         guard path == prefix || path.hasPrefix(prefix + "/"), !path.hasPrefix("//"), !path.contains("\\") else { return nil }
         var components = URLComponents()

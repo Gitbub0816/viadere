@@ -127,16 +127,17 @@ final class ConsoleDesignSystemTests: XCTestCase {
     // MARK: Navigation
 
     func testGoBackLinksNeverLeaveTheConsole() {
-        let host = "console.viadere.com"
-        XCTAssertEqual(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboard/api-keys?x=1", host: host, prefix: "/dashboard"), "/dashboard/api-keys?x=1")
-        XCTAssertEqual(ConsoleUI.backPath(referer: "/dashboard/compliance", host: nil, prefix: "/dashboard"), "/dashboard/compliance")
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://evil.example/dashboard/api-keys", host: host, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://evil.example/dashboard/api-keys", host: nil, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "//evil.example/dashboard", host: host, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "javascript:alert(1)", host: host, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/operator/policy", host: host, prefix: "/dashboard"), "the other realm is not offered")
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboardx", host: host, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: nil, host: host, prefix: "/dashboard"))
+        let origins: Set<String> = ["https://console.viadere.com"]
+        XCTAssertEqual(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboard/api-keys?x=1", allowedOrigins: origins, prefix: "/dashboard"), "/dashboard/api-keys?x=1")
+        XCTAssertEqual(ConsoleUI.backPath(referer: "/dashboard/compliance", allowedOrigins: origins, prefix: "/dashboard"), "/dashboard/compliance")
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://evil.example/dashboard/api-keys", allowedOrigins: origins, prefix: "/dashboard"))
+        XCTAssertNil(ConsoleUI.backPath(referer: "http://console.viadere.com/dashboard/api-keys", allowedOrigins: origins, prefix: "/dashboard"), "scheme must match")
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com:8443/dashboard", allowedOrigins: origins, prefix: "/dashboard"), "port must match")
+        XCTAssertNil(ConsoleUI.backPath(referer: "//evil.example/dashboard", allowedOrigins: origins, prefix: "/dashboard"))
+        XCTAssertNil(ConsoleUI.backPath(referer: "javascript:alert(1)", allowedOrigins: origins, prefix: "/dashboard"))
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/operator/policy", allowedOrigins: origins, prefix: "/dashboard"), "the other realm is not offered")
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboardx", allowedOrigins: origins, prefix: "/dashboard"))
+        XCTAssertNil(ConsoleUI.backPath(referer: nil, allowedOrigins: origins, prefix: "/dashboard"))
     }
 
     func testBreadcrumbsFollowTheSectionsAndEveryPageHasAnIcon() {
@@ -192,7 +193,7 @@ final class ConsoleDesignSystemPageTests: XCTestCase {
         try await withHarness { h in
             let (owner, _, _) = try await h.verifiedOwner()
             let form = [("slug", "terms"), ("version", "1")]
-            let back = try await h.formPost("/dashboard/compliance/accept", owner, form, headers: ["Referer": "/dashboard/compliance"])
+            let back = try await h.formPost("/dashboard/compliance/accept", owner, form, headers: ["Referer": h.origin + "/dashboard/compliance"])
             XCTAssertEqual(back.status, .unprocessableEntity)
             XCTAssertTrue(back.text.contains("<a class=\"btn\" href=\"/dashboard/compliance\">Go back and fix it</a>"), back.text)
             XCTAssertTrue(back.text.contains("Check: <strong>confirm</strong>"))
