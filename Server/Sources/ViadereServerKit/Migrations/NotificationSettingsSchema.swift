@@ -20,7 +20,7 @@ final class NotificationSettingsRecord: Model, @unchecked Sendable {
 ///
 /// `has_own_level` tells a level the customer chose for one business from the absence of a choice, so a business without its own level can
 /// inherit the account-wide default. Existing rows that are muted are backfilled as their own level (they were chosen); an existing row at
-/// `none` stays "inherits", which is the same as before until the customer sets a default.
+/// `none` is handled by `NotificationSettings.v2`.
 struct CreateNotificationSettingsSchema: AsyncMigration {
     var name: String { "NotificationSettings.v1" }
 
@@ -41,6 +41,22 @@ struct CreateNotificationSettingsSchema: AsyncMigration {
         try await db.schema(BusinessPreferenceRecord.schema).deleteField("has_own_level").update()
         try await db.schema(NotificationSettingsRecord.schema).delete()
     }
+}
+
+/// `NotificationSettings.v2` (additive, data only): every `business_preferences` row that exists now is the customer's own choice.
+///
+/// Before the account-wide default existed, a stored row at `none` was a customer's explicit Everything (or a favorite or block that never
+/// touched the level), and v1 could not tell those from "no choice", so the row would have followed a quieter default. A row only exists once
+/// the customer changed something, so marking all of them keeps what they had; only a business with **no** stored row inherits. The direction
+/// is safe: it never makes a pre-existing business quieter. Rows created later are marked by the app (`PreferenceService`). Idempotent.
+struct CreateNotificationLevelBackfill: AsyncMigration {
+    var name: String { "NotificationSettings.v2" }
+
+    func prepare(on db: any Database) async throws {
+        try await BusinessPreferenceRecord.query(on: db).filter(\.$hasOwnLevel == false).set(\.$hasOwnLevel, to: true).update()
+    }
+
+    func revert(on db: any Database) async throws {}
 }
 
 /// `LoopInstallAlerts.v1` (additive, forward-only): `loop_installs.alerts_enabled`, the customer's per-installed-Loop permission to show
