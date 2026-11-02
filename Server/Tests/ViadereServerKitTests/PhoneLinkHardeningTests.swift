@@ -371,6 +371,7 @@ final class PhoneLinkHardeningTests: XCTestCase {
             let notice = try XCTUnwrap(noticeAll.first { $0.topic == .phoneTransferRequested })
             try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
             h.clock.advance(by: 72 * 3600 + 1)
+            oldOwner = try await h.login(oldOwner)  // the earlier session expired while the clock moved past the 72-hour window
             let (db, ctx) = (h.db, h.ctx)
             let owner = oldOwner
             async let job: Int = PhoneLinkService(db: db, ctx: ctx).completeTransfers()
