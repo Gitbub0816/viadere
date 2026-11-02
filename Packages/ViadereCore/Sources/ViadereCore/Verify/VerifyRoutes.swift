@@ -44,13 +44,13 @@ extension APIRoutes {
     public static let providerDiditWebhook = Endpoint<Data, EmptyBody>(
         "providers.didit.webhook", .POST, "/v1/providers/didit/webhook", auth: .providerSignature)
 
-    /// Every Verify endpoint (appended to `APIRoutes.all`).
+    /// Every Verify endpoint (appended to `APIRoutes.all`), verification sessions included.
     public static let verifyEndpoints: [AnyEndpoint] = [
         verificationRequestCreate.descriptor, verificationRequestGet.descriptor, verificationResultGet.descriptor,
         verificationsList.descriptor, verificationGet.descriptor, verificationConsent.descriptor, verificationDecline.descriptor,
         verificationRevoke.descriptor, verificationWalletBegin.descriptor, verificationWalletComplete.descriptor,
         verificationDocumentBegin.descriptor, verificationDocumentComplete.descriptor, providerDiditWebhook.descriptor,
-    ]
+    ] + verificationSessionEndpoints
 }
 
 extension VerificationPrompt {

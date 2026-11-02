@@ -511,6 +511,8 @@ public enum APIRoutes {
         public static let linkSessionPrefix = "/k/"
         /// Approve v2 enrollment landing: `/a/{CODE}?rk=…#es=…`.
         public static let approveEnrollmentPrefix = "/a/"
+        /// Verification-session landing ("Verify with Viadere"): `/v/{CODE}`. No secret, no query; the app reads everything from the signed descriptor.
+        public static let verificationSessionPrefix = "/v/"
 
         public static func accountLinkURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(accountLinkPrefix + token) }
         public static func handoffURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(handoffPrefix + token) }
