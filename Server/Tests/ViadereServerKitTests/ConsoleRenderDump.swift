@@ -51,6 +51,12 @@ final class ConsoleRenderDump: XCTestCase {
             try await LoopInstallService(db: h.db, ctx: h.ctx).setListing(publicationId: publication.id!, category: .foodAndDrink, listed: true, featured: true,
                                                                           operatorId: world.reviewer1, reason: "Checked for the directory.")
             for _ in 0..<2 { _ = try await LoopStudioTests.createDraft(h, owner, template: "pickup_time") }
+            // Inbox: a customer answered the published Loop, so the hosted inbox has an item (list and detail pages).
+            let instance = try await world.instance(world.alice, publication)
+            _ = try await world.submitPickup(world.alice, instance.id)
+            try await world.drain(.loopDelivery)
+            // Operator: a new Loop revision waiting for review (the review queue and the review page).
+            _ = try await world.submit(LoopFixtures.pickup(title: "Weekend special pickup", key: "weekend"))
 
             let (op, opAccount) = try await h.makeOperator()
             try await h.dashReauth(op, opAccount)

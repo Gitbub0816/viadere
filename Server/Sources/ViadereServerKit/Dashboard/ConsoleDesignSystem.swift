@@ -65,7 +65,7 @@ enum ConsoleUI {
     main{padding:var(--s6) clamp(1rem,3vw,2.25rem) var(--s7);width:100%;max-width:1280px}
     .ph{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:var(--s4);margin-bottom:var(--s5)}.ph .sub{color:var(--mu);margin:.35rem 0 0;max-width:46rem}.ph .acts{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
     .head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
-    .tabs{position:relative;display:flex;gap:var(--s5);margin:calc(-1 * var(--s2)) 0 var(--s5);padding:0;border-bottom:1px solid var(--hl);overflow-x:auto;scrollbar-width:thin}
+    .tabs{position:relative;display:flex;gap:var(--s5);margin:calc(-1 * var(--s2)) 0 var(--s5);padding:0;border-bottom:1px solid var(--hl);overflow-x:auto;scrollbar-width:thin;background:linear-gradient(to right,var(--bg),var(--bg)) left/1.5rem 100% no-repeat local,linear-gradient(to left,var(--bg),var(--bg)) right/1.5rem 100% no-repeat local,linear-gradient(to right,var(--hl2),transparent) left/.75rem 100% no-repeat scroll,linear-gradient(to left,var(--hl2),transparent) right/.75rem 100% no-repeat scroll}
     .tabs a{display:inline-flex;align-items:center;min-height:2.5rem;padding:.35rem 0;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--mu);font-size:.9rem;white-space:nowrap;text-decoration:none}.tabs a:hover{color:var(--fg)}
     .tabs a[aria-current=page]{color:var(--fg);font-weight:600;border-bottom-color:var(--ac)}
     .card{background:var(--sf);border:1px solid var(--hl);border-radius:var(--r3);padding:var(--s5);margin-bottom:var(--s4);box-shadow:var(--sh);min-width:0}
@@ -81,7 +81,7 @@ enum ConsoleUI {
     .stat .n{font-size:var(--fs-3xl);font-weight:300;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.stat .l{font-size:var(--fs-sm);color:var(--mu);margin-top:.3rem}.stat .h{font-size:var(--fs-xs);color:var(--mu);margin-top:.35rem}
     a.stat:hover{border-color:var(--ac)}.stat.t-danger{border-color:var(--dg)}.stat.t-danger .n{color:var(--dg)}.stat.t-warning{border-color:var(--wa)}.stat.t-warning .n{color:var(--wa)}.stat.t-success .n{color:var(--ok)}
     .card .stat{box-shadow:none;background:var(--bg)}
-    .tw{position:relative;overflow-x:auto;margin:0 0 var(--s3);-webkit-overflow-scrolling:touch}.tw>table:has(select,input){min-width:36rem}td select{min-width:7.5rem}td input[type=number]{min-width:4.5rem}td input[type=datetime-local]{min-width:12rem}
+    .tw{position:relative;overflow-x:auto;margin:0 0 var(--s3);-webkit-overflow-scrolling:touch;--tw:var(--sf);background:linear-gradient(to right,var(--tw),var(--tw)) left/1.5rem 100% no-repeat local,linear-gradient(to left,var(--tw),var(--tw)) right/1.5rem 100% no-repeat local,linear-gradient(to right,var(--hl2),transparent) left/.75rem 100% no-repeat scroll,linear-gradient(to left,var(--hl2),transparent) right/.75rem 100% no-repeat scroll}.tw th{background:transparent}fieldset .tw{--tw:var(--bg)}.tw>table:has(select,input){min-width:36rem}td select{min-width:7.5rem}td input[type=number]{min-width:4.5rem}td input[type=datetime-local]{min-width:12rem}
     table{width:100%;border-collapse:separate;border-spacing:0;font-size:.9rem}
     th{font-size:var(--fs-xs);font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--hl2);white-space:nowrap;background:var(--sf)}
     td{padding:.7rem .7rem;border-bottom:1px solid var(--hl);vertical-align:top}tbody tr:last-child td{border-bottom:0}tbody tr:hover td{background:var(--mus)}
@@ -111,7 +111,10 @@ enum ConsoleUI {
     input:focus-visible,select:focus-visible,textarea:focus-visible{border-color:var(--ac);box-shadow:0 0 0 3px var(--acs)}
     input:disabled,select:disabled,textarea:disabled{opacity:.6;cursor:not-allowed;background:var(--sk)}
     input[type=color]{width:3.25rem;height:2.4rem;padding:.2rem;border:1px solid var(--bd);border-radius:var(--r1);background:var(--sr)}
-    input[type=file]{font:inherit;font-size:var(--fs-sm);max-width:100%}
+    input[type=file]{font:inherit;font-size:var(--fs-sm);color:var(--mu);max-width:100%;min-height:2.5rem;padding:.25rem 0;cursor:pointer}
+    input[type=file]::file-selector-button{font:inherit;font-size:.9rem;font-weight:600;min-height:2.25rem;margin:0 var(--s3) 0 0;padding:.4rem 1.05rem;border:1px solid var(--bd);border-radius:999px;background:var(--sr);color:var(--fg);cursor:pointer;transition:background-color .15s,border-color .15s}
+    input[type=file]:hover::file-selector-button{background:var(--acs);border-color:var(--fg)}
+    input[type=file]:focus-visible{outline:2px solid var(--ac);outline-offset:2px;border-radius:999px}
     [aria-invalid=true],input:user-invalid,select:user-invalid,textarea:user-invalid{border-color:var(--dg)}
     .help{font-size:var(--fs-sm);color:var(--mu);margin:.35rem 0 0}.ferr{display:flex;gap:.35rem;align-items:flex-start;font-size:var(--fs-sm);color:var(--dg);font-weight:600;margin:.35rem 0 0}.ferr .ico{width:15px;height:15px;margin-top:.15rem}
     .vmsg{display:none;font-size:var(--fs-sm);color:var(--dg);margin:.35rem 0 0}.field:has(:user-invalid) .vmsg{display:block}
@@ -171,10 +174,10 @@ enum ConsoleUI {
     .op .side .pill{background:var(--op);color:var(--pf)}
     @media(prefers-color-scheme:dark){.op .side{background:#2A2825;color:var(--fg);border-right:1px solid var(--hl2)}.op .side .brand,.op .side>nav a,.op .side-foot a{color:var(--fg)}.op .side>nav a .ico{color:var(--fg)}.op .side>nav a[aria-current=page]{color:var(--ac);box-shadow:inset 3px 0 0 var(--ac)}.op .side>nav a[aria-current=page] .ico{color:var(--ac)}.op .side .nav-g,.op .side .org .k{color:var(--mu);opacity:1}.op .side .pill{background:var(--acs);color:var(--ac)}.op .side .org{border-color:var(--hl2)}}
     @media(max-width:1100px){.split{grid-template-columns:minmax(0,1fr)}}
-    @media(max-width:820px){.shell{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;overflow:visible;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);border-right:0;border-bottom:1px solid var(--hl)}
+    @media(max-width:820px){.tw .act{position:sticky;right:0;background:var(--tw);box-shadow:-10px 0 8px -8px var(--hl2)}tbody tr:hover td.act{background:var(--tw);background-image:linear-gradient(var(--mus),var(--mus))}.shell{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;overflow:visible;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);border-right:0;border-bottom:1px solid var(--hl)}
     .side>nav{order:3;width:100%;flex-direction:row;overflow-x:auto;gap:var(--s1);padding-bottom:var(--s1);scrollbar-width:thin}.side>nav a{white-space:nowrap;min-height:2.25rem}.nav-g,.org,.side-foot{display:none}.brand .realm{margin-left:var(--s2)}
     .top{position:static}main{padding-top:var(--s5)}.who .nm{display:none}}
-    @media(max-width:560px){.tw>table{min-width:30rem}.cols:has(.qr){grid-template-columns:minmax(0,1fr)}.btn{white-space:normal;text-align:center}h1{font-size:1.45rem}main{padding:var(--s4) var(--s4) var(--s6)}.card{padding:var(--s4);border-radius:var(--r2)}.kv{grid-template-columns:minmax(0,1fr)}.kv dd{margin-bottom:var(--s2)}
+    @media(max-width:560px){.tabs{flex-wrap:wrap;gap:0 var(--s4);overflow-x:visible;background:none}.tw>table{min-width:30rem}.cols:has(.qr){grid-template-columns:minmax(0,1fr)}.btn{white-space:normal;text-align:center}h1{font-size:1.45rem}main{padding:var(--s4) var(--s4) var(--s6)}.card{padding:var(--s4);border-radius:var(--r2)}.kv{grid-template-columns:minmax(0,1fr)}.kv dd{margin-bottom:var(--s2)}
     .ph{align-items:flex-start}.form-actions .btn{flex:1 1 auto}.top{flex-wrap:wrap}.stat .n{font-size:var(--fs-2xl)}.auth .card{padding:var(--s5) var(--s4)}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
     @media(forced-colors:active){.btn,.pill,.badge,.stat,.card,.callout,.notice,.toast{border:1px solid CanvasText}.side>nav a[aria-current=page],.tabs a[aria-current=page]{outline:2px solid Highlight}}
