@@ -182,22 +182,28 @@ struct HouseholdInviteSheet: View {
     private var access: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Access").font(ViadereType.footnote.weight(.medium)).foregroundStyle(ViadereColor.textSecondary).padding(.bottom, ViadereSpace.xs)
-            ViadereRowGroup {
-                ForEach(Array(DelegationScopePolicy.delegablePurposes.enumerated()), id: \.element) { index, purpose in
-                    Toggle(isOn: Binding(get: { vm.draft.purposes.contains(purpose) }, set: { _ in vm.togglePurpose(purpose) })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: ViadereSpace.xs) {
-                                Text(PermissionCopy.title(purpose)).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                                if DelegationScopePolicy.isSensitive(purpose) { ViadereBadge("Sensitive", kind: .verified) }
-                            }
-                            Text(PermissionCopy.detail(purpose)).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
-                        }
+            // One chip per purpose instead of a column of switches; what the chosen ones mean is spelled out under them.
+            ViadereChipSet("Access",
+                           chips: DelegationScopePolicy.delegablePurposes.map { purpose in
+                               ViadereChipSet<InteractionPurpose>.Chip(purpose, PermissionCopy.title(purpose), hint: PermissionCopy.detail(purpose))
+                           },
+                           isSelected: { vm.draft.purposes.contains($0) },
+                           toggle: { vm.togglePurpose($0) })
+            let chosen = DelegationScopePolicy.delegablePurposes.filter { vm.draft.purposes.contains($0) }
+            VStack(alignment: .leading, spacing: ViadereSpace.xxs) {
+                if chosen.isEmpty {
+                    Text("Choose at least one.").font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                }
+                ForEach(chosen, id: \.self) { purpose in
+                    HStack(alignment: .firstTextBaseline, spacing: ViadereSpace.xs) {
+                        Text("\(PermissionCopy.title(purpose)): \(PermissionCopy.detail(purpose))")
+                            .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if DelegationScopePolicy.isSensitive(purpose) { ViadereBadge("Sensitive", kind: .verified) }
                     }
-                    .toggleStyle(.viadere)
-                    .padding(.vertical, ViadereSpace.xxs)
-                    if index < DelegationScopePolicy.delegablePurposes.count - 1 { ViadereHairline() }
                 }
             }
+            .padding(.top, ViadereSpace.xs)
         }
     }
 
@@ -207,19 +213,10 @@ struct HouseholdInviteSheet: View {
             if vm.businesses.isEmpty {
                 Text("Connect a business first.").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
             } else {
-                ViadereRowGroup {
-                    ForEach(Array(vm.businesses.enumerated()), id: \.element.id) { index, business in
-                        Toggle(isOn: Binding(get: { vm.draft.businessIds.contains(business.id) }, set: { _ in vm.toggleBusiness(business.id) })) {
-                            HStack(spacing: ViadereSpace.s) {
-                                ViadereAvatar(name: business.safeName, size: 32, isVerified: business.isVerified)
-                                Text(business.safeName).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                            }
-                        }
-                        .toggleStyle(.viadere)
-                        .padding(.vertical, ViadereSpace.xxs)
-                        if index < vm.businesses.count - 1 { ViadereHairline() }
-                    }
-                }
+                ViadereChipSet("Businesses",
+                               chips: vm.businesses.map { ViadereChipSet<BusinessID>.Chip($0.id, $0.safeName) },
+                               isSelected: { vm.draft.businessIds.contains($0) },
+                               toggle: { vm.toggleBusiness($0) })
             }
         }
     }

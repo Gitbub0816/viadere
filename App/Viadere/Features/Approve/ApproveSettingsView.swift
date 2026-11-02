@@ -61,18 +61,19 @@ struct ApproveSettingsView: View {
     private var freezeSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             ViadereSectionHeader("Pause everything")
-            ViadereRowGroup {
-                Toggle(isOn: Binding(get: { controller.accountFrozen }, set: { value in Task { await controller.setAccountFrozen(value) } })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Freeze approvals").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        Text("No business can ask you to approve anything. Turning this off again needs Face ID on a trusted device.")
-                            .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
-                    }
-                }
-                .toggleStyle(.viadere)
-                .disabled(controller.phase == .working)
-                .padding(.vertical, ViadereSpace.xxs)
+            // A deliberate state with a named action, not a switch: freezing is protective, and undoing it needs Face ID on a trusted device.
+            ViadereStateCard("Freeze approvals",
+                             detail: controller.accountFrozen
+                                 ? "No business can ask you to approve anything. Unfreezing needs Face ID on a trusted device."
+                                 : "Stops every business from asking you to approve anything, until you unfreeze with Face ID on a trusted device.",
+                             state: controller.accountFrozen ? "Frozen" : "Off",
+                             stateKind: controller.accountFrozen ? .danger : .neutral,
+                             actionTitle: controller.accountFrozen ? "Unfreeze approvals" : "Freeze approvals",
+                             actionKind: controller.accountFrozen ? .secondary : .destructive) {
+                let freeze = !controller.accountFrozen
+                Task { await controller.setAccountFrozen(freeze) }
             }
+            .disabled(controller.phase == .working)
         }
     }
 
@@ -175,7 +176,8 @@ private struct EnrollmentItem: Identifiable, Equatable {
     var id: String { code + (rootKid ?? "") }
 }
 
-/// The per-business freeze switch shown on the business page.
+/// The per-business pause shown in a business's settings: a state card with a named action (shown only when this phone holds an approval
+/// key for the business).
 struct ApproveBusinessFreezeRow: View {
     @Bindable var controller: ApproveController
     let relationshipId: RelationshipID
@@ -183,16 +185,19 @@ struct ApproveBusinessFreezeRow: View {
 
     var body: some View {
         if controller.isAvailable, controller.keys.contains(where: { $0.relationshipId == relationshipId && $0.status != .revoked }) {
-            ViadereRowGroup {
-                Toggle(isOn: Binding(get: { controller.isFrozen(relationship: relationshipId) }, set: { value in Task { await controller.setFrozen(value, relationship: relationshipId) } })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pause approvals for \(businessName)").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        Text("It cannot ask you to approve anything until you turn this off.").font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
-                    }
+            let frozen = controller.isFrozen(relationship: relationshipId)
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Approvals")
+                ViadereStateCard("Approvals from \(businessName)",
+                                 detail: frozen ? "Paused: \(businessName) can't ask you to approve anything until you resume."
+                                                : "Payments and sign-ins \(businessName) asks you to confirm. Pause them if something looks wrong.",
+                                 state: frozen ? "Paused" : "On",
+                                 stateKind: frozen ? .danger : .success,
+                                 actionTitle: frozen ? "Resume approvals" : "Pause approvals",
+                                 actionKind: frozen ? .secondary : .destructive) {
+                    Task { await controller.setFrozen(!frozen, relationship: relationshipId) }
                 }
-                .toggleStyle(.viadere)
                 .disabled(controller.phase == .working)
-                .padding(.vertical, ViadereSpace.xxs)
             }
         }
     }

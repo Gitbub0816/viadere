@@ -97,12 +97,10 @@ struct LoopConsentFlowView: View {
     }
 
     @ViewBuilder private func agreement(_ text: LoopConsentText) -> some View {
-        Toggle(isOn: $consent.agreed) {
+        // An explicit agreement: a checkbox, not a switch.
+        ViadereCheckbox(isOn: $consent.agreed) {
             Text("I understand how these requests work and want to turn them on.")
-                .font(ViadereType.body)
-                .foregroundStyle(ViadereColor.textPrimary)
         }
-        .toggleStyle(.viadere)
         .disabled(!consent.allChecksAnswered)
         Button(text.agreeLabel) {
             Task {
@@ -171,8 +169,9 @@ struct LoopBusinessAuthorizationSheet: View {
     }
 }
 
-/// Settings → Requests built by businesses (WP-3.5): the global switch (on runs the education; off revokes everything and cancels open
-/// requests, history kept) and one switch per connected, verified business.
+/// You → Requests built by businesses (WP-3.5): the global state (turning on runs the education; turning off revokes everything and cancels
+/// open requests, history kept) as a state card, and the allowed businesses as one group of chips (allowing one opens its authorization
+/// sheet; removing one revokes it and cancels its open requests).
 struct LoopSettingsView: View {
     let model: AppModel
     @State private var showingEducation = false
@@ -185,20 +184,21 @@ struct LoopSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                ViadereBackButton("Settings") { dismiss() }
+                ViadereBackButton("You") { dismiss() }
                 ViadereHeader("Requests built by businesses",
                               subtitle: "Short requests a business builds, like choosing a pickup time. Each one says who built it.")
                 if !consent.isAvailable {
                     ViadereNotice("These requests aren't available right now. Everything else in Viadere works as usual.", kind: .info)
                 } else {
-                    ViadereRowGroup {
-                        Toggle(isOn: Binding(get: { consent.isEnabled }, set: { on in
-                            if on { showingEducation = true } else { confirmingOff = true }
-                        })) {
-                            Text("Allow requests built by businesses").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        }
-                        .toggleStyle(.viadere)
-                        .padding(.vertical, ViadereSpace.s)
+                    ViadereStateCard("Requests built by businesses",
+                                     detail: consent.isEnabled
+                                         ? "Businesses you allow can send you short requests they built. Turning this off cancels every open one."
+                                         : "Off. Turning it on starts a short explanation of how these requests work, then asks you to agree.",
+                                     state: consent.isEnabled ? "On" : "Off",
+                                     stateKind: consent.isEnabled ? .success : .neutral,
+                                     actionTitle: consent.isEnabled ? "Turn off" : "Learn and turn on",
+                                     actionKind: consent.isEnabled ? .destructive : .primary) {
+                        if consent.isEnabled { confirmingOff = true } else { showingEducation = true }
                     }
                     if consent.isEnabled { businesses }
                 }
@@ -236,17 +236,24 @@ struct LoopSettingsView: View {
             if verified.isEmpty {
                 Text("Businesses you connect to appear here.").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
             } else {
-                ViadereRowGroup {
-                    ForEach(Array(verified.enumerated()), id: \.element.id) { index, entry in
-                        Toggle(isOn: Binding(get: { consent.isAuthorized(entry.business.id) }, set: { on in
-                            if on { authorizing = entry.business } else { Task { await consent.revoke(entry.business.id) } }
-                        })) {
-                            Text(entry.business.safeName).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        }
-                        .toggleStyle(.viadere)
-                        .padding(.vertical, ViadereSpace.s)
-                        .accessibilityHint(Text("Allows \(entry.business.safeName) to send you requests it built"))
-                        if index < verified.count - 1 { ViadereHairline() }
+                ViadereCard(padding: ViadereSpace.m) {
+                    VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                        ViadereChipSet("Businesses allowed to send requests they built",
+                                       chips: verified.map { entry in
+                                           ViadereChipSet<BusinessID>.Chip(entry.business.id, entry.business.safeName,
+                                                                           hint: consent.isAuthorized(entry.business.id)
+                                                                               ? "Double-tap to stop \(entry.business.safeName) and cancel its open requests."
+                                                                               : "Double-tap to review what allowing \(entry.business.safeName) means.")
+                                       },
+                                       isSelected: { consent.isAuthorized($0) },
+                                       toggle: { id in
+                                           if consent.isAuthorized(id) { Task { await consent.revoke(id) } }
+                                           else { authorizing = verified.first { $0.business.id == id }?.business }
+                                       })
+                        Text(allowedSummary(verified))
+                            .font(ViadereType.footnote)
+                            .foregroundStyle(ViadereColor.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -254,7 +261,19 @@ struct LoopSettingsView: View {
     }
 }
 
-/// Business settings → whether this business may send Loops (shown only while Loops are on). Off revokes and cancels its open requests.
+extension LoopSettingsView {
+    func allowedSummary(_ verified: [ConnectedBusiness]) -> String {
+        let allowed = verified.filter { consent.isAuthorized($0.business.id) }.count
+        switch allowed {
+        case 0: return "No business is allowed yet. Tap one to review and allow it."
+        case 1: return "1 business allowed. Tap it to stop it; its open requests are cancelled."
+        default: return "\(allowed) businesses allowed. Tap one to stop it; its open requests are cancelled."
+        }
+    }
+}
+
+/// Business settings → whether this business may send Loops (shown only while Loops are on). Removing it revokes and cancels its open
+/// requests; allowing it opens the authorization sheet.
 struct BusinessLoopAuthorizationRow: View {
     let business: BusinessSummary
     let model: AppModel
@@ -264,19 +283,17 @@ struct BusinessLoopAuthorizationRow: View {
 
     var body: some View {
         if model.services.loopsAPI != nil, consent.isEnabled, business.isVerified {
+            let allowed = consent.isAuthorized(business.id)
             VStack(alignment: .leading, spacing: 0) {
                 ViadereSectionHeader("Requests")
-                ViadereRowGroup {
-                    Toggle(isOn: Binding(get: { consent.isAuthorized(business.id) }, set: { on in
-                        if on { authorizing = true } else { Task { await consent.revoke(business.id) } }
-                    })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Requests built by \(business.safeName)").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                            Text("Turning this off cancels its open requests.").font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
-                        }
-                    }
-                    .toggleStyle(.viadere)
-                    .padding(.vertical, ViadereSpace.s)
+                ViadereStateCard("Requests built by \(business.safeName)",
+                                 detail: allowed ? "\(business.safeName) can send you short requests it built. Stopping cancels its open requests."
+                                                 : "\(business.safeName) can't send you requests it built.",
+                                 state: allowed ? "Allowed" : "Not allowed",
+                                 stateKind: allowed ? .success : .neutral,
+                                 actionTitle: allowed ? "Stop" : "Allow…",
+                                 actionKind: allowed ? .destructive : .secondary) {
+                    if allowed { Task { await consent.revoke(business.id) } } else { authorizing = true }
                 }
             }
             .sheet(isPresented: $authorizing) {

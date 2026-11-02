@@ -32,20 +32,19 @@ struct BusinessProfileAccessView: View {
                 ForEach(vm.groups, id: \.category) { group in
                     VStack(alignment: .leading, spacing: 0) {
                         ViadereSectionHeader(group.category.title)
-                        ViadereRowGroup {
-                            ForEach(Array(group.fields.enumerated()), id: \.element.key) { index, field in
-                                Toggle(isOn: Binding(get: { vm.isOn(field.key) }, set: { _ in vm.toggle(field.key) })) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(ProfileRules.title(field.key))
-                                        if !field.hasValue {
-                                            Text("Not in your profile").font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
-                                        }
-                                    }
-                                }
-                                .toggleStyle(ViadereToggleStyle())
-                                .disabled(!vm.canToggle(field.key))
-                                if index < group.fields.count - 1 { ViadereHairline() }
-                            }
+                        // Shared details as chips (on = shared); a detail missing from the profile is shown but can't be chosen.
+                        ViadereChipSet(group.category.title,
+                                       chips: group.fields.map { field in
+                                           ViadereChipSet<String>.Chip(field.key, ProfileRules.title(field.key), isEnabled: vm.canToggle(field.key),
+                                                                       hint: field.hasValue ? nil : "Not in your profile")
+                                       },
+                                       isSelected: { vm.isOn($0) },
+                                       toggle: { vm.toggle($0) })
+                        let missing = group.fields.filter { !$0.hasValue }.map { ProfileRules.title($0.key) }
+                        if !missing.isEmpty {
+                            Text("Not in your profile: \(missing.joined(separator: ", ")).")
+                                .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
+                                .padding(.top, ViadereSpace.xs)
                         }
                     }
                 }
@@ -114,21 +113,25 @@ struct ProfileRequestSheet: View {
                 Text(vm.purpose).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
             }
         }
-        ViadereRowGroup {
-            ForEach(Array(vm.prompt.fields.enumerated()), id: \.element.key) { index, field in
-                Toggle(isOn: Binding(get: { vm.selected.contains(field.key) || field.alreadyGranted }, set: { _ in vm.toggle(field.key) })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(ProfileRules.title(field.key))
-                        if field.alreadyGranted {
-                            Text("Already shared").font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
-                        } else if !field.hasValue {
-                            Text("Add it in Profile to share it").font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
-                        }
-                    }
+        // Each requested detail is a chip: tap to include it. Already shared ones are locked on; ones missing from the profile can't be chosen.
+        ViadereCard(padding: ViadereSpace.m) {
+            VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                ViadereChipSet("Details to share",
+                               chips: vm.prompt.fields.map { field in
+                                   ViadereChipSet<String>.Chip(field.key, ProfileRules.title(field.key), isLocked: field.alreadyGranted,
+                                                               isEnabled: field.alreadyGranted || vm.canSelect(field),
+                                                               hint: field.alreadyGranted ? "Already shared" : (field.hasValue ? nil : "Add it in Profile to share it"))
+                               },
+                               isSelected: { key in vm.selected.contains(key) || vm.prompt.fields.contains { $0.key == key && $0.alreadyGranted } },
+                               toggle: { vm.toggle($0) })
+                let shared = vm.prompt.fields.filter(\.alreadyGranted).map { ProfileRules.title($0.key) }
+                let missing = vm.prompt.fields.filter { !$0.hasValue && !$0.alreadyGranted }.map { ProfileRules.title($0.key) }
+                if !shared.isEmpty {
+                    Text("Already shared: \(shared.joined(separator: ", ")).").font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
                 }
-                .toggleStyle(ViadereToggleStyle())
-                .disabled(!vm.canSelect(field))
-                if index < vm.prompt.fields.count - 1 { ViadereHairline() }
+                if !missing.isEmpty {
+                    Text("Add to your profile to share: \(missing.joined(separator: ", ")).").font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
+                }
             }
         }
         Text("You can stop sharing any of these later from the business's page.")
@@ -166,7 +169,7 @@ struct ProfileReceiptsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                ViadereBackButton("Settings") { dismiss() }
+                ViadereBackButton("You") { dismiss() }
                 Text("Sharing history")
                     .font(ViadereType.display)
                     .foregroundStyle(ViadereColor.textPrimary)
@@ -213,14 +216,10 @@ struct ProfileVerificationSheet: View {
                 Text("Viadere keeps only the facts you choose, with when and how they were checked. Never your ID, its number or a photo.")
                     .font(ViadereType.subhead)
                     .foregroundStyle(ViadereColor.textSecondary)
-                ViadereRowGroup {
-                    ForEach(Array(ProfileVerifiedFactKind.allCases.enumerated()), id: \.element) { index, kind in
-                        Toggle(kind.title, isOn: Binding(get: { vm.keep.contains(kind) },
-                                                         set: { on in if on { vm.keep.insert(kind) } else { vm.keep.remove(kind) } }))
-                            .toggleStyle(ViadereToggleStyle())
-                        if index < ProfileVerifiedFactKind.allCases.count - 1 { ViadereHairline() }
-                    }
-                }
+                ViadereChipSet("Facts to keep",
+                               chips: ProfileVerifiedFactKind.allCases.map { ViadereChipSet<ProfileVerifiedFactKind>.Chip($0, $0.title) },
+                               isSelected: { vm.keep.contains($0) },
+                               toggle: { kind in if vm.keep.contains(kind) { vm.keep.remove(kind) } else { vm.keep.insert(kind) } })
                 switch vm.phase {
                 case .finished(let status):
                     ViadereNotice(status == .verified ? "Verified. Your profile shows the badge." : "We couldn't confirm that. Nothing was kept.",
