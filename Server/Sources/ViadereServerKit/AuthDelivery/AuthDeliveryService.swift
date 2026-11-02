@@ -89,7 +89,9 @@ struct AuthDeliveryService {
         // Business-level policy first: a key that may not use the capability learns nothing about the customer.
         let policy = PolicyService(db: db, ctx: ctx)
         try await policy.enforce(PolicyInput(.authChallenge), principal: principal, auditAllowed: false)
-        let hash = SecureToken.sha256Hex(Data("auth_delivery.create\n".utf8) + (try ViadereJSON.encode(request)))
+        // Keyed (server pepper): the request carries the OTP and variables, and an unkeyed digest of a 4- to 10-character code stored next to the
+        // other request fields would let a database reader recover the code by enumeration, defeating the sealed secret.
+        let hash = ctx.hasher.hmacHex("auth_delivery.create", Base64URL.encode(try ViadereJSON.encode(request)))
         let businessId = principal.businessId
         if let existing = try await AuthDeliveryRecord.query(on: db).filter(\.$businessId == businessId.uuid).filter(\.$requestId == request.requestId).first() {
             guard ConstantTime.equals(existing.requestHash, hash) else {

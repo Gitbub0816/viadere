@@ -390,6 +390,12 @@ extension WebhookService {
               subscription.signatureVersion == WebhookSignatureVersion.v2.rawValue, subscription.envelopeVersion == WebhookEnvelopeV2.version else {
             throw APIError.notFound
         }
+        // The same gates as `sendTestEvent` (SEC-API-006): a sample never goes to an endpoint whose ownership is unproven, nor to a paused one, and is rate limited.
+        if ctx.config.operations.webhookOwnershipVerification, subscription.verifiedAt == nil {
+            throw APIError.conflict("Verify the endpoint before sending events to it.")
+        }
+        guard subscription.pausedAt == nil else { throw APIError.conflict("This endpoint is paused.") }
+        guard await ctx.limiter.allow("webhook-test", key: subscriptionId.description, rule: .perMinute(10, burst: 5)) else { throw APIError.rateLimited(retryAfter: 30) }
         let delivery = WebhookDeliveryRecord()
         delivery.id = UUID()
         let eventId = "evt_" + delivery.id!.uuidString.lowercased()
