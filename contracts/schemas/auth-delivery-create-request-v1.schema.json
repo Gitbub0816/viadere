@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/contracts/schemas/auth-delivery-create-request-v1.schema.json",
+  "title": "Auth delivery create request",
+  "description": "POST /v1/business/auth-deliveries. Closed: tenant_id, audience and every other unknown member is 422. The tenant is the API key's business.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["method", "request_id", "subject_ref", "purpose", "template"],
+  "properties": {
+    "method": { "enum": ["magic_link", "otp", "notice"] },
+    "request_id": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "subject_ref": { "type": "string", "pattern": "^sub_[A-Za-z0-9_-]{43}$" },
+    "purpose": { "enum": ["sign_in", "step_up", "verify_contact", "account_notice"] },
+    "template": { "type": "string" },
+    "variables": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 60 } },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["link_mode"],
+      "properties": {
+        "link_mode": { "enum": ["business", "viadere"] },
+        "url": { "type": "string", "maxLength": 2048 },
+        "signature": { "type": "string", "maxLength": 2048 },
+        "link_client_id": { "type": "string" },
+        "return_url": { "type": "string" },
+        "code_challenge": { "type": "string" },
+        "code_challenge_method": { "const": "S256" }
+      }
+    },
+    "otp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "code_kind"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[0-9A-Z]{4,10}$" },
+        "code_kind": { "enum": ["otp", "totp"] }
+      }
+    },
+    "correlation_id": { "type": "string", "maxLength": 128 },
+    "client_transaction_ref": { "type": "string", "maxLength": 128 },
+    "expires_in_seconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
+    "channels": { "type": "array", "items": { "enum": ["push", "inbox", "email"] } },
+    "fallback": { "type": "object", "additionalProperties": false, "properties": { "email": { "type": "object", "additionalProperties": false, "required": ["address"], "properties": { "address": { "type": "string" } } } } },
+    "callback": { "type": "object", "additionalProperties": false, "required": ["webhook_id"], "properties": { "webhook_id": { "type": "string", "format": "uuid" } } }
+  }
+}

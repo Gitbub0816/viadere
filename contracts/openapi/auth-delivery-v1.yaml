@@ -1,0 +1,461 @@
+openapi: 3.1.0
+info:
+  title: Viadere Authentication Delivery API
+  version: "2026-11-02"
+  summary: Deliver a business's magic link, partner-generated one-time code or security notice to the customer's own Viadere app. Viadere never verifies the result.
+  description: |
+    Viadere is a **transport** for what a business already decided to send (ADR-0020, `docs/product/AUTH-DELIVERY-SPEC-v2.md` section 6).
+    The business creates a delivery; Viadere shows it only in the customer's own app (push, then the in-app inbox) and reports its state.
+    **OPENED is never authentication success**: only the business's own `complete` call finishes a delivery, and the business verifies its link or
+    code itself. Nothing here is delivered over SMS, and there is no route that verifies a one-time code or a TOTP.
+
+    Hand-written, kept in lock-step with `Packages/ViadereCore/Sources/ViadereCore/AuthDelivery/` (and `API/APIRoutes.swift`): the contract
+    parity tests in `ViadereCoreTests` fail when a route, an enum or a schema member drifts.
+
+    ## Feature flag
+    The whole surface answers `404` while the server's `AUTH_DELIVERY_ENABLED` is off (the default in staging and production).
+
+    ## Authentication and tenancy
+    Business routes take `Authorization: Bearer vdk_…`. **The tenant is the key's business, never a field of the payload**: `tenant_id` and
+    `audience` in a body are `422 validation_failed`. A foreign delivery id is `404`, the same body as an unknown one. A live key additionally
+    needs mutual TLS (`401 signature_required` otherwise; request signatures follow in a later stage); a test key reaches sandbox customers only.
+
+    ## Idempotency
+    `Idempotency-Key` is required on every `POST`. The same key with the same request replays the original result (`200`); the same key with
+    another request is `409 idempotency_conflict`. `request_id` is unique per tenant.
+
+    ## Non-disclosure
+    An unknown customer, a customer without an eligible app, a customer who paused this business and a frozen relationship all return the same
+    `404 not_deliverable`.
+
+    ## Secrets
+    The magic-link URL and the code are never returned to a business, never in a webhook, never in a push and never in a log. The device receives
+    them once, from `open`.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.viadere.com
+tags:
+  - name: Business
+  - name: Device
+  - name: Webhooks
+security:
+  - apiKey: []
+paths:
+  /v1/business/auth-deliveries:
+    post:
+      tags: [Business]
+      operationId: createAuthDelivery
+      summary: Create a delivery
+      description: |
+        Requires scope `auth_deliveries:write` and the `auth.challenge` capability. Body at most 16 KiB; every member not listed is `422`.
+        `201` on creation, `200` on an idempotent replay.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuthDeliveryCreateRequest" }
+      responses:
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "201":
+          description: Created and queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotDeliverable" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/auth-deliveries/{deliveryId}:
+    get:
+      tags: [Business]
+      operationId: getAuthDelivery
+      summary: Delivery status and events
+      description: Requires scope `auth_deliveries:read`. Never a secret.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+      responses:
+        "200":
+          description: The delivery with its events.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/auth-deliveries/{deliveryId}/cancel:
+    post:
+      tags: [Business]
+      operationId: cancelAuthDelivery
+      summary: Cancel a delivery
+      description: Requires scope `auth_deliveries:write`. Deletes the secret. A delivery that already ended is returned unchanged.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The delivery.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/auth-deliveries/{deliveryId}/complete:
+    post:
+      tags: [Business]
+      operationId: completeAuthDelivery
+      summary: Report your own verification outcome
+      description: |
+        Requires scope `auth_deliveries:write`. Allowed only after the customer opened the delivery (`409 conflict` otherwise): Viadere never
+        infers completion, and `sent`, `delivered` and `opened` never mean success.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuthDeliveryCompleteRequest" }
+      responses:
+        "200":
+          description: The delivery, `completed` or `failed`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /v1/business/webhooks/{webhookId}:
+    patch:
+      tags: [Webhooks]
+      operationId: updateWebhook
+      summary: Move a webhook endpoint to signature v2
+      description: |
+        Requires scope `webhooks:manage` and an `Idempotency-Key`. For 30 days after the switch deliveries of the pre-existing event types carry both
+        `v2=` and `v1=` entries so a receiver can deploy the new verifier first; `auth.*` events never carry a `v1=` entry (ADR-0025).
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWebhookRequest" }
+      responses:
+        "200":
+          description: The subscription.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /v1/business/webhooks/test:
+    post:
+      tags: [Webhooks]
+      operationId: testAuthWebhook
+      summary: Send a signed sample auth event (test keys only)
+      description: |
+        Sends a sample `auth.delivery.*` event with fixed sample ids to one of your v2 endpoints, signed exactly like a real delivery, so you can check
+        signature, tenant, digest and dedup handling.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuthWebhookTestRequest" }
+      responses:
+        "200":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthWebhookTestResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /v1/auth-deliveries:
+    get:
+      tags: [Device]
+      operationId: listAuthDeliveries
+      summary: Inbox
+      description: Device-signed bearer. Open deliveries for this device's own account (never a delegate's). No secret.
+      security:
+        - deviceSignedBearer: []
+      responses:
+        "200":
+          description: Open deliveries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuthDeliveryDisplay" }
+  /v1/auth-deliveries/{deliveryId}:
+    get:
+      tags: [Device]
+      operationId: getAuthDeliveryDisplay
+      summary: Display object
+      description: Device-signed bearer. The first fetch marks the delivery `delivered`.
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+      responses:
+        "200":
+          description: The display object.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryDisplay" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/auth-deliveries/{deliveryId}/open:
+    post:
+      tags: [Device]
+      operationId: openAuthDelivery
+      summary: Open (reveal the secret once)
+      description: |
+        Device-signed bearer. Returns the URL or code **once**; the ciphertext is deleted in the same transaction. A second call is `409 already_opened`,
+        an expired or cancelled delivery `410`.
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+      responses:
+        "200":
+          description: The secret, once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryOpenResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { description: Expired, cancelled or already ended. }
+  /v1/auth-deliveries/{deliveryId}/deny:
+    post:
+      tags: [Device]
+      operationId: denyAuthDelivery
+      summary: Deny or "This wasn't me"
+      description: Device-signed bearer. Reduce-only. Deletes the secret and tells the business `denied`.
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuthDeliveryDenyRequest" }
+      responses:
+        "200":
+          description: The delivery, `denied`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthDeliveryView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: Business API key (see `docs/openapi.yaml`).
+    deviceSignedBearer:
+      type: http
+      scheme: bearer
+      description: A session token plus a VIADERE-SIG-V1 device signature (see `docs/SECURITY.md`).
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/DeliveryId" }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Unauthorized: { description: Missing, invalid or unsigned credentials (`401`). }
+    Forbidden: { description: The key lacks the scope, capability or entitlement (`403`). }
+    NotFound: { description: Unknown, or not yours (the same body). }
+    NotDeliverable: { description: "`not_deliverable`: unknown customer, no eligible app, paused or frozen (one body)." }
+    Conflict: { description: "State conflict, `idempotency_conflict` or `already_opened`." }
+    Validation: { description: "`validation_failed` (`details` names the field and a code) or `destination_not_allowed`, `destination_signature_required`." }
+    RateLimited: { description: Per-tenant flood limit (`429`, `Retry-After`). Per-subject budgets never refuse; they make delivery silent. }
+  schemas:
+    DeliveryId:
+      type: string
+      description: "`adl_` plus 22 base64url characters."
+      pattern: "^adl_[A-Za-z0-9_-]{22}$"
+    SubjectRef:
+      type: string
+      pattern: "^sub_[A-Za-z0-9_-]{43}$"
+    Method:
+      type: string
+      enum: [magic_link, otp, notice]
+    Purpose:
+      type: string
+      enum: [sign_in, step_up, verify_contact, account_notice]
+    Channel:
+      type: string
+      description: There is no `sms`. `email` is refused until the email-fallback gate (ADR-0020 section 7) is met.
+      enum: [push, inbox, email]
+    Status:
+      type: string
+      enum: [created, validated, queued, sent, delivered, opened, completed, expired, cancelled, denied, failed]
+    AuthDeliveryCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [method, request_id, subject_ref, purpose, template]
+      properties:
+        method: { $ref: "#/components/schemas/Method" }
+        request_id: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        purpose: { $ref: "#/components/schemas/Purpose" }
+        template: { type: string, description: "A Viadere-owned template id, for example `auth.sign_in_link.v1`." }
+        variables:
+          type: object
+          description: Only keys the template declares; personal data (stored sealed, deleted at the terminal state). No URL, e-mail address or phone number.
+          additionalProperties: { type: string, minLength: 1, maxLength: 60 }
+        destination:
+          type: object
+          additionalProperties: false
+          required: [link_mode]
+          properties:
+            link_mode: { type: string, enum: [business, viadere] }
+            url: { type: string, maxLength: 2048 }
+            signature: { type: string, maxLength: 2048, description: "Compact `viadere-destination+jws` (ADR-0031 section 3)." }
+            link_client_id: { type: string }
+            return_url: { type: string }
+            code_challenge: { type: string }
+            code_challenge_method: { type: string, enum: [S256] }
+        otp:
+          type: object
+          additionalProperties: false
+          required: [code, code_kind]
+          properties:
+            code: { type: string, pattern: "^[0-9A-Z]{4,10}$" }
+            code_kind: { type: string, enum: [otp, totp] }
+        correlation_id: { type: string, maxLength: 128 }
+        client_transaction_ref: { type: string, maxLength: 128 }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 86400 }
+        channels:
+          type: array
+          items: { $ref: "#/components/schemas/Channel" }
+        fallback:
+          type: object
+          additionalProperties: false
+          properties:
+            email:
+              type: object
+              additionalProperties: false
+              required: [address]
+              properties:
+                address: { type: string }
+        callback:
+          type: object
+          additionalProperties: false
+          required: [webhook_id]
+          properties:
+            webhook_id: { type: string, format: uuid }
+    AuthDeliveryView:
+      type: object
+      required: [id, request_id, method, purpose, status, expires_at, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/DeliveryId" }
+        request_id: { type: string }
+        method: { $ref: "#/components/schemas/Method" }
+        purpose: { $ref: "#/components/schemas/Purpose" }
+        status: { $ref: "#/components/schemas/Status" }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        correlation_id: { type: string }
+        client_transaction_ref: { type: string }
+        reason: { type: string }
+        events:
+          type: array
+          items:
+            type: object
+            required: [status, at]
+            properties:
+              status: { $ref: "#/components/schemas/Status" }
+              at: { type: string, format: date-time }
+              reason: { type: string }
+    AuthDeliveryCompleteRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [succeeded, failed] }
+    AuthDeliveryDisplay:
+      type: object
+      required: [id, method, purpose, template, status, business_id, business_name, expires_at, created_at, request_id, silent]
+      properties:
+        id: { $ref: "#/components/schemas/DeliveryId" }
+        method: { $ref: "#/components/schemas/Method" }
+        purpose: { $ref: "#/components/schemas/Purpose" }
+        template: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        business_id: { type: string, format: uuid }
+        business_name: { type: string }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        request_id: { type: string }
+        destination_host: { type: string }
+        destination_statement: { type: string }
+        code_kind: { type: string, enum: [otp, totp] }
+        variables: { type: object, additionalProperties: { type: string } }
+        silent: { type: boolean }
+    AuthDeliveryOpenResponse:
+      type: object
+      required: [id, method, opened_at]
+      properties:
+        id: { $ref: "#/components/schemas/DeliveryId" }
+        method: { $ref: "#/components/schemas/Method" }
+        url: { type: string }
+        code: { type: string }
+        code_kind: { type: string, enum: [otp, totp] }
+        opened_at: { type: string, format: date-time }
+    AuthDeliveryDenyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        report: { type: boolean }
+        reason: { type: string, enum: [destination_unverified] }
+    UpdateWebhookRequest:
+      type: object
+      additionalProperties: false
+      required: [signature_version]
+      properties:
+        signature_version: { type: string, enum: [v2] }
+    AuthWebhookTestRequest:
+      type: object
+      additionalProperties: false
+      required: [webhook_id, type]
+      properties:
+        webhook_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum:
+            - auth.delivery.created
+            - auth.delivery.sent
+            - auth.delivery.delivered
+            - auth.delivery.opened
+            - auth.delivery.completed
+            - auth.delivery.failed
+            - auth.delivery.denied
+            - auth.delivery.cancelled
+            - auth.delivery.expired
+    AuthWebhookTestResponse:
+      type: object
+      required: [event_id]
+      properties:
+        event_id: { type: string }

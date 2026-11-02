@@ -26,7 +26,8 @@ struct OpenAPIParityTests {
     }
 
     @Test func everyBusinessAPIKeyRouteIsDocumentedAndNothingDocumentedIsMissingFromTheCatalog() throws {
-        let documented = try Self.documented()
+        // The auth-delivery routes are documented in their own contract (`contracts/openapi/auth-delivery-v1.yaml`, ADR-0020 section 10).
+        let documented = try Self.documented().union(AuthDeliveryContractParityTests.documentedRoutes())
         #expect(documented.count > 30)
         let business = APIRoutes.all.filter { $0.auth == .businessAPIKey }
         #expect(business.count > 30)
