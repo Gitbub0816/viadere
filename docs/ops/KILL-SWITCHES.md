@@ -1,5 +1,9 @@
 # Kill switches and emergency controls (OPS-006)
 
+> **Retirement note (ADR-0029, 2026-11-02):** Fly.io, Neon and Google Cloud KMS are retired. Command names below that mention `fly`, Neon or `gcloud kms` are historical and are being
+> replaced; the Azure equivalents are: `az containerapp ...` (revisions, jobs, scale: `docs/operations/ROLLBACK.md`), Flexible Server PITR (`RESILIENCE.md` section 3), Key Vault keys and
+> `kv_tool.py` (`KEY-ROTATION.md`), Log Analytics instead of `fly logs`. Authority-tier procedures: `docs/operations/INCIDENT_RESPONSE.md`. Tracked in the ledger as open work.
+
 **Status:** v2, 2026-10-28 (WP6). v1 (2026-10-27) listed what existed and fifteen gaps; WP6 closed G-1, G-3, G-5, G-6, G-7, G-8, G-9, G-10, G-12, G-13 and G-15
 in code (section 2 says where each lives and which test proves it). G-2 (per-capability toggles) and G-14 (issuer trust list) were delivered by WP2/WP3 (E-18);
 G-4 (vault sync) is the `VAULT_SYNC_ENABLED` flag; G-11 (origin mTLS) stays open and needs a platform decision (section 2, G-11).

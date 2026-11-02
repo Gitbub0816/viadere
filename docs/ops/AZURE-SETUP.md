@@ -523,6 +523,25 @@ Ways to stay nearer USD 20: `api_min_replicas = 0` (scale to zero when idle: abo
 
 Fixed-fee items the lean profile deliberately does **not** create (the policy check fails if they appear): private endpoints (0.01/h = 7.30/month each, "Standard Private Endpoint", 2020-02-01), NAT gateway (0.045/h = 32.85 + 0.045/GB, 2020-06-01) and its static IP (0.005/h = 3.65, 2018-06-01), ACR (Basic 0.1666/day ≈ 5.07, 2018-01-01), Container Apps environment private endpoint / management / planned maintenance (0.10/h each, 2026-09-01), Key Vault Premium HSM keys, Service Bus Standard (10.00/month base, 2018-05-01) or Premium.
 
+### Authority tier, lean (`Infra/azure-authority`, only when `authority_enabled = true`)
+
+Same meters and 730 h basis as above (prices from the table; ACR Basic quoted 2026-10-29). Estimate, **not measured**: confirm in Cost Analysis after the first month.
+
+| Item | Basis | USD/month |
+|---|---|---|
+| `ca-viadere-authority`, 0.25 vCPU / 0.5 GiB, always on | idle: 0.25 x 2,628,000 s x 0.000003 + 0.5 x 2,628,000 x 0.000003; the monthly free grant is already used by the ordinary apps | 5.91 idle (about 20 if busy around the clock) |
+| Admin and migrate jobs | executions only | < 0.10 |
+| Azure Container Registry Basic | 0.1666/day | 5.07 |
+| Key Vault Standard `kv-vdr-auth` (software keys) | operations | < 0.50 |
+| Private DNS zone of the authority environment | 0.50/zone | 0.50 |
+| Own Log Analytics workspace + App Insights | cap 0.1 GB/day; the 5 GB/month free allowance is shared with the ordinary workspace | 0.00 to 1.00 |
+| One log-query alert (Activity Log alerts are free) | about 1.50 each | 1.50 |
+| Database | same server, one more database | 0.00 |
+| **Added by the authority** | | **about 13.5 (idle)** |
+
+The lean total becomes about **41 idle**, above the USD 30 budget alert of section 2.2: raise the alert before enabling (owner checklist C5) or set `authority_min_replicas = 0` (about -6, cold starts). Not included and to be
+checked on the first apply: whether Azure bills an internal load balancer in the environment's managed resource group (the ordinary environment is the same type, so it would already be visible in its line).
+
 ### Standard (production-grade, indicative)
 
 | Item | Basis | USD/month |

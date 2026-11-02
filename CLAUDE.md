@@ -37,7 +37,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
 9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
 
-### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then; Android and browser-test rows checked 2026-11-02)
+### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then; Android and browser-test rows checked 2026-11-02; authority tier and Cloudflare provider rows 2026-11-02)
 
 | Component | Required | Notes |
 |---|---|---|
@@ -82,6 +82,8 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Azure lean profile: PostgreSQL without HA | Burstable B1ms, no standby, 7-day PITR, locally redundant backup (standard: zone-redundant HA, 35 days, geo-redundant) | Same budget; Burstable has no HA; no production data in lean | The `standard` profile is applied |
 | Azure lean profile: brand-asset storage on a public endpoint | Storage account `stvdrbrand…` with public network access on, firewall Deny by default with only the Container Apps subnet (Microsoft.Storage service endpoint), no IP rules, no bypass; shared keys disabled, Entra only, container private. `policy_check.py` records it as `ST-BRAND-PUBLIC` and fails it in `standard` | Same budget as the other lean rows (a private endpoint is USD 7.30/month); customers never reach the account (the api serves assets through the tunnel) | The `standard` profile (private endpoint, public access disabled) is applied |
 | OpenTofu state storage on a public endpoint (Azure, both profiles) | Storage account with shared keys disabled, Entra auth only, versioning, soft delete, lock | GitHub-hosted runners have no fixed address or VNet path | CI runs OpenTofu from a VNet-integrated runner (then disable public access) |
+| Authority tier, lean (`Infra/azure-authority`, ADR-0019, ADR-0028 section 7) | Same subscription as the ordinary tier; `kv-vdr-auth` Key Vault **Standard** (software-protected EC/RSA keys, public endpoint firewalled to `snet-auth`, RBAC only, `bypass = AzureServices`); authority registry ACR **Basic** on its public endpoint (Entra only; no firewall exists below Premium: `ACR-AUTH-PUBLIC`); same PostgreSQL server, separate database and roles; lean seal construction HPKE with the seal private key in authority memory (R-23, ADR-0034 sections 8 and 10); federated deploy subjects without `job_workflow_ref` until the repository OIDC subject template is customised (`AUTH-OIDC-SUBJECT`) | Testing budget and one human (R-21); decided in ADR-0019 and ADR-0028; the authority has no Internet egress so it cannot use GHCR; the authority is disabled by default (`authority_enabled = false`) | The `standard` profile is applied: separate subscription or management group, Key Vault Premium HSM keys, `recovery-seal-rsa` (ADR-0034 section 9, C-16), private endpoints; the OIDC subject template is customised and `oidc_subject_workflow_ref = true`; a second human reviewer is named |
+| Cloudflare provider `cloudflare/cloudflare` 5.28.1 (`Infra/cloudflare`) | 5.28.1, exact pin | Checked 2026-10-27 against registry.opentofu.org and registry.terraform.io; re-check at the next monthly refresh (rule 5) | Re-checked and bumped |
 
 ## Working in this repo
 

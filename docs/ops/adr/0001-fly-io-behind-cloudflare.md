@@ -1,8 +1,8 @@
 # ADR-0001: Server on Fly.io behind Cloudflare
 
-- **Status:** superseded by 0010 (proposed 2026-10-29; stays in force for the transitional Fly.io staging environment until 0010 is accepted and cutover completes)
+- **Status:** superseded by 0010 and retired by 0029 (2026-11-02): no Fly deploy path remains in CI, IaC or code
 - **Plan reference:** ADR-01 in `docs/IMPLEMENTATION-PLAN-v2.md` (decided by: Product owner, 2026-10-27)
-- **Related:** Infra/fly/, Infra/terraform/cloudflare.tf
+- **Related:** Infra/cloudflare/ (the Fly files were deleted by ADR-0029)
 - **Review:** revisit at each phase gate or when a stated assumption changes
 
 ## Context

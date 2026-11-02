@@ -1,5 +1,9 @@
 # Detection and response runbooks (OPS-005)
 
+> **Retirement note (ADR-0029, 2026-11-02):** Fly.io, Neon and Google Cloud KMS are retired. Command names below that mention `fly`, Neon or `gcloud kms` are historical and are being
+> replaced; the Azure equivalents are: `az containerapp ...` (revisions, jobs, scale: `docs/operations/ROLLBACK.md`), Flexible Server PITR (`RESILIENCE.md` section 3), Key Vault keys and
+> `kv_tool.py` (`KEY-ROTATION.md`), Log Analytics instead of `fly logs`. Authority-tier procedures: `docs/operations/INCIDENT_RESPONSE.md`. Tracked in the ledger as open work.
+
 **Status:** v2, 2026-10-28 (WP6 closed gaps G-1, G-3, G-5, G-6, G-7, G-8, G-9, G-10, G-12, G-13, G-15; `KILL-SWITCHES.md` section 2). Every step below names a control that exists today (E- and G-numbers of `KILL-SWITCHES.md`); a step is marked **[GAP Gn]**
 only where the tool is still missing (G-11) and the interim manual step is given. Review after every incident and tabletop (`TABLETOP-EXERCISES.md`).
 Roles are placeholders until named: **IC** incident commander, **SEC** security lead, **ENG** on-call engineer, **OPS** operator-console user, **COMMS** communications, **LEGAL** counsel/privacy lead.
