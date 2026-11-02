@@ -90,6 +90,8 @@ public final class AppModel {
     public let alerts: AlertsViewModel
     public let benefits: BenefitsViewModel
     public let businesses: BusinessesViewModel
+    /// The account-wide default level and quiet hours (You → Notifications).
+    public let notificationSettings: NotificationSettingsViewModel
     /// Loop consent (global and per business; WP-3.5). Entry points are hidden unless it allows them.
     public let loopConsent: LoopConsentViewModel
     /// The Loop publication keys the renderer verifies with (build pins, narrowed by the server's list).
@@ -118,6 +120,7 @@ public final class AppModel {
         alerts = AlertsViewModel(api: services.organizationAPI, clock: services.clock)
         benefits = BenefitsViewModel(api: services.organizationAPI)
         businesses = BusinessesViewModel(api: services.organizationAPI)
+        notificationSettings = NotificationSettingsViewModel(api: services.organizationAPI)
         loopConsent = LoopConsentViewModel(api: services.loopsAPI)
         loopKeys = LoopKeyRing(pinned: services.configuration.loopPublicationKeys, api: services.loopsAPI)
         let consentModel = loopConsent
@@ -179,6 +182,7 @@ public final class AppModel {
         await alerts.refresh()
         await alerts.ensureLoaded(organization.effective)
         await benefits.load()
+        await notificationSettings.load()
         if services.loopsAPI != nil {
             await loopConsent.load()
             await loopKeys.refresh()
@@ -451,6 +455,7 @@ public final class AppModel {
         alerts.reset()
         benefits.reset()
         businesses.reset()
+        notificationSettings.reset()
         loopConsent.clear()
         loopLibrary.clear()
         loopToInstall = nil

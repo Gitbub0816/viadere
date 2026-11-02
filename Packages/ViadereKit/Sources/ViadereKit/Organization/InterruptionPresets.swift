@@ -54,6 +54,9 @@ public enum InterruptionPreset: String, CaseIterable, Sendable, Hashable, Identi
         }
     }
 
+    /// For a business that follows the account-wide default: "Following your default (Balanced)".
+    public func followingSummary() -> String { "Following your default: \(title)" }
+
     /// The short form used in summaries ("Balanced", "Quiet until 6 PM").
     public func summary(until: Date?, now: Date, calendar: Calendar = .current) -> String {
         guard self != .everything, let until else { return title }
@@ -106,5 +109,21 @@ extension PermissionCopy {
         case .marketing: "offers"
         case .rewards: "rewards"
         }
+    }
+}
+
+extension BusinessPreferences {
+    /// The named level in force for this business: its own, else the account-wide default.
+    public func preset(accountDefault: MuteLevel, at now: Date) -> InterruptionPreset {
+        InterruptionPreset(effectiveLevel(accountDefault: accountDefault, at: now))
+    }
+
+    /// Whether the business follows the account-wide default now (no level of its own, or a timed level that ended).
+    public func followsDefault(at now: Date) -> Bool { !hasOwnLevel || (muteUntil.map { $0 <= now } ?? false) }
+
+    /// The business's state in one phrase: "Balanced until 6 PM" for a level it has, "Following your default: Balanced" otherwise.
+    public func levelSummary(accountDefault: MuteLevel, at now: Date, calendar: Calendar = .current) -> String {
+        let preset = preset(accountDefault: accountDefault, at: now)
+        return followsDefault(at: now) ? preset.followingSummary() : preset.summary(until: muteUntil, now: now, calendar: calendar)
     }
 }

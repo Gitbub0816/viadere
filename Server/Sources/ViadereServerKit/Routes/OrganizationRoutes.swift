@@ -52,6 +52,13 @@ enum OrganizationRoutes {
             let body: BusinessPreferencesUpdate = try req.decodeBody()
             return try req.jsonResponse(try await PreferenceService(db: req.db, ctx: req.ctx).update(principal: try req.consumer, business: business, update: body))
         }
+        routes.api(APIRoutes.notificationSettingsGet) { req in
+            try req.jsonResponse(try await NotificationSettingsService(db: req.db, ctx: req.ctx).get(consumer: try req.consumer.consumerId.uuid))
+        }
+        routes.api(APIRoutes.notificationSettingsPut) { req in
+            let body: NotificationSettingsUpdate = try req.decodeBody()
+            return try req.jsonResponse(try await NotificationSettingsService(db: req.db, ctx: req.ctx).put(principal: try req.consumer, update: body))
+        }
         routes.api(APIRoutes.businessSurfaceGet) { req in
             let business: BusinessID = try req.uuidParameter("businessId")
             return try req.jsonResponse(try await SurfaceService(db: req.db, ctx: req.ctx).view(consumer: try req.consumer.consumerId, business: business))

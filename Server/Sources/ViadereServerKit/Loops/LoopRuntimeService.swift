@@ -517,11 +517,16 @@ struct LoopRuntimeService {
         do {
             let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$revokedAt == nil).all().filter { $0.kind == .app && !$0.isExpired(at: now) }
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id)).filter(\.$invalidatedAt == nil).all()
+            // An answer to the customer's own Loop request is transactional and never security-critical: quiet hours (and a quieter level)
+            // deliver it quietly; the instance stays in Alerts and Your Loops either way.
+            let business = try await LoopInstanceRecord.find(instanceId, on: db)?.businessId
+            let quiet = await NotificationSettingsService(db: db, ctx: ctx).interruption(consumer: consumer, business: business, kind: nil,
+                                                                                         purpose: .transactional, actionRequired: false) == .quiet
             for token in tokens {
                 let message = PushMessage(deviceToken: token.record.token, environment: token.record.environment,
                                           topic: token.record.bundleId.isEmpty ? ctx.config.appBundleID : token.record.bundleId,
                                           title: PushPayloadBuilder.genericTitle, body: Self.pushBody, category: "viadere.loop", threadID: "viadere.loop",
-                                          interruptionLevel: "active", mutableContent: true, interactionId: nil, highPriority: true,
+                                          interruptionLevel: quiet ? "passive" : "active", mutableContent: true, interactionId: nil, highPriority: !quiet,
                                           collapseID: "loop.\(id)", loopInstanceId: id)
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: now).update()

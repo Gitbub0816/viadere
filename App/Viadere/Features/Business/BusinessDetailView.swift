@@ -104,7 +104,8 @@ struct BusinessDetailView: View {
 
     /// How loudly this business may interrupt: three levels instead of a switch, and how long a quieter level lasts.
     private var notifications: some View {
-        let preset = InterruptionPreset(prefs.effectiveMute)
+        let preset = InterruptionPreset(prefs.effectiveLevel(accountDefault: model.notificationSettings.settings.defaultLevel))
+        let follows = prefs.preferences.followsDefault(at: model.services.clock())
         return VStack(alignment: .leading, spacing: 0) {
             ViadereSectionHeader("Notifications")
             ViadereCard(padding: ViadereSpace.m) {
@@ -112,8 +113,13 @@ struct BusinessDetailView: View {
                     ViadereLevelPicker("Interruptions from \(name)",
                                        selection: Binding(get: { preset }, set: { value in Task { await prefs.setMute(value.muteLevel, for: duration) } }),
                                        levels: InterruptionPreset.levels,
-                                       caption: preset.explanation(business: name))
+                                       caption: follows ? "\(preset.followingSummary()). \(preset.explanation(business: name))" : preset.explanation(business: name))
                     .disabled(prefs.isSaving)
+                    if !follows {
+                        Button("Follow my default level") { Task { await prefs.followDefault() } }
+                            .buttonStyle(.viadere(.quiet))
+                            .disabled(prefs.isSaving)
+                    }
                     if preset != .everything {
                         ViadereHairline()
                         ViadereInlineStepper("For", value: Binding(get: { duration }, set: { value in

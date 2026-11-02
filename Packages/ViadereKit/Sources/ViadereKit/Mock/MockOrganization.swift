@@ -4,6 +4,7 @@ import ViadereCore
 /// In-memory Organization state of the mock server.
 struct MockOrganizationState {
     var preferences: [BusinessID: BusinessPreferences] = [:]
+    var notificationSettings = NotificationSettings.default
     var seen: Set<String> = []
     var conversationState: [SessionID: ConversationStateView] = [:]
     var layouts: [BusinessID: [SurfaceModule]] = [:]
@@ -126,9 +127,18 @@ extension MockViadereAPI: OrganizationAPI {
         guard !update.isEmpty else { throw APIError.server(status: 422, code: .validationFailed, message: "Change at least one preference.") }
         var prefs = org.preferences[business] ?? BusinessPreferences(businessId: business)
         if let favorite = update.favorite { prefs.favorite = favorite }
+        if update.followDefault != nil, update.muteLevel != nil || update.muteUntil != nil {
+            throw APIError.server(status: 422, code: .validationFailed, message: "Follow your default or choose a level, not both.")
+        }
         if let level = update.muteLevel {
             prefs.muteLevel = level
             prefs.muteUntil = level == MuteLevel.none ? nil : update.muteUntil
+            prefs.hasOwnLevel = true
+        }
+        if update.followDefault == true {
+            prefs.muteLevel = MuteLevel.none
+            prefs.muteUntil = nil
+            prefs.hasOwnLevel = false
         }
         if let blocked = update.blocked {
             prefs.blocked = blocked
@@ -137,6 +147,18 @@ extension MockViadereAPI: OrganizationAPI {
         prefs.updatedAt = clock()
         org.preferences[business] = prefs
         return prefs
+    }
+
+    public func notificationSettings() async throws -> NotificationSettings {
+        try online()
+        return org.notificationSettings
+    }
+
+    public func updateNotificationSettings(_ update: NotificationSettingsUpdate) async throws -> NotificationSettings {
+        try online()
+        if update.invalidField != nil { throw APIError.server(status: 422, code: .validationFailed, message: "Check the quiet hours.") }
+        org.notificationSettings = NotificationSettings(defaultLevel: update.defaultLevel, quietHours: update.quietHours, updatedAt: clock())
+        return org.notificationSettings
     }
 
     public func surface(business: BusinessID) async throws -> BusinessSurfaceView {

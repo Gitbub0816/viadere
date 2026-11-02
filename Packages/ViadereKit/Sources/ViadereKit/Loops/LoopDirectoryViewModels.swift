@@ -119,6 +119,8 @@ public final class LoopDetailViewModel {
     /// Set only after the manifest verified and the definition matched it.
     public private(set) var definition: LoopDefinition?
     public var mode: LoopInstallMode = .installOnly
+    /// "Alerts from this Loop" on the install sheet (owner decision F-4). Off unless the customer chooses it; only this Loop's own requests.
+    public var alertsEnabled = false
     public private(set) var isSubmitting = false
     public var errorMessage: String?
 
@@ -190,6 +192,10 @@ public final class LoopDetailViewModel {
         return LoopPermissions.derive(definition, business: entry.business.safeName, connected: isConnected || mode == .installAndConnect)
     }
 
+    /// The install sheet's alerts choice: what it does and what it never does (Core wording).
+    public var alertsTitle: String { LoopAlertsCopy.title }
+    public var alertsDetail: String { LoopAlertsCopy.detail(business: entry?.business.safeName ?? "") }
+
     public var title: String { entry.map(LoopDirectoryViewModel.title) ?? "" }
     public var summary: String? { entry.flatMap(LoopDirectoryViewModel.summary) }
 
@@ -217,7 +223,8 @@ public final class LoopDetailViewModel {
         errorMessage = nil
         do {
             let result = try await api.install(loopId, LoopInstallRequest(mode: offersConnect ? mode : .installOnly, source: source,
-                                                                          textVersion: text.version, textDigest: text.digest, agree: true))
+                                                                          textVersion: text.version, textDigest: text.digest, agree: true,
+                                                                          alertsEnabled: alertsEnabled))
             onConsent(result.consent)
             library?.adopt(result.installed)
             if var entry {
@@ -288,6 +295,24 @@ public final class LoopLibraryViewModel {
         loops.removeAll { $0.loopId == installed.loopId }
         loops.append(installed)
         loops.sort { ($0.title, $0.loopId.description) < ($1.title, $1.loopId.description) }
+    }
+
+    /// Allows or stops this Loop's own alerts in Alerts. Optimistic, rolled back when the server refuses. Returns whether it was saved.
+    @discardableResult
+    public func setAlerts(_ loop: LoopDefinitionID, enabled: Bool) async -> Bool {
+        guard let api, let index = loops.firstIndex(where: { $0.loopId == loop }) else { return false }
+        let previous = loops[index]
+        loops[index].alertsEnabled = enabled
+        do {
+            let saved = try await api.setLoopAlerts(loop, enabled: enabled)
+            if let i = loops.firstIndex(where: { $0.loopId == loop }) { loops[i] = saved }
+            errorMessage = nil
+            return true
+        } catch {
+            if let i = loops.firstIndex(where: { $0.loopId == loop }) { loops[i] = previous }
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't change this."
+            return false
+        }
     }
 
     /// Removes the Loop (the server cancels its open requests). Returns whether it was removed.

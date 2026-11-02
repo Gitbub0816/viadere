@@ -14,10 +14,13 @@ final class BusinessPreferenceRecord: Model, @unchecked Sendable {
     @OptionalField(key: "mute_until") var muteUntil: Date?
     @OptionalField(key: "blocked_at") var blockedAt: Date?
     @Field(key: "updated_at") var updatedAt: Date
+    /// The customer chose a level for this business (`NotificationSettings.v1`); otherwise it inherits the account-wide default level.
+    @Field(key: "has_own_level") var hasOwnLevel: Bool
 
-    init() {}
+    init() { hasOwnLevel = false }
 
     init(consumerId: UUID, businessId: UUID, now: Date) {
+        hasOwnLevel = false
         id = UUID()
         self.consumerId = consumerId
         self.businessId = businessId
@@ -30,7 +33,7 @@ final class BusinessPreferenceRecord: Model, @unchecked Sendable {
 
     func dto(_ businessId: BusinessID) -> BusinessPreferences {
         BusinessPreferences(businessId: businessId, favorite: favorite, muteLevel: muteLevelValue, muteUntil: muteUntil, blocked: blockedAt != nil,
-                            updatedAt: updatedAt)
+                            updatedAt: updatedAt, hasOwnLevel: hasOwnLevel)
     }
 }
 

@@ -16,7 +16,9 @@ final class LoopInstallRecord: Model, @unchecked Sendable {
     @Field(key: "installed_at") var installedAt: Date
     @Field(key: "updated_at") var updatedAt: Date
     @OptionalField(key: "uninstalled_at") var uninstalledAt: Date?
-    init() {}
+    /// The customer allows this Loop's own alerts in Alerts (`LoopInstallAlerts.v1`, owner decision F-4). Off unless chosen.
+    @Field(key: "alerts_enabled") var alertsEnabled: Bool
+    init() { alertsEnabled = false }
 
     var isActive: Bool { uninstalledAt == nil }
 }

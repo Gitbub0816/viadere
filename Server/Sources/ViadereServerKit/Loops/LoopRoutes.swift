@@ -69,6 +69,11 @@ enum LoopRoutes {
             let body: LoopInstallRequest = try req.decodeBody()
             return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).install(principal: try req.consumer, loopId: id, request: body))
         }
+        routes.api(APIRoutes.loopInstalledAlerts) { req in
+            let id: LoopDefinitionID = try req.uuidParameter("loopId")
+            let body: LoopAlertsRequest = try req.decodeBody()
+            return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).setAlerts(principal: try req.consumer, loopId: id, enabled: body.enabled))
+        }
         routes.api(APIRoutes.loopUninstall) { req in
             let id: LoopDefinitionID = try req.uuidParameter("loopId")
             return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).uninstall(principal: try req.consumer, loopId: id))

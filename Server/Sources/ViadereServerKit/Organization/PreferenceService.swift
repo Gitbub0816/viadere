@@ -46,6 +46,9 @@ struct PreferenceService {
                 throw APIError.validation("A mute must end in the future and within a year.", details: ["muteUntil": "invalid"])
             }
         }
+        if update.followDefault != nil, update.muteLevel != nil || update.muteUntil != nil {
+            throw APIError.validation("Follow your default or choose a level, not both.", details: ["followDefault": "invalid"])
+        }
         let relationship = try await ownedRelationship(consumer: consumer, business: business)
         let result: BusinessPreferences = try await db.transaction { tx in
             let row = try await record(consumer: consumer.uuid, business: business.uuid, on: tx)
@@ -55,6 +58,13 @@ struct PreferenceService {
             if let level = update.muteLevel {
                 row.muteLevel = level.rawValue
                 row.muteUntil = level == MuteLevel.none ? nil : update.muteUntil
+                row.hasOwnLevel = true
+            }
+            // Back to the account-wide default (`NotificationSettings.defaultLevel`): this business no longer has a level of its own.
+            if update.followDefault == true {
+                row.muteLevel = MuteLevel.none.rawValue
+                row.muteUntil = nil
+                row.hasOwnLevel = false
             }
             if let blocked = update.blocked { row.blockedAt = blocked ? (row.blockedAt ?? now) : nil }
             row.updatedAt = now
@@ -101,12 +111,12 @@ struct PreferenceService {
         return BusinessDirectoryRules.ordered(entries)
     }
 
-    /// The interruption a push for `purpose` from `business` may use under the customer's mute (spec C7.2: mute changes interruption only,
-    /// never presence; never for security, account service or action-required items).
-    func silences(consumer: UUID, business: UUID, purpose: InteractionPurpose, actionRequired: Bool) async -> Bool {
-        guard let row = try? await record(consumer: consumer, business: business, on: db) else { return false }
-        let level = row.dto(BusinessID(business)).effectiveMute(at: ctx.now)
-        return MutePolicy.silences(level, purpose: purpose, actionRequired: actionRequired)
+    /// Whether a push for this item should be delivered quietly: the business's level (its own, else the account default) and the account's
+    /// quiet hours (spec C7.2: these change interruption only, never presence; never for security-critical items). See
+    /// `NotificationSettingsService`.
+    func silences(consumer: UUID, business: UUID, kind: InteractionKind?, purpose: InteractionPurpose, actionRequired: Bool) async -> Bool {
+        await NotificationSettingsService(db: db, ctx: ctx).interruption(consumer: consumer, business: business, kind: kind, purpose: purpose,
+                                                                         actionRequired: actionRequired) == .quiet
     }
 
     // MARK: Conversations (archive, mute)
@@ -135,6 +145,7 @@ struct PreferenceService {
     /// Erases the account's Organization rows (preferences, conversation state, seen marks). Called inside the deletion transaction.
     static func wipe(consumer: UUID, on db: any Database) async throws {
         try await BusinessPreferenceRecord.query(on: db).filter(\.$consumerId == consumer).delete()
+        try await NotificationSettingsService.wipe(consumer: consumer, on: db)
         try await ConversationStateRecord.query(on: db).filter(\.$consumerId == consumer).delete()
         try await AlertSeenRecord.query(on: db).filter(\.$consumerId == consumer).delete()
     }
