@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UserNotifications
 import ViadereKit
 import WatchConnectivity
 
@@ -18,6 +19,23 @@ final class WatchModel: NSObject, WCSessionDelegate {
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
+        registerMirroredCategories()
+    }
+
+    /// The mirrored iPhone notifications (`viadere.approve`, `viadere.auth.link`) show Deny / This wasn't me on the wrist only if the watch app
+    /// registers the same categories (ADR-0022 §8). There is no Approve action anywhere: the watch holds no key and never approves.
+    /// **Verify on a device (Stage 4):** whether iOS delivers a mirrored action to this delegate once the watch app is installed.
+    private func registerMirroredCategories() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let categories = AuthNotificationCategory.categories.map { model -> UNNotificationCategory in
+            let actions = model.actions
+                .filter { $0.identifier == AuthNotificationCategory.denyAction || $0.identifier == AuthNotificationCategory.reportAction }
+                .map { UNNotificationAction(identifier: $0.identifier, title: $0.title, options: []) }
+            return UNNotificationCategory(identifier: model.identifier, actions: actions, intentIdentifiers: [],
+                                          hiddenPreviewsBodyPlaceholder: AuthDeliveryCopy.hiddenPreviewsPlaceholder, options: [])
+        }
+        center.setNotificationCategories(Set(categories))
     }
 
     /// Applies the phone's appearance choice (the night side of it) and keeps it for the next launch; without one the stored or default
@@ -35,7 +53,8 @@ final class WatchModel: NSObject, WCSessionDelegate {
         guard let data = WatchSync.encode(request) else { return }
         let session = WCSession.default
         guard session.isReachable else {
-            statusMessage = "iPhone not reachable"
+            // W-05: nothing is queued and nothing is signed on the wrist.
+            statusMessage = AuthDeliveryCopy.watchPhoneUnreachable
             return
         }
         session.sendMessageData(data, replyHandler: { reply in
@@ -45,7 +64,7 @@ final class WatchModel: NSObject, WCSessionDelegate {
                 if result == .done || result == .stale || result == .expired { self.items.removeAll { $0.id == request.interactionId } }
             }
         }, errorHandler: { _ in
-            Task { @MainActor in self.statusMessage = "Couldn't reach iPhone" }
+            Task { @MainActor in self.statusMessage = AuthDeliveryCopy.watchPhoneUnreachable }
         })
     }
 
@@ -74,5 +93,29 @@ final class WatchModel: NSObject, WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in self.isReachable = reachable }
+    }
+}
+
+// MARK: Mirrored notification actions (ADR-0022 §8)
+
+extension WatchModel: UNUserNotificationCenterDelegate {
+    /// Forwards Deny and This wasn't me from a mirrored authentication notification to the phone. Never anything else: there is no Approve
+    /// here, and "Review" simply opens this app (the long look shows W-02).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let content = response.notification.request.content
+        guard AuthNotificationCategory.all.contains(content.categoryIdentifier) else { return }
+        let decision: Decision
+        switch response.actionIdentifier {
+        case AuthNotificationCategory.denyAction: decision = .deny
+        case AuthNotificationCategory.reportAction: decision = .report
+        default: return
+        }
+        let request = WatchActionRequest(interactionId: "", decision: decision, categoryIdentifier: content.categoryIdentifier,
+                                         pushUserInfo: PushPayload.stringify(content.userInfo))
+        await MainActor.run { self.send(request) }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list]
     }
 }

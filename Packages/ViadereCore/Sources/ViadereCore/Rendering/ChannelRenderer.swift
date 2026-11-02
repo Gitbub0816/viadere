@@ -273,14 +273,15 @@ public enum ChannelRenderer {
             var text = "Sign-in to \(SMSEncoding.field(p.service, maxLength: 60)) from \(SMSEncoding.field(p.device, maxLength: 60))"
             if let location = p.approximateLocation ?? p.ipRegion { text += " near \(SMSEncoding.field(location, maxLength: 60))" }
             body = text + ". Is this you?"
-            actions = [action("approve", "Yes, it's me", foreground: secure), action("deny", "No", .destructive),
-                       action("report", "Not me - report", .destructive)]
+            // F-14: approve on a security kind always foregrounds the app (an inline approve dead-ends). Refusals never need unlock (A6/A7 H1).
+            actions = [action("approve", "Yes, it's me", foreground: true), action("deny", "No", .destructive, auth: false),
+                       action("report", "Not me - report", .destructive, auth: false)]
             categoryId = secure ? "viadere.authenticate.secure" : "viadere.authenticate"
         case .authorize(let p):
             subtitle = "Approval request"
             body = authorizeSentence(p)
-            actions = [action("approve", "Approve", foreground: secure), action("deny", "Deny", .destructive),
-                       action("report", "Not me - report", .destructive)]
+            actions = [action("approve", "Approve", foreground: true), action("deny", "Deny", .destructive, auth: false),
+                       action("report", "Not me - report", .destructive, auth: false)]
             categoryId = secure ? "viadere.authorize.secure" : "viadere.authorize"
         case .confirm(let p):
             subtitle = "Please confirm"
@@ -333,7 +334,9 @@ public enum ChannelRenderer {
         let level: NotificationRendering.InterruptionLevel
         switch (interaction.purpose, interaction.effectivePriority) {
         case (.marketing, _), (.rewards, _), (_, .low): level = .passive
-        case (.security, .high), (.security, .urgent), (.transactional, .high): level = .timeSensitive
+        // ADR-0022 §5.5: security notifications are `active`, never time-sensitive (urgency adds pressure).
+        case (.security, _): level = .active
+        case (.transactional, .high): level = .timeSensitive
         default: level = .active
         }
         return NotificationRendering(

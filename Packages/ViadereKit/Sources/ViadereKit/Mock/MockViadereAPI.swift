@@ -647,7 +647,11 @@ public actor MockViadereAPI: ViadereAPI {
         return envelope
     }
 
+    /// How many hand-off tokens were redeemed (F-08: opening a `/h/` link must not redeem; only the confirm screen's Open does).
+    public private(set) var handoffRedemptions = 0
+
     public func redeemHandoff(token: String) async throws -> HandoffRedeemResponse {
+        handoffRedemptions += 1
         guard let id = interactionOrder.first(where: { envelopes[$0]?.status == .pending }) else { throw Self.notFound() }
         return HandoffRedeemResponse(purpose: .interaction, interactionId: id)
     }

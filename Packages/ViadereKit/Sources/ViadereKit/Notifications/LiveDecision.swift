@@ -91,6 +91,20 @@ public enum LiveDecisionEnrichment {
     private static func nonEmpty(_ text: String) -> String? { text.isEmpty ? nil : text }
 }
 
+/// How much a Live Activity may say where a stranger can read it (F-09, spec §7.2, UX_COPY §0 rule 5).
+///
+/// The Lock Screen and the Dynamic Island are visible without unlocking and cannot tell whether the phone is locked, so the **default is
+/// neutral**: Viadere's own words, no business name, no question, no option labels. `detailed` is the person's opt-in
+/// (`PreferenceKey.liveActivityLockScreenDetails`), for people who want the question on the Lock Screen. Business text is never drawn on a
+/// surface that has not been told `detailed`.
+public enum LiveActivityDisclosure: Sendable, Equatable {
+    case neutral
+    case detailed
+
+    /// The person's choice (off unless they turned it on in Settings).
+    public init(preferences: any PreferencesStore) { self = preferences.bool(.liveActivityLockScreenDetails) ? .detailed : .neutral }
+}
+
 /// What the widget draws for a decision activity, as plain data. Text is sanitized again at render time (content state is data).
 public struct LiveDecisionPresentation: Equatable, Sendable {
     public struct ActionButton: Equatable, Sendable, Identifiable {
@@ -121,7 +135,28 @@ public struct LiveDecisionPresentation: Equatable, Sendable {
 
     public static let openLabel = "Open"
 
-    public init(state: DecisionActivityState, businessName rawBusinessName: String, now: Date = Date()) {
+    /// - Parameter disclosure: `.neutral` (the default) shows only Viadere's own words and an "Open" link; nothing the business supplied.
+    public init(state: DecisionActivityState, businessName rawBusinessName: String, disclosure: LiveActivityDisclosure = .neutral, now: Date = Date()) {
+        if disclosure == .neutral {
+            // F-09: no business name, no question, no option labels, no countdown that hints at urgency. The decision is answered in the app.
+            business = "Viadere"
+            expiresAt = state.expiresAt
+            isEnriched = false
+            openURL = URL(string: "\(DeepLinkRouter.customScheme)://i/\(state.interactionId)")
+            let neutralStage: DecisionActivityState.Stage = state.stage == .pending && now >= state.expiresAt ? .expired : state.stage
+            isPending = neutralStage == .pending
+            headline = AuthDeliveryCopy.liveActivityHeadline
+            detail = isPending ? AuthDeliveryCopy.liveActivityDetail : nil
+            buttons = []
+            showsOpen = isPending
+            switch neutralStage {
+            case .pending: stageText = nil; compact = "Open"
+            case .answered: stageText = "Answered"; compact = "Done"
+            case .expired: stageText = "Expired"; compact = "Expired"
+            case .cancelled: stageText = "Withdrawn"; compact = "Off"
+            }
+            return
+        }
         business = UntrustedText.name(rawBusinessName, max: 40, attribution: nil).text
         expiresAt = state.expiresAt
         isEnriched = state.isEnriched
@@ -248,7 +283,8 @@ public struct LiveDecisionPerformer: Sendable {
         switch outcome {
         case .submitted(_, let status), .stale(_, let status): return .finished(DecisionActivityState.stage(for: status))
         case .expired: return .finished(.expired)
-        case .requiresApp, .open: return .openApp
+        case .requiresApp, .open, .openApproveRequest, .openAuthDelivery, .openRequests: return .openApp
+        case .reduced: return .rejected
         case .failed(_, let message): return .failed(message)
         case .ignored: return .rejected
         }

@@ -209,7 +209,7 @@ public struct NotificationEnricher: Sendable {
     /// Generic notification when the interaction cannot be fetched (offline, device locked before first unlock).
     public static func fallback(interactionId: InteractionID) -> EnrichedNotification {
         EnrichedNotification(
-            title: "Viadere", subtitle: "Action needed", body: "Open Viadere to review a request.",
+            title: AuthDeliveryCopy.n01Title, subtitle: "Action needed", body: AuthDeliveryCopy.n08Body,
             threadIdentifier: "viadere.general", interruptionLevel: .active,
             category: NotificationCategoryModel(identifier: "viadere.unknown", actions: [
                 NotificationActionModel(identifier: "viadere.open", title: "Open", requiresAuthentication: true, opensApp: true),
@@ -228,8 +228,12 @@ public struct NotificationEnricher: Sendable {
     /// the authenticated API (`LoopNotificationRoute`).
     public static let loopCategory = NotificationCategoryModel(identifier: LoopNotificationRoute.category, actions: [])
 
-    /// Everything the app registers at launch: the renderer's static categories plus the security-cancel and Loop categories.
-    public static func registeredCategorySpecs() -> [NotificationCategoryModel] { staticCategorySpecs() + [securityCancelCategory, loopCategory] }
+    /// Everything the app registers at launch: the renderer's static categories plus the security-cancel and Loop categories and the
+    /// authentication-delivery categories (`viadere.approve`, `viadere.auth.link`, `viadere.auth.code`; F-15: a push whose category is not
+    /// registered shows no actions and falls through to Alerts).
+    public static func registeredCategorySpecs() -> [NotificationCategoryModel] {
+        staticCategorySpecs() + [securityCancelCategory, loopCategory] + AuthNotificationCategory.categories
+    }
 
     /// Static categories (`ChannelRenderer.staticCategories`) with their actions, so the app registers the
     /// same shapes the renderer produces. Built by rendering a representative interaction per category.

@@ -25,6 +25,10 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/lp/{loopId}` or `viadere://lp/{loopId}`: a business's Loop install link. Opens the install sheet only
     /// (SECURITY.md §2.98 "Installed Loops"); nothing is installed without the customer's choice.
     case loopInstall(LoopDefinitionID)
+    /// Produced only from a tapped authentication-delivery push, never from a URL: the confirm screen for a link delivery (`adl`).
+    case authDelivery(UUID)
+    /// Produced only from a tapped push, never from a URL: an Approve v2 request (`req`), or `nil` for the list of requests.
+    case approveRequest(String?)
     /// `https://{link domain}/v/{CODE}` (a business's "Verify with Viadere" button or its QR): review a verification session. No secret, no query.
     case verificationSession(code: String)
 }

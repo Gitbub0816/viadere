@@ -250,7 +250,7 @@ struct TokenStorageTests {
         let api = LiveViadereAPI(client: APIClient(executor: executor, sessions: sessions))
         let result = await NotificationEnricher(api: api).enrich(interactionId: InteractionID())
         #expect(result.isFallback)
-        #expect(result.body == "Open Viadere to review a request.")
+        #expect(result.body == "You have a new security item. Open Viadere to review it.")
         #expect(result.category.identifier == "viadere.unknown")
     }
 }

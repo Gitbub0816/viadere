@@ -18,6 +18,9 @@ public enum PreferenceKey: String, CaseIterable, Sendable {
     case protectionPromptShown
     /// Show business detail in notification banners (user controls previews further in iOS Settings).
     case richNotificationPreviews
+    /// Show a decision Live Activity's question and answers on the Lock Screen and in the Dynamic Island (F-09). Off by default: the neutral
+    /// wording is shown instead. Read by the widget extension through the app group.
+    case liveActivityLockScreenDetails
     case lastKnownConsumerId
     /// The saved business context of the Organization views (`OrganizationContext` JSON). A filter only; never sent as authority.
     case organizationContext

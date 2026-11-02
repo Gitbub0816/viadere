@@ -29,7 +29,8 @@ struct WatchAndPushTests {
         let auth = PreviewData.authorize(sensitivity: .low)
         await api.add(auth)
         let approve = WatchActionRequest(interactionId: auth.id.description, decision: .approve)
-        #expect(await WatchSync.handle(approve, using: services.notificationHandler) == .requiresApp(auth.id))
+        // ADR-0022 §8: the watch never approves a security item, so it is refused outright rather than handed to the phone.
+        #expect(await WatchSync.handle(approve, using: services.notificationHandler) == .ignored)
         let choose = PreviewData.choose()
         await api.add(choose)
         let pick = WatchActionRequest(interactionId: choose.id.description, decision: .select, optionId: "fri_11")

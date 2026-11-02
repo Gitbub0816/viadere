@@ -100,18 +100,40 @@ public final class ApproveController {
     // MARK: Requests
 
     /// Answers `prompt`. Returns whether the answer was accepted by the relay.
+    /// - Parameter dismissOnSuccess: `false` keeps the sheet up so it can show what happened ("Approved. Your answer was sent to {Business}.",
+    ///   shown only after the relay accepted the signed result); the sheet then calls `finishPresented()`.
     @discardableResult
-    public func answer(_ prompt: ApprovalPrompt, _ decision: ApprovalDecision) async -> Bool {
+    public func answer(_ prompt: ApprovalPrompt, _ decision: ApprovalDecision, dismissOnSuccess: Bool = true) async -> Bool {
         guard let env = environment else { return false }
         phase = .working
         defer { phase = .idle }
         do {
             _ = try await env.requests.answer(prompt, decision: decision)
             prompts.removeAll { $0.id == prompt.id }
-            if presented?.id == prompt.id { presented = nil }
-            presentNextIfIdle()
+            if dismissOnSuccess {
+                if presented?.id == prompt.id { presented = nil }
+                presentNextIfIdle()
+            }
             return true
         } catch { report(error); return false }
+    }
+
+    /// The person closed the result screen of an answered request.
+    public func finishPresented() {
+        presented = nil
+        presentNextIfIdle()
+    }
+
+    /// A tapped Approve push or its "Review" action (F-15): refresh, then open the request the push named, else the first waiting one.
+    /// A request that is gone says so (E-03) instead of landing somewhere unrelated.
+    public func presentRequest(key: String?) async {
+        await refresh()
+        guard let key else { return }
+        if let match = prompts.first(where: { $0.id.uuidString.caseInsensitiveCompare(key) == .orderedSame || $0.request.requestId == key }) {
+            present(match)
+        } else {
+            message = AuthDeliveryCopy.noLongerActive
+        }
     }
 
     /// The person closed the sheet without answering: it stays in the list, but is not pushed at them again until the next launch.

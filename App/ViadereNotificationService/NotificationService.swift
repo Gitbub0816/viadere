@@ -96,7 +96,7 @@ private final class PendingDelivery: @unchecked Sendable {
     func deliverBestAttempt() {
         guard claim() else { return }
         content.title = "Viadere"
-        content.body = "Open Viadere to review a request."
+        content.body = AuthDeliveryCopy.n08Body
         content.categoryIdentifier = "viadere.unknown"
         handler(content)
     }

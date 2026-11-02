@@ -27,7 +27,7 @@ enum NotificationCategories {
             actions: model.actions.map(action),
             intentIdentifiers: [],
             // Shown instead of the body when the user hides previews on the lock screen.
-            hiddenPreviewsBodyPlaceholder: "Viadere needs your attention",
+            hiddenPreviewsBodyPlaceholder: AuthDeliveryCopy.hiddenPreviewsPlaceholder,
             options: [])
     }
 

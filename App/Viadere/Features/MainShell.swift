@@ -88,6 +88,20 @@ struct MainShell: View {
             }
         }
         .loopInstallLinks(model: model)
+        .sheet(item: $model.pendingAuthDelivery) { pending in
+            // A sign-in link push ("Open"): the confirm screen. Nothing is opened until Continue, and nothing at all until the destination is verified.
+            LinkConfirmationSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(isPresented: Binding(get: { model.pendingHandoff != nil }, set: { if !$0 { model.dismissHandoff() } })) {
+            // A `/h/` link (F-08): confirm first; the token is redeemed only by Open.
+            if let confirmation = model.pendingHandoff {
+                HandoffConfirmationSheet(appModel: model, confirmation: confirmation)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(ViadereColor.background)
+            }
+        }
         .sheet(item: $model.pendingVerificationSession) { pending in
             // A business's "Verify with Viadere" button or QR (`/v/…`).
             VerificationSessionSheet(pending: pending)

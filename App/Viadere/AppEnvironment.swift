@@ -9,12 +9,18 @@ final class AppEnvironment {
     static let shared = AppEnvironment()
 
     /// Keychain-backed, Secure Enclave-keyed, certificate-pinned. See `ViadereServices.live`.
-    nonisolated static let services: ViadereServices = ViadereServices.live(
-        configuration: ViadereRuntime.configuration,
-        passkeys: ApplePasskeyService(anchorProvider: { KeyWindow.current }),
-        notificationPermission: UserNotificationPermissionService(),
-        appLock: LocalAuthenticationAppLock(),
-        residue: AppLocalResidueCleaner())
+    nonisolated static let services: ViadereServices = {
+        var services = ViadereServices.live(
+            configuration: ViadereRuntime.configuration,
+            passkeys: ApplePasskeyService(anchorProvider: { KeyWindow.current }),
+            notificationPermission: UserNotificationPermissionService(),
+            appLock: LocalAuthenticationAppLock(),
+            residue: AppLocalResidueCleaner())
+        // "Deny not sent yet" (N-09). `services.authDelivery` stays `UnavailableAuthDeliveryAPI` until the server's auth-delivery API exists,
+        // and `services.authDeliveryFlags` stays `.shipping` (device-add comparison and destination verification off, fail closed).
+        services.localSecurityNotices = LocalSecurityNotices()
+        return services
+    }()
 
     let model: AppModel
     let privacyShield = PrivacyShield()
@@ -38,9 +44,12 @@ final class AppEnvironment {
     let link: LinkController
 
     private init() {
-        approve = ApproveController(environment: ApproveEnvironment.live(services: Self.services))
+        let approveController = ApproveController(environment: ApproveEnvironment.live(services: Self.services))
+        approve = approveController
         link = LinkController(flow: ApproveEnvironment.liveLinkFlow(services: Self.services))
         model = AppModel(services: Self.services, walletLibrary: PassKitWalletLibrary())
+        // F-15: a tapped approval push opens that request (and "Review" does too), never the Alerts list.
+        model.openApproveRequest = { key in await approveController.presentRequest(key: key) }
         liveActivities = LiveActivityManager(services: Self.services)
         watchBridge = WatchBridge(services: Self.services)
     }

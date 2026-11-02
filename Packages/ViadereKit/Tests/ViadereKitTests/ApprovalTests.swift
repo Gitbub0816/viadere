@@ -107,10 +107,11 @@ struct ApprovalTests {
         #expect(!SigningPlan.plan(for: .deviceSignature).requiresUserVerification)
     }
 
-    @Test func slideToApproveForMoneyAndHighRisk() {
-        #expect(ApprovalPolicy.usesSlideToApprove(PreviewData.authorize().interaction))
+    @Test("No slide-to-approve for any flow (ADR-0022 §2.5, F-16)")
+    func noSlideToApproveAnywhere() {
+        #expect(!ApprovalPolicy.usesSlideToApprove(PreviewData.authorize().interaction))
         #expect(!ApprovalPolicy.usesSlideToApprove(PreviewData.authenticate(sensitivity: .standard).interaction))
-        #expect(ApprovalPolicy.usesSlideToApprove(PreviewData.authenticate(sensitivity: .high).interaction))
+        #expect(!ApprovalPolicy.usesSlideToApprove(PreviewData.authenticate(sensitivity: .high).interaction))
         #expect(!ApprovalPolicy.usesSlideToApprove(PreviewData.choose().interaction))
     }
 
@@ -169,7 +170,7 @@ struct ApprovalViewModelTests {
         await model.load()
         #expect(model.availability.isActionable)
         #expect(model.plan?.requiresBiometrics == true)
-        #expect(model.usesSlideToApprove)
+        #expect(!model.usesSlideToApprove)
         var finished: InteractionOutcome?
         model.onFinished = { finished = $0 }
         await model.approve()

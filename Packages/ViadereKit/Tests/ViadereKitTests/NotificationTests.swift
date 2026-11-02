@@ -138,7 +138,7 @@ struct EnrichmentTests {
         #expect(result.body.contains("$285.28"))
         #expect(result.category.identifier == "viadere.authorize.secure")
         #expect(result.requiresSecureFlow)
-        #expect(result.interruptionLevel == .timeSensitive)
+        #expect(result.interruptionLevel == .active)
         #expect(result.threadIdentifier == "business.\(PreviewData.northfield.id)")
         // approve opens the app, deny doesn't
         #expect(result.category.actions.first { $0.identifier == "viadere.approve" }?.opensApp == true)
