@@ -16,4 +16,7 @@ Recorded 2026-11-02 before any coding, as `docs/product/AUTH-DELIVERY-SPEC-v2.md
 | 10 | Existing retention | **Align to 30 days:** approval-request and link-token metadata follow the 30-day rule; tamper-evident audit events (no secrets) keep their longer, access-restricted retention. |
 | 11 | Legacy infrastructure | **Retire Fly.io, GCP KMS and Neon** from CI and IaC (Azure is the only staging). |
 | 12 | Existing Key Vault signing keys | **New grant/OIDC keys live only in the private signer from day one;** existing keys (key-directory log, link descriptor, Loop publication, Brand manifest, data KEK) stay with the api for now as a tracked exception with a migration plan. |
+| 13 | Residency definition (refines decision 7) | **Stored in the US, processors listed honestly:** all Viadere data at rest stays in US Azure regions; transit/edge providers (Cloudflare) and named processors (email provider, Didit) are documented with their regions in the privacy docs; nothing authentication-related is stored outside the US. |
+| 14 | GHCR images (O-4) | **Keep private; replace the personal access token** with a dedicated, narrowly scoped pull credential owned by the deploy setup. |
+| 15 | Legacy accounts (O-5) | Owner is not sure whether Fly/Neon/GCP resources still exist: retirement includes read-only check commands for the owner to run before anything is deleted. |
 | — | Production | No agent deploys to production. Staging only. |
