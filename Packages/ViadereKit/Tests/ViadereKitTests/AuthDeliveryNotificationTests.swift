@@ -137,10 +137,14 @@ struct AuthDeliveryNotificationTests {
 
     @Test func aDenyWithoutAUsableIdOpensTheRequestListInsteadOfGuessing() async {
         let api = MockAuthDeliveryAPI()
-        let h = await handler(api: api)
+        let notices = RecordingNotices()
+        let h = await handler(api: api, notices: notices)
         let outcome = await h.handle(NotificationResponseInfo(actionIdentifier: "viadere.deny", categoryIdentifier: "viadere.approve", userInfo: [:]))
         #expect(outcome == .openRequests)
         #expect(await api.reduceCalls.isEmpty)
+        // Review: Deny is a background action (the app is not brought forward), so the list cannot be shown; without the N-09 notice the
+        // person would believe they had denied (today's server sends `viadere.approve` pushes without `req`).
+        #expect(await notices.posted == 1, "a Deny that sent nothing must say so")
     }
 
     @Test func theDefaultAuthDeliveryClientFailsClosed() async {

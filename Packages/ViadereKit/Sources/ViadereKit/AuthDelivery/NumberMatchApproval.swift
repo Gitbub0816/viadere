@@ -178,8 +178,12 @@ public final class NumberMatchApprovalViewModel {
 
     public var needsFatigueAcknowledgement: Bool { context.showFatigueWarning && !fatigueAcknowledged }
 
+    /// Three wrong entries were made. Approve stays off for good on this screen, even when the automatic denial could not be sent (Face ID
+    /// cancelled, offline): the only answers left are Deny (sent as `number_mismatch`) and This wasn't me.
+    public var wrongEntryLimitReached: Bool { wrongEntries >= Self.maxWrongEntries }
+
     public var canApprove: Bool {
-        guard phase == .entering, !isScreenCaptured, context.deviceCanApprove, !needsFatigueAcknowledgement, context.expiresAt > clock() else { return false }
+        guard phase == .entering, !wrongEntryLimitReached, !isScreenCaptured, context.deviceCanApprove, !needsFatigueAcknowledgement, context.expiresAt > clock() else { return false }
         if numberRequired { return requirementUsable && isNumberComplete }
         return context.singleRequestId != nil
     }
@@ -206,7 +210,14 @@ public final class NumberMatchApprovalViewModel {
 
     // MARK: Answers
 
-    public func deny() async { await submit(.deny(reason: nil), requestIds: context.groupRequestIds, success: .denied) }
+    public func deny() async {
+        // After three wrong entries a Deny is the retry of the automatic `number_mismatch` denial that could not be sent.
+        if wrongEntryLimitReached {
+            await submit(.deny(reason: .numberMismatch), requestIds: context.groupRequestIds, success: .autoDenied)
+        } else {
+            await submit(.deny(reason: nil), requestIds: context.groupRequestIds, success: .denied)
+        }
+    }
 
     public func reportNotMe() async { await submit(.report, requestIds: context.groupRequestIds, success: .reported) }
 

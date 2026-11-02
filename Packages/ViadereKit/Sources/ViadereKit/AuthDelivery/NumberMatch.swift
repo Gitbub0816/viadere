@@ -62,7 +62,8 @@ public enum NumberMatcher {
     }
 
     static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
-        var diff = UInt8(truncatingIfNeeded: a.count ^ b.count)
+        // The lengths are compared as a whole: truncating `a.count ^ b.count` to 8 bits would call lengths that differ by 256 equal.
+        var diff: UInt8 = a.count == b.count ? 0 : 1
         let count = max(a.count, b.count)
         for i in 0..<count {
             let x: UInt8 = i < a.count ? a[i] : 0

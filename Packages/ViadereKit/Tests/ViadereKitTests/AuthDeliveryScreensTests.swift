@@ -82,6 +82,15 @@ struct NumberMatchTests {
         #expect(NumberMatcher.evaluate(entry: "47", requirement: clash) == .ambiguous)
     }
 
+    @Test("Review: the compare never treats a length that differs by a multiple of 256 as equal")
+    func lengthDifferencesAreNeverTruncatedAway() {
+        let code = Array("47".utf8)
+        #expect(!NumberMatcher.constantTimeEqual(code + [UInt8](repeating: 0, count: 256), code))
+        #expect(!NumberMatcher.constantTimeEqual(code, code + [UInt8](repeating: 0, count: 512)))
+        #expect(NumberMatcher.constantTimeEqual(code, Array("47".utf8)))
+        #expect(NumberMatcher.evaluate(entry: "47" + String(repeating: "\u{0}", count: 256), requirement: requirement("47")) == .noMatch)
+    }
+
     @Test func requirementsAreValidated() {
         #expect(requirement("47").isWellFormed)
         #expect(requirement("473").isWellFormed)
@@ -177,6 +186,33 @@ struct NumberMatchTests {
         let sent = await answering.answers
         #expect(sent.count == 1 && sent[0].0 == .deny(reason: .numberMismatch) && sent[0].1 == ["r1", "r2"])
         #expect(m.resultLine == "The number didn't match, so we denied this request. If you're signing in, start again on \u{2068}Acme\u{2069}.")
+    }
+
+    @Test("Review: after three wrong entries Approve stays off even when the automatic denial was not sent")
+    func aFailedAutomaticDenialNeverReopensApprove() async {
+        let answering = RecordingAnswering()
+        let (m, _) = model(requirement("47", "58"), answering: answering)
+        for _ in 0..<2 {
+            type("99", into: m)
+            await m.approve()
+        }
+        // The automatic denial fails (Face ID cancelled, offline): the screen returns to entering with the "not sent" notice.
+        await answering.failWith(AuthDeliveryError.offline)
+        type("99", into: m)
+        await m.approve()
+        #expect(m.phase == .entering && m.wrongEntries == 3)
+        await answering.failWith(nil)
+        // A fourth try with the right number must not approve anything.
+        type("47", into: m)
+        #expect(!m.canApprove)
+        await m.approve()
+        let afterApprove = await answering.answers
+        #expect(!afterApprove.contains { if case .approve = $0.0 { return true } else { return false } }, "no approve after the third wrong entry")
+        // Deny retries the number_mismatch denial of the whole group.
+        await m.deny()
+        #expect(m.phase == .autoDenied)
+        let last = await answering.answers.last
+        #expect(last?.0 == .deny(reason: .numberMismatch) && last?.1 == ["r1", "r2"])
     }
 
     @Test func twoMatchingRequestsSignNothing() async {
