@@ -123,7 +123,8 @@ public struct ViadereIconButton: View {
     }
 }
 
-/// "‹ Back" for pushed screens (the system bar is hidden).
+/// "‹ Back" for pushed screens (the system bar is hidden). It also turns the edge swipe back on for its navigation controller, which UIKit
+/// switches off whenever the bar is hidden (`ViadereNavigationGestures.swift`).
 public struct ViadereBackButton: View {
     private let title: String
     private let action: () -> Void
@@ -144,6 +145,9 @@ public struct ViadereBackButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        #if os(iOS)
+        .viadereEdgeSwipeBack()
+        #endif
     }
 }
 

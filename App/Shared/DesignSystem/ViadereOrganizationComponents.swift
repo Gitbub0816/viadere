@@ -10,8 +10,8 @@ import SwiftUI
 
 // MARK: - Context bar
 
-/// The top bar of every primary destination: the single business selector (All by default), Add business (+) and the account entry
-/// point (Settings is secondary, never a tab).
+/// The top bar of every primary destination: the single business selector (All by default), Add business (+) and, optionally, an account
+/// entry point (the app's You tab replaced it; pass `nil` to leave it out).
 ///
 /// Accessibility: the selector is **one adjustable element**. VoiceOver reads "Business, Showing all businesses" (or "Showing {name}");
 /// swipe up or down moves through All and the businesses, double-tap opens the full list. At accessibility text sizes the bar stacks so the
@@ -23,11 +23,11 @@ public struct ViadereContextBar: View {
     private let openSelector: () -> Void
     private let adjust: (Int) -> Void
     private let add: () -> Void
-    private let account: () -> Void
+    private let account: (() -> Void)?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     public init(title: String, accessibilityValue: String, isFiltered: Bool, openSelector: @escaping () -> Void, adjust: @escaping (Int) -> Void,
-                add: @escaping () -> Void, account: @escaping () -> Void) {
+                add: @escaping () -> Void, account: (() -> Void)? = nil) {
         self.title = title
         self.accessibilityValue = accessibilityValue
         self.isFiltered = isFiltered
@@ -101,8 +101,10 @@ public struct ViadereContextBar: View {
         ViadereIconButton(systemName: "plus", label: "Add business", action: add)
     }
 
-    private var accountButton: some View {
-        ViadereIconButton(systemName: "person.crop.circle", label: "Settings", action: account)
+    @ViewBuilder private var accountButton: some View {
+        if let account {
+            ViadereIconButton(systemName: "person.crop.circle", label: "Settings", action: account)
+        }
     }
 }
 
