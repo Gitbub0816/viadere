@@ -180,7 +180,9 @@ final class RCSTests: XCTestCase {
             XCTAssertEqual(taps.map(\.text), ["Yes, thanks", "Not yet"])
             // The second message went out later and superseded the first menu only if it had chips; it has none.
             let noChips = sent.first { h.replyTokens(in: $0).isEmpty }!
-            XCTAssertTrue(h.suggestions(in: noChips).contains { ($0["action"] as? [String: Any])?["openUrlAction"] != nil })
+            // No chips and no link: the message says to open the Viadere app (decision 9).
+            XCTAssertTrue(h.suggestions(in: noChips).allSatisfy { ($0["action"] as? [String: Any])?["openUrlAction"] == nil })
+            XCTAssertTrue((((noChips["contentMessage"] as? [String: Any])?["text"] as? String) ?? "").contains("Viadere app"))
             try await eq(try await h.rcsTap(token: taps[1].token).status, .ok)
             let record = try await XCTUnwrapAsync(await InteractionRecord.find(interaction.id.uuid, on: h.db))
             XCTAssertEqual(record.statusValue, .replied)
@@ -462,9 +464,8 @@ final class RCSTests: XCTestCase {
             try await h.runJobs()
             let sms = try XCTUnwrap(h.texts.sent.last)
             XCTAssertEqual(sms.to, phone)
-            XCTAssertTrue(sms.body.hasPrefix("[Northwind Air]: "))
             // Over SMS an interaction is only ever UX_COPY SMS-04: who sent something and that it needs the app. No link, no content, no way to answer.
-            XCTAssertTrue(sms.body.contains("https://viadere.com/h/") == false && !sms.body.contains("://"), sms.body)
+            XCTAssertFalse(sms.body.contains("://"), sms.body)
             XCTAssertFalse(sms.body.contains("1. Confirm"))
             XCTAssertFalse(sms.body.contains("Seat 14C"), "details stay out of the insecure channel")
             XCTAssertEqual(sms.body, "Viadere: Northwind Air sent you something that needs the Viadere app. Open Viadere to respond.")

@@ -111,6 +111,23 @@ struct PhoneLinkService {
 
     // MARK: Inbound (the gateway calls this inside its transaction, before the menu engine)
 
+    /// Work that must run only after the gateway's transaction committed (pushes reach the network; a rolled-back text must not announce anything).
+    final class AfterCommit: @unchecked Sendable {
+        private let lock = NSLock()
+        private var actions: [@Sendable () async -> Void] = []
+        func add(_ action: @escaping @Sendable () async -> Void) { lock.lock(); actions.append(action); lock.unlock() }
+        func run() async {
+            let pending = take()
+            for action in pending { await action() }
+        }
+        private func take() -> [@Sendable () async -> Void] {
+            lock.lock(); defer { lock.unlock() }
+            let pending = actions
+            actions = []
+            return pending
+        }
+    }
+
     enum InboundHandling: Equatable {
         /// An ordinary message: the menu engine handles it.
         case ordinary
@@ -123,7 +140,7 @@ struct PhoneLinkService {
         GatewayKeyword.classify(sms.text) == .unlink || PhoneLinkMO.extractNonce(from: sms.text) != nil
     }
 
-    func handleInbound(_ sms: InboundSMS, on tx: any Database) async throws -> InboundHandling {
+    func handleInbound(_ sms: InboundSMS, on tx: any Database, afterCommit: AfterCommit) async throws -> InboundHandling {
         if GatewayKeyword.classify(sms.text) == .unlink {
             try await unlink(number: sms.from, on: tx)
             return .handled
@@ -167,7 +184,7 @@ struct PhoneLinkService {
             try await audit("phone_link.mo_refused", reason: "device", number: sms.from, consumer: challenge.consumerId, on: tx)
             return .handled
         }
-        try await bind(challenge: challenge, device: device, phone: phone, now: now, on: tx)
+        try await bind(challenge: challenge, device: device, phone: phone, now: now, on: tx, afterCommit: afterCommit)
         // SMS-02, for every valid text, before any waiting period ends: states the effect and offers UNLINK and STOP. No code, no link.
         try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: phone, body: GatewayCopy.phoneLinkedNotice)
         return .handled
@@ -190,7 +207,8 @@ struct PhoneLinkService {
         return week < Self.maxLinksPerNumberPerWeek && day < Self.maxLinksPerNumberPerDay
     }
 
-    private func bind(challenge: PhoneLinkMOChallengeRecord, device: DeviceRecord, phone: PhoneNumber, now: Date, on tx: any Database) async throws {
+    private func bind(challenge: PhoneLinkMOChallengeRecord, device: DeviceRecord, phone: PhoneNumber, now: Date, on tx: any Database,
+                      afterCommit: AfterCommit) async throws {
         let consumerId = ConsumerID(challenge.consumerId)
         let hash = challenge.phoneHash
         let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == challenge.consumerId).filter(\.$revokedAt == nil).all()
@@ -223,7 +241,8 @@ struct PhoneLinkService {
                 metadata: ["phone": phone.masked, "assurance": PhoneLinkMO.assuranceLabel])
             try await SecurityNotices(db: tx, ctx: ctx).store(of: existing.consumerId, except: nil, notice: .phoneTransferRequested,
                                                               subjectId: existing.id?.uuidString.lowercased())
-            await SecurityNotices(db: tx, ctx: ctx).push(to: existing.consumerId, except: nil, notice: .phoneTransferRequested)
+            let (db, ctx, owner) = (self.db, self.ctx, existing.consumerId)
+            afterCommit.add { await SecurityNotices(db: db, ctx: ctx).push(to: owner, except: nil, notice: .phoneTransferRequested) }
         } else {
             record.state = "verified"
             record.verifiedPhoneHash = hash
@@ -234,7 +253,8 @@ struct PhoneLinkService {
         }
         // The account's other devices are told; the proving device already knows.
         try await SecurityNotices(db: tx, ctx: ctx).store(of: challenge.consumerId, except: device.id, notice: .newPhone, subjectId: record.id?.uuidString.lowercased())
-        await SecurityNotices(db: tx, ctx: ctx).push(to: challenge.consumerId, except: device.id, notice: .newPhone)
+        let (db, ctx, consumer, deviceId) = (self.db, self.ctx, challenge.consumerId, device.id)
+        afterCommit.add { await SecurityNotices(db: db, ctx: ctx).push(to: consumer, except: deviceId, notice: .newPhone) }
     }
 
     // MARK: UNLINK

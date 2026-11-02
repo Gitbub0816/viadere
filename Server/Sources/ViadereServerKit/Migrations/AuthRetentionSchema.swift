@@ -1,5 +1,6 @@
 import Fluent
 import Foundation
+import ViadereCore
 
 /// `AuthRetention.v1` (additive, forward-only; ADR-0026 section 3, owner decision 10, finding F-07): the one-time catch-up for the retention
 /// move of approval requests from 400 to 30 days, and the emptying of `link_tokens`.

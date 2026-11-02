@@ -50,6 +50,7 @@ struct GatewayService {
             return .processed
         }
         for _ in 0..<Self.maxConflictRetries {
+            let afterCommit = PhoneLinkService.AfterCommit()
             do {
                 try await db.transaction { tx in
                     do {
@@ -61,12 +62,13 @@ struct GatewayService {
                     }
                     // The customer-originated link text and UNLINK are handled before the menu engine, and nothing else sees them: a nonce never
                     // reaches a menu, a business or a log, and a failed one gets no reply that says which check failed.
-                    if try await PhoneLinkService(db: tx, ctx: ctx).handleInbound(sms, on: tx) == .handled { return }
+                    if try await PhoneLinkService(db: db, ctx: ctx).handleInbound(sms, on: tx, afterCommit: afterCommit) == .handled { return }
                     let (context, record) = try await loadContext(phone: sms.from, on: tx)
                     let transition = await engine(on: tx).handle(sms, context: context, now: ctx.now)
                     try await persist(transition.context, previous: record, on: tx)
                     try await execute(transition.effects, context: transition.context, on: tx)
                 }
+                await afterCommit.run()
                 return .processed
             } catch is DuplicateInbound {
                 return .duplicate
