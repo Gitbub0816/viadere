@@ -109,6 +109,40 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
                                                               body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
     }
 
+    // MARK: Authentication delivery (ADR-0020; staging pilot, off by default)
+
+    /// Creates a magic-link, one-time-code or notice delivery (scope `auth_deliveries:write`). Viadere only delivers it: it never verifies your code, and
+    /// "opened" is not a sign-in. `Idempotency-Key` is required; the tenant is your key, never a field.
+    public func createAuthDelivery(_ request: AuthDeliveryCreateRequest, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryCreate.descriptor, body: request, idempotencyKey: idempotencyKey))
+    }
+
+    public func authDelivery(id: AuthDeliveryID) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryGet.descriptor, parameters: ["deliveryId": id.description]))
+    }
+
+    public func cancelAuthDelivery(id: AuthDeliveryID, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl-cancel")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryCancel.descriptor, parameters: ["deliveryId": id.description],
+                                                            body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
+    }
+
+    /// Reports **your own** verification outcome after the customer opened the delivery.
+    public func completeAuthDelivery(id: AuthDeliveryID, outcome: AuthDeliveryOutcome, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl-done")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryComplete.descriptor, parameters: ["deliveryId": id.description],
+                                                            body: AuthDeliveryCompleteRequest(outcome: outcome), idempotencyKey: idempotencyKey))
+    }
+
+    /// Moves a webhook endpoint to signature v2 (no way back; the older event types are dual-signed for 30 days).
+    public func moveWebhookToSignatureV2(id: WebhookSubscriptionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "webhook-v2")) async throws -> WebhookSubscription {
+        try decode(WebhookSubscription.self, try await perform(APIRoutes.businessWebhookUpdate.descriptor, parameters: ["webhookId": id.description],
+                                                               body: UpdateWebhookRequest(signatureVersion: .v2), idempotencyKey: idempotencyKey))
+    }
+
+    /// Test keys only: a signed sample `auth.delivery.*` event to one of your v2 endpoints.
+    public func sendAuthWebhookTest(webhookId: WebhookSubscriptionID, type: String) async throws -> AuthWebhookTestResponse {
+        try decode(AuthWebhookTestResponse.self, try await perform(APIRoutes.businessAuthWebhookTest.descriptor, body: AuthWebhookTestRequest(webhookId: webhookId, type: type)))
+    }
+
     // MARK: Sandbox (test keys only)
 
     /// Creates a sandbox consumer connected to your business (`POST /v1/business/sandbox/relationships`). **Test keys can

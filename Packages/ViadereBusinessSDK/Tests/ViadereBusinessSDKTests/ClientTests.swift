@@ -122,7 +122,9 @@ struct ClientTests {
                                     "business.wallet.passes.issue", "business.wallet.passes.list", "business.wallet.passes.update", "business.wallet.passes.void",
                                     "business.wallet.scan",
                                     "business.profileRequests.create", "business.profileRequests.get", "business.profiles.get",
-                                    "business.verificationSessions.create", "business.verificationSessions.get", "business.verificationSessions.cancel"]
+                                    "business.verificationSessions.create", "business.verificationSessions.get", "business.verificationSessions.cancel",
+                                    "business.authDeliveries.create", "business.authDeliveries.get", "business.authDeliveries.cancel", "business.authDeliveries.complete",
+                                    "business.webhooks.update", "business.authWebhooks.test"]
 
         #expect(Set(business).subtracting(covered).isEmpty)
     }
