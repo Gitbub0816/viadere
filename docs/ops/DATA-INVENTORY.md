@@ -7,7 +7,7 @@ established through this inventory and applicable law (spec §13), not hardcoded
 Classes follow the spec §13 table: **PUB** Public, **OPS** Operational, **SEC** Security metadata, **IDA** Identity assertions,
 **RIE** Raw identity evidence, **PKP** Passkey private keys, **SMP** Sensitive message payloads. **P** = personal data of an identifiable
 person (or a pseudonym derivable by Viadere); **E** = encrypted at rest at field level (AES-256-GCM, row-bound, `DATA_ENCRYPTION_KEY`); **H** = peppered hash only
-(`SERVER_PEPPER`). Custody is "Viadere" (Neon, ADR-02) unless stated. All rows sit in Neon PostgreSQL 18 with provider-level encryption at rest on top of the field encryption shown.
+(`SERVER_PEPPER`). Custody is "Viadere" unless stated. All rows sit in Azure Database for PostgreSQL Flexible Server 18 in an Azure US region (`centralus` in staging; ADR-0011) with provider-level encryption at rest on top of the field encryption shown. **Updated 2026-11-02 (ADR-0029, owner decisions 11 and 13):** Fly.io, Neon and Google Cloud KMS are retired from CI, IaC and code; whether live resources still exist is checked read-only by the owner before deletion (ADR-0029 §5). Residency: all Viadere data at rest stays in Azure US regions; transit and processors are listed in §3 with their regions.
 
 Not stored by Viadere today (by design, confirm on each change): raw ID images, birthdates, selfies (RIE: issuer/device/Didit, ADR-05), passkey private
 keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodies, API keys and tokens (hashes only).
@@ -77,12 +77,13 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 
 | Data | Where | Class | Custody and treatment |
 |---|---|---|---|
-| Secrets: `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `CONNECT_LINK_SIGNING_KEY` | Fly secrets, offline escrow | SEC | Never in the database or git; target: KMS (ADR-03). Loss makes encrypted columns / hashes unrecoverable |
+| Secrets: `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `CONNECT_LINK_SIGNING_KEY` | Azure Key Vault `kv-vdr-<env>` (US region; `kms1:` wrapped by `kek-data`, ADR-0012), offline escrow | SEC | Never in the database or git. Loss makes encrypted columns / hashes unrecoverable. (Was: Fly secrets, retired) |
+| Authority keys and secrets (ADR-0028, ADR-0032) | Azure Key Vault `kv-vdr-auth-<env>` (US region) | SEC | Authority identity only; non-exportable keys; HMAC secrets `ACCOUNT_REF_KEY`, `OIDC_PAIRWISE_KEY`, `RECOVERY_VERIFIER_KEY`, `SUBJECT_REF_KEY` copy |
 | Audit chain heads | write-once storage (to be provisioned: object-lock bucket) | SEC | Output of `audit-head`; integrity anchor |
 | Raw identity evidence (ID image, selfie, birthdate) | Didit (processor), Apple Wallet / issuer, device | RIE | Not collected centrally (ADR-05); Viadere keeps the minimized result; Didit sessions are purged after reading, with unbounded retry and an alert `[counsel: DPA, residency]`; Didit's own data-retention window is configured to the shortest the account allows (backstop if our purge cannot run) |
 | Passkey private keys, approval keys | Secure Enclave / iCloud Keychain / E2EE vault | PKP | Never server plaintext (ADR-06/08) |
-| Logs | Fly logs, Cloudflare, GCP audit logs | OPS/SEC | Server redacts tokens, secrets and phone numbers (`LogRedaction`); log retention: Fly 7 days (default, verify), GCP KMS audit 400 days (Terraform) `[counsel]` |
-| Backups | Neon PITR (7 days) + daily snapshots (30 days) | all | Erased data persists in backups until they age out: stated in the privacy notice `[counsel]` |
+| Logs | Azure App Insights / Log Analytics (`centralus`, 30 days), Key Vault `AuditEvent` diagnostics, Cloudflare logs and analytics (global edge; retention per plan) | OPS/SEC | Auth, phone-link and OIDC routes log an allow-list of fields only (ADR-0026 §3); `LogRedaction` remains a second layer; Cloudflare Logpush for `id.` and link hosts excludes query strings `[counsel]`. (Was: Fly logs and GCP audit logs, retired) |
+| Backups | Azure Flexible Server PITR (7 days lean / 35 days standard; geo-redundant pairs must be US regions, ADR-0026 §3) | all | Erased data persists in backups until they age out: stated in the privacy notice; restores re-run sweeps and tombstones before serving `[counsel]`. (Was: Neon PITR, retired) |
 | Email (verification codes, invitations) | transactional email provider | OPS | Address and code in transit; provider is a sub-processor |
 | Didit session data (WP3): ID images, selfie, liveness video, document fields, face embedding and scores | Didit (processor, EU by default), only for the duration of one verification | RIE | Captured on the device and sent **directly to Didit**; Viadere never receives images or biometrics. After reading the decision in memory and deriving the one claim, the server deletes the session with `privacy_erasure` and deletes the vendor user (`POST /v3/users/delete/`), and records the deletion; failures are retried. Configure the shortest retention in the Didit console as a backstop and keep biometric-template retention **off**. No biometric template is retained at Didit. `[counsel: BIPA / GDPR Art. 9, DPA, residency]` |
 | Apple Wallet presentment (WP3): the encrypted DeviceResponse | transient, in server memory | RIE | Decrypted with the merchant key (KMS-wrapped, ADR-03), verified, reduced to the requested elements, **never persisted or logged**. Apple and the issuing authority do not learn where the ID was shared (Apple's design). IACA trust anchors are public certificates on disk |
@@ -90,9 +91,21 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 
 ## 3. Sub-processors (to publish; LEG-PR-006)
 
-Fly.io (hosting), Cloudflare (edge, site), Neon (database), Google Cloud (KMS), MailerSend (SMS and transactional email; Twilio as the alternative SMS provider), RCS provider (TBD), Apple (APNs, Wallet, App Attest),
-Didit (identity verification). Each needs a DPA, a transfer mechanism and a breach-notification
-clause `[counsel]`; the public sub-processor list must match this table (Site, WP7).
+Current list (owner decision 13: stored in the US, processors listed honestly with their regions; S1-A10-3):
+
+| Processor | Purpose | Data | Region (as known; **verify** marks unconfirmed) |
+|---|---|---|---|
+| Microsoft Azure | hosting, database, Key Vault, Service Bus, blob, logs | all data at rest | US regions only (`centralus` staging); enforced by Azure Policy and `RESIDENCY-US` |
+| Microsoft Entra ID | workload identities and tokens | no customer data | global service |
+| Cloudflare | edge, TLS, tunnel, WAF, static site and `id.` JWKS | all traffic in transit; edge logs | global edge (processing outside the US in transit); log storage per plan, **verify** |
+| Apple | APNs, Wallet, App Attest | push tokens, opaque ids | Apple global infrastructure |
+| Google | FCM (Android, later) | push tokens, opaque ids | Google global infrastructure |
+| MailerSend | transactional email; email fallback for auth codes/links (gated) and SMS (US/CA) | email address, message content, activity | **verify**; email fallback stays off until verified US storage or content storage off (ADR-0020 §7) |
+| SMS provider (MailerSend, Twilio alternative) | SMS gateway on-ramp, phone-link inbound texts | phone numbers, message text | **verify** |
+| Didit | identity verification (not authentication) | RIE, transient | EU by default; outside the authentication-delivery residency claim |
+| RCS provider | TBD | | TBD |
+
+Retired (no longer sub-processors once ADR-0029 is applied): Fly.io (hosting), Neon (database), Google Cloud (KMS, audit bucket). Each processor needs a DPA, a transfer mechanism and a breach-notification clause `[counsel]`; the public sub-processor list must match this table (Site, WP7).
 
 ## 4. Lawful basis, purpose and rights (placeholders for counsel)
 
@@ -110,7 +123,7 @@ clause `[counsel]`; the public sub-processor list must match this table (Site, W
 1. No age-based purge for: `interactions`, `conversation_messages`, `decisions`, `consent_grants`, `audit_events`, `business_applications`, `channel_endpoints`, `rcs_postbacks`, `processed_provider_messages`, `interaction_challenges`, `device_enroll_challenges`, expired `access_tokens`/`refresh_tokens`. Retention must be set per data class (spec §13) and implemented as configurable class-based jobs (WP8 part 2 / Server owner).
 2. `RetentionService` covers only outbound rows, link tokens, webhook deliveries and device expiry. A `RETENTION_*` setting exists for three of these only.
 3. Export of data for a subject-access request exists only as `export-dispute` (per interaction); there is no subject-access export (LEG-PR gap).
-4. Backups retain erased data until Neon retention expires; the privacy notice must say so.
+4. Backups retain erased data until the Azure PITR window expires (7 / 35 days); the privacy notice must say so.
 
 ## 6. Addendum (2026-10-28, WP6): tables added by WP1, WP2, WP5 and WP6, and the retention that now exists
 

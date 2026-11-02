@@ -1,6 +1,6 @@
 # ADR-0024: OIDC provider in staging (authorization code + PKCE); SAML design only
 
-- **Status:** proposed (2026-11-02)
+- **Status:** proposed (2026-11-02); revision 2 (2026-11-02): confidential clients only, issuer-only assertion audience, RFC 9207 `iss`, residual R-17 (S1-A2-5); JWKS publication as protected as the signing key (S1-A3-01, -16); `sub` binding and encoding (S1-A3-04, -14); authority-built display (S1-A3-06); consent copy and revoke (S1-A9-7); `login_hint` exposure (S1-A10-2)
 - **Spec reference:** §5.3, §8.1, §13 (protocol validation), §14 Phase D, §19 (`/oidc/*`), §24 stage 9; owner decision 6; OpenID Connect Core 1.0, Discovery 1.0, RP-Initiated Logout 1.0, RFC 6749, RFC 7636, RFC 9700, RFC 9068, RFC 8176, RFC 8725, W3C WebAuthn Level 3
 - **Related:** ADR-0019, ADR-0022 §6, ADR-0023, ADR-0028; ADR-0004 (static site on Workers Static Assets)
 - **Review:** A1 (author role), A2, A3; external review before any production IdP (spec §13)
@@ -27,7 +27,9 @@ Decision 6: build OIDC in staging behind a staging-only flag; SAML stays design 
 | `scopes_supported` | `["openid"]` (only the pairwise `sub` is released; no profile, email or phone exist for anonymous accounts) |
 | `subject_types_supported` | `["pairwise"]` |
 | `id_token_signing_alg_values_supported` | `["RS256","ES256"]` — RS256 is included because OpenID Connect Discovery 1.0 requires it; the client registration's `id_token_signed_response_alg` (default `RS256` per OIDC Registration) selects the key |
-| `token_endpoint_auth_methods_supported` | `["private_key_jwt","none"]` — confidential clients use `private_key_jwt` (client JWKS held in the authority registration); public clients (`none`) are allowed only with PKCE and only for native/SPA redirect URIs |
+| `token_endpoint_auth_methods_supported` | `["private_key_jwt"]` — **confidential clients only** (client JWKS held in the authority registration). Public clients (`none`) are refused until a separate A2 and A3 review (S1-A2-5) |
+| `token_endpoint_auth_signing_alg_values_supported` | `["ES256","RS256","PS256"]`; the algorithm is resolved from the registered client JWK, never from the assertion header alone |
+| `authorization_response_iss_parameter_supported` | `true`: `iss` is returned in every authorization response, success and error (RFC 9207, mix-up defense) |
 | `claims_parameter_supported`, `request_parameter_supported`, `request_uri_parameter_supported` | `false` |
 | `acr_values_supported` | `["urn:viadere:acr:passkey","urn:viadere:acr:app"]` |
 | `end_session_endpoint` | `/oidc/logout` (RP-Initiated Logout 1.0) |
@@ -37,16 +39,19 @@ Spec-vs-standard conflict recorded: the spec's crypto guidance names ES256/Ed255
 
 ### 3. Clients (relying parties)
 
-Registered in the authority only (`authority_oidc_clients {client_id, tenant_id, client_type, redirect_uris[] exact, post_logout_redirect_uris[] exact, sector_identifier, jwks (private_key_jwt), id_token_signed_response_alg, default_acr_values, require_acr, status}`), created and changed only through the authority admin job (two reviewers, ADR-0019 §5). Redirect URIs: exact string match, `https` (or a claimed `https` app link / universal link for native; no custom schemes, no loopback in staging), no wildcards, no fragments. `sector_identifier` defaults to the redirect URIs' common host; multiple hosts need a `sector_identifier_uri` reviewed at registration (OIDC Core §8.1).
+Registered in the authority only (`authority_oidc_clients {client_id ("ocl_…"), tenant_id, display_name, client_type: "confidential", redirect_uris[] exact, post_logout_redirect_uris[] exact, sector_identifier, jwks (private_key_jwt), id_token_signed_response_alg, default_acr_values, require_acr, status}`), created and changed only through the authority admin job (ADR-0019 §5). Link-client ids use `lcl_` and OIDC client ids `ocl_`; registration enforces the prefixes so the namespaces are disjoint (S1-A3-15). `display_name` is reviewed at registration against the tenant's verified name and is always shown together with the redirect host (S1-A9-7). Redirect URIs: exact string match, `https` (or a claimed `https` app link / universal link for native; no custom schemes, no loopback in staging), no wildcards, no fragments. `sector_identifier` is the lowercase A-label host of the redirect URIs; LF and non-A-label characters are refused. Multiple hosts need a `sector_identifier_uri` reviewed at registration, and the reviewer confirms common ownership of every host, because one sector lets those relying parties correlate a person (OIDC Core §8.1, S1-A10-11).
 
 ### 4. Authentication at the authorize endpoint
 
-The api renders the authorize page (strict CSP, `frame-ancestors 'none'`, `__Host-` cookies, CSRF token on every form) and calls the authority to create a challenge (`purpose: oidc_login`, client, exact redirect URI, display object). The authority validates the client and redirect URI before any user interaction; an invalid client or redirect URI shows an error page and never redirects (RFC 6749 §4.1.2.1).
+The api renders the authorize page (strict CSP, `frame-ancestors 'none'`, `__Host-` cookies, CSRF token on every form) and calls the authority to create a challenge (`purpose: oidc_login`, client id, exact redirect URI; **no display object**: the authority builds and signs the display itself, ADR-0033 §1). The authority validates the client and redirect URI before any user interaction; an invalid client or redirect URI shows an error page and never redirects (RFC 6749 §4.1.2.1).
+
+**Residual R-17 (S1-A2-5).** The authorize endpoint and the WebAuthn origin `https://id.<domain>` are served by the api. A compromised api can therefore create the authority challenge for a victim's *genuine* login with the **attacker's** RP session's `code_challenge` and `state`, run the victim's real passkey or app ceremony against it, and deliver the code to the attacker's browser, so the RP logs the attacker in as the victim. Passkey origin binding does not help because the origin is the compromised component. This needs the victim to be actively signing in, and it is recorded as a **named exception to the §13 formal metric** for the staging OP. Owner A2. Removal condition: before any production IdP, the browser-facing authorization endpoint and passkey origin run in a component outside the ordinary tier with its own identity and deploy path, plus the external review of spec §13.
 
 Methods, in the order offered (passkey bias, decision 4):
 
 1. **Passkey** (WebAuthn L3): discoverable credential, `rpId = RP_ID` (the existing Viadere RP id, so existing account passkeys work), allowed origin `https://id.<domain>`, `userVerification: "required"`, challenge = authority nonce. The authority verifies the assertion itself (it links webauthn-swift) against a passkey in its key log (ADR-0023 §4).
-2. **App approval**: if the request has `login_hint` equal to that client's tenant `subject_ref`, the authority resolves the account and the api pushes an approval to its devices; otherwise the page shows a QR code containing the `ach` (the person scans it in the Viadere app). Either way the page shows a 2-digit number and the app requires it to be typed (ADR-0022 §2); evidence is a `viadere-factor+jws` (`purpose: oidc_login`).
+2. **App approval**: if the request has `login_hint` equal to that client's tenant `subject_ref`, the authority resolves the account and the api pushes an approval to its devices; these pushes count against the ADR-0022 §5 fatigue counters per (client, account) and are alert-limited like every other prompt (S1-A2-5, -6). Otherwise the page shows a QR code containing a Viadere universal link with the `ach`, which the Viadere app handles with its confirm screen; the system camera opening it lands on the same in-app screen, never a web page (A6/A7 matrix note F13). Either way the page shows a 2-digit number and the app requires it to be typed (ADR-0022 §2); the phone screen is "Sign in to {Client}?" with the row "Website {redirect host}" from the signed challenge (UX_COPY OIDC-08); evidence is a `viadere-factor+jws` (`purpose: oidc_login`).
+3. **`login_hint` exposure (S1-A10-2).** `login_hint` (a pairwise per-tenant identifier) travels in the authorize query string, which reaches browser history and could reach edge logs. Controls in staging: `login_hint` is optional; the `id.` host's Cloudflare Logpush and analytics exclude query strings; the api logs only the allow-listed fields (ADR-0020 §9). Carrying it in a signed request object or PAR is a later phase (deferred, owner A1, Stage 9).
 
 No SSO session is kept at the OP in staging: every authorization requires fresh evidence, so a stolen api session cannot be turned into a token; `max_age` and `prompt=login` are trivially satisfied, `prompt=none` returns `login_required`.
 
@@ -56,26 +61,35 @@ No SSO session is kept at the OP in staging: every authorization requires fresh 
 |---|---|---|---|
 | Passkey assertion, UV, origin `https://id.<domain>` | `urn:viadere:acr:passkey` | `["user","mfa"]` plus `"hwk"` only when the credential's attestation shows a device-bound authenticator, otherwise `"swk"` (RFC 8176 has no passkey-specific value) | yes (origin-bound) |
 | App approval with number match, `uv = biometric` | `urn:viadere:acr:app` | `["hwk","user","mfa"]` | **no** (relay possible, R-12) |
-| App approval with number match, `uv = device_passcode` | `urn:viadere:acr:app` | `["hwk","pin","mfa"]` | no |
+| App approval with number match, `uv = user_presence` (biometric or passcode, modality unknown) | `urn:viadere:acr:app` | `["hwk","mfa"]` (no `pin` claim; S1-A3-21) | no |
 
 No NIST AAL is claimed in tokens; documentation describes the passkey path as comparable to a phishing-resistant multi-factor authenticator and the app path as a non-phishing-resistant one (NIST SP 800-63B-4 terms), without certification claims. A client with `require_acr = urn:viadere:acr:passkey` can never be satisfied by app approval (`acr_values` is enforced, not advisory).
 
 ### 6. Tokens are issued only by the isolated signer
 
 - Authorization code: generated by the authority, 256-bit, stored as a hash with client, redirect URI, PKCE challenge, nonce, `acr`, `amr`, `auth_time`, `account_ref`, 60 s lifetime, single use; the api only carries it in the redirect.
-- `POST /oidc/token` at the api forwards the form body to the authority's `oidc/token`; the authority authenticates the client (`private_key_jwt`: `iss`/`sub` = client id, `aud` = the token endpoint URL, `jti` single use, `exp` ≤ 5 min), checks PKCE and code, then signs:
-  - id_token: `iss`, `sub` (pairwise: `base64url(HMAC-SHA256(OIDC_PAIRWISE_KEY, "oidc-sub\n" ‖ sector_identifier ‖ "\n" ‖ accountId))` truncated to 32 bytes), `aud` = client id, `azp`, `nonce`, `auth_time`, `acr`, `amr`, `iat`, `exp = iat + 300`, `jti`; header `typ: JWT`, `kid` thumbprint;
+- `POST /oidc/token` at the api forwards the form body to the authority's `oidc/token`; the authority authenticates the client (`private_key_jwt`: `iss`/`sub` = client id; **`aud` a single string exactly equal to the issuer identifier**; arrays and the token endpoint URL are refused with `invalid_client` (S1-A2-5, S1-A3-15); algorithm resolved from the registered JWK; `iat` required; `jti` single use until `exp` + 60 s; `exp` ≤ 5 min), checks PKCE and code, then signs:
+  - id_token: `iss`, `sub`, `aud` = client id, `azp`, `nonce`, `auth_time`, `acr`, `amr`, `iat`, `exp = iat + 300`, `jti`; header `typ: JWT`, `kid` thumbprint. `sub = base64url(HMAC-SHA256(OIDC_PAIRWISE_KEY, "oidc-sub\n" ‖ sector_host_lowercase_alabel ‖ "\n" ‖ accountId_lowercase_uuid))`, **no truncation** (43 characters), with a vector (S1-A3-14). `accountId` is used only after the binding check against the `account_ref` of the passkey or key that produced the evidence (ADR-0032 §2); `OIDC_PAIRWISE_KEY` serves only this derivation (ADR-0032 §4);
   - access token: RFC 9068 `at+jwt`, `aud = https://id.<domain>/oidc/userinfo`, `exp = iat + 300`, scope `openid`.
 - `/oidc/userinfo` (api) verifies the access token with the authority's public keys (the api may verify, never sign) and returns `{sub}` only.
 - Every issuance is recorded in `authority_grants` (jti, kid, client, acr, sub hash).
 
 ### 7. Discovery and JWKS are not served by the api
 
-The discovery document and both JWKS documents (`/oidc/jwks.json`, `/grant/jwks.json`) are static files committed under `Site/content/id/` and deployed by the site workflow to Cloudflare Workers Static Assets with its own Cloudflare token. A compromised api cannot publish a key (THREAT_MODEL T-OIDC-2). Key rotation: the admin job prints the new public JWK; a reviewed commit publishes it at least 24 h before the authority switches to it; the old key stays published for 24 h after the switch (longer than any token lifetime). Cloudflare route and DNS changes are IaC-only with change alerts (ADR-0028 §8).
+Publishing a key is equivalent to holding the signing key (S1-A3-01), so publication gets the same protection as an authority deploy:
+
+1. The discovery document and both JWKS documents (`/oidc/jwks.json`, `/grant/jwks.json`) are static files under `Site/content/id/`, deployed **only** by a dedicated workflow `authority-publish.yml` in GitHub environment `authority-publish-<env>` with the same required reviewers as authority deploys, deployment branch `main` only, and its own Cloudflare token scoped to the `id.` host's static assets only. The general site token loses every `id.` scope; the site workflow refuses to deploy `Site/content/id/**`.
+2. CODEOWNERS covers `Site/content/id/**` and branch protection requires code-owner review on it (ADR-0028 §6).
+3. A JWK is admitted to a published set only if its RFC 7638 thumbprint equals a public key that the authority admin job printed from `kv-vdr-auth` in an **attested** key-inventory artifact (GitHub artifact attestation by `authority-admin.yml` on `main`); `authority-publish.yml` verifies the attestation and compares thumbprints; a hand-pasted value fails.
+4. A scheduled monitor that holds no Azure or Cloudflare write credential (a read-only GitHub scheduled workflow, separate from both tiers' deploy identities) fetches the live documents every 15 minutes and alerts the owner on any `kid` not in the attested inventory or any change outside an `authority-publish` run.
+5. Content and caching (S1-A3-16): every JWK carries `kid`, `use: "sig"` and `alg` (`RS256` or `ES256`); the grant JWKS and the OIDC JWKS never share a key; served with `Cache-Control: max-age=3600` or less, and the edge cache is purged on publication; SDK verifiers refetch on an unknown `kid` at most once per 5 minutes; maximum RP exposure after an emergency rollover is the cache TTL plus the token lifetime (≤ 3600 s + 300 s), documented.
+6. Key rotation: the admin job prints the new public JWK into the attested inventory; `authority-publish` publishes it at least 24 h before the authority switches to it (explicit version pin, ADR-0028 §2); the old key stays published for 24 h after the switch. Cloudflare route and DNS changes are IaC-only with change alerts (ADR-0028 §8).
+
+A compromised api cannot publish a key, and neither can a compromised site credential or a single merged PR (THREAT_MODEL T-OIDC-2, T-CP-8).
 
 ### 8. Consent and logout
 
-- Consent: first use of a client by an account shows "{Client} wants to confirm it's you. It will receive a private identifier for this app only." The device-signed display (`display_digest`) includes the client display name, so the evidence proves what the person saw. Consent records (client, `account_ref`, granted at) are kept by the authority (class T while active, deleted on revoke).
+- Consent: first use of a client by an account shows UX_COPY OIDC-05 ("{Client} wants to confirm it's you. It gets an ID that only {Client} can use. It doesn't get your name, email or phone number, and other apps can't match it. You'll return to {redirect host}."). The display is authority-built and signed (ADR-0033), so the device-signed `display_digest` proves what the person saw. Consent records (client, `account_ref`, granted at, last used) are kept by the authority (class T while active, deleted on revoke). The app lists them under Settings → "Apps you've signed in to with Viadere" with "Stop {Client} recognizing me" (revokes consent through a reduce-only `revocations` call; UX_COPY OIDC-09, OIDC-10).
 - Logout: `end_session_endpoint` accepts `id_token_hint` (verified), `post_logout_redirect_uri` (exact registered), `state`; since no OP session exists, logout only redirects. Back-channel and front-channel logout are not offered in staging.
 
 ### 9. SAML 2.0: design only
@@ -94,7 +108,8 @@ Stage 9 (or the staging build) runs the OpenID Foundation conformance suite for 
 
 ## Threat assumptions changed
 
-- Token minting moves entirely out of the internet-facing process; JWKS integrity moves to the reviewed static publication path (AS-7 class for Cloudflare).
+- Token minting moves entirely out of the internet-facing process; JWKS integrity moves to a reviewer-gated publication path tied to an attested key inventory (AS-7 class for Cloudflare account compromise).
+- Under AS-1 a genuine login can be bound to an attacker's RP session (R-17, named exception to the §13 metric until the authorize front end leaves the ordinary tier).
 - App-approval tokens are explicitly labelled non-phishing-resistant.
 
 ## Reviewers required
