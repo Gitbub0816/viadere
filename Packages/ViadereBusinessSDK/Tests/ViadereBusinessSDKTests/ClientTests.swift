@@ -124,7 +124,7 @@ struct ClientTests {
                                     "business.profileRequests.create", "business.profileRequests.get", "business.profiles.get",
                                     "business.verificationSessions.create", "business.verificationSessions.get", "business.verificationSessions.cancel",
                                     "business.authDeliveries.create", "business.authDeliveries.get", "business.authDeliveries.cancel", "business.authDeliveries.complete",
-                                    "business.webhooks.update", "business.authWebhooks.test"]
+                                    "business.webhooks.update", "business.authWebhooks.test", "business.authApprovals.create", "business.authApprovals.get"]
 
         #expect(Set(business).subtracting(covered).isEmpty)
     }

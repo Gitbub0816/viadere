@@ -42,8 +42,12 @@ public struct PendingApproval: Sendable, Hashable {
     public var details: ApprovalSubject
     /// When you set the request to expire.
     public var expiresAt: Date
+    /// Number matching (ADR-0022 §3): `.required(code:)` with the code **you** drew and showed, or `.notRequested`. No default, so a verifier can never
+    /// forget it and accept a result without the typed number (downgrade).
+    public var numberMatch: NumberMatchExpectation
 
-    public init(requestId: String, subject: SubjectRef, challenge: String, details: ApprovalSubject, expiresAt: Date) {
+    public init(requestId: String, subject: SubjectRef, challenge: String, details: ApprovalSubject, numberMatch: NumberMatchExpectation, expiresAt: Date) {
+        self.numberMatch = numberMatch
         self.requestId = requestId
         self.subject = subject
         self.challenge = challenge
@@ -65,7 +69,7 @@ public struct PendingApproval: Sendable, Hashable {
 /// let result = try await client.approvalResult(resultRef: webhook.resultRef)
 /// let verified = try await verifier.verify(result: result.result,
 ///                                          for: PendingApproval(requestId: tx.requestId, subject: tx.subject, challenge: tx.challenge,
-///                                                               details: .transaction(tx.displayed), expiresAt: tx.expiresAt))
+///                                                               details: .transaction(tx.displayed), numberMatch: .required(code: tx.code), expiresAt: tx.expiresAt))
 /// guard verified.decision == .approve else { return deny() }
 /// ```
 public struct ApprovalVerifier: Sendable {
@@ -105,7 +109,7 @@ public struct ApprovalVerifier: Sendable {
     }
 
     private func expectation(_ pending: PendingApproval) -> ApprovalExpectation {
-        ApprovalExpectation(audience: businessId, subject: pending.subject, requestId: pending.requestId, challenge: pending.challenge, subjectDetails: pending.details,
+        ApprovalExpectation(audience: businessId, subject: pending.subject, requestId: pending.requestId, challenge: pending.challenge, subjectDetails: pending.details, numberMatch: pending.numberMatch,
                             requestExpiresAt: pending.expiresAt, minimumAMR: minimumAMR, maxClockSkew: maxClockSkew)
     }
 }

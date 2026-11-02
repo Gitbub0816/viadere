@@ -58,7 +58,8 @@ public struct ApprovalRequestBuilder: Sendable {
     }
 
     /// End to end: the request is signed with your request-signing key and HPKE-encrypted **once per device**; Viadere relays ciphertext only.
-    public func endToEnd(requestId: String, subject: SubjectRef, challenge: String, details: ApprovalSubject, devices: [ApprovalDeviceTarget], expiresIn: Int = 120) async throws -> CreateApprovalRequest {
+    public func endToEnd(requestId: String, subject: SubjectRef, challenge: String, details: ApprovalSubject, devices: [ApprovalDeviceTarget], expiresIn: Int = 120,
+                         numberMatch: ApprovalNumberMatch? = nil) async throws -> CreateApprovalRequest {
         guard let requestSigningKey else { throw ApprovalRequestBuilderError.requestSigningKeyRequired }
         guard !devices.isEmpty else { throw ApprovalRequestBuilderError.noDevices }
         try details.validate()
@@ -66,7 +67,8 @@ public struct ApprovalRequestBuilder: Sendable {
         let expires = now.addingTimeInterval(TimeInterval(expiresIn))
         var deliveries: [ApprovalEnvelopeDelivery] = []
         for device in devices {
-            let content = ApprovalRequestContent(businessId: businessId, subject: subject, requestId: requestId, challenge: challenge, details: details, toKid: device.kid, issuedAt: now, expiresAt: expires)
+            let content = ApprovalRequestContent(businessId: businessId, subject: subject, requestId: requestId, challenge: challenge, details: details, toKid: device.kid, issuedAt: now, expiresAt: expires,
+                                                 numberMatch: numberMatch)
             let plaintext = try await content.sealedPlaintext(signedWith: requestSigningKey)
             let context = E2EEContext(purpose: "approve.request", requestId: requestId, sender: "biz_" + businessId.description, recipient: "ak_" + device.kid, expiresAt: expires)
             deliveries.append(ApprovalEnvelopeDelivery(kid: device.kid, envelope: try E2EE.seal(plaintext, to: device.hpkePublicKey, context: context)))
