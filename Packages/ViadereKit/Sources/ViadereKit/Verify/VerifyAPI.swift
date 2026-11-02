@@ -16,7 +16,7 @@ public protocol VerifyAPI: Sendable {
 
 /// `VerifyAPI` over HTTP through the app's signed `APIClient`.
 public struct LiveVerifyAPI: VerifyAPI {
-    private let client: APIClient
+    let client: APIClient
     public init(client: APIClient) { self.client = client }
 
     private func params(_ id: VerificationRequestID) -> [String: String] { ["requestId": id.description] }

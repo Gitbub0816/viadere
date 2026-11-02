@@ -22,6 +22,8 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/k/{CODE}#es={secret}` (QR or button a business shows in its own signed-in session, right after it authenticated the
     /// customer): link this app to the business's customer record (WP-C1). The fragment never reaches a server; log nothing of this link.
     case linkSession(code: String, secret: LinkSessionSecret?)
+    /// `https://{link domain}/v/{CODE}` (a business's "Verify with Viadere" button or its QR): review a verification session. No secret, no query.
+    case verificationSession(code: String)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -65,6 +67,11 @@ public enum DeepLinkRouter {
             // Strict: the exact link domain, `/k/{CODE}`, no query, and a fragment that is exactly `es=` plus 43 characters (or none).
             guard let parsed = LinkSessionLink.parse(url, domain: domain) else { return nil }
             return .linkSession(code: parsed.code, secret: parsed.secret)
+        }
+        if components.path.hasPrefix(APIRoutes.Web.verificationSessionPrefix) {
+            // Strict: the exact link domain, `/v/{CODE}`, no query, no fragment.
+            guard let code = VerificationSessionLink.parse(url, domain: domain) else { return nil }
+            return .verificationSession(code: code)
         }
         // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
         guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,

@@ -71,6 +71,12 @@ struct ConnectView: View {
                     linkSession = PendingLinkSession(code: code, secret: secret)
                     return
                 }
+                // A business's "Verify with Viadere" QR (`/v/…`) opens the verification-session review.
+                if case .verificationSession(let code)? = DeepLinkRouter.route(payload) {
+                    model.addBusinessPresented = false
+                    model.pendingVerificationSession = PendingVerificationSession(code: code)
+                    return
+                }
                 Task { await vm.handleScanned(payload) }
             } onClose: { showingScanner = false }
             .viaderePullDownToDismiss() // the scanner closes with a downward pull, like a sheet
