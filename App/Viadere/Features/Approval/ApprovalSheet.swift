@@ -16,10 +16,17 @@ struct ApprovalSheet: View {
     @State private var confirmingReport = false
     @State private var replyText = ""
     @State private var multiSelection: Set<String> = []
+    @State private var confirmingLeave = false
+
+    /// An answer is in progress (typed or chosen but not sent). Then the sheet is not pulled away by accident: the pull is held and an
+    /// explicit Close asks first. Otherwise a downward pull closes it, and the request stays in Alerts until it expires.
+    private var hasDraft: Bool {
+        !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !multiSelection.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ViadereGrabber()
+            ViadereSheetHandle(onClose: hasDraft && !model.isBusy && !isDone ? { confirmingLeave = true } : nil)
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     header
@@ -38,7 +45,13 @@ struct ApprovalSheet: View {
         }
         .background(ViadereColor.background)
         .privacySensitive()
-        .interactiveDismissDisabled(model.isBusy)
+        .interactiveDismissDisabled(model.isBusy || (hasDraft && !isDone))
+        .confirmationDialog("Leave without sending?", isPresented: $confirmingLeave, titleVisibility: .visible) {
+            Button("Leave", role: .destructive) { dismiss() }
+            Button("Keep answering", role: .cancel) {}
+        } message: {
+            Text("Your answer isn't sent. The request stays in Alerts until it expires.")
+        }
         .task {
             await model.load()
             // Drives the countdown and the expiry state.

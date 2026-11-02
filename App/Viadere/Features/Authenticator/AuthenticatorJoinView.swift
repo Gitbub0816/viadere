@@ -41,6 +41,7 @@ struct AuthenticatorJoinView: View {
                 .ignoresSafeArea()
                 ViadereIconButton(systemName: "xmark", label: "Cancel scanning") { scanning = false }.padding(ViadereSpace.m)
             }
+            .viaderePullDownToDismiss() // the scanner closes with a downward pull, like a sheet
         }
     }
 
