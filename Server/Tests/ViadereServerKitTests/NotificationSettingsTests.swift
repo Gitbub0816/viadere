@@ -128,6 +128,43 @@ final class NotificationSettingsServerTests: XCTestCase {
         }
     }
 
+    /// A business the customer explicitly set to Everything before the account default existed was stored as `none` with no marker.
+    /// `NotificationSettings.v2` marks every pre-existing row as the customer's own choice; only a business with no stored row inherits.
+    func testLegacyExplicitEverythingKeepsItsLevelAfterTheBackfill() async throws {
+        try await withHarness { h in
+            let world = try await TenantWorld.build(h)
+            try await registerToken(h, world.alice)
+            // The pre-release shape: a stored row at `none` that is not marked as an own level (an explicit Everything, a favorite, ...).
+            let legacy = BusinessPreferenceRecord(consumerId: world.alice.id.uuid, businessId: world.bank.id.uuid, now: h.clock.now())
+            legacy.favorite = true
+            try await legacy.create(on: h.db)
+            try await eq(try await put(h, world.alice, NotificationSettingsUpdate(defaultLevel: .allNonEssential, quietHours: nil)).status, .ok)
+
+            // Reproduces the gap: before the backfill the legacy Everything follows the quieter default.
+            var before = h.push.sent.count
+            let quieted = try await world.issueStatus(world.bank, world.rel("alice", "bank"), title: "Statement ready")
+            XCTAssertEqual(h.push.sent.dropFirst(before).first { $0.interactionId == quieted.description }?.interruptionLevel, "passive")
+
+            try await CreateNotificationLevelBackfill().prepare(on: h.db)
+
+            // After: the stored row keeps Everything; a business with no row still inherits the default.
+            let ownLevel = try await h.signed(world.alice, .GET, "/v1/businesses/\(world.bank.id)/preferences").json(BusinessPreferences.self)
+            XCTAssertTrue(ownLevel.hasOwnLevel)
+            XCTAssertTrue(ownLevel.favorite)
+            before = h.push.sent.count
+            let kept = try await world.issueStatus(world.bank, world.rel("alice", "bank"), title: "Another statement")
+            XCTAssertNotEqual(h.push.sent.dropFirst(before).first { $0.interactionId == kept.description }?.interruptionLevel, "passive")
+            before = h.push.sent.count
+            let inherited = try await world.issueStatus(world.shop, world.rel("alice", "shop"), title: "Your order shipped")
+            XCTAssertEqual(h.push.sent.dropFirst(before).first { $0.interactionId == inherited.description }?.interruptionLevel, "passive")
+            // Idempotent, and "follow default" still works afterwards.
+            try await CreateNotificationLevelBackfill().prepare(on: h.db)
+            let follow = try await h.signed(world.alice, .PUT, "/v1/businesses/\(world.bank.id)/preferences",
+                                            body: try ViadereJSON.encode(BusinessPreferencesUpdate(followDefault: true)))
+            XCTAssertFalse(try follow.json(BusinessPreferences.self).hasOwnLevel)
+        }
+    }
+
     func testQuietHoursQuietEverythingExceptSecurityAndEndWithTheWindow() async throws {
         try await withHarness { h in
             let world = try await TenantWorld.build(h)

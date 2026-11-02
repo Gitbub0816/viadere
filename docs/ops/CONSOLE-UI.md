@@ -110,7 +110,10 @@ validates again; a failed POST renders the error page with the fields to check a
 * Targets are at least 24 CSS pixels (buttons 36, small buttons 29.6); focus is a 2 px accent outline; motion respects
   `prefers-reduced-motion`; forced-colours mode keeps borders.
 * Layout reflows at 820 px (sidebar becomes a scrolling top bar) and 560 px (single column, full-width form buttons). Wide tables scroll
-  inside their card, never the page.
+  inside their card, never the page. A scrolling table shows soft edge shadows where more content lies beyond (pure CSS, `background-attachment:
+  local`), and at 820 px and below its `actions` column is pinned to the right edge so row actions are never off-screen. Section tabs
+  (`.tabs`) scroll with the same fade edges and wrap onto several lines at 560 px and below, so no tab is clipped. A file input
+  keeps the native `<input type=file>` and styles its `::file-selector-button` as a 36 px pill; the input itself is at least 40 px tall.
 * `WP6ConsoleTests` audits every console page structurally (one `h1`, landmarks, labels, captions, names, no inline style or handler).
   `ConsoleDesignSystemTests` covers escaping, tables, back links and the stylesheet. Add your page's paths to those audits.
 
@@ -118,7 +121,7 @@ validates again; a failed POST renders the error page with the fields to check a
 
 `Server/Tests/browser/test_console_render.py` renders every console page in headless Chromium at 1440, 1024, 820, 560 and 390 px, light and
 dark, under the real response headers (so a stylesheet change that is not covered by the CSP pin fails). It fails on CSP violations, page-level
-horizontal overflow and text below WCAG AA contrast, and lists targets under 24 px. The pages come from the test-only dump
+horizontal overflow and text below WCAG AA contrast, and lists targets under 24 px (the file input passes at 24 px and above). The pages come from the test-only dump
 `ConsoleRenderDump` (skipped unless `CONSOLE_DUMP_DIR` is set):
 
 ```sh
@@ -128,4 +131,4 @@ python Server/Tests/browser/test_console_render.py /tmp/console-dump --out /tmp/
 
 Rules this found: a `.vh` (visually hidden) element is `position:absolute`, so every horizontal scroller (`.tw`, `.tabs`, the mobile nav
 strip) must be `position:relative` or the hidden text widens the whole page; the operator sidebar in dark mode is a raised charcoal surface, not
-the inverted ivory of light mode. Before/after screenshots: `docs/ops/console-screenshots/`.
+the inverted ivory of light mode. The fixture also holds a hosted-inbox item and an operator Loop revision waiting for review, so those pages are rendered too. Before/after screenshots: `docs/ops/console-screenshots/` (`api-keys-390-pinned-actions.png` shows the pinned actions column and wrapped tabs).
