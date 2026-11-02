@@ -123,6 +123,14 @@ struct AuthDeliveryTests {
         #expect(!AuthDeliveryValidation.containsOTPAuth("authenticator app"))
     }
 
+    @Test func sessionHandleIsOptionalAndValidated() {
+        guard case .request(let r) = AuthDeliveryValidation.decodeCreate(Self.body(["session_handle": "sess_A-1"])) else { Issue.record("refused"); return }
+        #expect(r.sessionHandle == "sess_A-1")
+        for bad in ["", String(repeating: "a", count: 65), "a b", "a.b", "\u{e9}"] {
+            guard case .invalid = AuthDeliveryValidation.decodeCreate(Self.body(["session_handle": bad])) else { Issue.record("accepted \(bad)"); continue }
+        }
+    }
+
     @Test func otpCodesAndKindsAreValidated() {
         func otp(_ code: String) -> Data { Self.body(["method": "otp", "template": "auth.sign_in_code.v1", "otp": ["code": code, "code_kind": "otp"]], remove: ["destination"]) }
         for ok in ["1234", "ABCD123456", "7Z9Q"] { guard case .request = AuthDeliveryValidation.decodeCreate(otp(ok)) else { Issue.record("\(ok) refused"); continue } }

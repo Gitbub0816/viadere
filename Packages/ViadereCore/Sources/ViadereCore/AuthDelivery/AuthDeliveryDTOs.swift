@@ -140,11 +140,15 @@ public struct AuthDeliveryCreateRequest: Codable, Sendable, Hashable {
     public var channels: [AuthDeliveryChannel]?
     public var fallback: AuthFallback?
     public var callback: AuthCallback?
+    /// Opaque value the business derives from its own initiating session (ADR-0020 revision 3): 1 to 64 of `[A-Za-z0-9_-]`, class T, never shown, never in a webhook.
+    /// The only input to supersession: a new `sign_in` replaces an open one only when both carry the same handle.
+    public var sessionHandle: String?
 
     public init(method: AuthDeliveryMethod, requestId: String, subjectRef: SubjectRef, purpose: AuthDeliveryPurpose, template: String,
                 variables: [String: String]? = nil, destination: AuthDestinationRequest? = nil, otp: AuthOTPPayload? = nil,
                 correlationId: String? = nil, clientTransactionRef: String? = nil, expiresInSeconds: Int? = nil,
-                channels: [AuthDeliveryChannel]? = nil, fallback: AuthFallback? = nil, callback: AuthCallback? = nil) {
+                channels: [AuthDeliveryChannel]? = nil, fallback: AuthFallback? = nil, callback: AuthCallback? = nil, sessionHandle: String? = nil) {
+        self.sessionHandle = sessionHandle
         self.method = method
         self.requestId = requestId
         self.subjectRef = subjectRef
@@ -164,11 +168,11 @@ public struct AuthDeliveryCreateRequest: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case method, requestId = "request_id", subjectRef = "subject_ref", purpose, template, variables, destination, otp
         case correlationId = "correlation_id", clientTransactionRef = "client_transaction_ref", expiresInSeconds = "expires_in_seconds"
-        case channels, fallback, callback
+        case channels, fallback, callback, sessionHandle = "session_handle"
     }
 
     public static let memberNames: Set<String> = Set(["method", "request_id", "subject_ref", "purpose", "template", "variables", "destination", "otp",
-                                                       "correlation_id", "client_transaction_ref", "expires_in_seconds", "channels", "fallback", "callback"])
+                                                       "correlation_id", "client_transaction_ref", "expires_in_seconds", "channels", "fallback", "callback", "session_handle"])
 
     public init(from decoder: any Decoder) throws {
         try requireOnly(decoder, Self.memberNames)
@@ -187,6 +191,7 @@ public struct AuthDeliveryCreateRequest: Codable, Sendable, Hashable {
         channels = try c.decodeIfPresent([AuthDeliveryChannel].self, forKey: .channels)
         fallback = try c.decodeIfPresent(AuthFallback.self, forKey: .fallback)
         callback = try c.decodeIfPresent(AuthCallback.self, forKey: .callback)
+        sessionHandle = try c.decodeIfPresent(String.self, forKey: .sessionHandle)
     }
 }
 

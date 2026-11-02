@@ -449,8 +449,11 @@ public struct WebhookSubscription: Codable, Sendable, Hashable, Identifiable {
     public var verifiedAt: Date?
     /// Set while delivery to the endpoint is paused.
     public var pausedAt: Date?
+    /// `v1` (absent on older servers) or `v2` (ADR-0025). `auth.*` events are delivered only to `v2` subscriptions.
+    public var signatureVersion: WebhookSignatureVersion?
     public init(id: WebhookSubscriptionID, url: URL, events: [WebhookEventType], active: Bool, createdAt: Date, envelopeVersion: String? = nil,
-                secretVersion: Int? = nil, verifiedAt: Date? = nil, pausedAt: Date? = nil) {
+                secretVersion: Int? = nil, verifiedAt: Date? = nil, pausedAt: Date? = nil, signatureVersion: WebhookSignatureVersion? = nil) {
+        self.signatureVersion = signatureVersion
         self.verifiedAt = verifiedAt
         self.pausedAt = pausedAt
         self.id = id
@@ -469,10 +472,17 @@ public struct CreateWebhookRequest: Codable, Sendable, Hashable {
     /// `nil` (default) keeps the v1 event body (`WebhookEvent`). `"2026-10-27"` opts this subscription into the opaque v2 envelope
     /// (`WebhookEnvelopeV2`: ids and a `result_ref` only), which is limited to `WebhookEventType.opaqueEvents`.
     public var envelopeVersion: String?
-    public init(url: URL, events: [WebhookEventType], envelopeVersion: String? = nil) {
+    /// `v2` opts the endpoint into the new signature (ADR-0025). Needed for `auth.*` events, which have no `v1` form. Default `v1` until the migration phase M1.
+    public var signatureVersion: WebhookSignatureVersion?
+    public init(url: URL, events: [WebhookEventType], envelopeVersion: String? = nil, signatureVersion: WebhookSignatureVersion? = nil) {
         self.url = url
         self.events = events
         self.envelopeVersion = envelopeVersion
+        self.signatureVersion = signatureVersion
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case url, events, envelopeVersion, signatureVersion = "signature_version"
     }
 }
 

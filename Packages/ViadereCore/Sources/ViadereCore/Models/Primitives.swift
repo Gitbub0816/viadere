@@ -165,6 +165,12 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case alreadyOpened = "already_opened"
     /// `422`: `auth.*` events exist only on signature version `v2`.
     case signatureVersionRequired = "signature_version_required"
+    /// `409` on `auth-approvals` (ADR-0020 section 2a): the match code collides with, or is a prefix of (or prefixed by), an open request's code. Redraw.
+    case matchCodeInUse = "match_code_in_use"
+    /// `409` (`details.digits = 3`): the person has 30 or more open requests; use a 3-digit code.
+    case matchDigitsRequired = "match_digits_required"
+    /// `409`: no free code can exist for this person. Critical operator alert.
+    case matchCodeSpaceExhausted = "match_code_space_exhausted"
     case unknown
 
     public init(from decoder: any Decoder) throws {

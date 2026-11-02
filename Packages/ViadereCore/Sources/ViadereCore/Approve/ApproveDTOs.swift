@@ -758,5 +758,6 @@ public extension WebhookEventType {
         .interactionDecided, .interactionExpired, .interactionCancelled,
         // Verify (WP3): `verification.completed` carries only `request_id` and `result_ref`.
         .verificationCompleted,
-    ]
+        // Auth deliveries (ADR-0020): opaque, signature v2 only.
+    ] + WebhookEventType.authEvents
 }

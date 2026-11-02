@@ -60,6 +60,11 @@ public enum AuthDeliveryValidation {
         }
     }
 
+    /// `session_handle`: 1 to 64 of `[A-Za-z0-9_-]`.
+    public static func isValidSessionHandle(_ value: String) -> Bool {
+        (1...64).contains(value.utf8.count) && value.utf8.allSatisfy { ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x61 && $0 <= 0x7A) || $0 == 0x5F || $0 == 0x2D }
+    }
+
     /// 4 to 10 characters of `[0-9A-Z]`.
     public static func isValidCode(_ code: String) -> Bool {
         (4...10).contains(code.utf8.count) && code.utf8.allSatisfy { ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x41 && $0 <= 0x5A) }
@@ -129,6 +134,7 @@ public enum AuthDeliveryValidation {
     public static func validate(_ request: AuthDeliveryCreateRequest) -> AuthDeliveryValidationIssue? {
         guard isValidIdentifier(request.requestId) else { return AuthDeliveryValidationIssue("request_id", "invalid") }
         if let correlation = request.correlationId, !isValidIdentifier(correlation) { return AuthDeliveryValidationIssue("correlation_id", "invalid") }
+        if let handle = request.sessionHandle, !isValidSessionHandle(handle) { return AuthDeliveryValidationIssue("session_handle", "invalid") }
         if let ref = request.clientTransactionRef, !isValidIdentifier(ref) { return AuthDeliveryValidationIssue("client_transaction_ref", "invalid") }
         guard let template = AuthDeliveryTemplate.template(request.template), template.method == request.method else {
             return AuthDeliveryValidationIssue("template", "unknown_or_wrong_method")

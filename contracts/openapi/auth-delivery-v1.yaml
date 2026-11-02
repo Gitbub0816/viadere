@@ -20,6 +20,9 @@ info:
     `audience` in a body are `422 validation_failed`. A foreign delivery id is `404`, the same body as an unknown one. A live key additionally
     needs mutual TLS (`401 signature_required` otherwise; request signatures follow in a later stage); a test key reaches sandbox customers only.
 
+    ## Grouping (ADR-0020 revisions 3 and 3.1)
+    `session_handle` (optional, `base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" || initiating_session_id))`, class T) is the only input to supersession: a new `sign_in` replaces an open one only when both carry the same handle; a handle seen on more than 3 distinct request ids for one customer within 10 minutes stops superseding. Nothing is refused or cancelled because of a per-customer count. The number-match tags and their three `409` answers (`match_code_in_use`, `match_digits_required`, `match_code_space_exhausted`) belong to `POST /v1/business/auth-approvals` (ADR-0020 section 2a, Stage 5) and are specified there.
+
     ## Idempotency
     `Idempotency-Key` is required on every `POST`. The same key with the same request replays the original result (`200`); the same key with
     another request is `409 idempotency_conflict`. `request_id` is unique per tenant.
@@ -360,6 +363,7 @@ components:
               required: [address]
               properties:
                 address: { type: string }
+        session_handle: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Opaque value from your own initiating session (class T, never shown). A new sign_in supersedes an open one only when both carry the same handle; otherwise open requests stay side by side." }
         callback:
           type: object
           additionalProperties: false

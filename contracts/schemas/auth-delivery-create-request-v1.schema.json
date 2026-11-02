@@ -41,6 +41,7 @@
     "expires_in_seconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
     "channels": { "type": "array", "items": { "enum": ["push", "inbox", "email"] } },
     "fallback": { "type": "object", "additionalProperties": false, "properties": { "email": { "type": "object", "additionalProperties": false, "required": ["address"], "properties": { "address": { "type": "string" } } } } },
+    "session_handle": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Opaque, derived from the business's own initiating session. Only a matching handle lets a new sign_in replace an open one." },
     "callback": { "type": "object", "additionalProperties": false, "required": ["webhook_id"], "properties": { "webhook_id": { "type": "string", "format": "uuid" } } }
   }
 }

@@ -62,7 +62,7 @@ public enum AuthDestinationValidator {
 
     // MARK: Pieces
 
-    static func validateHost(_ host: String) throws(AuthDestinationError) {
+    public static func validateHost(_ host: String) throws(AuthDestinationError) {
         guard !host.isEmpty, host.utf8.count <= 253 else { throw .host }
         guard host.utf8.allSatisfy({ $0 < 0x80 }) else { throw .host }
         if host.hasSuffix(".") { throw .trailingDot }
