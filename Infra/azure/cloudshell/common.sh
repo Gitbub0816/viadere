@@ -23,11 +23,10 @@ tofu_ready() {
     curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/sums" "$base/tofu_${TOFU_VERSION}_SHA256SUMS" || fail "download sums"
     want="$(grep " tofu_${TOFU_VERSION}_${os}_${arch}.zip\$" "$dl/sums" | cut -d' ' -f1)"
     [ -n "$want" ] || fail "checksum missing"
-    if command -v sha256sum >/dev/null; then
-      echo "$want  $dl/tofu.zip" | sha256sum --check --quiet || fail "checksum"
-    else
-      echo "$want  $dl/tofu.zip" | shasum -a 256 --check --quiet || fail "checksum"
-    fi
+    # Compare the digest directly: GNU sha256sum, BSD/macOS sha256sum and shasum take different flags.
+    local got
+    if command -v shasum >/dev/null; then got="$(shasum -a 256 "$dl/tofu.zip" | cut -d' ' -f1)"; else got="$(sha256sum "$dl/tofu.zip" | cut -d' ' -f1)"; fi
+    [ -n "$want" ] && [ "$got" = "$want" ] || fail "checksum (expected $want, got $got)"
     unzip -o -q "$dl/tofu.zip" tofu -d "$dl" || fail "unzip tofu"
     install "$dl/tofu" ~/bin/ || fail "install tofu"
   fi
