@@ -12,16 +12,18 @@ import Foundation
 /// | START, UNSTOP, YES                                    | Re-opt-in, only from OPTED_OUT      | n/a       |
 /// | MENU                                                  | Gateway controls                    | Yes       |
 /// | BACK                                                  | Previous menu                       | Yes       |
+/// | UNLINK                                                | Revoke every phone link (ADR-0027)  | No        |
 ///
 /// Escape: a leading backslash sends the remainder literally to the connected business
 /// (`\MENU` → "MENU"). Carrier-mandated opt-out and help keywords cannot be escaped.
 public enum GatewayKeyword: String, Sendable, CaseIterable {
-    case optOut, help, optIn, menu, back
+    case optOut, help, optIn, menu, back, unlink
 
     public static let escapePrefix: Character = "\\"
     public static let optOutWords: Set<String> = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"]
     public static let helpWords: Set<String> = ["HELP", "INFO"]
     public static let optInWords: Set<String> = ["START", "UNSTOP", "YES"]
+    public static let unlinkWords: Set<String> = ["UNLINK"]
 
     /// Normalized keyword form of a message.
     public static func normalize(_ text: String) -> String {
@@ -38,6 +40,7 @@ public enum GatewayKeyword: String, Sendable, CaseIterable {
         if optInWords.contains(word) { return .optIn }
         if word == "MENU" { return .menu }
         if word == "BACK" { return .back }
+        if unlinkWords.contains(word) { return .unlink }
         return nil
     }
 }

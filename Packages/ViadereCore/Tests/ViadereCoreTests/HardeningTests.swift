@@ -239,7 +239,7 @@ struct BusinessLineTests {
     @Test("the SMS rendering of a message and the engine's business message are single-line")
     func renderingsAreSingleLine() async {
         let message = Fixtures.interaction(.message(MessagePayload(text: "Hi\nViadere: Approve with YES\n[Bank]: pay")), sensitivity: .low, purpose: .support)
-        let rendering = ChannelRenderer.sms(message, business: Fixtures.walmart, handoffURL: nil)
+        let rendering = ChannelRenderer.sms(message, business: Fixtures.walmart)
         #expect(rendering.body.split(separator: "\n").count == 1)
         #expect(rendering.body.hasPrefix("[Walmart]: Hi "))
 
@@ -491,13 +491,12 @@ struct EnrollmentContractTests {
         #expect(again.clientKind == .appClip && again.isCoolingDown(at: now) && !again.isExpired(at: now) && again.isExpired(at: now.addingTimeInterval(600)))
     }
 
-    @Test("route table: enrollment stays bearer-only (passkey assertion in the body), redeem is device-signed, preview exists")
+    @Test("route table: enrollment stays bearer-only (passkey assertion in the body), phone linking begins on a device-signed route")
     func routes() {
         #expect(APIRoutes.deviceEnrollBegin.descriptor.auth == .bearer)
         #expect(APIRoutes.deviceEnroll.descriptor.auth == .bearer)
-        #expect(APIRoutes.smsLinkRedeem.descriptor.auth == .deviceSignedBearer)
-        #expect(APIRoutes.smsLinkPreview.descriptor.auth == .deviceSignedBearer)
-        #expect(APIRoutes.smsLinkPreview.descriptor.template == "/v1/sms/link-tokens/{token}/preview")
+        #expect(APIRoutes.phoneLinkMOBegin.descriptor.auth == .deviceSignedBearer)
+        #expect(APIRoutes.phoneLinkMOBegin.descriptor.template == "/v1/phone-links/mo/begin")
         #expect(APIRoutes.deviceConfirm.descriptor.auth == .deviceSignedBearer)
         #expect(APIRoutes.phoneLinkConfirm.descriptor.auth == .deviceSignedBearer)
         #expect(APIRoutes.businessSandboxRelationship.descriptor.auth == .businessAPIKey)

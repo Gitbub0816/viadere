@@ -25,7 +25,6 @@ public enum GatewayCopy {
     public static let welcome = "Viadere: A trusted way to connect with verified businesses."
     public static let searchPrompt = "Viadere: Reply with a business name, @handle, or 6-character code (like AF-2345)."
     public static let noRecent = "Viadere: No recent businesses yet."
-    public static let linkSent = "Viadere: We're texting you a secure link to link your account."
     public static let linked = "Viadere: Your number is now linked to your Viadere account."
     public static let notConnected = "Viadere: You're not connected to a business. Text a name, @handle, or code."
     public static let directoryUnavailable = "Viadere: Sorry, we couldn't look that up right now. Please try again shortly."
@@ -65,8 +64,9 @@ public enum GatewayCopy {
         "Viadere: Your conversation with \(safeName(business)) timed out." + (messageHeld ? " Your message was not sent yet." : "")
     }
 
-    public static func linkRequired(_ business: BusinessSummary) -> String {
-        "Viadere: To message \(safeName(business)), link your account first. We're texting you a secure link."
+    /// A number that is not linked cannot route to a business. Linking happens in the app (ADR-0027); nothing is texted but this pointer.
+    public static func linkRequired(_ business: BusinessSummary, url: String) -> String {
+        "Viadere: To message \(safeName(business)), link this number in the Viadere app first. Get the app: \(url)"
     }
 
     public static func businessUnavailable(_ business: BusinessSummary) -> String {
@@ -84,14 +84,20 @@ public enum GatewayCopy {
         "Viadere: You have a new message from \(safeName(sender)) in the Viadere app. Don't reply here: replies in this chat go to \(safeName(active)). Reply MENU to switch."
     }
 
-    /// Sent by the server for `.sendAccountLink`.
-    public static func accountLink(url: URL, ttlMinutes: Int) -> String {
-        "Viadere: Link your account: \(url.absoluteString) Expires in \(ttlMinutes) min. Don't share this link."
-    }
+    /// UX_COPY SMS-01: the on-ramp pointer. A static page, never a token (decision 9).
+    public static func getViadere(url: String) -> String { "Get the Viadere app to connect with businesses: \(url)" }
 
-    /// Sent by the server for `.sendSecureHandoff`.
-    public static func secureHandoff(url: URL, ttlMinutes: Int) -> String {
-        "Viadere: For your security, continue here: \(url.absoluteString) Expires in \(ttlMinutes) min."
+    /// ADR-0027 §4: what the gateway says instead of minting a hand-off link. No link, no code.
+    public static let openAppToRespond = "Viadere: Open the Viadere app to respond."
+    public static let openAppForAccount = "Viadere: Open the Viadere app for account help and settings."
+
+    /// UX_COPY SMS-02: sent to a number after every valid customer-originated link text, before any waiting period ends.
+    public static let phoneLinkedNotice = "Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages."
+    /// UX_COPY SMS-03.
+    public static let unlinkDone = "Viadere: Done. This number is no longer linked to a Viadere app."
+    /// UX_COPY SMS-04: the only thing a number linked by text ever receives about an interaction.
+    public static func secureRequestNotice(business: BusinessSummary) -> String {
+        "Viadere: \(safeName(business)) sent you something that needs the Viadere app. Open Viadere to respond."
     }
 
     /// Menu body with numbered options.

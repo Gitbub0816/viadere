@@ -4,6 +4,7 @@ import Foundation
 public enum GatewayState: String, Codable, Sendable, CaseIterable {
     case new = "NEW"
     case unlinked = "UNLINKED"
+    /// Retired (ADR-0027): decodes from threads saved by older builds and is treated as `unlinked`.
     case linkPending = "LINK_PENDING"
     case idleMenu = "IDLE_MENU"
     case recentMenu = "RECENT_MENU"
@@ -159,11 +160,6 @@ public enum SessionCloseReason: String, Codable, Sendable {
     case switched, endedByUser, expired, optedOut, businessUnavailable
 }
 
-/// Purpose of a secure handoff link.
-public enum HandoffPurpose: String, Codable, Sendable {
-    case accountHelp, manageBusinesses, interaction
-}
-
 /// Redacted audit record emitted by the engine (never contains message text).
 public struct GatewayAudit: Codable, Sendable, Hashable {
     public var action: String
@@ -182,11 +178,6 @@ public enum GatewayEffect: Codable, Sendable, Hashable {
     case forwardToBusiness(businessId: BusinessID, sessionId: SessionID, text: String, providerMessageId: String)
     case openSession(businessId: BusinessID, sessionId: SessionID)
     case closeSession(businessId: BusinessID, sessionId: SessionID, reason: SessionCloseReason)
-    /// Create a single-use, short-TTL account-link token bound to this phone + conversation revision,
-    /// and send `GatewayCopy.accountLink(url:ttlMinutes:)`.
-    case sendAccountLink
-    /// Create a short-lived secure handoff link and send `GatewayCopy.secureHandoff(url:ttlMinutes:)`.
-    case sendSecureHandoff(HandoffPurpose)
     /// Persist an SMS consent change (opt-out / opt-in) with the keyword used.
     case recordConsent(optedOut: Bool, keyword: String, at: Date)
     /// A business message that must not be shown in the current thread context; store in history only.
@@ -221,7 +212,8 @@ public protocol DirectoryLookup: Sendable {
 public struct GatewayConfiguration: Sendable, Hashable {
     public var menuTTL: TimeInterval
     public var sessionIdleTTL: TimeInterval
-    public var linkTTL: TimeInterval
+    /// The static "get Viadere" page named in on-ramp texts (UX_COPY SMS-01). Never carries a token.
+    public var getAppURL: String
     /// When true (default), unlinked numbers may browse but not route messages to businesses.
     public var requireLinkForRouting: Bool
     /// Max provider message ids remembered for idempotency.
@@ -232,13 +224,13 @@ public struct GatewayConfiguration: Sendable, Hashable {
     /// (the menu is shown again). `0` disables the guard.
     public var menuRaceWindow: TimeInterval
 
-    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, linkTTL: TimeInterval = 15 * 60,
+    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, getAppURL: String = "https://viadere.com/get",
                 requireLinkForRouting: Bool = true, dedupMemory: Int = 50, maxForwardLength: Int = 1600,
                 menuRaceWindow: TimeInterval = 0) {
         self.menuRaceWindow = menuRaceWindow
         self.menuTTL = menuTTL
         self.sessionIdleTTL = sessionIdleTTL
-        self.linkTTL = linkTTL
+        self.getAppURL = getAppURL
         self.requireLinkForRouting = requireLinkForRouting
         self.dedupMemory = dedupMemory
         self.maxForwardLength = maxForwardLength

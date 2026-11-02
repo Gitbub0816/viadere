@@ -8,22 +8,21 @@ struct RCSPostbackTests {
 
     @Test func renderedSuggestionsDecodeToTypedTargets() {
         let confirm = Fixtures.interaction(.confirm(ConfirmPayload(title: "Pickup")), sensitivity: .low)
-        let rcs = ChannelRenderer.rcs(confirm, business: business, handoffURL: nil)
+        let rcs = ChannelRenderer.rcs(confirm, business: business)
         #expect(rcs.suggestions.compactMap { $0.target(forInteraction: confirm.id) } == [.decision(.confirm), .decision(.decline)])
 
         let choose = Fixtures.interaction(.choose(Fixtures.choosePayload), sensitivity: .low)
-        let chips = ChannelRenderer.rcs(choose, business: business, handoffURL: nil)
+        let chips = ChannelRenderer.rcs(choose, business: business)
         #expect(chips.suggestions.compactMap { $0.target(forInteraction: choose.id) } == [.option("am"), .option("pm"), .option("eve")])
 
         let reply = Fixtures.interaction(.reply(ReplyPayload(prompt: "Fixed?", suggestedReplies: ["Yes", "No"])), sensitivity: .low)
-        let replies = ChannelRenderer.rcs(reply, business: business, handoffURL: nil)
+        let replies = ChannelRenderer.rcs(reply, business: business)
         #expect(replies.suggestions.compactMap { $0.target(forInteraction: reply.id) } == [.suggestedReply(0), .suggestedReply(1)])
     }
 
     @Test func openURLSuggestionsHaveNoTargetAndSensitiveInteractionsOfferNoReplyTargets() {
         let authorize = Fixtures.interaction(.authorize(Fixtures.mesaAuthorize), sensitivity: .high)
-        let handoff = URL(string: "https://viadere.com/h/abc")
-        let rcs = ChannelRenderer.rcs(authorize, business: business, handoffURL: handoff)
+        let rcs = ChannelRenderer.rcs(authorize, business: business)
         #expect(rcs.isSecureHandoff)
         #expect(rcs.suggestions.allSatisfy { $0.target(forInteraction: authorize.id) == nil })
     }

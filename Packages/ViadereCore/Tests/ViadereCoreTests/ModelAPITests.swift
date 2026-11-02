@@ -151,9 +151,14 @@ struct APIRouteTests {
     func sessionRotationRoutes() throws {
         #expect(APIRoutes.authRefresh.auth == .none)
         #expect(APIRoutes.authRefresh.template == "/v1/auth/refresh")
-        #expect(APIRoutes.handoffRedeem.auth == .deviceSignedBearer)
+        #expect(APIRoutes.phoneLinkMOBegin.auth == .deviceSignedBearer)
+        #expect(APIRoutes.phoneLinkStatus.auth == .deviceSignedBearer)
         #expect(APIRoutes.all.contains { $0.name == "auth.refresh" })
-        #expect(APIRoutes.all.contains { $0.name == "handoff.redeem" })
+        // ADR-0027: the SMS-code, link-token and hand-off routes are gone from the catalog.
+        for gone in ["handoff.redeem", "phoneLinks.start", "phoneLinks.verify", "sms.linkTokens.preview", "sms.linkTokens.redeem"] {
+            #expect(!APIRoutes.all.contains { $0.name == gone }, "\(gone)")
+        }
+        #expect(APIRoutes.all.contains { $0.name == "phoneLinks.mo.begin" })
     }
 
     @Test("AuthSession decodes with and without a refresh token")
@@ -165,17 +170,15 @@ struct APIRouteTests {
         let full = AuthSession(consumerId: id, accessToken: "a", expiresAt: Date(timeIntervalSince1970: 1_800_000_000),
                                refreshToken: "r", refreshExpiresAt: Date(timeIntervalSince1970: 1_900_000_000))
         #expect(try ViadereJSON.decode(AuthSession.self, from: ViadereJSON.encode(full)) == full)
-        let handoff = HandoffRedeemResponse(purpose: .manageBusinesses, interactionId: InteractionID())
-        #expect(try ViadereJSON.decode(HandoffRedeemResponse.self, from: ViadereJSON.encode(handoff)) == handoff)
     }
 
     @Test("Spec-required endpoints exist", arguments: [
         "auth.register.begin", "auth.register.finish", "auth.login.begin", "auth.login.finish", "devices.enroll", "devices.list",
-        "devices.revoke", "phoneLinks.start", "phoneLinks.verify", "directory.search", "directory.resolve", "directory.handle",
+        "devices.revoke", "phoneLinks.mo.begin", "phoneLinks.status", "directory.search", "directory.resolve", "directory.handle",
         "directory.code", "relationships.connect", "relationships.list", "relationships.disconnect", "consents.get",
         "consents.update", "interactions.list", "interactions.get", "interactions.decide", "conversations.list",
         "conversations.messages", "conversations.send", "rewards.list", "rewards.redeem", "wallet.pass", "liveActivities.token",
-        "push.apnsToken", "sms.linkTokens.redeem", "business.interactions.issue", "business.messages.send",
+        "push.apnsToken", "business.interactions.issue", "business.messages.send",
         "business.statuses.update", "business.rewards.issue", "business.webhooks.create", "business.webhooks.list",
         "business.webhooks.delete", "business.interactions.outcome", "providers.sms.inbound", "delegations.create",
     ])
