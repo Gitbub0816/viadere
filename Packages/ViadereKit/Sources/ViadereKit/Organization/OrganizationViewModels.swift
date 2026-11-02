@@ -133,6 +133,22 @@ public final class BusinessesViewModel {
         }
     }
 
+    /// Drops this business's own level so it follows the account-wide default again (You → Notifications).
+    public func followDefault(_ id: BusinessID) async {
+        guard let api, let index = directory.firstIndex(where: { $0.business.id == id }) else { return }
+        let previous = directory[index].preferences
+        directory[index].preferences.muteLevel = MuteLevel.none
+        directory[index].preferences.muteUntil = nil
+        directory[index].preferences.hasOwnLevel = false
+        do {
+            apply(try await api.updatePreferences(business: id, BusinessPreferencesUpdate(followDefault: true)))
+            errorMessage = nil
+        } catch {
+            if let i = directory.firstIndex(where: { $0.business.id == id }) { directory[i].preferences = previous }
+            errorMessage = message(for: error, "Couldn't save that change.")
+        }
+    }
+
     /// Unblocks a business the customer blocked. The connection stays ended; it can be reconnected from its code afterwards.
     @discardableResult
     public func unblock(_ id: BusinessID) async -> Bool {
@@ -147,9 +163,10 @@ public final class BusinessesViewModel {
         }
     }
 
-    /// How many active businesses are quieted at `now` (the Notifications row's summary).
-    public func quietedCount(at now: Date) -> Int {
-        active.filter { $0.preferences.effectiveMute(at: now) != MuteLevel.none }.count
+    /// How many active businesses are quieted at `now` (the Notifications row's summary). A business without a level of its own counts
+    /// by the account-wide default.
+    public func quietedCount(at now: Date, accountDefault: MuteLevel = .none) -> Int {
+        active.filter { $0.preferences.effectiveLevel(accountDefault: accountDefault, at: now) != MuteLevel.none }.count
     }
 
     /// Reflects preferences saved elsewhere (the business settings screen).
@@ -194,6 +211,9 @@ public final class BusinessPreferencesViewModel {
     /// The mute in force now (a timed mute that ended reads as none).
     public var effectiveMute: MuteLevel { preferences.effectiveMute(at: clock()) }
 
+    /// The level in force for this business: its own, else the account-wide default.
+    public func effectiveLevel(accountDefault: MuteLevel) -> MuteLevel { preferences.effectiveLevel(accountDefault: accountDefault, at: clock()) }
+
     /// Timed mutes the screen offers.
     public enum MuteDuration: String, CaseIterable, Sendable {
         case hour, day, week, untilChanged = "until_changed"
@@ -230,6 +250,9 @@ public final class BusinessPreferencesViewModel {
     }
 
     public func setFavorite(_ favorite: Bool) async { await save(BusinessPreferencesUpdate(favorite: favorite)) }
+
+    /// Follow the account-wide default level again.
+    public func followDefault() async { await save(BusinessPreferencesUpdate(followDefault: true)) }
 
     /// Ends the connection and refuses new ones from this business until unblocked (the screen confirms first).
     public func block() async { await save(BusinessPreferencesUpdate(blocked: true)) }

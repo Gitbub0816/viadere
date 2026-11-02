@@ -54,6 +54,9 @@ public enum InterruptionPreset: String, CaseIterable, Sendable, Hashable, Identi
         }
     }
 
+    /// For a business that follows the account-wide default: "Following your default (Balanced)".
+    public func followingSummary() -> String { "Following your default: \(title)" }
+
     /// The short form used in summaries ("Balanced", "Quiet until 6 PM").
     public func summary(until: Date?, now: Date, calendar: Calendar = .current) -> String {
         guard self != .everything, let until else { return title }

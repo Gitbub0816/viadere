@@ -10,6 +10,9 @@ public protocol OrganizationAPI: Sendable {
     func businesses() async throws -> [ConnectedBusiness]
     func preferences(business: BusinessID) async throws -> BusinessPreferences
     func updatePreferences(business: BusinessID, _ update: BusinessPreferencesUpdate) async throws -> BusinessPreferences
+    /// The account-wide default level and quiet hours (SECURITY.md §2.96 "Notification level and quiet hours").
+    func notificationSettings() async throws -> NotificationSettings
+    func updateNotificationSettings(_ update: NotificationSettingsUpdate) async throws -> NotificationSettings
     func surface(business: BusinessID) async throws -> BusinessSurfaceView
     func conversations(business: BusinessID?, includeArchived: Bool) async throws -> [ConversationSummary]
     func updateConversation(_ id: SessionID, _ update: ConversationStateUpdate) async throws -> ConversationStateView
@@ -41,6 +44,12 @@ public struct LiveOrganizationAPI: OrganizationAPI {
 
     public func updatePreferences(business: BusinessID, _ update: BusinessPreferencesUpdate) async throws -> BusinessPreferences {
         try await client.call(APIRoutes.businessPreferencesPut, params: ["businessId": business.description], body: update)
+    }
+
+    public func notificationSettings() async throws -> NotificationSettings { try await client.call(APIRoutes.notificationSettingsGet) }
+
+    public func updateNotificationSettings(_ update: NotificationSettingsUpdate) async throws -> NotificationSettings {
+        try await client.call(APIRoutes.notificationSettingsPut, body: update)
     }
 
     public func surface(business: BusinessID) async throws -> BusinessSurfaceView {

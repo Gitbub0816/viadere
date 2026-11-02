@@ -24,6 +24,7 @@ public actor MockLoopsAPI: LoopsAPI {
         var mode: LoopInstallMode
         var source: LoopInstallSource
         var at: Date
+        var alerts = false
     }
 
     struct Instance {
@@ -288,7 +289,7 @@ public actor MockLoopsAPI: LoopsAPI {
             return InstalledLoop(loopId: p.loopId, business: business, businessCategory: .retail, title: p.definition.title, mode: install.mode,
                                  source: install.source, installedAt: install.at, connected: connected.contains(p.summary.businessId),
                                  publicationId: available ? p.summary.publicationId : nil, entryPoints: p.definition.entryPoints, openInstances: open,
-                                 brandKitId: nil)
+                                 brandKitId: nil, alertsEnabled: install.alerts)
         }.sorted { $0.title < $1.title }
     }
 
@@ -302,13 +303,21 @@ public actor MockLoopsAPI: LoopsAPI {
         }
         guard let g = statusValue().global, g.current else { throw APIError.server(status: 409, code: .conflict, message: "Turn on Loops first.") }
         if request.mode == .installAndConnect { connected.insert(p.summary.businessId) }
-        installs[loop] = Install(mode: request.mode, source: request.source, at: installs[loop]?.at ?? clock())
+        installs[loop] = Install(mode: request.mode, source: request.source, at: installs[loop]?.at ?? clock(),
+                                 alerts: request.alertsEnabled ?? installs[loop]?.alerts ?? false)
         if businessGrants[p.summary.businessId]?.current != true {
             businessGrants[p.summary.businessId] = LoopConsentGrantView(businessId: p.summary.businessId, textVersion: text.version, textDigest: text.digest,
                                                                        grantedAt: clock(), current: true)
         }
         guard let view = installedList().first(where: { $0.loopId == loop }) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
         return LoopInstallResult(installed: view, consent: statusValue())
+    }
+
+    public func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop {
+        guard installs[loop] != nil else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+        installs[loop]?.alerts = enabled
+        guard let view = installedList().first(where: { $0.loopId == loop }) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+        return view
     }
 
     public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {

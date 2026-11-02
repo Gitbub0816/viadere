@@ -22,6 +22,8 @@ public protocol LoopsAPI: Sendable {
     func installedLoops() async throws -> [InstalledLoop]
     func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult
     func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop]
+    /// Allow or stop this installed Loop's own alerts in Alerts (owner decision F-4). Never subscribes to anything else from the business.
+    func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop
 }
 
 /// Defaults for test doubles written before installable Loops: the server answers `404` (nothing installable).
@@ -37,6 +39,9 @@ extension LoopsAPI {
         throw APIError.server(status: 404, code: .notFound, message: "Not found.")
     }
     public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {
+        throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+    }
+    public func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop {
         throw APIError.server(status: 404, code: .notFound, message: "Not found.")
     }
 }
@@ -100,6 +105,10 @@ public struct LiveLoopsAPI: LoopsAPI {
 
     public func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult {
         try await client.call(APIRoutes.loopInstall, params: ["loopId": loop.description], body: request)
+    }
+
+    public func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop {
+        try await client.call(APIRoutes.loopInstalledAlerts, params: ["loopId": loop.description], body: LoopAlertsRequest(enabled: enabled))
     }
 
     public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {
