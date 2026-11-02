@@ -117,6 +117,11 @@ enum DeviceRoutes {
             try await SecurityNotices(db: req.db, ctx: req.ctx).dismiss(id, principal: try req.consumer)
             return try req.emptyOK()
         }
+        routes.api(APIRoutes.securityNoticeSeen) { req in
+            guard let raw = req.parameters.get("noticeId"), let id = UUID(uuidString: raw) else { throw APIError.notFound }
+            try await SecurityNotices(db: req.db, ctx: req.ctx).seen(id, principal: try req.consumer)
+            return try req.emptyOK()
+        }
         routes.api(APIRoutes.accountDelete) { req in
             try await AccountService(db: req.db, ctx: req.ctx).deleteAccount(principal: try req.consumer)
             return try req.emptyOK()

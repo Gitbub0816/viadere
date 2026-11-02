@@ -153,6 +153,8 @@ struct RCSInbound {
         if let usableFrom = link.usableFrom, usableFrom > now {
             return try await reject(.linkCoolDown, interaction: interactionId, business: businessId)
         }
+        // An UNLINK text paused this number: it answers nothing until the holder links it again in the app.
+        if link.suspendedAt != nil { return try await reject(.notLinked, interaction: interactionId, business: businessId) }
         guard let interaction = try? record.interaction(), interaction.allowedChannels.contains(.rcs),
               let target = RCSPostbackTarget(storageValue: postback.target) else {
             return try await reject(.notPermitted, interaction: interactionId, business: businessId)

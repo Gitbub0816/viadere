@@ -92,6 +92,8 @@ public protocol ViadereAPI: Sendable {
     func securityNotices() async throws -> [SecurityNotice]
     /// `POST /v1/security-notices/{id}/dismiss`: needs a trusted device (`403 device_cool_down` otherwise).
     func dismissSecurityNotice(_ id: UUID) async throws
+    /// `POST /v1/security-notices/{id}/seen`: this notice is on screen with its action. Any live app device may say so (a new phone in cool-down too).
+    func markSecurityNoticeSeen(_ id: UUID) async throws
 
     // MARK: Directory
     func searchDirectory(query: String) async throws -> [BusinessSummary]

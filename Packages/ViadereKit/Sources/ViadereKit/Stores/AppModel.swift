@@ -262,6 +262,7 @@ public final class AppModel {
         guard !isLocked else { return }
         isLocked = true
         lockEpoch += 1
+        Task { await securityNotices.setCovered(true) }
         presentedApproval = nil
         pendingConnect = nil
         pendingApproveEnrollment = nil
@@ -282,6 +283,7 @@ public final class AppModel {
     /// Opens the app after a successful authentication and replays what arrived while it was locked.
     func unlocked() async {
         isLocked = false
+        await securityNotices.setCovered(false)
         let replay = lockedQueue
         lockedQueue.removeAll()
         for link in replay { await handle(link) }

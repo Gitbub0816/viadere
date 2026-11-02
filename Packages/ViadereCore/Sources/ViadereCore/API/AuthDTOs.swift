@@ -637,7 +637,7 @@ public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
     case cancelDeviceReplacement
     /// `POST /v1/vault/recovery-release/{subjectId}/cancel` (a vault device or a trusted device).
     case cancelVaultRecovery
-    /// `POST /v1/phone-links/{subjectId}/keep` (a trusted device): refuses a pending transfer of this number.
+    /// `POST /v1/phone-links/{subjectId}/keep` (any active app device of the account): refuses a pending transfer of this number.
     case keepPhoneNumber
     case unknown
 

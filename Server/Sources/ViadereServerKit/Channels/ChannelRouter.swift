@@ -42,6 +42,10 @@ struct ChannelRouter {
             try await skip("phone_link_cool_down")
             return
         }
+        if link.suspendedAt != nil {
+            try await skip("phone_link_suspended")
+            return
+        }
         if let context = try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == phoneHash).first(), context.optedOut {
             try await skip("opted_out")
             return

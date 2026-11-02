@@ -22,10 +22,13 @@ struct AccountService {
             .filter(\.$consumerId == principal.consumerId.uuid).first() else { throw APIError.notFound }
         guard link.state != "revoked" else { return }
         try await db.transaction { tx in
-            link.state = "revoked"
-            link.verifiedPhoneHash = nil
-            link.otpHash = nil
-            try await link.update(on: tx)
+            // Serialize with a completing transfer, Keep and UNLINK on the same number (R-2).
+            try await PhoneLinkService.lockNumber(phoneHash: link.phoneHash, on: tx)
+            guard let current = try await PhoneLinkRecord.find(link.id!, on: tx), current.state != "revoked" else { return }
+            current.state = "revoked"
+            current.verifiedPhoneHash = nil
+            current.otpHash = nil
+            try await current.update(on: tx)
             try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$phoneHash == link.phoneHash).delete()
             // Active SMS threads for the number stop being attributed to this account immediately.
             try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == link.phoneHash).set(\.$consumerId, to: nil).update()

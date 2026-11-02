@@ -56,5 +56,7 @@ struct SecurityNoticeBanner: View {
         .overlay(RoundedRectangle(cornerRadius: ViadereRadius.card, style: .continuous).strokeBorder(ViadereColor.accent.opacity(0.3), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isHeader)
+        // Reported as seen only now that it is on screen with its action (R-1); a covered banner (app lock) is not reported.
+        .task(id: notice.id) { await vm.noteShown(notice) }
     }
 }

@@ -94,7 +94,7 @@ public enum GatewayCopy {
     /// UX_COPY SMS-02: sent to a number after every valid customer-originated link text, before any waiting period ends.
     public static let phoneLinkedNotice = "Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages."
     /// UX_COPY SMS-03.
-    public static let unlinkDone = "Viadere: Done. This number is no longer linked to a Viadere app."
+    public static let unlinkDone = "Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app."
     /// UX_COPY SMS-04: the only thing a number linked by text ever receives about an interaction.
     public static func secureRequestNotice(business: BusinessSummary) -> String {
         "Viadere: \(safeName(business)) sent you something that needs the Viadere app. Open Viadere to respond."

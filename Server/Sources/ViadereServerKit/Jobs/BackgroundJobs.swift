@@ -5,7 +5,7 @@ import Vapor
 /// Maintenance and delivery jobs. State lives in the database, so any number of instances can run them safely (claims are compare-and-swap).
 ///
 /// The work is split into the task groups the Azure scheduled jobs run (`ViadereServer maintenance <task>`, plan 5.7):
-/// - `maintenance` (every 5 minutes): expiries, the delivery sweeps (the safety net behind the queues), purges and retention;
+/// - `maintenance` (every 5 minutes): expiries, the delivery sweeps (the safety net behind the queues), purges and retention (not the `minute` task);
 /// - `minute` (every minute): the P-class sweep of phone-link challenges (ADR-0026: no row older than expiry + 2 minutes) and pending transfers;
 /// - `hourly`: Verify maintenance, API-key lifecycle, onboarding assurance, pending changes;
 /// - `audit-export`: the signed audit-head export.
@@ -66,12 +66,26 @@ struct BackgroundJobs {
 
     /// Phone-link challenges are pending secrets (ADR-0026 class P): gone at expiry + 2 minutes, so this runs every minute (its own scheduled job on
     /// Azure; the in-process loop gates it to once a minute), isolated so an earlier failure elsewhere never skips it. Pending transfers complete here.
+    ///
+    /// One run at a time (`job_leases`, R-2 of the SMS-removal re-check): a run that finds the lease taken does nothing, and a crashed run's lease
+    /// expires on its own before the next minute. The transfers stay correct without it (row locks), so the lease only saves duplicate work.
     func minute(gated: Bool) async {
         guard await gate("phone-link-sweep", gated) else { return }
         let (db, ctx) = (app.db, app.ctx)
+        let holder = UUID()
+        let leased = LeaseResult()
+        await guarded("phone-link-lease") { leased.value = try await JobLease.acquire(Self.minuteLease, holder: holder, ttl: Self.minuteLeaseTTL, on: db, now: ctx.now) }
+        guard leased.value else { return }
         await guarded("phone-link-challenges") { _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now) }
         await guarded("phone-link-transfers") { _ = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers() }
+        await guarded("phone-link-lease-release") { try await JobLease.release(Self.minuteLease, holder: holder, on: db) }
     }
+
+    private final class LeaseResult: @unchecked Sendable { var value = false }
+
+    static let minuteLease = "phone-link-minute"
+    /// Shorter than the cadence: a lease left by a killed run never blocks the next minute's run for long.
+    static let minuteLeaseTTL: TimeInterval = 50
 
     private func maintenance(gated: Bool) async throws -> Report {
         let db = app.db
@@ -106,7 +120,9 @@ struct BackgroundJobs {
             // Published outbox rows and old idempotency markers.
             try await QueuePump.purge(on: db, now: ctx.now)
         }
-        await minute(gated: gated)
+        // The in-process loop (gated) runs the minute task here. The scheduled `maintenance` job (ungated, every 5 minutes) does not: the Azure
+        // `minute` job owns it, so two runs never overlap every fifth minute (R-2).
+        if gated { await minute(gated: true) }
         if await gate("retention-purge", gated) {
             try await RetentionService(db: db, ctx: ctx).purge()
             _ = try await LoopInbox(db: db, ctx: ctx).purgeClosed(before: ctx.now.addingTimeInterval(-ctx.config.loops.inboxRetention))

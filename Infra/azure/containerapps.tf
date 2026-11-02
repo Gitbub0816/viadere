@@ -466,7 +466,7 @@ resource "azurerm_container_app" "worker" {
 locals {
   scheduled_jobs = var.enable_scheduled_jobs ? {
     maintenance    = "*/5 * * * *"  # sweeps, purges, retention (section 5.7)
-    minute         = "* * * * *"    # phone-link challenge sweep (ADR-0026: expiry + 2 minutes) and pending transfers
+    minute         = "* * * * *"    # phone-link challenge sweep (ADR-0026: expiry + 2 minutes) and pending transfers; ~1,440 runs/day of a few seconds each, well inside the lean consumption budget; reuses the worker identity and secrets (standard profile: narrower identity, R-5)
     hourly         = "23 * * * *"   # verify maintenance, API-key lifecycle, onboarding assurance
     "audit-export" = "41 */6 * * *" # AUDIT_HEAD_EXPORT_INTERVAL_HOURS = 6
   } : {}
@@ -479,8 +479,9 @@ resource "azurerm_container_app_job" "scheduled" {
   resource_group_name          = azurerm_resource_group.this["app"].name
   container_app_environment_id = azapi_resource.cae.id
   workload_profile_name        = "Consumption"
-  replica_timeout_in_seconds   = 1800
-  replica_retry_limit          = 1
+  # The `minute` job must end before the next minute starts (R-5, ADR-0026): a stuck run is killed at 55 s. The others keep 30 minutes.
+  replica_timeout_in_seconds   = each.key == "minute" ? 55 : 1800
+  replica_retry_limit          = each.key == "minute" ? 0 : 1
   tags                         = local.tags
 
   schedule_trigger_config {

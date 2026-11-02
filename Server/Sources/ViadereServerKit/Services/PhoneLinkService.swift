@@ -1,5 +1,7 @@
 import Fluent
+import FluentSQL
 import Foundation
+import SQLKit
 import ViadereCore
 
 /// Phone-number ownership by a customer-originated text (ADR-0027, owner decisions 1 and 9).
@@ -39,6 +41,15 @@ struct PhoneLinkService {
             try await link.update(on: db)
         }
         return links.count
+    }
+
+    /// `SELECT id FROM phone_links WHERE phone_hash = ? ORDER BY id FOR UPDATE`, first thing in every transaction that decides who holds a number
+    /// (completing a transfer, Keep, removal, a new text). PostgreSQL runs at READ COMMITTED, so without it a Keep or removal that commits between
+    /// a job's read and its write would be overwritten. Always all rows of the number, always in id order: one lock order, no deadlock. A statement
+    /// that runs after the lock is granted sees the committed rows, so callers re-read **after** calling this. SQLite serializes writers.
+    static func lockNumber(phoneHash: String, on db: any Database) async throws {
+        guard let sql = db as? any SQLDatabase else { throw APIError.internalError }
+        _ = try await sql.select().column("id").from(PhoneLinkRecord.schema).where("phone_hash", .equal, phoneHash).orderBy("id").for(.update).all()
     }
 
     private func nonceHash(linkId: UUID, nonce: String) -> String { ctx.hasher.hmacHex("phone-mo", "\(linkId.uuidString.lowercased())\n\(nonce)") }
@@ -145,7 +156,7 @@ struct PhoneLinkService {
 
     func handleInbound(_ sms: InboundSMS, on tx: any Database, afterCommit: AfterCommit) async throws -> InboundHandling {
         if GatewayKeyword.classify(sms.text) == .unlink {
-            try await unlink(number: sms.from, on: tx)
+            try await unlink(number: sms.from, indicator: sms.senderIndicator, on: tx)
             return .handled
         }
         guard let nonce = PhoneLinkMO.extractNonce(from: sms.text) else { return .ordinary }
@@ -214,6 +225,7 @@ struct PhoneLinkService {
                       afterCommit: AfterCommit) async throws {
         let consumerId = ConsumerID(challenge.consumerId)
         let hash = challenge.phoneHash
+        try await Self.lockNumber(phoneHash: hash, on: tx)
         let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == challenge.consumerId).filter(\.$revokedAt == nil).all()
         let otherTrusted = devices.contains { $0.id != device.id && $0.isTrusted(at: now) }
         var usableFrom = now.addingTimeInterval(otherTrusted ? Self.newLinkCoolDown : Self.soleDeviceLinkCoolDown)
@@ -221,6 +233,17 @@ struct PhoneLinkService {
         let existing = try await PhoneLinkRecord.query(on: tx).filter(\.$verifiedPhoneHash == hash).filter(\.$state == "verified").first()
         let auditService = AuditService(db: tx, ctx: ctx)
         if let existing, existing.consumerId == challenge.consumerId {
+            if existing.suspendedAt != nil {
+                // The holder's number was paused by an UNLINK text and the holder texted again from the phone: resume it with a fresh waiting period.
+                existing.suspendedAt = nil
+                existing.usableFrom = max(existing.usableFrom ?? usableFrom, usableFrom)
+                existing.confirmedAt = nil
+                existing.provedByDeviceId = device.id
+                try await existing.update(on: tx)
+                _ = try await auditService.record("phone_link.resumed_mo", actor: AuditActor(kind: .consumer, id: consumerId.description), consumerId: consumerId,
+                    subjectType: "phone_link", subjectId: existing.id?.uuidString.lowercased(), metadata: ["phone": phone.masked, "cool_down": "true"])
+                return
+            }
             // Already this account's number: nothing changes.
             _ = try await auditService.record("phone_link.verified_mo", actor: AuditActor(kind: .consumer, id: consumerId.description), consumerId: consumerId,
                 subjectType: "phone_link", subjectId: existing.id?.uuidString.lowercased(), metadata: ["phone": phone.masked, "result": "already_linked"])
@@ -233,6 +256,7 @@ struct PhoneLinkService {
         record.verifiedAt = now
         record.usableFrom = usableFrom
         record.source = Self.sourceMO
+        record.provedByDeviceId = device.id
         if let existing {
             // No immediate displacement (S1-A2-7): the current owner keeps the number until this request's waiting period ends and they were
             // told in the app and did not keep it. A spoofed or victim-induced text therefore never takes a linked number over at once.
@@ -262,23 +286,44 @@ struct PhoneLinkService {
 
     // MARK: UNLINK
 
-    /// `UNLINK` from a number revokes every link of it at any time (ADR-0027 §1.5), tells each affected account in the app, and replies SMS-03.
-    func unlink(number: PhoneNumber, on tx: any Database) async throws {
+    /// `UNLINK` from a number (ADR-0027 section 1.5, rev 4). It **pauses** every link of the number and tells each account in the app, and replies
+    /// SMS-03. It never releases the number: the link stays bound to its holder until the holder removes it in the app (a trusted device) or a
+    /// transfer completes (section 1.3). So a forged UNLINK, which can be sent without being the number's owner, can only stop routing (fail-safe).
+    /// It cannot open a dormant owner's number for a victim-induced text to bind fresh, which is how it used to get around section 1.3 (F-4).
+    /// A positive spoof indicator is refused without an answer; `unsupported` and `notProvided` still work, because the real owner's safety valve
+    /// must keep working with the shipped adapters. Waiting claims on the number (`pending_transfer` rows) are withdrawn, which only ever
+    /// leaves the status quo.
+    func unlink(number: PhoneNumber, indicator: InboundSenderIndicator = .unsupported, on tx: any Database) async throws {
         let hash = ctx.hasher.phoneHash(number)
+        guard indicator != .suspectedSpoof else {
+            try await audit("phone_link.unlink_refused", reason: "sender_indicator", number: number, on: tx)
+            return
+        }
+        try await Self.lockNumber(phoneHash: hash, on: tx)
+        let now = ctx.now
         let links = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == hash).filter(\.$state ~~ ["verified", Self.statePendingTransfer]).all()
+        var paused = 0
         for link in links {
-            link.state = "revoked"
-            link.verifiedPhoneHash = nil
+            if link.state == Self.statePendingTransfer {
+                link.state = "revoked"
+                try await link.update(on: tx)
+                _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.transfer_withdrawn_by_text", actor: AuditActor(kind: .gateway, id: number.masked),
+                    consumerId: ConsumerID(link.consumerId), subjectType: "phone_link", subjectId: link.id?.uuidString.lowercased(), metadata: ["phone": number.masked])
+                continue
+            }
+            guard link.suspendedAt == nil else { continue }
+            link.suspendedAt = now
             try await link.update(on: tx)
+            paused += 1
             try await SecurityNotices(db: tx, ctx: ctx).store(of: link.consumerId, except: nil, notice: .phoneUnlinked, subjectId: link.id?.uuidString.lowercased())
-            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.unlinked_by_text", actor: AuditActor(kind: .gateway, id: number.masked),
+            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.suspended_by_text", actor: AuditActor(kind: .gateway, id: number.masked),
                 consumerId: ConsumerID(link.consumerId), subjectType: "phone_link", subjectId: link.id?.uuidString.lowercased(), metadata: ["phone": number.masked])
         }
         try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$phoneHash == hash).delete()
         try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == hash).set(\.$consumerId, to: nil).update()
         if links.isEmpty { _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.unlink_no_link", actor: AuditActor(kind: .gateway, id: number.masked), metadata: ["phone": number.masked]) }
         try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: number, body: GatewayCopy.unlinkDone)
-        for _ in links { ctx.logger.warning("phone number unlinked by text", metadata: ["phone": "\(number.masked)"]) }
+        for _ in 0..<paused { ctx.logger.warning("phone number paused by an UNLINK text", metadata: ["phone": "\(number.masked)"]) }
     }
 
     private func audit(_ action: String, reason: String, number: PhoneNumber, consumer: UUID? = nil, on tx: any Database) async throws {
@@ -288,12 +333,17 @@ struct PhoneLinkService {
 
     // MARK: Pending transfers
 
-    /// The current owner refuses a pending transfer of their number ("Keep my number").
+    /// The current owner refuses a pending transfer of their number ("Keep my number"). Any live app device of the holder may do it, a new phone
+    /// in cool-down included: it only preserves the status quo (R-1). The number's rows are locked first and re-read, so a transfer that is
+    /// completing at the same moment either finishes before this call (then the link is gone: 404) or sees the Keep (R-2).
     func keep(principal: ConsumerPrincipal, id: PhoneLinkID) async throws {
-        try await DeviceTrust.require(principal, db: db, now: ctx.now)
-        guard let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
+        try await DeviceTrust.requireActiveApp(principal, db: db, now: ctx.now)
+        guard let probe = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
             .filter(\.$state == "verified").first() else { throw APIError.notFound }
         try await db.transaction { tx in
+            try await Self.lockNumber(phoneHash: probe.phoneHash, on: tx)
+            guard let link = try await PhoneLinkRecord.query(on: tx).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
+                .filter(\.$state == "verified").first() else { throw APIError.notFound }
             let pending = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == link.phoneHash).filter(\.$state == Self.statePendingTransfer).all()
             for other in pending {
                 other.state = "revoked"
@@ -304,28 +354,31 @@ struct PhoneLinkService {
         }
     }
 
-    /// Moves a number to the account that asked for it. Run by the maintenance job. ADR-0027 section 1.3 (rev 3): the transfer completes only when
+    /// Moves a number to the account that asked for it. Run by the `minute` job. ADR-0027 section 1.3 (rev 3): the transfer completes only when
     /// all of these hold, otherwise it stays `pending_transfer` and the current holder keeps routing:
     /// 1. the request's waiting period ended;
-    /// 2. the **current holder's** app fetched the in-app `phoneTransferRequested` notice written for that holder's link (a dormant owner never
-    ///    loses a number);
+    /// 2. the **current holder's** app **showed** the in-app `phoneTransferRequested` notice written for that holder's link (`security_notices
+    ///    .fetched_at`, set by `POST /v1/security-notices/{id}/seen`, never by listing; a dormant owner never loses a number);
     /// 3. the holder did not choose "Keep my number" (that revokes the pending row, see `keep`);
-    /// 4. the holder is still the account that was notified. If the holder changed, the new holder gets a fresh notice and a fresh waiting period;
-    /// 5. the requester still has an active device.
-    /// The losing account is told in the app when the number moves.
+    /// 4. the holder is still the account that was notified. If the holder changed, the new holder gets a fresh notice and a fresh waiting period.
+    ///    The same when the only notice is older than the app's list window, because the app can no longer show it (R-4);
+    /// 5. the requester's **account** is active and the **device that proved the link** is still an active app device (R-3).
+    /// The losing account is told in the app when the number moves. Everything for one number runs under that number's row locks and re-reads the
+    /// rows after taking them, so it cannot overwrite a concurrent Keep, removal or UNLINK (R-2).
     @discardableResult
     func completeTransfers() async throws -> Int {
         let now = ctx.now
         let due = try await PhoneLinkRecord.query(on: db).filter(\.$state == Self.statePendingTransfer).filter(\.$usableFrom <= now).all()
         var moved = 0
-        for pending in due {
+        for candidate in due {
             let afterCommit = AfterCommit()
             let completed: Bool = try await db.transaction { tx in
-                // The row may have been kept, revoked or completed since it was read.
-                guard let pending = try await PhoneLinkRecord.find(pending.id!, on: tx), pending.state == Self.statePendingTransfer else { return false }
+                try await Self.lockNumber(phoneHash: candidate.phoneHash, on: tx)
+                // The row may have been kept, revoked, extended or completed since it was read.
+                guard let pending = try await PhoneLinkRecord.query(on: tx).filter(\.$id == candidate.id!).filter(\.$state == Self.statePendingTransfer).first(),
+                      (pending.usableFrom ?? now) <= now else { return false }
                 let audits = AuditService(db: tx, ctx: ctx)
-                let requesterDevices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == pending.consumerId).filter(\.$revokedAt == nil).count()
-                guard requesterDevices > 0 else {
+                guard try await requesterCanReceive(pending, on: tx) else {
                     pending.state = "revoked"
                     try await pending.update(on: tx)
                     _ = try await audits.record("phone_link.transfer_dropped", actor: AuditActor(kind: .system), consumerId: ConsumerID(pending.consumerId),
@@ -338,18 +391,23 @@ struct PhoneLinkService {
                     let notices = try await SecurityNoticeRecord.query(on: tx).filter(\.$consumerId == holder.consumerId)
                         .filter(\.$kind == SecurityNotices.Notice.phoneTransferRequested.kind.rawValue).filter(\.$subjectId == subject)
                         .filter(\.$createdAt >= pending.createdAt).all()
-                    if notices.isEmpty {
-                        // The account that was notified is not the holder any more (or the notice is gone): restart with a fresh notice and wait.
+                    let noneSeen = !notices.contains { $0.fetchedAt != nil }
+                    let newest = notices.map(\.createdAt).max()
+                    let outOfWindow = noneSeen && (newest.map { $0 < now.addingTimeInterval(-SecurityNotices.listWindow) } ?? false)
+                    if notices.isEmpty || outOfWindow {
+                        // The account that was notified is not the holder any more, the notice is gone, or it is too old for the app to show:
+                        // restart with a fresh notice and wait.
                         try await SecurityNotices(db: tx, ctx: ctx).store(of: holder.consumerId, except: nil, notice: .phoneTransferRequested, subjectId: subject)
                         pending.usableFrom = max(pending.usableFrom ?? now, now.addingTimeInterval(Self.newLinkCoolDown))
                         try await pending.update(on: tx)
                         _ = try await audits.record("phone_link.transfer_renotified", actor: AuditActor(kind: .system), consumerId: ConsumerID(holder.consumerId),
-                            subjectType: "phone_link", subjectId: pending.id?.uuidString.lowercased(), metadata: ["reason": "holder_changed"])
+                            subjectType: "phone_link", subjectId: pending.id?.uuidString.lowercased(),
+                            metadata: ["reason": notices.isEmpty ? "holder_changed" : "notice_expired"])
                         let (db, ctx, owner) = (self.db, self.ctx, holder.consumerId)
                         afterCommit.add { await SecurityNotices(db: db, ctx: ctx).push(to: owner, except: nil, notice: .phoneTransferRequested) }
                         return false
                     }
-                    guard notices.contains(where: { $0.fetchedAt != nil }) else { return false }
+                    guard !noneSeen else { return false }
                 }
                 for old in holders where old.consumerId != pending.consumerId {
                     old.state = "revoked"
@@ -372,6 +430,19 @@ struct PhoneLinkService {
             if completed { moved += 1 }
         }
         return moved
+    }
+
+    /// R-3: the requester's account is active and the device that proved the link is still a live app device. A row made before the proving
+    /// device was recorded falls back to "any live app device of the account".
+    private func requesterCanReceive(_ pending: PhoneLinkRecord, on tx: any Database) async throws -> Bool {
+        let now = ctx.now
+        guard let account = try await ConsumerRecord.find(pending.consumerId, on: tx), account.status == "active" else { return false }
+        if let proving = pending.provedByDeviceId {
+            guard let device = try await DeviceRecord.find(proving, on: tx) else { return false }
+            return device.consumerId == pending.consumerId && device.kind == .app && device.revokedAt == nil && !device.isExpired(at: now)
+        }
+        let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == pending.consumerId).filter(\.$revokedAt == nil).all()
+        return devices.contains { $0.kind == .app && !$0.isExpired(at: now) }
     }
 
     // MARK: Sweep (class P: the challenge row never outlives expiry + 2 minutes)

@@ -33,6 +33,9 @@ public actor MockViadereAPI: ViadereAPI {
     /// Test hook: when true, dismissing answers `403 device_cool_down` like a device that is not trusted yet.
     public var dismissNeedsTrustedDevice = false
     public private(set) var dismissedNoticeIds: [UUID] = []
+    /// Notices the app reported as shown (`markSecurityNoticeSeen`), in order, and how often the call was made per notice.
+    public private(set) var seenNoticeIds: [UUID] = []
+    private var seenNeedsFail = false
     /// Test hook: refuse an enrollment that carries no App Attest evidence (`403 attestation_required`), like `APP_ATTEST_MODE=require`.
     public var requiresAttestation = false
     /// Every enrollment request the server received.
@@ -524,6 +527,12 @@ public actor MockViadereAPI: ViadereAPI {
     public func revokeSession(_ id: String) async throws { consumerSessions.removeAll { $0.id == id && !$0.isCurrent } }
 
     public func securityNotices() async throws -> [SecurityNotice] { noticeList.sorted { $0.createdAt > $1.createdAt } }
+    public func markSecurityNoticeSeen(_ id: UUID) async throws {
+        if seenNeedsFail { throw APIError.server(status: 503, code: .unavailable, message: "") }
+        seenNoticeIds.append(id)
+    }
+    /// Test hook: the "seen" call fails (offline), so the app must try again later.
+    public func setSeenCallFails(_ value: Bool) { seenNeedsFail = value }
     public func dismissSecurityNotice(_ id: UUID) async throws {
         if dismissNeedsTrustedDevice {
             throw APIError.server(status: 403, code: .deviceCoolDown, message: "")

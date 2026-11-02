@@ -25,6 +25,46 @@ struct SecurityNoticesTests {
         #expect(model.message == nil)
     }
 
+    static func transfer(age: TimeInterval = 7_200) -> SecurityNotice {
+        SecurityNotice(id: UUID(), rawKind: "phoneTransferRequested", message: "m", createdAt: Date().addingTimeInterval(-age),
+                       subjectId: UUID().uuidString, action: .keepPhoneNumber)
+    }
+
+    /// R-1: the app shows one notice; a pending phone transfer always wins that slot, and only a shown notice is reported as seen.
+    @Test func aPendingPhoneTransferIsTheShownNoticeAndIsReportedSeenOnlyWhenRendered() async throws {
+        let api = MockViadereAPI(seed: false)
+        let transfer = Self.transfer(age: 9_000), newer = Self.notice(.newDevice)
+        await api.setSecurityNotices([transfer, newer])
+        let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: api))
+        await model.load()
+        #expect(model.current == transfer, "a newer notice never hides the transfer request")
+        #expect(await api.seenNoticeIds.isEmpty, "loading the list is not seeing it")
+        await model.noteShown(transfer)
+        #expect(await api.seenNoticeIds == [transfer.id])
+        await model.noteShown(transfer)
+        #expect(await api.seenNoticeIds == [transfer.id], "reported once")
+        // An informational notice needs no report.
+        await model.noteShown(newer)
+        #expect(await api.seenNoticeIds == [transfer.id])
+    }
+
+    @Test func aNoticeBehindTheLockScreenIsNotSeenUntilItOpensAndAFailedReportIsRetried() async throws {
+        let api = MockViadereAPI(seed: false)
+        let transfer = Self.transfer()
+        await api.setSecurityNotices([transfer])
+        let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: api))
+        await model.load()
+        await model.setCovered(true)
+        await model.noteShown(transfer)
+        #expect(await api.seenNoticeIds.isEmpty, "the cold-launch load behind the app lock is not a sighting")
+        await api.setSeenCallFails(true)
+        await model.setCovered(false)
+        #expect(await api.seenNoticeIds.isEmpty)
+        await api.setSeenCallFails(false)
+        await model.noteShown(transfer)
+        #expect(await api.seenNoticeIds == [transfer.id])
+    }
+
     @Test func noNoticesMeansNoBanner() async {
         let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: MockViadereAPI(seed: false)))
         await model.load()

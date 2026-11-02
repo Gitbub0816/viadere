@@ -376,8 +376,9 @@ final class PhoneLinkMOTests: XCTestCase {
             // The owner's app fetches the notice before the wait ended: still waiting.
             oldOwner = try await h.login(oldOwner)
             let notices = try await h.signed(oldOwner, .GET, "/v1/security-notices").json([SecurityNotice].self)
-            XCTAssertTrue(notices.contains { $0.topic == .phoneTransferRequested })
-            try await eq(try await service.completeTransfers(), 0, "fetched, but the waiting period has not ended")
+            let shown = try XCTUnwrap(notices.first { $0.topic == .phoneTransferRequested })
+            try await eq(try await h.signedPost(oldOwner, "/v1/security-notices/\(shown.id.uuidString.lowercased())/seen", EmptyBody()).status, .ok)
+            try await eq(try await service.completeTransfers(), 0, "seen, but the waiting period has not ended")
             try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
             h.clock.advance(by: 72 * 3600 + 1)
             try await eq(try await service.completeTransfers(), 1)
@@ -432,6 +433,7 @@ final class PhoneLinkMOTests: XCTestCase {
             let notices = try await h.signed(third, .GET, "/v1/security-notices").json([SecurityNotice].self)
             let fresh = try XCTUnwrap(notices.first { $0.topic == .phoneTransferRequested }, "the new holder is told")
             XCTAssertEqual(fresh.action, .keepPhoneNumber)
+            try await eq(try await h.signedPost(third, "/v1/security-notices/\(fresh.id.uuidString.lowercased())/seen", EmptyBody()).status, .ok)
             try await eq(try await service.completeTransfers(), 0, "restarted wait has not ended")
             h.clock.advance(by: 25 * 3600)
             try await eq(try await service.completeTransfers(), 1, "fetched by the new holder, wait ended, not kept")
@@ -454,25 +456,29 @@ final class PhoneLinkMOTests: XCTestCase {
         }
     }
 
-    func testUnlinkRevokesEveryLinkOfTheNumberNotifiesTheAccountAndChurnIsLimited() async throws {
+    /// F-4 (ADR-0027 section 1.5, rev 4): UNLINK pauses routing and tells the account in the app; it never releases the number. Only the holder's
+    /// in-app removal does. Churn is still limited, so a released number cannot be re-linked over and over.
+    func testUnlinkSuspendsEveryLinkOfTheNumberNotifiesTheAccountAndChurnIsLimited() async throws {
         try await withHarness { h in
             var consumer = try await h.readyConsumer()
-            try await h.linkPhoneByText(consumer, phone: phone)
+            let first = try await h.linkPhoneByText(consumer, phone: phone)
+            let firstLink = try XCTUnwrap(first.status.link)
             h.clock.advance(by: 3600)
             consumer = try await h.login(consumer)
-            // The number's real owner texts UNLINK: SMS-03, link gone, the account told in the app.
+            // The number's real owner texts UNLINK: SMS-03, routing paused, the account told in the app.
             let replies = try await h.textViadere(from: phone, " unlink. ")
-            XCTAssertEqual(replies, ["Viadere: Done. This number is no longer linked to a Viadere app."])
+            XCTAssertEqual(replies, [GatewayCopy.unlinkDone])
             try await eq(try await h.gatewayConsumer(phone), nil)
             let link = try await XCTUnwrapAsync(await PhoneLinkRecord.query(on: h.db).first())
-            XCTAssertEqual(link.state, "revoked")
-            XCTAssertNil(link.verifiedPhoneHash)
+            XCTAssertEqual(link.state, "verified", "an UNLINK text never releases the number")
+            XCTAssertNotNil(link.suspendedAt)
             let second = try await h.enrollDevice(consumer)
             let notices = try await h.signed(second, .GET, "/v1/security-notices").json([SecurityNotice].self)
-            XCTAssertTrue(notices.contains { $0.topic == .phoneUnlinked && $0.message == "Your phone number was unlinked by a text from that number." })
-            let unlinkAudit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.unlinked_by_text").all()
+            XCTAssertTrue(notices.contains { $0.topic == .phoneUnlinked && $0.message.contains("remove it in Viadere") })
+            let unlinkAudit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.suspended_by_text").all()
             XCTAssertFalse(unlinkAudit.isEmpty)
-            // Churn: a second verified link the same day is refused (1 a day, 2 a week), without a reply.
+            // The holder releases it in the app. A second verified link the same day is refused (1 a day, 2 a week), without a reply.
+            try await eq(try await h.signed(consumer, .DELETE, "/v1/phone-links/\(firstLink.id)").status, .ok)
             let again = try await h.beginPhoneLink(consumer, phone: phone).json(PhoneLinkMOBeginResponse.self)
             let refused = try await h.textViadere(from: phone, again.prefill)
             XCTAssertTrue(refused.isEmpty)
@@ -482,8 +488,10 @@ final class PhoneLinkMOTests: XCTestCase {
             consumer = try await h.login(consumer)
             let next = try await h.beginPhoneLink(consumer, phone: phone).json(PhoneLinkMOBeginResponse.self)
             try await h.textViadere(from: phone, next.prefill)
-            try await eq(try await h.phoneLinkStatus(consumer, id: next.phoneLinkId).state, .verified)
+            let nextStatus = try await h.phoneLinkStatus(consumer, id: next.phoneLinkId)
+            let nextLink = try XCTUnwrap(nextStatus.link)
             try await h.textViadere(from: phone, "UNLINK")
+            try await eq(try await h.signed(consumer, .DELETE, "/v1/phone-links/\(nextLink.id)").status, .ok)
             h.clock.advance(by: 25 * 3600)
             consumer = try await h.login(consumer)
             let third = try await h.beginPhoneLink(consumer, phone: phone).json(PhoneLinkMOBeginResponse.self)

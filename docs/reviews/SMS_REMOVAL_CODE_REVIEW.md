@@ -150,6 +150,8 @@ The finding is fixed. A dormant owner whose app never fetches the notice keeps t
 
 ### F-4: rate-limit half closed; forged UNLINK ruled not acceptable as it stands
 
+- **Status (forged-UNLINK half): fixed in ab80044, awaiting reviewer re-check.** UNLINK now only pauses a link (`suspended_at`); the number stays bound to its holder until the holder removes it in the app or a section 1.3 transfer completes, so a victim-induced text after a forged UNLINK becomes a `pending_transfer` against the holder. A positive `suspectedSpoof` indicator makes UNLINK a no-op. Test `testAForgedUnlinkThenAVictimInducedTextCannotTakeADormantOwnersNumber`; ADR-0027 section 1.5 rev 4 explains the design and its residual.
+
 UNLINK now has its own bucket, and the test proves that a flood of link texts cannot block it. The forged-UNLINK half is **not** only a fail-safe denial of service:
 
 1. A forged UNLINK, which is never indicator-checked, revokes the dormant owner's link.
@@ -166,6 +168,7 @@ Add a test for that composition.
 ### New findings
 
 **R-1 (Medium): "fetched" is not "seen", and a device in cool-down can fetch but cannot keep.**
+- **Status: fixed in ab80044, awaiting reviewer re-check.** Listing no longer records anything; `POST /v1/security-notices/{id}/seen` is sent by the banner once rendered with Keep and not covered by the app lock; a pending transfer always ranks as the shown notice; Keep and seen work from any live app device. Tests `testListingNoticesDoesNotCountAsSeenOnlyTheShownCallDoes`, `testADeviceStillInCoolDownCanSeeAndKeepTheNumber`, Kit `aPendingPhoneTransferIsTheShownNotice...`.
 - **Where:** `Services/SecurityNotices.swift` `pending()`; Kit `SecurityNoticesViewModel.current`; App `AlertsView.swift:63`, `SettingsView.swift:172`; `AppModel.bootstrap`; `PhoneLinkService.keep` (`DeviceTrust.require`).
 - **Issue, part 1:** `pending()` marks every one of up to 50 returned notices as fetched. The app shows only the newest (`current`, with a "+N" count). It also loads notices on cold launch even when the app-lock screen is up. So an owner who opens the app while a newer notice exists records `fetched_at` on a transfer notice that was never on screen. This meets the ADR's word ("fetched") but not its intent ("notified in app").
 - **Issue, part 2:** any active device of the holder can record the fetch, but Keep requires a trusted device. An owner on a new phone that is still in cool-down sees the notice and is refused "Keep". The number then moves when the wait ends. UNLINK from the phone remains their only remedy.
@@ -176,6 +179,7 @@ Add a test for that composition.
   - Allow "Keep my number" from any active app device of the holder. It only preserves the status quo. Alternatively, count only fetches made by a trusted device.
 
 **R-2 (Medium): lost-update races between complete and Keep/UNLINK; overlapping job runs.**
+- **Status: fixed in ab80044, awaiting reviewer re-check.** Number-level `FOR UPDATE` locks with re-read in complete, Keep, removal, bind and UNLINK; `job_leases` lease on the minute task; `maintenance` no longer runs it. PostgreSQL test `testOnPostgresAKeepThatCommitsWhileTheJobRunsIsNeverUndone` (skipped on SQLite; **not run on PostgreSQL in this session: the server was down**).
 - **Where:** `PhoneLinkService.completeTransfers` re-reads the pending row with `find` but takes no lock. `keep` and `unlink` likewise update rows by id with no state predicate.
 - **Issue:** On PostgreSQL (READ COMMITTED), a Keep or UNLINK that commits between the job's read and its write is overwritten. The number moves despite Keep, or an UNLINKed pending row is set back to `verified`, which fails unsafe. On Azure, `maintenance` (every 5 min, ungated) also calls `minute()`, so two `completeTransfers` runs overlap every 5 minutes. The `job-viadere-minute` `replica_timeout_in_seconds = 1800` also lets a stuck run overlap the next ones. The window is milliseconds, but the job runs every minute.
 - **Required change:**
@@ -183,13 +187,15 @@ Add a test for that composition.
   - Drop `minute()` from the ungated `maintenance` task.
   - Add a PostgreSQL test.
 
-**R-3 (Low): requester condition weaker than required.** `completeTransfers` counts any non-revoked device of the requester. F-1 item 5 asked for the requester's **account** (status `active`) and the **proving device** (not revoked, not expired). Check both.
+**R-3 (Low): requester condition weaker than required.** *Status: fixed in ab80044, awaiting reviewer re-check (account active and proving device live; `provedByDeviceId`; test `testTheTransferDropsWhenTheRequestersAccountIsNotActiveOrTheProvingDeviceIsGone`).* `completeTransfers` counts any non-revoked device of the requester. F-1 item 5 asked for the requester's **account** (status `active`) and the **proving device** (not revoked, not expired). Check both.
 
 **R-4 (Low, fail-safe): a notice older than 30 days is never fetched, and nothing re-notifies.**
+- **Status: fixed in ab80044, awaiting reviewer re-check** (re-notify when the only notice is unseen and out of the list window; comment corrected; test `testAnOldUnseenNoticeIsReplacedSoAnActiveOwnerCanStillKeepTheNumber`).
 - **Issue:** `pending()` returns only notices from the last 30 days. If the owner opens the app after day 30, the old notice is never returned, so it is never fetched. Because it still exists, `notices.isEmpty` is false and no new notice is written. The transfer then stays pending for good while the owner is active again. The migration comment says pre-migration notices are "re-notified by the job", but that happens only when no notice row exists.
 - **Required change:** re-notify when the newest matching notice is unfetched and older than the list window, and correct the comment. Track this with F-6.
 
 **R-5 (Low, ops): minute job settings.**
+- **Status: fixed in ab80044, awaiting reviewer re-check** (`minute` job timeout 55 s, no retry; budget note and standard-profile identity follow-up in `Infra/azure/containerapps.tf`).
 - Set `replica_timeout_in_seconds` for `minute` below 60 s.
 - Confirm the ~1,440 executions a day fit the lean budget (Container Apps consumption seconds).
 - Track a narrower identity or secret set for the job in the `standard` profile.
