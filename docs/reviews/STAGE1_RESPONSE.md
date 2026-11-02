@@ -123,3 +123,78 @@ None. Three inter-review conflicts were resolved toward the stricter option and 
 ## Re-review scope
 
 A2 asked to re-review only the deltas: ADR-0020 §2, §8; ADR-0021 §3.4, §5; ADR-0023 §3, §4; ADR-0024 §2, §4, §6, §7; ADR-0031-0033; THREAT_MODEL §3-§8; TRUST_BOUNDARIES §4.3/§4.3a. A3: ADR-0023, 0024 §6-§7, 0025, 0028 §2, §5, §6, 0031-0033. A6/A7: ADR-0021 §4, ADR-0022 §5, §8, §9, ADR-0027 §1, FLOW_MATRIX. A9/A10: UX_COPY, ADR-0026, ADR-0027, DATA-INVENTORY.
+
+---
+
+# Revision 3 (2026-11-02): response to the A2 and A3 re-reviews
+
+| | |
+|---|---|
+| Reviews answered | `STAGE1_A2_SECURITY_REREVIEW.md` (BLOCK, narrow), `STAGE1_A3_CRYPTO_REREVIEW.md` (APPROVE WITH CONDITIONS), both at `bfa9ff6` |
+| Base | `claude/inspiring-cannon-t5hxfw` at `4a84bde` |
+| New ADR | **ADR-0034** sealed recovery envelopes (`recovery-seal`, HPKE RFC 9180, suite `DHKEM(P-256, HKDF-SHA256)` 0x0010 / `HKDF-SHA256` 0x0001 / `AES-256-GCM` 0x0002, mode_base) |
+| ADRs changed | 0023, 0024, 0028, 0031, 0032, 0033 (main deltas); 0019, 0021, 0022 (small); **0020 and 0027 additive only**; 0025 and 0026 unchanged |
+| Owner decisions | None changed. New owner questions OQ-8 to OQ-10, OQ-2 restated (`IMPLEMENTATION_LEDGER.md`) |
+
+No severity was changed by the author. Dispositions as in revision 2.
+
+## A2 re-review
+
+| Finding | Sev. | Disposition | Where |
+|---|---|---|---|
+| **S2-A2-1** recovery codes and recovery key through the api in clear | Critical | **Fixed** as required, items 1-5. (1) `recovery-seal` HPKE key pair, active + standby, both pinned in the app next to the statement keys; the authority holds only the active private key. Key Vault has no ECDH operation, so the private key is stored wrapped under a non-exportable RSA KEK with an unwrap-only role, reconciled per unwrap (residual R-23 stated). (2) Registration: device-generated codes sealed with `info = "VIADERE-RECOVERY-SET-V1\n{env}"`, `aad = ach‖nonce`; the factor JWS commits to `envelope_digest`; **`approvalBiometric` D1-equivalent key required**; a new set invalidates the previous authority set and the app retires the api's legacy set. (3) Start: `{recovery_id, nonce, code, new_kids}` sealed; every new key's PoP commits to the envelope digest; activation adds exactly `new_kids`; the head's `pending_recoveries[]` carries `kids` and the recovering device checks them. (4) AT-1 1.3.3 stays [R] and the refresh prompt is off until ST-REC-14..16, -21 pass (C-4). (5) ST-REC-14, -15, -16 (plus A3's ST-REC-21). Additionally, a legacy start is refused for accounts that have an authority set | ADR-0034; ADR-0032 §3; ADR-0023 §4; ADR-0028 §1, §2, §5; TRUST_BOUNDARIES §4.1, §4.2, §4.3a, DF-6; THREAT_MODEL T-REC-8, T-GW-14, AT-1 1.3.3, R-23; UX_COPY S-REC-05, -06 |
+| **S2-A2-2** passkey assertions accepted for key additions | High | **Fixed** as required, items 1-5: assertions only for `oidc_login` and reduce-only `recovery_cancel`; per-purpose `clientDataJSON.origin` allow-list; `passkey_added` only from the app on the device that created the passkey, by factor JWS; R-17 restated as single-session only; FLOW_MATRIX F10 says how a passkey-only person adds a device; ST-REC-17 | ADR-0023 §3a, §4; ADR-0024 §4; THREAT_MODEL T-REC-9, T-OIDC-11, AT-1 1.3.4, R-17; TRUST_BOUNDARIES §4.3a, DF-4, DF-5; FLOW_MATRIX F10 |
+| **S2-A2-3** device add not bound to the device held | High | **Fixed**, items 1-4: B refuses a challenge whose `kids` are not exactly its own and shows a 6-digit code over `env`, nonce and sorted `kids` (derivation and vectors specified); A asks for B's code (typed, into `match`); the authority recomputes it from the stored entry; reported name labelled "Name chosen on the new device"; ST-REC-18. **Clarification for A2:** the required text says A's display "shows the same code"; A **never shows** it (showing it would let the person copy A's own screen); the authority computes the expected value. We read that as A2's intent; please confirm | ADR-0033 §1, §4.1; ADR-0023 §4; TRUST_BOUNDARIES DF-5; THREAT_MODEL T-REC-10, AT-1 1.3.5; UX_COPY S-DEV-03..05 |
+| S2-A2-4 enrollment confirmation does not commit to the head | Medium | **Fixed**: factor JWS carries `head_hash` and `seq`; every key of the entry confirms the same head before any becomes grant-capable; imported accounts confirm per device and list other devices (S-SEC-05); "exactly" (enrollment) versus "contains" (steady state) made explicit; ST-AUTH-23 | ADR-0032 §1.4; ADR-0023 §3, §4; ADR-0033 §2; THREAT_MODEL T-REC-12 |
+| S2-A2-5 revocation list usable against the standby | Medium | **Fixed**: only the standby signs statement-family revocations and only of the active key; a list naming the standby or signed by the active key is ignored; sticky; routine rotation by app release + `AUTHORITY_MIN_APP_VERSION`; same rules for `recovery-seal` (seal-family lists may name only the active seal key); KEY-ROTATION.md before Stage 4 (C-6); ST-REC-19 | ADR-0033 §3; ADR-0034 §5; ADR-0028 §2; ledger L-2; THREAT_MODEL T-AUTH-17, R-22 |
+| S2-A2-6 unauthenticated authorize drives challenges and signing | Medium | **Fixed**: no challenge on page load (a neutral, sign-free client check instead); challenge only after a method is chosen, behind `oidc-authorize-ip`/`-client` edge limits; per-tenant challenge-signing bulkhead separate from heads, tenant records, revocation lists and grants; OIDC-11 page; ST-OIDC-17, ST-AUTH-24 | ADR-0024 §4; ADR-0033 §2; TRUST_BOUNDARIES §4.3, §4.3a, DF-4; THREAT_MODEL T-AUTH-16 |
+| S2-A2-7 S-REC-04 promises a forbidden self-service path | Medium | **Fixed**: S-REC-04 rewritten (no "make new codes" path; recover with an earlier authority set or support); ADR-0032 §3.3 states the two paths; ST-REC-20 | UX_COPY S-REC-04; ADR-0032 §3.3; THREAT_MODEL T-REC-11 |
+| S2-A2-8 permanently limited accounts | Medium | **Fixed with option (a)** (A2's recommendation): no consumer is created when genesis fails; the app retries (S-SEC-04); L-1 closed; decision 16 wording raised as owner question OQ-8 | ADR-0032 §1.5; ADR-0019 Consequences; UX_COPY S-SEC-03 (retired), S-SEC-04; ledger OQ-8 |
+| S2-A2-9 collapse supersedes the victim's prompt | Medium | **Fixed with both of A2's options combined**: supersession only with a matching business `session_handle`; otherwise requests stay open as a group, the typed number selects the request, the rest are cancelled only after an approval; collisions sign nothing (S-MFA-15); Deny/Report answer the group as one count; no lockout lever is created (nothing is refused or cancelled by count). R-20 narrowed to "retry on collision"; ST-MFA-10 extended | ADR-0022 §5.1-§5.2; **ADR-0020 §2, §8 (additive)**; THREAT_MODEL T-DO-8, T-MFA-6, AT-6, R-20; UX_COPY S-MFA-14, -15; FLOW_MATRIX F7 |
+| S2-A2-10 verification failures reported as denials | Medium | **Fixed**: integrity class (`destination_mismatch`, sent on the wire as the existing `destination_unverified`, high-priority alert) versus availability class (`destination_unverifiable`: no server call, item stays open, retry; clock-skew copy); neither counts toward the pause; T-AUTH-8 and F1/F2 state the tenant-record dependency; tenant-key hardening (13-month `not_after`, admin-job revocation without the api, automatic host removal on a failed weekly re-check); ST-ML-15. The wire value was kept so that Stage 2-3 code is unaffected | ADR-0031 §1, §4; **ADR-0020 §1, §5 (additive)**; ADR-0022 §5.4; ADR-0021 §2; THREAT_MODEL T-ML-10, T-AUTH-8; FLOW_MATRIX F1/F2; UX_COPY S-LINK-11, -12 |
+| S2-A2-11.1 "two reviewers" leftovers | Low | **Fixed** | THREAT_MODEL T-GW-5, T-AUTH-7 |
+| S2-A2-11.2 "at most" vs "at least" refresh | Low | **Fixed**: a cached statement is re-signed when older than 5 min at serving time | ADR-0033 §2; ADR-0031 §2 |
+| S2-A2-11.3 `amr` for unattested keys | Low | **Fixed**: `swk` replaces `hwk` (`["swk","mfa"]` / `["swk","user","mfa"]`) | ADR-0023 §5; ADR-0024 §5 |
+| S2-A2-11.4 `account_ref` checks on device add | Low | **Fixed**: approving device checks the challenge's `account_ref`; authority checks the approving key's account; in ST-REC-10 | ADR-0033 §2, §4.1; ADR-0023 §4 |
+| S2-A2-11.5 remove R-07' with a subject statement | Low (optional) | **Deferred** (optional by A2): ledger L-10, owner A2, Stage 5; `sub` kept in the destination statement for it | ADR-0031 §3, §7; ledger L-10 |
+| S1-A2-2 remainder | Critical | Closed by S2-A2-1 and S2-A2-7 above | as above |
+| S1-A2-6 remainder | High | Closed by S2-A2-9 above | as above |
+| S1-A2-7 note (dormant owner) | — | **Written down**: the transfer waits indefinitely while the existing account never fetches the notice (no behavior change) | **ADR-0027 §1.3 (one sentence)** |
+| S1-A2-8 remainder (missing §4.3a rows) | — | **Fixed**: rows for new-device name, recovery codes, recovery start keys, recovery id, enrollment `head_hash`, comparison code, WebAuthn purposes, OIDC challenge creation, `tenant-keys` path parameter, delivery id | TRUST_BOUNDARIES §4.3a |
+| S1-A2-12 remainder | — | R-17 narrowed; AT-1 1.3.3 stays [R] until ADR-0034 ships | THREAT_MODEL AT-1, R-17 |
+| §5 ruling 1 option (`timeSensitive` for security-change notices) | — | **Not adopted** (optional): `active` stays the only level; revisit with A6/A9 in Stage 4 together with ST-PRIV-05 | — |
+| Conditions C-1 … C-12 | — | **Accepted** and reflected: C-1 test list now includes ST-AUTH-23, ST-REC-14..21 (THREAT_MODEL §6); C-3 in ADR-0032 §1.5; C-4 in ADR-0032 §3.5 and UX_COPY S-REC-05; C-6 in ADR-0033 §3.8 and ledger L-2; C-9 (no plaintext recovery code member) is satisfied by design (ADR-0034); C-10 in ADR-0024 §4; C-12 in UX_COPY status. C-2, C-5, C-7, C-8, C-11 unchanged and still binding | as listed |
+
+## A3 re-review
+
+| Finding | Sev. | Disposition | Where |
+|---|---|---|---|
+| **S1-A3-R01** codes visible to the api, same set the api hashes, start not bound | High | **Fixed** (same design as S2-A2-1): item 1 separate set generated on the device, api holds no hash, legacy set retired; item 2 HPKE (the option A3 named first, ADR-0007 construction) with purpose `info`, challenge `aad`, `account_ref`, set id and nonce inside, digest committed by the factor JWS; item 3 code sealed with every new key's `kid`, PoP over `VIADERE-KEYLOG-V1\n{env}\nrecovery_started\n{kid}\n{nonce}\n{envelope_digest}`; item 4 CSPRNG, 50 bits, Crockford normalization stated, keyed HMAC verifier with lookup by value and CAS in the attempt transaction; item 5 ST-REC-14, ST-REC-21 (A3's ST-REC-15 is numbered ST-REC-21 because A2 used ST-REC-15); item 6 not needed (no owner exception requested). RSA-OAEP-256 alternative not taken: HPKE reuses one Core implementation on both sides; the custody gap it would close is stated as R-23 and tracked (L-12) | ADR-0034; ADR-0032 §3; TRUST_BOUNDARIES §4.3a; THREAT_MODEL T-REC-2, T-REC-8, T-GW-14, T-AUTH-15, R-23 |
+| **S1-A3-R02** revocation statement and authority undefined | Medium | **Fixed** with every listed item: payload defined (with `key_family`); index roles; only the standby revokes, only the active key; sticky, no expiry; standby-only after revocation; standby as a separate key object without a role until a reviewer-gated grant; loss-of-both and routine rotation stated; app-pinned reference set for the startup check; ST-REC-13 extended, ST-REC-19, vectors | ADR-0033 §2, §3; ADR-0023 §1; ADR-0028 §1, §2, §5; THREAT_MODEL T-AUTH-17, R-22 |
+| **S1-A3-R03** tenant keys without PoP or domain binding | Medium | **Fixed**: `viadere-destination-key-registration+jws` PoP with admin-job nonce; thumbprint in DNS TXT `_viadere-destkey.<host>` or the well-known file, fetched by the reviewer-gated workflow (the authority job keeps its egress deny) and re-checked by the job; `not_after` ≤ 13 months; P-256 only, both S forms accepted; ST-AUTH-16 extended | ADR-0031 §1, §6; ADR-0023 §1; THREAT_MODEL T-ML-9, AT-1 1.8 |
+| S1-A3-R04 destination statement details | Low | **Fixed**: items 1 (`url_sha256` encoding), 2 (check 4 is against api data; in R-07'), 4 (third `kid` definition), 5 (tenant record `seq`, replay window stated), 6 (exact members, ≤ 4096 bytes). Item 3 (`sub`): kept and marked unchecked; subject statement **deferred** (L-10) | ADR-0031 §2-§4, §7; ADR-0023 §2; THREAT_MODEL R-07' |
+| S1-A3-R05 device statement checks and cadence | Low | **Fixed**: `iss` and `env` in every check; `kid_header` removed; re-sign rule at serving time; `reported_name`; `enrollment_confirmed` (and `recovery_started`) display rows | ADR-0033 §1, §2 |
+| S1-A3-R06 encodings and loose ends | Low | **Fixed**: `account_ref` truncation stated; normalization (ADR-0034 §2); `swk` for unattested keys; builders emit RFC 7638 `kid`s, agreement vector; key-inventory channel named (job log → read-only Log Analytics → attested inventory, bound to `name/version`) | ADR-0032 §1.1; ADR-0034 §2; ADR-0023 §2, §5; ADR-0024 §7.3; TRUST_BOUNDARIES §4.2 |
+| S1-A3-R07 one key, several `typ`s | Info | **Adopted**: one Core verifier with non-optional expected `typ`, exact member set, cross-`typ` vector over all four statement types (challenge, head, tenant record, revocation list) | ADR-0033 §2 |
+| S1-A3-R08 monitor scope | Info | **Adopted**: discovery fields compared, unreachable documents alert, dead-man check | ADR-0024 §7.4 |
+| S1-A3-02 remainder | High | Closed by S1-A3-R01 | as above |
+| S1-A3-17 remainder | Low | Closed by S1-A3-R02 | as above |
+| S1-A3-10 note (app-pinned set) | — | **Fixed** | ADR-0028 §2 |
+| S1-A3-12 note (third `kid`, SPKI vs RFC 7638 in builders) | — | **Fixed** | ADR-0023 §2 |
+| S1-A3-06 note (device name) | — | **Fixed** (`reported_name`) | ADR-0033 §1 |
+| Ruling on `amr` (`user` optional on the `user_presence` row) | — | Left to A1 in Stage 5 as A3 allows; `face`/`fpt` never emitted (stated) | ADR-0023 §5 |
+| A3 conditions (Stages 2-6) | — | **Accepted**. Low/Info vectors tracked as ledger L-11; Key Vault key-agreement re-check as L-12 | ledger |
+
+## Disputes and clarifications
+
+No finding is disputed. One clarification is flagged for A2 (S2-A2-3: the existing device never displays the comparison code). One reviewer option was not taken, with reasons (S1-A3-R01: HPKE rather than RSA-OAEP-256; the gap is R-23).
+
+## Changes to ADRs that Stages 2-3 code against
+
+- **ADR-0020 (additive):** §2 new optional create member `session_handle` (also on `auth-approvals`); §8 supersession only when both requests carry the same `session_handle`; §1/§5 a `deny` with `reason: destination_unverified` is sent only for integrity failures and is not counted toward fatigue. No member, state or route removed.
+- **ADR-0027:** one clarifying sentence in §1.3 (dormant owner), no behavior change.
+- **ADR-0025, ADR-0026:** unchanged.
+
+## Revision 3 re-review scope
+
+A2: ADR-0032 §1.4, §1.5, §3; ADR-0034; ADR-0023 §3a, §4; ADR-0033 §1, §2, §3, §4.1; ADR-0022 §5.1-§5.2, §5.4; ADR-0024 §4; ADR-0031 §1, §4; ADR-0020 §2, §5, §8 deltas; TRUST_BOUNDARIES §4.3a, DF-5, DF-6; THREAT_MODEL T-REC-8..12, T-AUTH-15..17, T-ML-9/-10, AT-1, AT-6, §6 new tests, R-17, R-20, R-22, R-23. A3: ADR-0034; ADR-0032 §1.1, §3; ADR-0033 §2, §3, §4.1 (code derivation); ADR-0031 §1-§3; ADR-0023 §1, §2, §5; ADR-0028 §1, §2, §5; ADR-0024 §7.3. A9: UX_COPY revision 3 strings (C-12).
