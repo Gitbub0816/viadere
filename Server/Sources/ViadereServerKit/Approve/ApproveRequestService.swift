@@ -292,11 +292,8 @@ struct ApproveRequestService {
         let overdue = try await ApproveRequestRecord.query(on: db).filter(\.$status == ApprovalRequestStatus.pending.rawValue).filter(\.$expiresAt <= now).limit(limit).all()
         var count = 0
         for record in overdue where try await finish(record, status: .expired, reason: nil, notify: true) { count += 1 }
-        // Requests are kept for the capability's maximum result retention (400 days), then purged with their deliveries.
-        let cutoff = now.addingTimeInterval(-400 * 86_400)
-        if try await ApproveRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status != ApprovalRequestStatus.pending.rawValue).count() > 0 {
-            try await ApproveRequestRecord.query(on: db).filter(\.$createdAt < cutoff).filter(\.$status != ApprovalRequestStatus.pending.rawValue).delete()
-        }
+        // Request metadata is purged 30 days after its terminal state by the retention sweep (`RetentionClass.authDeliveryMetadata`, ADR-0026); a signed
+        // result stays as high-value evidence on the `signed_decisions` schedule.
         // Enrollments the customer never completed.
         // Read first so an idle tick takes no write lock.
         if try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now).count() > 0 {
@@ -306,9 +303,6 @@ struct ApproveRequestService {
         try await ApproveEnrollmentService(db: db, ctx: ctx).expireUnconfirmed()
         // Link sessions nobody completed, and completed ones the business never confirmed (WP-C1; the same job tick, no new job).
         try await LinkSessionService(db: db, ctx: ctx).expireDue()
-        if try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).count() > 0 {
-            try await ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < cutoff).delete()
-        }
         return count
     }
 

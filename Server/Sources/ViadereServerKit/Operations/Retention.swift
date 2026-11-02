@@ -20,6 +20,14 @@ enum RetentionClass: String, CaseIterable, Sendable {
     case channelCapability = "channel_capability"
     case securityNotices = "security_notices"
     case supportRecords = "support_records"
+    /// ADR-0026 class P: pending secrets (a begun phone link, later every bearer URL and code). They die at expiry plus two minutes in the minute
+    /// sweep; this class is the daily backstop.
+    case authSecrets = "auth_secrets"
+    /// ADR-0026 class T: security transaction metadata of authentication requests, 30 days after the terminal state (owner decisions 7 and 10).
+    case authDeliveryMetadata = "auth_delivery_metadata"
+    /// ADR-0026 class E-routine: routine security evidence (low-risk issuance records, fatigue, pause and report bookkeeping), 30 days. Routine
+    /// sign-in *results* stay high-value evidence for now (decision 16, OQ-1) and live in `signed_decisions`.
+    case authEvidenceRoutine = "auth_evidence_routine"
 
     struct Definition: Sendable {
         var defaultDays: Int
@@ -74,6 +82,18 @@ enum RetentionClass: String, CaseIterable, Sendable {
         case .securityNotices:
             Definition(defaultDays: 365, minDays: 30, maxDays: 1095, tenantAdjustable: false, holdable: false,
                        summary: "In-app security notices of consumers.", tables: "security_notices")
+        case .authSecrets:
+            Definition(defaultDays: 1, minDays: 1, maxDays: 1, tenantAdjustable: false, holdable: false,
+                       summary: "Pending secrets are deleted at expiry plus two minutes (the minute sweep); a legal hold never preserves a bearer secret.",
+                       tables: "phone_link_mo_challenges")
+        case .authDeliveryMetadata:
+            Definition(defaultDays: 30, minDays: 7, maxDays: 90, tenantAdjustable: true, holdable: true,
+                       summary: "Approval requests and their deliveries are deleted 30 days after their terminal state. A request with a signed result keeps its id, decision, key and signature as high-value evidence (see signed_decisions); everything else on the row is erased.",
+                       tables: "approve_requests, approve_deliveries, approve_freeze_events")
+        case .authEvidenceRoutine:
+            Definition(defaultDays: 30, minDays: 7, maxDays: 90, tenantAdjustable: false, holdable: true,
+                       summary: "Routine security evidence: low-risk issuance records and fatigue, pause and report bookkeeping. Stores attach to this class as they are built; the period is fixed at 30 days.",
+                       tables: "(reserved: authority grants for sign-in, fatigue, pause and report bookkeeping)")
         case .supportRecords:
             Definition(defaultDays: 730, minDays: 90, maxDays: 3650, tenantAdjustable: false, holdable: true,
                        summary: "Closed tickets and appeals, operator notices, decided approvals and data requests, released freezes.",
@@ -261,6 +281,46 @@ struct RetentionPurger {
         }
     }
 
+    /// Approve v2 requests 30 days after their terminal state (decided, or expired unanswered). A request that carries a signed result is high-value
+    /// evidence (O-3): its row stays for the `signed_decisions` period with only ids, decision, key and signature, and the displayed details, the
+    /// challenge and the device policy are erased. Everything else is deleted with its deliveries.
+    private func purgeApproveMetadata(before cutoff: Date, businessId: UUID?, heldBusinesses: [UUID], heldConsumers: [UUID]) async throws -> Int {
+        let pending = ApprovalRequestStatus.pending.rawValue
+        func base() -> QueryBuilder<ApproveRequestRecord> {
+            var q = ApproveRequestRecord.query(on: db).filter(\.$status != pending).group(.or) { either in
+                either.filter(\.$decidedAt < cutoff)
+                either.group(.and) { open in
+                    open.filter(\.$decidedAt == nil)
+                    open.filter(\.$expiresAt < cutoff)
+                }
+            }
+            if let businessId { q = q.filter(\.$businessId == businessId) }
+            if !heldBusinesses.isEmpty { q = q.filter(\.$businessId !~ heldBusinesses) }
+            if !heldConsumers.isEmpty { q = q.filter(\.$consumerId !~ heldConsumers) }
+            return q
+        }
+        var removed = 0
+        let gone = try await base().filter(\.$resultJWS == nil).limit(Self.batch).all().compactMap(\.id)
+        if !gone.isEmpty {
+            try await ApproveDeliveryRecord.query(on: db).filter(\.$requestId ~~ gone).delete()
+            try await ApproveRequestRecord.query(on: db).filter(\.$id ~~ gone).delete()
+            removed += gone.count
+        }
+        let evidence = try await base().filter(\.$resultJWS != nil).group(.or) { dirty in
+            dirty.filter(\.$detailsSealed != nil)
+            dirty.filter(\.$challenge != nil)
+            dirty.filter(\.$devicePolicy != nil)
+        }.limit(Self.batch).all()
+        for row in evidence {
+            row.detailsSealed = nil
+            row.challenge = nil
+            row.devicePolicy = nil
+            try await row.update(on: db)
+        }
+        removed += evidence.count
+        return removed
+    }
+
     private func purge(_ cls: RetentionClass, policy: RetentionPolicy, holds: RetentionPolicy.Holds, report: inout Report) async throws -> Int {
         let now = ctx.now
         let day: TimeInterval = 86_400
@@ -317,6 +377,17 @@ struct RetentionPurger {
             let ids = try await q.limit(Self.batch).all().compactMap(\.id)
             if !ids.isEmpty { try await RetentionDeleteGate.perform(on: db) { tx in try await DecisionRecord.query(on: tx).filter(\.$id ~~ ids).delete() } }
             removed += ids.count
+            // Approve v2 results (owner ruling O-3): the signed result stays on its request row after the 30-day metadata period, with only ids, the
+            // decision, the key and the signature, and leaves on the same schedule as device-signed decisions.
+            var results = ApproveRequestRecord.query(on: db).filter(\.$resultJWS != nil).filter(\.$decidedAt < platformCutoff)
+            if !heldBusinesses.isEmpty { results = results.filter(\.$businessId !~ heldBusinesses) }
+            if !heldConsumers.isEmpty { results = results.filter(\.$consumerId !~ heldConsumers) }
+            let resultIds = try await results.limit(Self.batch).all().compactMap(\.id)
+            if !resultIds.isEmpty {
+                try await ApproveDeliveryRecord.query(on: db).filter(\.$requestId ~~ resultIds).delete()
+                try await ApproveRequestRecord.query(on: db).filter(\.$id ~~ resultIds).delete()
+            }
+            removed += resultIds.count
         case .consentHistory:
             var q = ConsentGrantRecord.query(on: db).filter(\.$createdAt < platformCutoff)
             if !heldBusinesses.isEmpty { q = q.filter(\.$businessId !~ heldBusinesses) }
@@ -380,6 +451,19 @@ struct RetentionPurger {
             let oneDayAgo = now.addingTimeInterval(-day)
             removed += try await deleteMatching(DeviceEnrollChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo))
             removed += try await deleteMatching(InteractionChallengeRecord.query(on: db).filter(\.$expiresAt < oneDayAgo))
+        case .authSecrets:
+            removed += try await deleteMatching(PhoneLinkMOChallengeRecord.query(on: db)
+                .filter(\.$expiresAt < now.addingTimeInterval(-PhoneLinkService.challengeGrace)))
+        case .authEvidenceRoutine:
+            break // no store yet
+        case .authDeliveryMetadata:
+            removed += try await purgeApproveMetadata(before: platformCutoff, businessId: nil, heldBusinesses: heldBusinesses, heldConsumers: heldConsumers)
+            for (businessId, date) in try await tenantCutoffs(cls, policy: policy) where !heldBusinesses.contains(businessId) {
+                removed += try await purgeApproveMetadata(before: date, businessId: businessId, heldBusinesses: heldBusinesses, heldConsumers: heldConsumers)
+            }
+            var freezeEvents = ApproveFreezeEventRecord.query(on: db).filter(\.$createdAt < platformCutoff)
+            if !heldBusinesses.isEmpty { freezeEvents = freezeEvents.filter(\.$businessId !~ heldBusinesses) }
+            removed += try await deleteMatching(freezeEvents)
         case .channelCapability:
             removed += try await deleteMatching(ChannelEndpointRecord.query(on: db).filter(\.$updatedAt < platformCutoff))
             let weekAgo = now.addingTimeInterval(-7 * day)
