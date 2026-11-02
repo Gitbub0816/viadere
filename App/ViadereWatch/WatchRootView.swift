@@ -68,7 +68,11 @@ private struct WatchDetail: View {
             VStack(alignment: .leading, spacing: ViadereSpace.s) {
                 Text(item.business).font(ViadereType.caption).foregroundStyle(ViadereColor.textSecondary)
                 Text(item.headline).font(ViadereType.headline).foregroundStyle(ViadereColor.textPrimary)
-                if item.requiresPhone {
+                if let instruction = item.approveInstruction {
+                    // W-02: first line of the long look. The watch never approves a security item (ADR-0022 §8).
+                    Label(instruction, systemImage: "iphone")
+                        .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                } else if item.requiresPhone {
                     Label("Approve on your iPhone with Face ID", systemImage: "iphone")
                         .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
                 } else if item.options.isEmpty {
@@ -83,8 +87,12 @@ private struct WatchDetail: View {
                     }
                 }
                 if item.isSecurity {
-                    Button("No, it isn't me") { model.send(WatchActionRequest(interactionId: item.id, decision: .deny)) }
-                        .buttonStyle(.viadere(.destructive))
+                    // W-03: Deny and This wasn't me, one component (equal weight, neutral, safe action first). "This wasn't me" is a signed
+                    // report on the phone (`deny_reason: not_me`); the wrist signs nothing (fixes F-25: the watch used to send deny for it).
+                    Button(AuthDeliveryCopy.deny) { model.send(WatchActionRequest(interactionId: item.id, decision: .deny)) }
+                        .buttonStyle(.viadere(.secondary))
+                    Button(AuthDeliveryCopy.notMe) { model.send(WatchActionRequest(interactionId: item.id, decision: .report)) }
+                        .buttonStyle(.viadere(.secondary))
                 }
                 if let message = model.statusMessage {
                     Text(message).font(ViadereType.footnote).foregroundStyle(ViadereColor.accent)

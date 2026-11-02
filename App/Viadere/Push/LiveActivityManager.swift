@@ -66,7 +66,13 @@ final class LiveActivityManager {
               state.interactionId.description == activity.attributes.interactionId else { return }
         // A failed fetch leaves the generic wording ("{business} needs a quick decision", Decline and Open).
         guard let envelope = try? await services.api.interaction(state.interactionId) else { return }
-        let enriched = LiveDecisionEnrichment.enriched(state, businessId: activity.attributes.businessId, from: envelope, now: Date())
+        var enriched = LiveDecisionEnrichment.enriched(state, businessId: activity.attributes.businessId, from: envelope, now: Date())
+        // F-09: unless the person opted in, no business text is written into the activity at all (it would only be drawn on the Lock Screen).
+        if LiveActivityDisclosure(preferences: services.preferences) == .neutral {
+            enriched.title = nil
+            enriched.detail = nil
+            enriched.options = nil
+        }
         if enriched.stage == .pending {
             await activity.update(ActivityContent(state: .decision(enriched), staleDate: enriched.expiresAt))
         } else {

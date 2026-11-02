@@ -22,19 +22,27 @@ import WidgetKit
 /// contrast clamp kept it, never for security requests), on the trailing word or countdown, the keyline and the stage dot. Titles,
 /// status text, alert colors and the answer buttons stay Viadere's.
 struct ViadereLiveActivityWidget: Widget {
+    /// F-09: a decision shows only Viadere's neutral wording on the Lock Screen and in the Dynamic Island (both are visible without
+    /// unlocking) unless the person turned on "Show details on the Lock Screen". Read from the app group each time the activity is drawn.
+    private static var disclosure: LiveActivityDisclosure {
+        LiveActivityDisclosure(preferences: UserDefaultsPreferences(suiteName: ViadereThemeRuntime.appGroupID))
+    }
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ViadereActivityAttributes.self) { context in
             // The extension can outlive a theme change: pick up the person's current choice from the app group before drawing.
             let _ = ViadereThemeRuntime.shared.reloadFromStore()
             Group {
                 if case .decision(let decision) = context.state {
-                    let presentation = LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName)
+                    let presentation = LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName,
+                                                                disclosure: Self.disclosure)
                     DecisionLockScreenView(interactionId: context.attributes.interactionId, presentation: presentation, accent: context.attributes.accent)
                         .viadereProtectedSurface()
                         .widgetURL(presentation.openURL)
                 } else {
                     LockScreenActivityView(business: context.attributes.businessName,
-                                           presentation: LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName),
+                                           presentation: LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName,
+                                                                                  disclosure: Self.disclosure),
                                            accent: context.attributes.accent)
                 }
             }
@@ -44,10 +52,12 @@ struct ViadereLiveActivityWidget: Widget {
             let _ = ViadereThemeRuntime.shared.reloadFromStore()
             if case .decision(let decision) = context.state {
                 return DecisionIsland.make(interactionId: context.attributes.interactionId,
-                                           presentation: LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName),
+                                           presentation: LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName,
+                                                                                  disclosure: Self.disclosure),
                                            accent: context.attributes.accent)
             }
-            let presentation = LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName)
+            let presentation = LiveActivityPresentation(status: context.state, businessName: context.attributes.businessName,
+                                                        disclosure: Self.disclosure)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     ViadereMark(style: .onDark)

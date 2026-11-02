@@ -314,30 +314,38 @@ struct ApprovalSheet: View {
         }
     }
 
+    private var denyButton: some View {
+        Button(AuthDeliveryCopy.deny) { Task { await model.deny() } }
+            .buttonStyle(.viadere(.secondary))
+            .frame(minHeight: 44)
+            .accessibilityInputLabels([AuthDeliveryCopy.deny])
+    }
+
+    private var approveButton: some View {
+        Button(AuthDeliveryCopy.approve) { if !approveBlocked { Task { await model.approve() } } }
+            .buttonStyle(.viadere(.secondary))
+            .frame(minHeight: 44)
+            .disabled(approveBlocked)
+            .accessibilityInputLabels([AuthDeliveryCopy.approve])
+    }
+
     @ViewBuilder private var actionFooter: some View {
         switch model.interaction.payload {
         case .authorize, .authenticate:
+            // Sign-in and payment items (ADR-0022 §2.5, UX_COPY §0.2, F-16): Deny and Approve are one component (same style, size and
+            // weight, neutral, Deny first; stacked with Deny on top when the text would truncate), "This wasn't me" is a full-width
+            // secondary button, and there is no slider. Approve is disabled, never hidden, while it is blocked.
             VStack(spacing: ViadereSpace.xs) {
-                if model.usesSlideToApprove {
-                    ViadereSlideToConfirm(model.interaction.kind == .authenticate ? "Slide to sign in" : "Slide to approve",
-                                          confirmedTitle: "Confirming…") {
-                        Task { await model.approve() }
-                    }
-                    .id(slideKey)
-                    .disabled(approveBlocked)
-                    .opacity(approveBlocked ? 0.4 : 1)
-                    Button("Deny") { Task { await model.deny() } }
-                        .buttonStyle(.viadere(.destructive))
-                } else {
-                    ViadereApprovalButtons(
-                        approveTitle: model.interaction.kind == .authenticate ? "Yes, it's me" : "Approve",
-                        denyTitle: model.interaction.kind == .authenticate ? "No" : "Deny",
-                        onApprove: { if !approveBlocked { Task { await model.approve() } } },
-                        onDeny: { Task { await model.deny() } })
-                    .opacity(approveBlocked ? 0.6 : 1)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: ViadereSpace.s) { denyButton; approveButton }
+                    VStack(spacing: ViadereSpace.s) { denyButton; approveButton }
                 }
-                Button("I don't recognize this") { withAnimation(ViadereMotion.standard) { confirmingReport.toggle() } }
-                    .buttonStyle(.viadere(.quiet))
+                Button(AuthDeliveryCopy.notMe) { withAnimation(ViadereMotion.standard) { confirmingReport.toggle() } }
+                    .buttonStyle(.viadere(.secondary))
+                    .frame(minHeight: 44)
+                    .accessibilityInputLabels([AuthDeliveryCopy.notMe])
+                Text(AuthDeliveryCopy.denyLine)
+                    .font(ViadereType.caption).foregroundStyle(ViadereColor.textSecondary).multilineTextAlignment(.center)
             }
         case .confirm:
             ViadereApprovalButtons(approveTitle: "Confirm", denyTitle: "Decline",
