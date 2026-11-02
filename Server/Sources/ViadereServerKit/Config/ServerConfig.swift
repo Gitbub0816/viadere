@@ -160,6 +160,8 @@ public struct ServerConfig: Sendable {
     public var vaultSync = VaultSyncSettings()
     /// Approve v2, the business key directory and its transparency log (WP1; `APPROVE_V2_ENABLED`, default off in staging and production).
     public var approve = ApproveSettings()
+    /// Authentication delivery (ADR-0020; `AUTH_DELIVERY_ENABLED`, default off in staging and production).
+    public var authDelivery = AuthDeliverySettings()
     /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).
     public var verify = VerifySettings()
     /// Hosted Loops (WP-3.2..3.5): the `loop-publication` signing key and runtime limits.
@@ -355,6 +357,7 @@ public struct ServerConfig: Sendable {
         try config.applyInfrastructureEnvironment(env, production: production)
         config.applyVaultEnvironment(env)
         try config.applyApproveEnvironment(env, production: production)
+        try config.applyAuthDeliveryEnvironment(env, production: production)
         try config.applyLoopEnvironment(env, production: production)
         try config.applyVerifyEnvironment(env, production: production)
         try config.applyOperationsEnvironment(env, production: production)

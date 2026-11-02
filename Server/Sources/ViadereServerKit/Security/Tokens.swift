@@ -29,8 +29,11 @@ enum BusinessAPIKeys {
         static let linksManage = "links:manage"
         /// Wallet passes: issue, list, update and void passes for connected customers, and validate scanned pass codes (live keys).
         static let walletWrite = "wallet:write"
+        /// Auth deliveries (ADR-0020): create, cancel and complete / read status. Elevated (not a baseline scope); the `auth.challenge` capability is checked as well.
+        static let authDeliveriesWrite = "auth_deliveries:write"
+        static let authDeliveriesRead = "auth_deliveries:read"
         static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
-                                    linksManage, walletWrite, profilesRead]
+                                    linksManage, walletWrite, profilesRead, authDeliveriesWrite, authDeliveriesRead]
     }
 
     struct Issued {

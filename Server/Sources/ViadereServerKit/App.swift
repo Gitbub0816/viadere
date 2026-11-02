@@ -122,7 +122,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
                             domains: domains, outbound: outbound, kms: kms, auditObjectStore: auditStore, accessTokens: tokens,
-                            queueTransport: queueTransport)
+                            queueTransport: queueTransport, tenantDestinationKeys: overrides.tenantDestinationKeys)
     app.brandKits = BrandKitRuntime(store: try BrandKitRegistration.store(config: config, override: overrides.brandAssetStore, tokens: tokens, http: outbound,
                                                                           now: { clock.now() }),
                                     maxConcurrent: config.brandKits.maxConcurrentIngestions)
@@ -230,6 +230,8 @@ public struct Overrides: Sendable {
     public var outboundHTTP: (any OutboundHTTP)?
     /// Brand asset storage. `nil` = Azure Blob when configured, a development directory, or memory outside staging and production.
     public var brandAssetStore: (any ObjectStore)?
+    /// Authority-published tenant destination keys (ADR-0031). `nil` = none known (business-mode magic links fail closed until Stage 6).
+    public var tenantDestinationKeys: (any TenantDestinationKeyDirectory)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,

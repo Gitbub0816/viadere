@@ -12,7 +12,7 @@ import ViadereCore
 /// delivery), `notify.step` (a notification-orchestrator step) and `push.send` (approval wake-up pushes). Each becomes one `QueueMessageType` with a
 /// claim on its own row; delivery, retry and DLQ guarantees come from this pipeline.
 enum QueueHandlers {
-    static let all: [QueueMessageType] = [smsSend, channelDeliver, webhookDeliver, walletPush, operatorNotice, consumerExport, interactionExpire, approveExpire, identityMaintenance]
+    static let all: [QueueMessageType] = [smsSend, channelDeliver, webhookDeliver, walletPush, operatorNotice, consumerExport, interactionExpire, approveExpire, identityMaintenance, authDeliveryDispatch, authDeliveryExpire]
 
     /// A short delay before trying again when a row is busy (another message of the same phone ahead of it, a notice claimed elsewhere).
     static let busyRetry: TimeInterval = 15
@@ -151,6 +151,28 @@ enum QueueHandlers {
             if ctx.config.approve.enabled { _ = try await ApproveRequestService(db: db, ctx: ctx).expireDue() }
             return nil
         }
+    }
+
+    // MARK: Auth delivery (ADR-0020; behind `AUTH_DELIVERY_ENABLED`)
+
+    /// Sends the opaque push for a queued delivery. The row's compare-and-swap state machine stays the source of truth: the message is a doorbell and a second
+    /// delivery of it finds the delivery already `sent` and does nothing (exactly one send per accepted push, ST-DLV-01).
+    static let authDeliveryDispatch = QueueMessageType(name: "auth.delivery.dispatch", version: 1, queue: .push, timeToLive: 86_400, requiresTenant: true) { envelope, tx, ctx in
+        guard ctx.config.authDelivery.enabled, let row = try await AuthDeliveryRecord.find(envelope.ref, on: tx) else { return .done }
+        guard row.businessId == envelope.tenant else { return .deadLetter(reason: "tenant_mismatch") }
+        guard row.statusValue == .queued else { return .done }
+        let id = envelope.ref
+        return .afterCommit { db, ctx in try await AuthDeliveryDispatcher(db: db, ctx: ctx).dispatch(id: id) }
+    }
+
+    /// Ends a delivery at `expires_at` (scheduled at create); the sweep is the safety net.
+    static let authDeliveryExpire = QueueMessageType(name: "auth.delivery.expire", version: 1, queue: .expiry, timeToLive: 14 * 86_400, requiresTenant: true) { envelope, tx, ctx in
+        guard ctx.config.authDelivery.enabled, let row = try await AuthDeliveryRecord.find(envelope.ref, on: tx) else { return .done }
+        guard row.businessId == envelope.tenant else { return .deadLetter(reason: "tenant_mismatch") }
+        guard !row.statusValue.isTerminal else { return .done }
+        if row.expiresAt > ctx.now { return .retry(at: row.expiresAt) }
+        try await AuthDeliveryService(db: tx, ctx: ctx).expireIfDue(row)
+        return .done
     }
 
     /// Recovery holds and device replacements that fall due (`IdentityMaintenance`, CAS-safe).

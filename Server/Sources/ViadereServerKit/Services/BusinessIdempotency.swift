@@ -19,6 +19,10 @@ struct BusinessIdempotency {
         case webhookCreate = "webhook.create"
         case webhookRotate = "webhook.rotate"
         case interactionCancel = "interaction.cancel"
+        case authDeliveryCreate = "auth_delivery.create"
+        case authDeliveryCancel = "auth_delivery.cancel"
+        case authDeliveryComplete = "auth_delivery.complete"
+        case webhookUpdate = "webhook.update"
     }
 
     /// The required header: 1-128 characters of `A-Z a-z 0-9 _ . - :`.
@@ -31,12 +35,12 @@ struct BusinessIdempotency {
         return header
     }
 
-    private func existing(_ businessId: UUID, _ operation: Operation, _ key: String) async throws -> BusinessIdempotencyRecord? {
+    func existing(_ businessId: UUID, _ operation: Operation, _ key: String) async throws -> BusinessIdempotencyRecord? {
         try await BusinessIdempotencyRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$operation == operation.rawValue)
             .filter(\.$idemKey == key).first()
     }
 
-    private func checkSame(_ record: BusinessIdempotencyRecord, _ requestHash: String) throws {
+    func checkSame(_ record: BusinessIdempotencyRecord, _ requestHash: String) throws {
         guard ConstantTime.equals(record.requestHash, requestHash) else {
             throw APIError(.conflict, .idempotencyConflict, "This Idempotency-Key was already used with a different request.")
         }
@@ -52,7 +56,7 @@ struct BusinessIdempotency {
     }
 
     /// Runs `perform` once per key. `sealResult` stores the response for replay (one-time secrets).
-    private func once<T: Codable & Sendable>(businessId: UUID, operation: Operation, key: String, requestHash: String, sealResult: Bool,
+    func once<T: Codable & Sendable>(businessId: UUID, operation: Operation, key: String, requestHash: String, sealResult: Bool,
                                              perform: @escaping @Sendable (any Database) async throws -> (T, UUID?),
                                              replay: @escaping @Sendable (BusinessIdempotencyRecord) async throws -> T) async throws -> (value: T, created: Bool) {
         if let found = try await existing(businessId, operation, key) {

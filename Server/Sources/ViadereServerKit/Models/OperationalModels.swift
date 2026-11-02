@@ -178,8 +178,12 @@ final class WebhookSubscriptionRecord: Model, @unchecked Sendable {
     @OptionalField(key: "paused_at") var pausedAt: Date?
     @OptionalField(key: "paused_by") var pausedBy: String?
     @OptionalField(key: "pause_reason") var pauseReason: String?
+    /// `v1` (the default of every row that existed before) or `v2` (ADR-0025: method, host, path, event id, tenant and body digest are signed).
+    @Field(key: "signature_version") var signatureVersion: String
+    /// End of the 30-day window in which a subscription that moved to `v2` still gets a `v1=` entry next to `v2=` (never on `auth.*` events).
+    @OptionalField(key: "v2_dual_until") var v2DualUntil: Date?
 
-    init() {}
+    init() { signatureVersion = "v1" }
 
     var isPaused: Bool { pausedAt != nil }
 }
