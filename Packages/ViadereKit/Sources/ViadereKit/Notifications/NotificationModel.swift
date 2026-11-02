@@ -56,10 +56,15 @@ public enum AuthNotificationCategory {
     public static let reportAction = "viadere.report"
 
     /// Neutral wording and style: equal prominence, no destructive (red) role on the safe action.
-    public static let approveCategory = NotificationCategoryModel(identifier: approve, actions: [
-        NotificationActionModel(identifier: reviewAction, title: AuthDeliveryCopy.review, style: .normal, requiresAuthentication: true, opensApp: true),
-        NotificationActionModel(identifier: denyAction, title: AuthDeliveryCopy.deny, style: .normal, requiresAuthentication: false, opensApp: false),
-    ])
+    /// Deny appears only when `flags.notificationDeny` is on (Stage 4 review R4-03).
+    public static func approveCategory(flags: AuthDeliveryFlags) -> NotificationCategoryModel {
+        var actions = [NotificationActionModel(identifier: reviewAction, title: AuthDeliveryCopy.review, style: .normal, requiresAuthentication: true, opensApp: true)]
+        if flags.notificationDeny {
+            actions.append(NotificationActionModel(identifier: denyAction, title: AuthDeliveryCopy.deny, style: .normal, requiresAuthentication: false, opensApp: false))
+        }
+        return NotificationCategoryModel(identifier: approve, actions: actions)
+    }
+    public static let approveCategory = approveCategory(flags: .shipping)
     public static let linkCategory = NotificationCategoryModel(identifier: link, actions: [
         NotificationActionModel(identifier: openAction, title: AuthDeliveryCopy.open, style: .normal, requiresAuthentication: true, opensApp: true),
         NotificationActionModel(identifier: reportAction, title: AuthDeliveryCopy.notMe, style: .normal, requiresAuthentication: false, opensApp: false),

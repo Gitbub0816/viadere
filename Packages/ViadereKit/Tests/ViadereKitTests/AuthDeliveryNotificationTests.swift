@@ -20,8 +20,14 @@ struct AuthDeliveryNotificationTests {
 
     // MARK: Action configuration (A6/A7 H1, ADR-0022 §5.5, ADR-0021 §4 item 5)
 
+    @Test func shippingApproveCategoryHasNoDenyUntilTheServerAcceptsIt() {
+        // R4-03: a Deny that cannot succeed is never shown; the shipping build offers Review only.
+        #expect(AuthNotificationCategory.approveCategory.actions.map(\.title) == ["Review"])
+        #expect(!AuthDeliveryFlags.shipping.notificationDeny)
+    }
+
     @Test func approveCategoryIsReviewAndDenyOnly() throws {
-        let category = AuthNotificationCategory.approveCategory
+        let category = AuthNotificationCategory.approveCategory(flags: AuthDeliveryFlags(notificationDeny: true))
         #expect(category.identifier == "viadere.approve")
         #expect(category.actions.map(\.title) == ["Review", "Deny"])
         let review = try #require(category.actions.first)

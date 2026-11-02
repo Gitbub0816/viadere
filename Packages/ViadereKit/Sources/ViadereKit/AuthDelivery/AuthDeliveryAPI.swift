@@ -8,10 +8,14 @@ public struct AuthDeliveryFlags: Sendable, Equatable {
     /// ADR-0031 §4: the business-signed destination is verified on the device against an authority-signed tenant record. Stage 6.
     /// While false, every business link fails closed (S-LINK-09) and Continue never enables.
     public var destinationVerification: Bool
+    /// The Deny action on `viadere.approve` notifications (ADR-0022 §5.5). Off until the server sends `req` in Approve v2 pushes and
+    /// accepts a request-key-signed reduce-only deny (Stage 4 review R4-03): a Deny button that cannot succeed must never be shown.
+    public var notificationDeny: Bool
 
-    public init(deviceAddComparison: Bool = false, destinationVerification: Bool = false) {
+    public init(deviceAddComparison: Bool = false, destinationVerification: Bool = false, notificationDeny: Bool = false) {
         self.deviceAddComparison = deviceAddComparison
         self.destinationVerification = destinationVerification
+        self.notificationDeny = notificationDeny
     }
 
     /// What ships today.

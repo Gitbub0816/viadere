@@ -24,7 +24,7 @@ import WidgetKit
 struct ViadereLiveActivityWidget: Widget {
     /// F-09: a decision shows only Viadere's neutral wording on the Lock Screen and in the Dynamic Island (both are visible without
     /// unlocking) unless the person turned on "Show details on the Lock Screen". Read from the app group each time the activity is drawn.
-    private static var disclosure: LiveActivityDisclosure {
+    private nonisolated static var disclosure: LiveActivityDisclosure {
         LiveActivityDisclosure(preferences: UserDefaultsPreferences(suiteName: ViadereThemeRuntime.appGroupID))
     }
 
