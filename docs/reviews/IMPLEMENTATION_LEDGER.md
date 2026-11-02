@@ -9,7 +9,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 | Stage | Name | Artifacts | Authoring roles | Reviewer roles | Commit | Status |
 |---|---|---|---|---|---|---|
 | 0 | Discovery | `docs/architecture/CURRENT_STATE.md`, `docs/architecture/GAP_ANALYSIS.md`, `docs/product/SCOPE_LEDGER.md`, `docs/reviews/IMPLEMENTATION_LEDGER.md`; evidence reports A4, A5, A6, A8, A14 (kept outside the repository in `/tmp/claude-0/auth/stage0/`, not committed) | A0 (reconciliation, spot-checks), A4, A5, A6, A8, A14 (evidence reports) | Pending: A2 and A5 on security findings F-01 to F-03; A14 on scope; A7 on Android notes (Kotlin package not yet merged); owner approval of the current-state inventory (gate: "Current-state inventory approved") | 59bc991 | Written, awaiting review |
-| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0030 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md` | One Stage 1 author acting as A1, A2, A3, A5, A10 | Pending, per `STAGE1_REVIEW_REQUEST.md`: A2 and A3 (both required for ADR-0023, 0024, 0025, 0028 and recovery), A6/A7 (feasibility), A9 (copy), A10 (privacy), A5 peer or A4 (network), A4 (contracts); A0 consistency. Author may not approve. | recorded by A0 after commit | Written, awaiting review |
+| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0033 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy; ADR-0031-0033 added in revision 2), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md`, reviews `STAGE1_A2_SECURITY_REVIEW.md`, `STAGE1_A3_CRYPTO_REVIEW.md`, `STAGE1_A6A7_PLATFORM_REVIEW.md`, `STAGE1_A9A10_UX_PRIVACY_REVIEW.md`, author response `STAGE1_RESPONSE.md`, `docs/ops/DATA-INVENTORY.md` update | One Stage 1 author acting as A1, A2, A3, A5, A10 | Reviewed once (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions). Revision 2 awaits delta re-review by the same reviewers; A5 peer or A4 (network) and A4 (contracts) still pending; A0 consistency. Author may not approve. | recorded by A0 after commit | Revision 2 written, awaiting delta re-review |
 | 2 | API + data contracts | `contracts/openapi/auth-delivery-v1.yaml`, event and webhook schemas, migrations, retention sweeps, webhook signature v2 in Core | A4, A8, A10 | A10 (privacy), A2, A13 (contract tests); Core change reviewed by A3 | | Not started |
 | 3 | Delivery engine | Delivery aggregate and state machine, magic-link and OTP transport, code delivery, queue handlers, SDKs (Swift, TypeScript), harness, `tests/security/` | A4, A8 | A2, A9 (copy), A13 | | Not started |
 | 4 | Native handoffs | iOS confirm-gated handoff, number-matching UI, equal Deny, Live Activity policy, notification routing fixes, watch classification, Android handoff from the Kotlin branch, UX copy | A6, A7, A9 | A9 (UX), A13 (real-device checks), A2 | | Not started |
@@ -36,7 +36,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 |---|---|---|
 | Stage 0 exit | Current-state inventory approved | Not yet approved; documents written |
 | Stage 1 entry | Stage 0 outputs reviewed | Stage 1 drafted in parallel at the orchestrator's direction; Stage 0 review still pending |
-| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet; review request filed |
+| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet. Reviews received (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions); revision 2 and `STAGE1_RESPONSE.md` written; delta re-review requested |
 | Production | Owner approval after release gates | Not applicable; no agent deploys to production |
 
 ## Open items carried to Stage 1
@@ -46,9 +46,39 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 3. Unverified live settings listed in `CURRENT_STATE.md` section 12 need an operator with Azure, GitHub and Cloudflare access.
 4. THREAT_MODEL.md and ADR-0001 are spec §16 discovery outputs that belong to Stage 1 and are not written yet.
 
+## Stage 1 revision 2 (2026-11-02)
+
+All Critical, High and Medium findings of the four reviews are fixed or replaced by an argued alternative; Medium/Low deferrals carry an owner and a stage. Full table: `docs/reviews/STAGE1_RESPONSE.md`. Owner decisions 13 (residency), 14 (private GHCR, scoped pull credential) and 15 (read-only checks before deleting legacy resources) were applied (ADR-0026 §3, ADR-0028 §6.7, ADR-0029 §5). Structural changes: authority-minted account identity and authority-verified recovery (ADR-0032), authority-built and signed displays and device statements (ADR-0033), business-signed destinations verified on the device against authority tenant keys (ADR-0031), JWKS publication behind its own reviewer-gated environment, budgets that limit alerts instead of availability, field-level trust table (TRUST_BOUNDARIES §4.3a).
+
+### Owner questions raised by revision 2 (no owner decision was changed)
+
+| Id | Question | Why it is a question | Default until answered |
+|---|---|---|---|
+| OQ-1 | May device-signed results of **low-risk sign-ins** (approval-result JWS, factor JWS) move to E-routine (30 days), as A10 proposes? | O-3 names all signed device decisions and approval-result JWS as high-value evidence | They stay E-high (O-3 as written) |
+| OQ-2 | Pilot start needs the app to ask people to make new recovery codes; people who recover with old codes lose Viadere sign-in (link service, OIDC) until they do. Accept this UX cost? | Product impact of ADR-0032 §3 (security requirement from A2/A3) | Design as written |
+| OQ-3 | Create a GitHub identity for agents distinct from the owner's (machine user or GitHub App), enable "Prevent self-review", branch protection and CODEOWNERS; accept that staging admin/deploy/publish is a single owner approval (R-21) until a second human reviewer exists | Owner action and residual acceptance (S1-A2-9) | Authority environments not created until answered |
+| OQ-4 | Accounts created while the authority is down are permanently without Viadere sign-in features; acceptable for the pilot (an upgrade path is ledger item L-1)? | Product impact of ADR-0032 §1.5 | Design as written |
+| OQ-5 | Phone numbers linked by customer-originated text receive only on-ramp text and SMS-04 (no interaction content by SMS) until carrier verification exists. This narrows SMS-thread continuity for app users; decision 9 is unchanged | Feature scope (S1-A10-4) | Design as written |
+| OQ-6 | Spanish as the first additional locale for the US launch? | Product choice (S1-A9-12) | English only in the pilot |
+| OQ-7 | Business-mode magic links in the pilot require each tenant to register a destination-signing key through the reviewed admin path (ADR-0031); slower onboarding | Decision 2 kept; adds an onboarding requirement | Design as written |
+
+### Tracked follow-ups from revision 2
+
+| Id | Item | Owner | Stage |
+|---|---|---|---|
+| L-1 | Upgrade path for outage-created accounts (must rest on authority-verified evidence) | A2 | 6 |
+| L-2 | `docs/ops/KEY-ROTATION.md`: explicit versions, standby device-statement key, emergency rollover | A3, A11 | 6 |
+| L-3 | Purge for `channel_endpoints`, `rcs_postbacks` | A10 | 2 |
+| L-4 | `sms_consent_events` retention and TCPA/CTIA review | A10 with counsel | before production |
+| L-5 | `login_hint` by signed request object or PAR | A1 | 9 |
+| L-6 | Review of the unmerged Kotlin package against ADR-0030 | A7 | 4 (before Android merge) |
+| L-7 | Device checks marked **verify** (watch action routing, `sms_body` on OEM apps, RCS inbound, Android clipboard flag) | A6, A7, A13 | 4, 5, 7 |
+| L-8 | MailerSend and SMS-provider storage locations verified and recorded (email fallback gate) | A10, owner | before enabling email fallback |
+| L-9 | Counsel list from the A10 review §4 (E periods, state privacy law, COPPA, TCPA/CTIA, residency wording, controller/processor, lawful requests, OIDC consent terms, claims language) | A10 with counsel | before production |
+
 ## Stage 1 record
 
-Owner rulings applied after Stage 0: O-1 (Kotlin allowed; CLAUDE.md rule 4), O-3 (signed device decisions and approval-result JWS are high-value audit evidence; ADR-0026), O-6 (household delegation and customer profiles are baseline; "first-party actions" = existing first-party surfaces; THREAT_MODEL §1.4), decision 9 phone proof (ADR-0027). Still open: O-4 (GHCR visibility), O-5 (live Fly/Neon/GCP resources), O-2 narrowed to carrier behavior for customer-originated texts.
+Owner rulings applied after Stage 0: O-1 (Kotlin allowed; CLAUDE.md rule 4), O-3 (signed device decisions and approval-result JWS are high-value audit evidence; ADR-0026), O-6 (household delegation and customer profiles are baseline; "first-party actions" = existing first-party surfaces; THREAT_MODEL §1.4), decision 9 phone proof (ADR-0027). Still open at revision 1: O-4 (GHCR visibility) and O-5 (live Fly/Neon/GCP resources), both answered by owner decisions 14 and 15 on 2026-11-02; O-2 narrowed to carrier behavior for customer-originated texts (still open).
 
 | Item | Stage 1 resolution |
 |---|---|
