@@ -414,7 +414,7 @@ final class SecurityTests: XCTestCase {
             let applinks = try XCTUnwrap((json["applinks"] as? [String: Any])?["details"] as? [[String: Any]])
             XCTAssertEqual(applinks[0]["appIDs"] as? [String], ["TEAMID1234.com.viadere.app"])
             let components = try XCTUnwrap(applinks[0]["components"] as? [[String: String]])
-            XCTAssertEqual(Set(components.compactMap { $0["/"] }), ["/c/*", "/l/*", "/h/*", "/a/*", "/k/*", "/lp/*"])
+            XCTAssertEqual(Set(components.compactMap { $0["/"] }), ["/c/*", "/l/*", "/h/*", "/a/*", "/k/*", "/lp/*", "/v/*"])
             XCTAssertEqual((json["webcredentials"] as? [String: Any])?["apps"] as? [String], ["TEAMID1234.com.viadere.app"])
             XCTAssertEqual((json["appclips"] as? [String: Any])?["apps"] as? [String], ["TEAMID1234.com.viadere.app.Clip"])
         }

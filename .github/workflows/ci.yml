@@ -99,10 +99,12 @@ jobs:
       - name: Install Playwright and Chromium
         run: |
           python3 -m venv "$RUNNER_TEMP/pw"
-          "$RUNNER_TEMP/pw/bin/pip" install --no-input playwright==1.64.1
+          "$RUNNER_TEMP/pw/bin/pip" install --no-input playwright==1.64.1 qrcode==8.2
           "$RUNNER_TEMP/pw/bin/playwright" install --with-deps chromium
-      - name: Test the web component in headless Chromium
-        run: '"$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_connect_button.py'
+      - name: Test the web components in headless Chromium
+        run: |
+          "$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_connect_button.py
+          "$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_verify_button.py
 
   site:
     name: Site (build + lint)

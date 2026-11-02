@@ -88,6 +88,12 @@ struct MainShell: View {
             }
         }
         .loopInstallLinks(model: model)
+        .sheet(item: $model.pendingVerificationSession) { pending in
+            // A business's "Verify with Viadere" button or QR (`/v/…`).
+            VerificationSessionSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
         .sheet(isPresented: $model.addBusinessPresented, onDismiss: {
             Task { await model.businesses.load() }
         }) {

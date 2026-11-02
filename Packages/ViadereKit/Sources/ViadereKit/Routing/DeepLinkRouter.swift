@@ -25,6 +25,8 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/lp/{loopId}` or `viadere://lp/{loopId}`: a business's Loop install link. Opens the install sheet only
     /// (SECURITY.md §2.98 "Installed Loops"); nothing is installed without the customer's choice.
     case loopInstall(LoopDefinitionID)
+    /// `https://{link domain}/v/{CODE}` (a business's "Verify with Viadere" button or its QR): review a verification session. No secret, no query.
+    case verificationSession(code: String)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -71,6 +73,11 @@ public enum DeepLinkRouter {
             // Strict: the exact link domain, `/k/{CODE}`, no query, and a fragment that is exactly `es=` plus 43 characters (or none).
             guard let parsed = LinkSessionLink.parse(url, domain: domain) else { return nil }
             return .linkSession(code: parsed.code, secret: parsed.secret)
+        }
+        if components.path.hasPrefix(APIRoutes.Web.verificationSessionPrefix) {
+            // Strict: the exact link domain, `/v/{CODE}`, no query, no fragment.
+            guard let code = VerificationSessionLink.parse(url, domain: domain) else { return nil }
+            return .verificationSession(code: code)
         }
         // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
         guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verify with Viadere · Embed kit</title>
+<meta name="description" content="Viadere mark, wordmark and Verify with Viadere button artwork for businesses: variants, sizes, clear space, minimum sizes, do and don't.">
+<style>
+:root{--charcoal:#1F1E1C;--graphite:#4A4844;--silver:#C9C4BB;--ivory:#F5F2EC;--surface:#FCFBF8;--text2:#6B675F;--accent:#8C7550;--black:#121211;--surface-dark:#1C1B1A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ivory);color:var(--charcoal);font:16px/1.55 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:56px 24px 96px}
+h1{font:600 40px/1.1 -apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.02em;margin:0 0 12px}
+h2{font:600 24px/1.2 -apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.01em;margin:64px 0 12px}
+h3{font-size:15px;margin:0 0 6px}
+p{max-width:720px;margin:0 0 12px}
+.lead{font-size:19px;color:var(--text2)}
+.eyebrow{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 16px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.tile{border:1px solid var(--silver);border-radius:20px;padding:28px;background:var(--surface);display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+.tile.dark{background:var(--black);border-color:var(--graphite);color:#F3F0EA}
+.tile.dark .note{color:#A29D94}
+.tile.photo{background:linear-gradient(135deg,#4A4844,#121211 60%,#8C7550)}
+.note{font-size:13px;color:var(--text2);margin:0}
+.row{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+code{font:14px ui-monospace,"SF Mono",Menlo,monospace;background:rgba(31,30,28,.06);padding:1px 6px;border-radius:6px}
+table{border-collapse:collapse;width:100%;max-width:820px;font-size:15px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--silver);vertical-align:top}
+th{font-weight:600}
+.rules{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.rule{border-radius:16px;padding:20px;background:var(--surface);border:1px solid var(--silver)}
+.rule b{display:block;margin-bottom:6px}
+.do b{color:#4C7458}
+.dont b{color:#A3412E}
+.clear-demo{position:relative;padding:22px;border:1px dashed var(--accent);border-radius:999px;display:inline-block}
+.clear-demo span{position:absolute;font-size:12px;color:var(--accent)}
+.clear-demo .t{top:2px;left:50%;transform:translateX(-50%)}
+.clear-demo .l{left:6px;top:50%;transform:translateY(-50%)}
+footer{margin-top:72px;font-size:13px;color:var(--text2)}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Viadere · Embed kit</p>
+<h1>Verify with Viadere</h1>
+<p class="lead">Button artwork, mark and wordmark for businesses that let their customers verify with Viadere — on the web, in an iOS app and in an Android app. Use the live components where you can; use these files where a component cannot run (design mock-ups, documentation, emails that link to your own page).</p>
+<p>The live buttons are in <code>Server/Public/verify-button/v1/</code> (web), <code>VerifyWithViadereButton</code> in the business SDK (iOS) and <code>Packages/android/viadere-verify</code> (Android). Integration and security: <code>docs/VERIFY-BUTTON.md</code>.</p>
+
+<h2>Variants</h2>
+<p>Three variants, each in a light and a dark appearance. The live components follow the visitor's appearance automatically.</p>
+<div class="grid">
+  <div class="tile"><h3>Filled · light</h3><img src="svg/verify-filled-light-md.svg" alt="Verify with Viadere, filled charcoal"><p class="note">The default. Charcoal on light pages.</p></div>
+  <div class="tile dark"><h3>Filled · dark</h3><img src="svg/verify-filled-dark-md.svg" alt="Verify with Viadere, filled ivory"><p class="note">The same button on dark pages: ivory.</p></div>
+  <div class="tile photo"><h3 style="color:#F3F0EA">Ivory</h3><img src="svg/verify-ivory-md.svg" alt="Verify with Viadere, ivory"><p class="note" style="color:#C9C4BB">For dark, coloured or photographic backgrounds.</p></div>
+  <div class="tile"><h3>Outline · light</h3><img src="svg/verify-outline-light-md.svg" alt="Verify with Viadere, outline"><p class="note">For busy light layouts and secondary placement.</p></div>
+  <div class="tile dark"><h3>Outline · dark</h3><img src="svg/verify-outline-dark-md.svg" alt="Verify with Viadere, outline on dark"><p class="note">Ivory outline on dark pages.</p></div>
+  <div class="tile"><h3>Icon only</h3><div class="row"><img src="svg/verify-icon-filled-light-md.svg" alt="Verify with Viadere"><img src="svg/verify-icon-ivory-md.svg" alt="Verify with Viadere"><img src="svg/verify-icon-outline-light-md.svg" alt="Verify with Viadere"></div><p class="note">Only where space is tight and the context says "verify" (a toolbar next to a labelled field). It always carries the accessible name "Verify with Viadere".</p></div>
+</div>
+
+<h2>Sizes</h2>
+<div class="tile"><div class="row"><img src="svg/verify-filled-light-sm.svg" alt="small"><img src="svg/verify-filled-light-md.svg" alt="medium"><img src="svg/verify-filled-light-lg.svg" alt="large"></div></div>
+<table>
+  <tr><th>Size</th><th>Height</th><th>Label</th><th>Use</th></tr>
+  <tr><td>Small</td><td>36 px / pt</td><td>13</td><td>Dense layouts. Keep a 44 pt (iOS) / 48 dp (Android) touch area around it; the components do.</td></tr>
+  <tr><td>Medium</td><td>44 px / pt</td><td>15</td><td>The default, and the minimum for a primary action on touch screens.</td></tr>
+  <tr><td>Large</td><td>52 px / pt</td><td>17</td><td>Checkout and age gates where verifying is the main action.</td></tr>
+</table>
+
+<h2>Clear space and minimum sizes</h2>
+<div class="row"><div class="clear-demo"><span class="t">½ h</span><span class="l">½ h</span><img src="svg/verify-filled-light-md.svg" alt="Clear space around the button"></div></div>
+<div class="rules">
+  <div class="rule"><b>Button clear space = ½ height</b>Keep half the button's height clear on every side: no other button, link or text closer than that.</div>
+  <div class="rule"><b>Minimum button</b>36 px high with the label; never scale the artwork below that, and never shrink the label separately.</div>
+  <div class="rule"><b>Mark and wordmark</b>Clear space of one dot diameter on every side (built into the lockup files). Monochrome mark at least 20 px wide; gradient mark 32 px; horizontal lockup 96 px (Design/brand-guide.html).</div>
+</div>
+
+<h2>Do and don't</h2>
+<div class="rules">
+  <div class="rule do"><b>Do</b>Show the button where a customer decides to verify: an age gate, a checkout step, an account screen.</div>
+  <div class="rule do"><b>Do</b>Link it only to a verification session <em>your server</em> created a moment ago (<code>https://viadere.com/v/…</code>), and decide on your server from Viadere's signed result.</div>
+  <div class="rule do"><b>Do</b>Pick the variant that contrasts with the background: filled on light, ivory on dark or imagery.</div>
+  <div class="rule do"><b>Do</b>Keep the label exactly "Verify with Viadere".</div>
+  <div class="rule dont"><b>Don't</b>Recolour the button or the mark, add gradients, shadows, outlines or a shield; don't use your brand colour as its background.</div>
+  <div class="rule dont"><b>Don't</b>Stretch, rotate, crop or re-type the artwork, or rebuild it from a screenshot.</div>
+  <div class="rule dont"><b>Don't</b>Put it in emails, texts or ads, or link it to anything that is not a fresh session on your own verified domain: Viadere's app shows the site the request came from, and people are told to stop when it isn't the one they are on.</div>
+  <div class="rule dont"><b>Don't</b>Treat a click, a return to your page or anything your front end says as a verification. Only the signed result counts.</div>
+</div>
+
+<h2>Mark and wordmark</h2>
+<div class="grid">
+  <div class="tile"><img src="svg/viadere-mark.svg" alt="Viadere mark" width="160"><p class="note">viadere-mark.svg (gradient, light backgrounds)</p></div>
+  <div class="tile dark"><img src="svg/viadere-mark-on-dark.svg" alt="Viadere mark on dark" width="160"><p class="note">viadere-mark-on-dark.svg</p></div>
+  <div class="tile"><img src="svg/viadere-mark-mono-dark.svg" alt="Viadere mark, charcoal" width="160"><p class="note">viadere-mark-mono-dark.svg (one colour)</p></div>
+  <div class="tile"><img src="svg/viadere-lockup-horizontal.svg" alt="Viadere horizontal lockup" width="260"><p class="note">viadere-lockup-horizontal.svg</p></div>
+  <div class="tile dark"><img src="svg/viadere-wordmark-on-dark.svg" alt="viadere wordmark on dark" width="200"><p class="note">viadere-wordmark-on-dark.svg</p></div>
+</div>
+
+<h2>Files</h2>
+<table>
+  <tr><th>Path</th><th>What</th></tr>
+  <tr><td><code>svg/verify-{filled-light|filled-dark|ivory|outline-light|outline-dark}-{sm|md|lg}.svg</code></td><td>Labelled buttons; the label is outlined (Outfit SemiBold), so no font is needed.</td></tr>
+  <tr><td><code>svg/verify-icon-…-{sm|md|lg}.svg</code></td><td>Icon-only buttons.</td></tr>
+  <tr><td><code>png/…@2x.png</code>, <code>png/…@3x.png</code></td><td>Transparent renders of every button.</td></tr>
+  <tr><td><code>svg/viadere-mark*.svg</code>, <code>svg/viadere-wordmark*.svg</code>, <code>svg/viadere-lockup-horizontal*.svg</code></td><td>Copies of the brand artwork (source: <code>Design/svg</code>).</td></tr>
+</table>
+<p class="note">Generated by <code>python3 Design/tools/embeds.py</code> from the single Bézier source and the button geometry the live components use. Live components set their label in the system UI font (SF Pro on Apple platforms); the artwork uses outlined Outfit so that it renders the same everywhere.</p>
+
+<footer>Viadere — A trusted way to connect. Brand guide: Design/brand-guide.html.</footer>
+</main>
+</body>
+</html>

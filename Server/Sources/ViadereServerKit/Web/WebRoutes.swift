@@ -44,9 +44,9 @@ enum WebRoutes {
             let clipID = "\(ctx.config.appleTeamID).\(ctx.config.appClipBundleID)"
             let json: [String: Any] = [
                 // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, account link, handoff, Approve enrollment, link sessions and
-                // Loop install links.
+                // Loop install links and verification sessions (`/v/`, the "Verify with Viadere" button).
                 // Fragments (`#es=`) are never sent to a server; the matching rules ignore them.
-                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"]]]]],
+                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"], ["/": "/v/*"]]]]],
                 "webcredentials": ["apps": [appID]],
                 "appclips": ["apps": [clipID]],
             ]
@@ -57,6 +57,7 @@ enum WebRoutes {
             return response
         }
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("c", ":code", use: connectPage)
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("v", ":code", use: verificationSessionPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("l", ":token") { req in
             try await tokenPage(req, kind: "accountLink", title: "Link your phone",
                 body: "<p>To finish linking this phone number, open the Viadere app, sign in with your passkey, and confirm the last four digits of your number when asked.</p><p class=\"muted\">Viadere will never ask you to approve a payment or sign-in by text message.</p>")
@@ -127,6 +128,26 @@ enum WebRoutes {
             body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
         }
         return page(title: "Add a Loop", body: body, ctx: ctx)
+    }
+
+    /// The landing page of a verification-session link (`/v/{CODE}`), shown when the link opened in a browser instead of the app (the app is not
+    /// installed, or the link was opened on a computer). It looks **nothing** up: no business, no status, no oracle on whether the code exists.
+    @Sendable
+    static func verificationSessionPage(_ req: Request) async throws -> Response {
+        let ctx = req.ctx
+        guard let raw = req.parameters.get("code"), raw.count <= 16, let code = VerificationSessionCode.canonical(raw), code == raw else {
+            return page(title: "Not available", body: "<p>This Viadere link isn't valid. Go back to the business's page and start again.</p>", status: .notFound, ctx: ctx)
+        }
+        var head = ""
+        var body = "<p>This verification continues in the Viadere app. Viadere shows you which verified business is asking and exactly what it would learn before you decide.</p>"
+        body += "<p>Already have Viadere on your phone? Open it and enter the code <code>\(escape(VerificationSessionCode.display(code)))</code>, or scan the QR code on the business's page.</p>"
+        body += "<p class=\"muted\">The code expires a few minutes after it was shown. Viadere never asks for your password or a payment on this page.</p>"
+        if let storeID = ctx.config.appStoreID, storeID.allSatisfy(\.isNumber) {
+            let argument = escape(VerificationSessionLink.build(code: code, domain: ctx.config.linkDomain))
+            head = "<meta name=\"apple-itunes-app\" content=\"app-id=\(storeID), app-argument=\(argument)\">"
+            body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
+        }
+        return page(title: "Continue in Viadere", head: head, body: body, ctx: ctx)
     }
 
     static func tokenPage(_ req: Request, kind: String, title: String, body: String) async throws -> Response {

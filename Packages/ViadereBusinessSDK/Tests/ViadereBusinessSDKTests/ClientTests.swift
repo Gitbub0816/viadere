@@ -121,7 +121,8 @@ struct ClientTests {
                                     "business.linkSessions.create", "business.linkSessions.get", "business.linkSessions.confirm", "business.linkSessions.cancel",
                                     "business.wallet.passes.issue", "business.wallet.passes.list", "business.wallet.passes.update", "business.wallet.passes.void",
                                     "business.wallet.scan",
-                                    "business.profileRequests.create", "business.profileRequests.get", "business.profiles.get"]
+                                    "business.profileRequests.create", "business.profileRequests.get", "business.profiles.get",
+                                    "business.verificationSessions.create", "business.verificationSessions.get", "business.verificationSessions.cancel"]
 
         #expect(Set(business).subtracting(covered).isEmpty)
     }

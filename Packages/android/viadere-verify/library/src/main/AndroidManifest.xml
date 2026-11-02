@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No permissions and no <queries>: the library makes no network requests and does not inspect installed apps. It only starts an
+     ACTION_VIEW intent for the session link (with FLAG_ACTIVITY_REQUIRE_NON_BROWSER for the App Link hand-off). -->
+<manifest />

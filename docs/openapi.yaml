@@ -760,6 +760,68 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/verification-sessions:
+    post:
+      tags: [Verification]
+      operationId: createVerificationSession
+      summary: Start a "Verify with Viadere" session for the button on one of your web origins
+      description: |
+        Server side only, live keys only. Needs the capability (`age.minimum`, `identity.name`, `identity.address`, `identity.verified`) on the key
+        **and** in your business's entitlements, like `POST /v1/verification-requests`. `origin` must be `https://{host}` inside one of your
+        verified domains; `return_url` (optional) must be on exactly that origin. The session lives 60-300 s (default 300) and is accepted once.
+        Give `link` (`https://{link domain}/v/{CODE}`) to the button (docs/VERIFY-BUTTON.md); keep `session_id` with your visitor's session.
+        SECURITY.md 2.100.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVerificationSessionRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/verification-sessions/{sessionId}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationSession
+      summary: A verification session, with Viadere's signed result once completed
+      description: |
+        `status`: `open`, `accepted` (the person continued in the app; `request_id` and `subject_ref` present), `completed` (`result` and
+        `result_ref` present), `expired`, `cancelled`. **Verify `result` yourself** against the `link-descriptor` keys you pinned
+        (`VIADERE-VERIFY-SESSION-RESULT-V1`) and check `session_id`, `business_id`, `origin`, `capability` and the `result_ref` digest. Attribute
+        values come once from `GET /v1/verification-results/{result_ref}`. Another business's session is a 404.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/verification-sessions/{sessionId}/cancel:
+    post:
+      tags: [Verification]
+      operationId: cancelVerificationSession
+      summary: Cancel an open verification session (an accepted one runs to its result)
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/business/key-directory/entries:
     post:
       tags: [KeyDirectory]
@@ -1849,6 +1911,42 @@ components:
       properties:
         confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
         approval_confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+    CreateVerificationSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [capability, purpose_code, origin]
+      properties:
+        capability: { enum: [age.minimum, identity.name, identity.address, identity.verified] }
+        parameters: { type: object, description: "The capability's typed parameters, e.g. years: 21. Flat; at most 8." }
+        purpose_code: { type: string, pattern: "^[a-z][a-z0-9_]{1,63}$" }
+        origin: { type: string, description: "https://{host} inside one of your verified domains; no port, path, query or fragment." }
+        return_url: { type: string, maxLength: 512, description: "https URL on exactly the origin; the app offers it after the verification." }
+        callback_id: { type: string, description: "A registered webhook endpoint subscribed to verification.completed (never a URL)." }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 300 }
+    VerificationSessionTicket:
+      type: object
+      required: [session_id, code, link, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        code: { type: string, description: "Eight characters, no separator; shown as ABCD-EFGH for typing into the app." }
+        link: { type: string, description: "https://{link domain}/v/{CODE}: the button's target and the QR content. No secret." }
+        expires_at: { type: string, format: date-time }
+    VerificationSessionView:
+      type: object
+      required: [session_id, status, capability, purpose_code, origin, created_at, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        status: { enum: [open, accepted, completed, expired, cancelled] }
+        capability: { type: string }
+        purpose_code: { type: string }
+        origin: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        request_id: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        result_ref: { type: string }
+        result: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        completed_at: { type: string, format: date-time }
     FreezeStatus:
       type: object
       required: [subject_ref, frozen]

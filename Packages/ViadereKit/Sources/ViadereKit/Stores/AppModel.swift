@@ -59,6 +59,8 @@ public final class AppModel {
     public var pendingApproveEnrollment: PendingApproveEnrollment?
     /// A business link session opened from a QR or link (`/k/…`); the Connect tab presents it.
     public var pendingLinkSession: PendingLinkSession?
+    /// A verification session opened from a business's "Verify with Viadere" button, QR or typed code (`/v/…`); the root presents its review.
+    public var pendingVerificationSession: PendingVerificationSession?
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
     /// A Loop install link (`/lp/{loopId}`) waiting for the shell to present its install sheet (`LoopDetailView`).
@@ -257,6 +259,7 @@ public final class AppModel {
         pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
+        pendingVerificationSession = nil
         conversationToOpen = nil
         businessToOpen = nil
         addBusinessPresented = false
@@ -338,6 +341,8 @@ public final class AppModel {
         case .loopInstall(let id):
             // Opening an install link only shows the Loop's install sheet; nothing is installed without the customer's choice.
             loopToInstall = id
+        case .verificationSession(let code):
+            pendingVerificationSession = PendingVerificationSession(code: code)
         }
     }
 
@@ -434,6 +439,7 @@ public final class AppModel {
         pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
+        pendingVerificationSession = nil
         conversationToOpen = nil
         businessToOpen = nil
         lockedQueue.removeAll()
@@ -466,6 +472,13 @@ public struct PendingLinkSession: Sendable, Equatable {
         self.secret = secret
         self.checkCode = checkCode
     }
+}
+
+/// A verification session to review: its code (from the link, the QR, or typed by the person).
+public struct PendingVerificationSession: Sendable, Equatable, Identifiable {
+    public var code: String
+    public var id: String { code }
+    public init(code: String) { self.code = code }
 }
 
 public struct PendingApproveEnrollment: Sendable, Equatable {

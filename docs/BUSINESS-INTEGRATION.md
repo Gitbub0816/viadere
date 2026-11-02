@@ -600,6 +600,8 @@ Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `req
 
 ## 8. "Connect with Viadere" button and QR codes
 
+> Asking a customer to **verify** (age, verified name or address) from your site or app? Use the "Verify with Viadere" button: `docs/VERIFY-BUTTON.md` (web, iOS, Android).
+
 Let customers connect from your site, email or print.
 
 * **Campaign links and QR** (dashboard → *Campaigns*): generates `https://viadere.com/c/{CODE}?ctx=…&sig=…` with a signed campaign context and renders the QR code

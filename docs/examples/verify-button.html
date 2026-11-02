@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Example integration of the "Verify with Viadere" button (docs/VERIFY-BUTTON.md). Served by YOUR site, with a CSP like:
+     Content-Security-Policy: default-src 'none'; script-src https://viadere.com; style-src 'self' https://viadere.com;
+                              base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'
+     No inline script or style is needed. Your server renders `link` and `expires-at` from the ticket it created a moment ago
+     (POST /v1/business/verification-sessions) and keeps the session id with this visitor's session. -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Northwind Spirits · Checkout</title>
+<link rel="stylesheet" href="https://viadere.com/verify-button/v1/viadere-verify.css"
+      integrity="sha384-7B8nwhugpRQh8Dv3bHED/l1CVZzyssS+AABdibXE3TEPHKXRjPLLq4v2VxPDYhDP" crossorigin="anonymous">
+<link rel="stylesheet" href="/static/shop.css">
+<script src="https://viadere.com/verify-button/v1/viadere-verify.js" defer
+        integrity="sha384-vT7Sg9sIvngk1wVF56Jez/Zj9uoaJRKxrxbv76xNd8qG7oQqjvm/blG5iyeezM+Y" crossorigin="anonymous"></script>
+</head>
+<body>
+<main>
+  <h1>Checkout</h1>
+  <p>Your basket contains age-restricted items. Confirm you are 21 or older to continue.</p>
+
+  <!-- Default: filled, medium, follows the visitor's light/dark preference. -->
+  <viadere-verify link="https://viadere.com/v/K7QFM2XA" expires-at="2026-11-02T10:05:00Z">
+    <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.com/v/K7QFM2XA" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
+  </viadere-verify>
+
+  <!-- Other variants (each needs its own fresh session in a real page). -->
+  <viadere-verify link="https://viadere.com/v/K7QFM2XA" variant="outline" size="lg"></viadere-verify>
+  <viadere-verify link="https://viadere.com/v/K7QFM2XA" variant="ivory" size="sm" theme="dark"></viadere-verify>
+  <viadere-verify link="https://viadere.com/v/K7QFM2XA" display="icon"></viadere-verify>
+
+  <!-- For a signed-in, already connected customer your server can reach: offers "Send to my phone". Your own external script listens for
+       the `viadere-verify-send` event and asks YOUR server to create an ordinary verification request for that customer. -->
+  <viadere-verify link="https://viadere.com/v/K7QFM2XA" send-to-phone></viadere-verify>
+
+  <p>After you approve in the Viadere app, this page continues by itself. We only accept the result Viadere signs and sends to our server.</p>
+</main>
+</body>
+</html>
