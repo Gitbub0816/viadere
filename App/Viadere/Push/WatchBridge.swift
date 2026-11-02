@@ -7,6 +7,10 @@ import WatchConnectivity
 /// phone with Face ID; the watch just says "Review on iPhone").
 final class WatchBridge: NSObject, WCSessionDelegate, @unchecked Sendable {
     private let services: ViadereServices
+    /// The last published parts. The application context is latest-wins and replaced whole, so each push re-sends both.
+    private let lock = NSLock()
+    private var lastItems: [WatchPendingItem] = []
+    private var lastAppearance: AppearanceSelection?
 
     init(services: ViadereServices) {
         self.services = services
@@ -16,18 +20,32 @@ final class WatchBridge: NSObject, WCSessionDelegate, @unchecked Sendable {
         WCSession.default.activate()
     }
 
-    /// Pushes the current pending list to the watch (latest-wins application context).
+    /// Pushes the current pending list (and the person's appearance choice) to the watch (latest-wins application context).
     func push(_ content: HomeContent) {
+        lock.withLock { lastItems = WatchSync.items(from: content, now: Date()) }
+        publish()
+    }
+
+    /// Pushes the person's appearance choice to the watch, which draws the night side of it.
+    func push(appearance: AppearanceSelection) {
+        lock.withLock { lastAppearance = appearance }
+        publish()
+    }
+
+    private func publish() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
-        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled,
-              let data = WatchSync.encode(WatchSync.items(from: content, now: Date())) else { return }
-        try? session.updateApplicationContext([WatchSync.contextKey: data])
+        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
+        let (items, appearance) = lock.withLock { (lastItems, lastAppearance) }
+        let selection = appearance ?? AppearanceModel.read(ViadereThemeRuntime.persistence())
+        try? session.updateApplicationContext(WatchSync.context(items: items, appearance: selection))
     }
 
     // MARK: WCSessionDelegate
 
-    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: (any Error)?) {}
+    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: (any Error)?) {
+        if activationState == .activated { publish() }
+    }
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 

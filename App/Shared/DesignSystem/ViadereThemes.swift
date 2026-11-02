@@ -40,6 +40,14 @@ public final class ViadereThemeRuntime: @unchecked Sendable {
 
     init() { selection = AppearanceModel.read(Self.persistence()) }
 
+    /// Re-reads the stored choice (for long-lived extension processes that may have started before the person changed theme).
+    @discardableResult
+    public func reloadFromStore() -> AppearanceSelection {
+        let stored = AppearanceModel.read(Self.persistence())
+        current = stored
+        return stored
+    }
+
     public var current: AppearanceSelection {
         get { lock.withLock { selection } }
         set { lock.withLock { selection = newValue } }
@@ -48,7 +56,12 @@ public final class ViadereThemeRuntime: @unchecked Sendable {
     /// The theme for a light/dark appearance; `renderKey` (from the trait) wins over the process-wide value when set.
     public func theme(dark: Bool, increaseContrast: Bool, renderKey: Int = 0) -> AppearanceTheme {
         let selection = AppearanceSelection(renderKey: renderKey) ?? current
+        #if os(watchOS)
+        // The watch has no light appearance: it always draws the night side of the choice synced from the phone.
+        return selection.watchTheme
+        #else
         return selection.resolvedTheme(systemIsDark: dark, increaseContrast: increaseContrast)
+        #endif
     }
 
     /// A kit over a theme, memoized (dynamic colors resolve often).
@@ -190,4 +203,20 @@ extension View {
     /// Marks a security surface (approval, sign-in, payment, verification, profile request): no Brand Kit style reaches anything inside,
     /// whatever an enclosing business space set. The theme still applies (it is Viadere's own palette).
     public func viadereProtectedSurface() -> some View { environment(\.brandStyle, .neutral) }
+
+    /// Draws the night side of the person's chosen theme whatever light/dark side they follow. For surfaces the system always paints
+    /// dark (the Dynamic Island), where a light theme's dark text would vanish.
+    public func viadereNightSurface() -> some View { modifier(ViadereNightSurfaceModifier()) }
+}
+
+/// See `View.viadereNightSurface()`.
+struct ViadereNightSurfaceModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        let chosen = ViadereThemeRuntime.shared.current
+        let night = AppearanceSelection(light: chosen.light, dark: chosen.dark, follow: .alwaysDark,
+                                        honorsIncreaseContrast: chosen.honorsIncreaseContrast)
+        content
+            .environment(\.viadereAppearanceKey, night.renderKey)
+            .environment(\.colorScheme, .dark)
+    }
 }

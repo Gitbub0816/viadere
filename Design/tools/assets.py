@@ -69,7 +69,7 @@ def write():
     imageset('Wordmark', 'viadere-wordmark', 'viadere-wordmark-on-dark')
     imageset('LockupHorizontal', 'viadere-lockup-horizontal', 'viadere-lockup-horizontal-on-dark')
 
-    # ---- Colour sets ----
+    # ---- Colour sets (only what the system reads before code runs: launch screen Background, global Accent; the rest are themes) ----
     with open(os.path.join(B.TOOLS, 'colors.json'), encoding='utf-8') as fh:
         colors = json.load(fh)
     os.makedirs(f'{X}/Colors', exist_ok=True)

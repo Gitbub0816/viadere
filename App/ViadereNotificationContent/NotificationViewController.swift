@@ -37,6 +37,8 @@ final class NotificationViewController: UIViewController {
 
 extension NotificationViewController: @preconcurrency UNNotificationContentExtension {
     func didReceive(_ notification: UNNotification) {
+        // Draw the person's current theme (the app may have changed it since this process last read the app group).
+        ViadereThemeRuntime.shared.reloadFromStore()
         let content = notification.request.content
         let card = (content.userInfo[NotificationCard.userInfoKey] as? String).flatMap { NotificationCard.decode(json: $0) }
         present(NotificationCardView(card: card, fallbackTitle: content.title, fallbackBody: content.body))

@@ -104,8 +104,8 @@ import SwiftUI
 
 // MARK: - Brand palette
 
-/// Viadere core palette. Semantic, appearance-aware colours live in the asset catalog
-/// (`Colors/*.colorset`) and in `ViadereDesignSystem.swift` (`ViadereColor`).
+/// Viadere core palette. Semantic colours come from the appearance themes
+/// (`ViadereDesignSystem.swift`, `ViadereColor`); the asset catalog holds only `Background` and `Accent` for the launch screen and accent.
 public enum ViadereBrand {
     public static let charcoal      = Color(viadereHex: @@hex_charcoal@@)   // primary dark, text, mark (light bg)
     public static let graphite      = Color(viadereHex: @@hex_graphite@@)   // secondary dark

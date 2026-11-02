@@ -24,10 +24,13 @@ import WidgetKit
 struct ViadereLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ViadereActivityAttributes.self) { context in
+            // The extension can outlive a theme change: pick up the person's current choice from the app group before drawing.
+            let _ = ViadereThemeRuntime.shared.reloadFromStore()
             Group {
                 if case .decision(let decision) = context.state {
                     let presentation = LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName)
                     DecisionLockScreenView(interactionId: context.attributes.interactionId, presentation: presentation, accent: context.attributes.accent)
+                        .viadereProtectedSurface()
                         .widgetURL(presentation.openURL)
                 } else {
                     LockScreenActivityView(business: context.attributes.businessName,
@@ -38,6 +41,7 @@ struct ViadereLiveActivityWidget: Widget {
             .activityBackgroundTint(ViadereColor.background)
             .activitySystemActionForegroundColor(ViadereColor.textPrimary)
         } dynamicIsland: { context in
+            let _ = ViadereThemeRuntime.shared.reloadFromStore()
             if case .decision(let decision) = context.state {
                 return DecisionIsland.make(interactionId: context.attributes.interactionId,
                                            presentation: LiveDecisionPresentation(state: decision, businessName: context.attributes.businessName),
@@ -55,6 +59,7 @@ struct ViadereLiveActivityWidget: Widget {
                     ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 20, accent: context.attributes.accent)
                         .padding(.trailing, 6)
                         .padding(.top, 2)
+                        .viadereNightSurface()
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(spacing: 1) {
@@ -68,6 +73,7 @@ struct ViadereLiveActivityWidget: Widget {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
+                    .viadereNightSurface()
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -85,6 +91,7 @@ struct ViadereLiveActivityWidget: Widget {
                     }
                     .padding(.horizontal, 6)
                     .padding(.top, 6)
+                    .viadereNightSurface()
                 }
             } compactLeading: {
                 ViadereMark(style: .onDark)
@@ -93,6 +100,7 @@ struct ViadereLiveActivityWidget: Widget {
             } compactTrailing: {
                 ActivityTrailingText(trailing: presentation.trailing, isAlert: presentation.isAlert, size: 13, accent: context.attributes.accent)
                     .frame(maxWidth: 52, alignment: .trailing)
+                    .viadereNightSurface()
             } minimal: {
                 ViadereMark(style: .onDark).frame(height: 14)
             }
@@ -174,6 +182,7 @@ enum DecisionIsland {
                 DecisionTrailing(presentation: presentation, size: 18, accent: accent)
                     .padding(.trailing, 6)
                     .padding(.top, 2)
+                    .viadereNightSurface()
             }
             DynamicIslandExpandedRegion(.center) {
                 VStack(spacing: 1) {
@@ -189,6 +198,8 @@ enum DecisionIsland {
                         .minimumScaleFactor(0.85)
                         .privacySensitive()
                 }
+                .viadereNightSurface()
+                .viadereProtectedSurface()
             }
             DynamicIslandExpandedRegion(.bottom) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -203,6 +214,8 @@ enum DecisionIsland {
                 }
                 .padding(.horizontal, 6)
                 .padding(.top, 4)
+                .viadereNightSurface()
+                .viadereProtectedSurface()
             }
         } compactLeading: {
             ViadereMark(style: .onDark)
@@ -214,6 +227,7 @@ enum DecisionIsland {
                 .foregroundStyle(accent)
                 .lineLimit(1)
                 .frame(maxWidth: 56, alignment: .trailing)
+                .viadereNightSurface()
         } minimal: {
             ViadereMark(style: .onDark).frame(height: 14)
         }

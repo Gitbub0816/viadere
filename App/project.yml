@@ -199,10 +199,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationContent
         INFOPLIST_FILE: ViadereNotificationContent/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereNotificationContent/ViadereNotificationContent.entitlements
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereNotificationContent/ViadereNotificationContent.entitlements
+      properties:
+        # Read-only use: the person's appearance theme (`com.viadere.appearance.v1`). No keychain group and no vault access.
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
     dependencies:
       - package: ViadereKit
         product: ViadereKit
@@ -255,10 +262,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.Widgets
         INFOPLIST_FILE: ViadereWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereWidgets/ViadereWidgets.entitlements
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereWidgets/ViadereWidgets.entitlements
+      properties:
+        # Read-only use: the person's appearance theme (`com.viadere.appearance.v1`). No keychain group and no vault access.
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
     dependencies:
       - package: ViadereKit
         product: ViadereKit

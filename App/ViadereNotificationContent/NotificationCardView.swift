@@ -53,6 +53,7 @@ struct NotificationCardView: View {
         .padding(ViadereSpace.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ViadereColor.background)
+        .viadereProtectedSurface()
         .accessibilityElement(children: .combine)
     }
 }

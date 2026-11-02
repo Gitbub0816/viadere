@@ -26,34 +26,34 @@ import UIKit
 /// Daybreak, Folio, Sage, Beacon by day; Nightfall, Midnight, Ember, Lantern by night) and resolves per light / dark appearance. Screens
 /// read these roles and never hex values, so every theme, and every business space themed by a Brand Kit, renders consistently.
 public enum ViadereColor {
-    public static let background     = Color.viadere(.background)
-    public static let surface        = Color.viadere(.surface)
-    public static let surfaceRaised  = Color.viadere(.surfaceRaised)
+    public static var background: Color { Color.viadere(.background) }
+    public static var surface: Color { Color.viadere(.surface) }
+    public static var surfaceRaised: Color { Color.viadere(.surfaceRaised) }
     /// Recessed fill for tracks (segmented control, slider, switch off).
-    public static let track          = Color.viadere(.track)
-    public static let textPrimary    = Color.viadere(.textPrimary)
-    public static let textSecondary  = Color.viadere(.textSecondary)
+    public static var track: Color { Color.viadere(.track) }
+    public static var textPrimary: Color { Color.viadere(.textPrimary) }
+    public static var textSecondary: Color { Color.viadere(.textSecondary) }
     /// Incidental text only (placeholders, timestamps, captions beside a primary label): 3:1 (4.5:1 in the high-contrast themes).
-    public static let textTertiary   = Color.viadere(.textTertiary)
+    public static var textTertiary: Color { Color.viadere(.textTertiary) }
     /// Champagne accent (links, focus, verification). Deeper on light themes so text stays readable.
-    public static let accent         = Color.viadere(.accent)
-    public static let accentSoft     = Color.viadere(.accentSoft)
+    public static var accent: Color { Color.viadere(.accent) }
+    public static var accentSoft: Color { Color.viadere(.accentSoft) }
     /// Primary action fill: charcoal ink by day, ivory (or champagne in Midnight) by night.
-    public static let primaryFill    = Color.viadere(.primaryFill)
-    public static let onPrimary      = Color.viadere(.onPrimary)
-    public static let danger         = Color.viadere(.danger)
-    public static let success        = Color.viadere(.success)
-    public static let warning        = Color.viadere(.warning)
-    public static let hairline       = Color.viadere(.hairline)
-    public static let switchOn       = Color.viadere(.switchOn)
-    public static let knob           = Color.viadere(.knob)
+    public static var primaryFill: Color { Color.viadere(.primaryFill) }
+    public static var onPrimary: Color { Color.viadere(.onPrimary) }
+    public static var danger: Color { Color.viadere(.danger) }
+    public static var success: Color { Color.viadere(.success) }
+    public static var warning: Color { Color.viadere(.warning) }
+    public static var hairline: Color { Color.viadere(.hairline) }
+    public static var switchOn: Color { Color.viadere(.switchOn) }
+    public static var knob: Color { Color.viadere(.knob) }
     /// Card shadow: barely there on light themes, none on dark ones.
-    public static let shadow         = Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.palette.shadowOpacity) }
+    public static var shadow: Color { Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.palette.shadowOpacity) } }
     /// The switch knob's small lift (all themes: the knob must read as a separate piece).
-    public static let knobShadow     = Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.isDark ? 0.4 : 0.14) }
+    public static var knobShadow: Color { Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.isDark ? 0.4 : 0.14) } }
     /// Tinted fills behind danger / success text (the opacity is part of the palette contract tested in ViadereKit).
-    public static let dangerTint     = Color.viadereDynamic { ThemeSwatch(color: $0.palette.danger.color, opacity: ThemePalette.dangerTintOpacity) }
-    public static let successTint    = Color.viadereDynamic { ThemeSwatch(color: $0.palette.success.color, opacity: ThemePalette.successTintOpacity) }
+    public static var dangerTint: Color { Color.viadereDynamic { ThemeSwatch(color: $0.palette.danger.color, opacity: ThemePalette.dangerTintOpacity) } }
+    public static var successTint: Color { Color.viadereDynamic { ThemeSwatch(color: $0.palette.success.color, opacity: ThemePalette.successTintOpacity) } }
 }
 
 extension Color {

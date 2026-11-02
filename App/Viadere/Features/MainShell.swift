@@ -109,6 +109,9 @@ struct MainShell: View {
             environment.watchBridge.push(content)
             Task { await environment.liveActivities.sync(content.statuses) }
         }
+        .onChange(of: ViadereThemeRuntime.model.selection, initial: true) { _, selection in
+            AppEnvironment.shared.watchBridge.push(appearance: selection)
+        }
         .onChange(of: model.activity.liveCandidates) { _, candidates in
             // Only statuses `LiveActivityPolicy` allows (ongoing orders, deliveries, flights, appointments; never marketing).
             Task { await AppEnvironment.shared.liveActivities.sync(candidates) }
