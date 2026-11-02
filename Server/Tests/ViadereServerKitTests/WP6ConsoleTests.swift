@@ -250,8 +250,9 @@ final class WP6ConsoleTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(ratio(palette["ac"]!, palette["bg"]!), 3, "\(name): focus ring")
         }
         // Targets of at least 24 CSS pixels (WCAG 2.2 SC 2.5.8), visible keyboard focus, responsive reflow and dark mode.
-        XCTAssertTrue(css.contains(".btn{min-height:2rem}"))
-        XCTAssertTrue(css.contains(".btn.sm{min-height:1.75rem}"), "1.75rem = 28px")
+        XCTAssertNotNil(css.range(of: #"\.btn\{[^}]*min-height:2\.25rem"#, options: .regularExpression), "2.25rem = 36px")
+        XCTAssertTrue(css.contains(".btn.sm{min-height:1.85rem"), "1.85rem = 29.6px")
+        XCTAssertTrue(css.contains(".side>nav a{display:flex;align-items:center;gap:.65rem;min-height:2.25rem"), "navigation targets")
         XCTAssertTrue(css.contains(":focus-visible{outline:2px solid"))
         XCTAssertTrue(css.contains("@media(max-width:820px)"))
         XCTAssertTrue(css.contains("-webkit-text-size-adjust:100%"))

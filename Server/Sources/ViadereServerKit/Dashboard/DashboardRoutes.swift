@@ -34,8 +34,7 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
     }
 
     private func render(_ error: APIError, request: Request, principal: DashboardPrincipal?) -> Response {
-        var message = error.message
-        if let details = error.details, !details.isEmpty { message += " (" + details.keys.sorted().joined(separator: ", ") + ")" }
+        let fields = (error.details ?? [:]).keys.sorted().map(Self.humanize)
         let title: String
         switch error.status {
         case .forbidden: title = "Not allowed"
@@ -43,9 +42,25 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
         case .tooManyRequests: title = "Slow down"
         default: title = "Could not complete that"
         }
-        let response = DashboardUI.errorPage(principal, status: error.status, title: title, message: message)
+        // A failed form submission offers a way back to the form it came from (a same-console path from the Referer, never another site).
+        var back: String?
+        if let p = principal, request.method == .POST, ![.forbidden, .notFound].contains(error.status) {
+            back = ConsoleUI.backPath(referer: request.headers.first(name: .referer), host: request.headers.first(name: .host), prefix: p.realm.home)
+        }
+        let response = DashboardUI.errorPage(principal, status: error.status, title: title, message: error.message, fields: fields, back: back)
         for (name, value) in error.headers { response.headers.replaceOrAdd(name: name, value: value) }
         return response
+    }
+
+    /// `registryNumber` → "registry number", `w0_start` → "w0 start" (field keys of validation errors, shown as words).
+    static func humanize(_ key: String) -> String {
+        var out = ""
+        for character in key {
+            if character == "_" || character == "-" || character == "." { out += " "; continue }
+            if character.isUppercase, !out.isEmpty, out.last != " " { out += " " }
+            out += character.lowercased()
+        }
+        return out
     }
 }
 
@@ -90,30 +105,33 @@ enum DashboardRoutes {
                 return DashboardResponses.redirect("/dashboard")
             }
             return DashboardUI.authPage(title: "Sign in", body: """
-            <h1>Sign in</h1><p class="mu">Use your passkey to open your organization's dashboard.</p>\
+            <h1>Sign in</h1><p class="mu">Open your organization's Viadere console with your passkey. There are no passwords.</p>\
             <form data-passkey="login" data-begin="/dashboard/auth/login/begin" data-finish="/dashboard/auth/login/finish" data-next="/dashboard">\
-            <button class="btn" type="submit">Sign in with passkey</button></form><p id="pk-msg" class="sm err" role="alert"></p>\
-            <p class="mu sm">New to Viadere? <a href="/dashboard/signup">Create an organization</a>.</p>
-            """)
+            <div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Sign in with passkey</button></div></form><p id="pk-msg" class="sm err" role="alert"></p>
+            """, footer: "New to Viadere? <a href=\"/dashboard/signup\">Create an organization</a>.")
         }
         pub.get("dashboard", "signup") { req -> Response in
-            let categories = DashboardAuthService.categories.map { "<option value=\"\($0)\">\(DashboardUI.esc($0.replacingOccurrences(of: "_", with: " ").capitalized))</option>" }.joined()
+            let categories = DashboardAuthService.categories.map { ConsoleUI.Option($0, $0.replacingOccurrences(of: "_", with: " ").capitalized) }
+            let about = ConsoleUI.fieldset("About you",
+                ConsoleUI.input("displayName", label: "Your name", id: "displayName", required: true, attrs: ["maxlength": "64", "autocomplete": "name"])
+                + ConsoleUI.input("email", label: "Work email", id: "email", type: "email", help: "We email a 6-digit code to this address to confirm it.", required: true,
+                                  attrs: ["maxlength": "254", "autocomplete": "email"]))
+            let organization = ConsoleUI.fieldset("Your organization",
+                ConsoleUI.input("organizationName", label: "Organization name", id: "organizationName", help: "The name customers see.", required: true,
+                                attrs: ["minlength": "2", "maxlength": "80", "autocomplete": "organization"])
+                + ConsoleUI.input("legalName", label: "Legal name", id: "legalName", help: "If it differs from the name above. Not shown to customers.", optional: true, attrs: ["maxlength": "120"])
+                + ConsoleUI.select("category", label: "Category", id: "category", options: categories)
+                + ConsoleUI.input("website", label: "Website", id: "website", type: "url", placeholder: "https://", help: "An https address you control.", optional: true, attrs: ["maxlength": "200"])
+                + ConsoleUI.input("requestedHandle", label: "Requested handle", id: "requestedHandle", placeholder: "yourbrand",
+                                  help: "Issued only after approval; Viadere may suggest another.", optional: true, attrs: ["maxlength": "30", "autocapitalize": "none", "spellcheck": "false"])
+                + ConsoleUI.textarea("description", label: "What will you use Viadere for?", id: "description", help: "A sentence or two helps the reviewer.", optional: true, attrs: ["maxlength": "500"]))
             return DashboardUI.authPage(title: "Create an organization", body: """
             <h1>Create an organization</h1><p class="mu">Apply to join Viadere as a verified business. A Viadere reviewer checks every application; \
             your handle and code are issued only after approval.</p>\
-            <form data-passkey="register" data-begin="/dashboard/auth/signup/begin" data-finish="/dashboard/auth/signup/finish" data-next="/dashboard/verify">\
-            <label for="displayName">Your name</label><input id="displayName" name="displayName" type="text" maxlength="64" required autocomplete="name">\
-            <label for="email">Work email</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email">\
-            <label for="organizationName">Organization name</label><input id="organizationName" name="organizationName" type="text" minlength="2" maxlength="80" required>\
-            <label for="legalName">Legal name (optional)</label><input id="legalName" name="legalName" type="text" maxlength="120">\
-            <label for="category">Category</label><select id="category" name="category">\(categories)</select>\
-            <label for="website">Website (https)</label><input id="website" name="website" type="url" maxlength="200" placeholder="https://">\
-            <label for="requestedHandle">Requested handle (optional)</label><input id="requestedHandle" name="requestedHandle" type="text" maxlength="30" placeholder="yourbrand">\
-            <label for="description">What will you use Viadere for?</label><textarea id="description" name="description" maxlength="500"></textarea>\
-            <p class="mu sm">You'll create a passkey to sign in. There are no passwords. We'll then email a 6-digit code to confirm your address; your application starts once you enter it.</p>\
-            <p><button class="btn" type="submit">Create passkey and apply</button></p></form><p id="pk-msg" class="sm err" role="alert"></p>\
-            <p class="mu sm">Already have an account? <a href="/dashboard/login">Sign in</a>.</p>
-            """)
+            <form data-passkey="register" data-begin="/dashboard/auth/signup/begin" data-finish="/dashboard/auth/signup/finish" data-next="/dashboard/verify">\(about)\(organization)\
+            \(ConsoleUI.callout(.neutral, title: "What happens next", "<p>You create a passkey to sign in (there are no passwords). We then email a 6-digit code to confirm your address; your application starts once you enter it.</p>"))\
+            <div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Create passkey and apply</button></div></form><p id="pk-msg" class="sm err" role="alert"></p>
+            """, footer: "Already have an account? <a href=\"/dashboard/login\">Sign in</a>.")
         }
         pub.get("dashboard", "invite", ":token") { req in try await invitePage(req, token: req.parameters.get("token") ?? "") }
         pub.get("dashboard", "verify") { _ in verifyPage() }
@@ -152,8 +170,8 @@ enum DashboardRoutes {
                 return verifyPage(notice: error.message, status: error.status, error: true, headers: error.headers)
             }
             return DashboardUI.authPage(title: "Email verified", body: """
-            <h1>Email verified</h1><p>Your application has been submitted for review. Sign in with the passkey you just created to see its status.</p>\
-            <p><a class="btn" href="/dashboard/login">Sign in</a></p>
+            <h1>Email verified</h1>\(ConsoleUI.callout(.success, "<p>Your application has been submitted for review.</p>"))<p>Sign in with the passkey you just created to follow its status.</p>\
+            <div class="form-actions">\(ConsoleUI.linkButton("Sign in", href: "/dashboard/login", .primary))</div>
             """, script: false)
         }
         ceremonies.post("dashboard", "verify", "resend") { req -> Response in
@@ -277,14 +295,17 @@ enum DashboardRoutes {
 
     /// The sign-up verification page (public). `notice` is a fixed server message, escaped anyway.
     static func verifyPage(notice: String? = nil, status: HTTPStatus = .ok, error: Bool = false, headers: [String: String] = [:]) -> Response {
-        let note = notice.map { "<p class=\"sm\(error ? " err" : "")\" role=\"\(error ? "alert" : "status")\">\(DashboardUI.esc($0))</p>" } ?? ""
+        let note = notice.map { error ? ConsoleUI.callout(.danger, urgent: true, "<p>\(DashboardUI.esc($0))</p>") : ConsoleUI.callout(.success, "<p>\(DashboardUI.esc($0))</p>") } ?? ""
         let response = DashboardUI.authPage(title: "Verify your email", body: """
         <h1>Check your email</h1><p class="mu">Enter the 6-digit code we sent to the address you signed up with. Until you do, your account is not active.</p>\(note)\
-        <form method="post" action="/dashboard/verify"><label for="email">Email</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="email">\
-        <label for="code">Code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required>\
-        <p><button class="btn" type="submit">Verify</button></p></form>\
-        <form method="post" action="/dashboard/verify/resend"><label for="remail">No code? Send a new one to</label><input id="remail" name="email" type="email" maxlength="254" required>\
-        <p><button class="btn s" type="submit">Send a new code</button></p></form>
+        <form method="post" action="/dashboard/verify">\
+        \(ConsoleUI.input("email", label: "Email", id: "email", type: "email", required: true, attrs: ["maxlength": "254", "autocomplete": "email"]))\
+        \(ConsoleUI.input("code", label: "Code", id: "code", help: "Six digits; spaces are fine.", required: true,
+                          attrs: ["inputmode": "numeric", "autocomplete": "one-time-code", "pattern": "[0-9 ]{6,7}", "maxlength": "7"]))\
+        <div class="form-actions"><button class="btn wide" type="submit">Verify</button></div></form><hr>\
+        <form method="post" action="/dashboard/verify/resend">\
+        \(ConsoleUI.input("email", label: "No code? Send a new one to", id: "remail", type: "email", required: true, attrs: ["maxlength": "254", "autocomplete": "email"]))\
+        <div class="form-actions"><button class="btn s" type="submit">Send a new code</button></div></form>
         """, script: false, status: status)
         for (name, value) in headers { response.headers.replaceOrAdd(name: name, value: value) }
         return response
@@ -299,7 +320,7 @@ enum DashboardRoutes {
             return DashboardUI.authPage(title: "Invitation", body: "<h1>Invitation not valid</h1><p>This invitation has expired or was already used. Ask your admin for a new one.</p>", script: false, status: .gone)
         }
         let role = OrgRole(rawValue: invite.role)?.title ?? "Member"
-        let note = notice.map { "<p class=\"sm\(error ? " err" : "")\" role=\"\(error ? "alert" : "status")\">\(DashboardUI.esc($0))</p>" } ?? ""
+        let note = notice.map { error ? ConsoleUI.callout(.danger, urgent: true, "<p>\(DashboardUI.esc($0))</p>") : ConsoleUI.callout(.success, "<p>\(DashboardUI.esc($0))</p>") } ?? ""
         // An unverified sign-up for the address does not count: it never blocks the invitee.
         let existing = try await DashboardUserRecord.query(on: req.db).filter(\.$emailHash == invite.emailHash).filter(\.$status != "unverified").count() > 0
         let response: Response
@@ -309,20 +330,20 @@ enum DashboardRoutes {
             if let cookie = req.requireCookie(.business), let session = try await DashboardSessionStore(db: req.db, ctx: ctx).authenticate(token: cookie, realm: .business),
                let user = try await DashboardUserRecord.find(session.userId, on: req.db), ConstantTime.equals(user.emailHash, invite.emailHash) {
                 let csrf = DashboardSessionStore.csrfToken(sessionToken: cookie, hasher: ctx.hasher)
-                accept = "<form method=\"post\" action=\"/dashboard/invite/\(DashboardUI.esc(token))/accept\"><input type=\"hidden\" name=\"_csrf\" value=\"\(DashboardUI.esc(csrf))\"><button class=\"btn\" type=\"submit\">Accept invitation</button></form>"
+                accept = "<form method=\"post\" action=\"/dashboard/invite/\(DashboardUI.esc(token))/accept\"><input type=\"hidden\" name=\"_csrf\" value=\"\(DashboardUI.esc(csrf))\"><div class=\"form-actions\"><button class=\"btn wide\" type=\"submit\">Accept invitation</button></div></form>"
             } else {
-                accept = "<p><a class=\"btn\" href=\"/dashboard/login\">Sign in to accept</a></p>"
+                accept = "<div class=\"form-actions\">\(ConsoleUI.linkButton("Sign in to accept", href: "/dashboard/login", .primary))</div>"
             }
-            response = DashboardUI.authPage(title: "Invitation", body: "<h1>Join \(DashboardUI.esc(business.displayName))</h1><p>You've been invited as <strong>\(DashboardUI.esc(role))</strong>. You already have a Viadere account, so sign in to accept.</p>\(accept)", script: false, status: status)
+            response = DashboardUI.authPage(title: "Invitation", body: "<h1>Join \(DashboardUI.esc(business.displayName))</h1><p>You've been invited as \(ConsoleUI.pill(role, .accent)). You already have a Viadere account, so sign in to accept.</p>\(accept)", script: false, status: status)
         } else {
             response = DashboardUI.authPage(title: "Invitation", body: """
-            <h1>Join \(DashboardUI.esc(business.displayName))</h1><p class="mu">You've been invited as <strong>\(DashboardUI.esc(role))</strong>. Confirm your email with a code, then create a passkey to sign in.</p>\(note)\
-            <form method="post" action="/dashboard/invite/\(DashboardUI.esc(token))/code"><p><button class="btn s" type="submit">Email me a code</button></p></form>\
-            <form data-passkey="register" data-begin="/dashboard/auth/invite/begin" data-finish="/dashboard/auth/invite/finish" data-next="/dashboard">\
+            <h1>Join \(DashboardUI.esc(business.displayName))</h1><p class="mu">You've been invited as \(ConsoleUI.pill(role, .accent)). Two steps: confirm your email with a code, then create a passkey to sign in.</p>\(note)\
+            <h2>1. Get a code</h2><form method="post" action="/dashboard/invite/\(DashboardUI.esc(token))/code"><div class="form-actions"><button class="btn s" type="submit">Email me a code</button></div></form>\
+            <h2>2. Create your passkey</h2><form data-passkey="register" data-begin="/dashboard/auth/invite/begin" data-finish="/dashboard/auth/invite/finish" data-next="/dashboard">\
             <input type="hidden" name="token" value="\(DashboardUI.esc(token))">\
-            <label for="displayName">Your name</label><input id="displayName" name="displayName" type="text" maxlength="64" required autocomplete="name">\
-            <label for="code">Code from the email</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>\
-            <p><button class="btn" type="submit">Create passkey and join</button></p></form><p id="pk-msg" class="sm err" role="alert"></p>
+            \(ConsoleUI.input("displayName", label: "Your name", id: "displayName", required: true, attrs: ["maxlength": "64", "autocomplete": "name"]))\
+            \(ConsoleUI.input("code", label: "Code from the email", id: "code", required: true, attrs: ["inputmode": "numeric", "autocomplete": "one-time-code", "maxlength": "7"]))\
+            <div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Create passkey and join</button></div></form><p id="pk-msg" class="sm err" role="alert"></p>
             """, status: status)
         }
         for (name, value) in headers { response.headers.replaceOrAdd(name: name, value: value) }
@@ -336,26 +357,64 @@ enum DashboardRoutes {
         try p.require(.viewOverview)
         let days = req.query[Int.self, at: "days"] ?? 30
         let o = try await DashboardAnalytics(db: req.db, ctx: req.ctx).overview(businessId: businessId, days: days)
-        let periods = [7, 30, 90].map { "<a class=\"btn sm \($0 == o.days ? "" : "s")\" href=\"/dashboard?days=\($0)\">\($0) days</a>" }.joined()
-        let tiles = """
-        <div class="grid">\(DashboardFormat.stat(String(o.totalIssued), "Interactions issued"))\(DashboardFormat.stat(String(o.totalDecided), "Decided"))\
-        \(DashboardFormat.stat(DashboardFormat.duration(o.medianLatency), "Median decision time"))\
-        \(DashboardFormat.stat(DashboardFormat.duration(o.p90Latency), "90th percentile"))</div>
-        <div class="grid">\(DashboardFormat.stat(DashboardFormat.percent(o.webhookSuccessRate), "Webhook delivery success"))\
-        \(DashboardFormat.stat(DashboardFormat.percent(o.channelSuccessRate), "SMS / RCS delivery success"))\
-        \(DashboardFormat.stat(String(o.optOuts), "Opt-outs (revocations and disconnects)"))\
-        \(DashboardFormat.stat(String(o.reports), "\"Not me\" reports"))</div>
-        """
-        let chart = "<div class=\"card\"><h2>Interactions per day</h2>\(DashboardFormat.barChart(o.daily, label: "Interactions issued per day"))</div>"
-        let rows = zip(o.issuedByKind, o.decidedByKind).map { issued, decided in
-            [DashboardUI.esc(issued.kind), String(issued.count), String(decided.count),
-             issued.count == 0 ? "—" : DashboardFormat.percent(Double(decided.count) / Double(issued.count))]
+        let periods = ConsoleUI.segmented([7, 30, 90].map { ("\($0) days", "/dashboard?days=\($0)", $0 == o.days) }, label: "Period")
+        let decisionRate = o.totalIssued == 0 ? nil : DashboardFormat.percent(Double(o.totalDecided) / Double(o.totalIssued))
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(o.totalIssued), "Interactions issued", hint: "Live traffic, last \(o.days) days"),
+            ConsoleUI.Stat(String(o.totalDecided), "Decided", hint: decisionRate.map { "\($0) of issued" }),
+            ConsoleUI.Stat(DashboardFormat.duration(o.medianLatency), "Median decision time", hint: "90th percentile \(DashboardFormat.duration(o.p90Latency))"),
+            ConsoleUI.Stat(String(o.activeRelationships), "Connected customers"),
+        ]) + ConsoleUI.sectionTitle("Delivery and trust", description: "How reliably your messages arrive and how customers respond.") + ConsoleUI.stats([
+            ConsoleUI.Stat(DashboardFormat.percent(o.webhookSuccessRate), "Webhook delivery success", href: p.can(.viewWebhooks) ? "/dashboard/webhooks/deliveries" : nil),
+            ConsoleUI.Stat(DashboardFormat.percent(o.channelSuccessRate), "SMS / RCS delivery success"),
+            ConsoleUI.Stat(String(o.optOuts), "Opt-outs (revocations and disconnects)"),
+            ConsoleUI.Stat(String(o.reports), "\"Not me\" reports", hint: o.reports > 0 ? "Customers said a request wasn't theirs" : nil, tone: o.reports > 0 ? .warning : nil),
+        ])
+        let chart = ConsoleUI.card("Interactions per day", description: "Issued per day, all kinds.", DashboardFormat.barChart(o.daily, label: "Interactions issued per day"))
+        let rows = zip(o.issuedByKind, o.decidedByKind).map { issued, decided -> [ConsoleUI.Cell] in
+            let rate = issued.count == 0 ? nil : Double(decided.count) / Double(issued.count)
+            return [.text(issued.kind), .number(issued.count), .number(decided.count), ConsoleUI.Cell(html: rate.map { DashboardFormat.percent($0) } ?? "—", sort: rate.map { .number($0) })]
         }
-        let byKind = "<div class=\"card\"><h2>By kind</h2>\(DashboardFormat.table(["Kind", "Issued", "Decided", "Decision rate"], rows, caption: "Interactions by kind"))</div>"
+        let byKind = ConsoleUI.card("By kind", ConsoleUI.table([ConsoleUI.Column("Kind", key: "kind"), ConsoleUI.Column("Issued", key: "issued", numeric: true),
+                                                                 ConsoleUI.Column("Decided", key: "decided", numeric: true), ConsoleUI.Column("Decision rate", key: "rate", numeric: true)],
+                                                                rows, caption: "Interactions by kind", state: ConsoleUI.TableState(req, id: "kind"), empty: "No interactions in this period."))
         let verifyCard = try await VerifyDashboard.card(db: req.db, ctx: req.ctx, businessId: businessId, days: o.days)
-        let note = "<p class=\"mu sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>"
-        return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "The last \(o.days) days", actions: periods,
-                                        flash: DashboardFormat.flash(req), body: tiles + chart + byKind + verifyCard + note)
+        let note = ConsoleUI.callout(.neutral, "<p class=\"sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>")
+        let attention = await attentionCard(req, p: p, businessId: businessId)
+        return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "How your organization is doing over the last \(o.days) days.", actions: periods,
+                                        flash: DashboardFormat.flash(req), body: attention + tiles + "<div class=\"cols\">\(chart)\(byKind)</div>" + verifyCard + note)
+    }
+
+    /// "Needs your attention": open work the signed-in person can act on, each item shown only to roles that may open the page it links to.
+    private static func attentionCard(_ req: Request, p: DashboardPrincipal, businessId: UUID) async -> String {
+        var items: [(ConsoleUI.Tone, ConsoleUI.Icon, String, String, String)] = []
+        if p.can(.viewOrganization) || p.can(.manageOrganization), let state = try? await OnboardingService(db: req.db, ctx: req.ctx).state(businessId: businessId) {
+            if !state.domainVerified {
+                items.append((.accent, .building, "Verify a domain you control", "It unlocks the sandbox and API keys.", "/dashboard/organization/domains"))
+            } else if state.goLive == .none || state.goLive == .rejected {
+                let blockers = state.requestBlockers
+                items.append((.accent, .building, blockers.isEmpty ? "Request production access" : "Finish onboarding",
+                              blockers.isEmpty ? "Everything is ready for the go-live review." : "Next: \(blockers.first!.title).", "/dashboard/organization"))
+            }
+            if !state.contractsCurrent, p.can(.viewCompliance) {
+                items.append((.warning, .document, "An agreement needs your acceptance", "Production access and some capabilities wait for it.", "/dashboard/compliance"))
+            }
+        }
+        if p.can(.approveChanges), let open = try? await PendingChanges(db: req.db, ctx: req.ctx).open(businessId: businessId) {
+            let waiting = open.filter { $0.status == "pending" && $0.requestedBy != p.user.id }.count
+            if waiting > 0 { items.append((.warning, .approve, "\(waiting) request\(waiting == 1 ? "" : "s") wait for a second person", "Keys and roles under two-person approval.", "/dashboard/security/approvals")) }
+        }
+        if p.can(.viewInbox), let staff = p.user.id, let unread = try? await LoopInbox(db: req.db, ctx: req.ctx).unreadCount(businessId: businessId, staffId: staff), unread > 0 {
+            items.append((.accent, .inbox, "\(unread) unread request\(unread == 1 ? "" : "s") in the inbox", "Customers are waiting for your answer.", "/dashboard/inbox"))
+        }
+        if p.can(.viewWebhooks), let dead = try? await WebhookDeliveryRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$status == "dead").count(), dead > 0 {
+            items.append((.danger, .alert, "\(dead) webhook deliver\(dead == 1 ? "y" : "ies") failed for good", "Fix the endpoint, then replay them.", "/dashboard/webhooks/deliveries"))
+        }
+        guard !items.isEmpty else { return "" }
+        let list = items.map { tone, icon, title, detail, href in
+            "<li class=\"\(tone.cls)\"><div>\(ConsoleUI.icon(icon))<div><strong>\(DashboardUI.esc(title))</strong><br><span class=\"mu sm\">\(DashboardUI.esc(detail))</span></div></div>\(ConsoleUI.linkButton("Open", href: href, .secondary, small: true, ariaLabel: "Open: \(title)"))</li>"
+        }.joined()
+        return ConsoleUI.card("Needs your attention", "<ul class=\"attn\">\(list)</ul>")
     }
 
     // MARK: Templates
@@ -364,27 +423,30 @@ enum DashboardRoutes {
         let (p, _) = try req.businessDashboard
         try p.require(.viewTemplates)
         let cards = InteractionTemplates.all(now: req.ctx.now).map { t in
-            """
-            <div class="card"><h2>\(DashboardUI.esc(t.title))</h2><p class="mu">\(DashboardUI.esc(t.summary))</p>\
-            <p class="sm"><span class="badge">\(DashboardUI.esc(t.method))</span> <code>\(DashboardUI.esc(t.path))</code></p><pre>\(DashboardUI.esc(t.json))</pre></div>
-            """
+            ConsoleUI.card(t.title, description: t.summary, actions: ConsoleUI.pill(t.method, .neutral),
+                           "<p class=\"sm\"><code>\(DashboardUI.esc(t.method)) \(DashboardUI.esc(t.path))</code></p><pre>\(DashboardUI.esc(t.json))</pre>")
         }.joined()
-        let intro = "<p class=\"mu\">Replace the placeholder <code>relationshipId</code> with a connected customer's. Every request needs an <code>Idempotency-Key</code> header equal to the body's <code>idempotencyKey</code>. Security kinds are only ever approved on the customer's device — never by text.</p>"
-        return DashboardUI.businessPage(p, title: "Templates", active: "/dashboard/templates", subtitle: "Copy a request for the most common interactions.", body: intro + cards)
+        let intro = ConsoleUI.callout(.accent, title: "Before you send", """
+        <ul><li>Replace the placeholder <code>relationshipId</code> with a connected customer's.</li>\
+        <li>Every request needs an <code>Idempotency-Key</code> header equal to the body's <code>idempotencyKey</code>.</li>\
+        <li>Security kinds are only ever approved on the customer's device, never by text.</li></ul>
+        """)
+        return DashboardUI.businessPage(p, title: "Templates", active: "/dashboard/templates", subtitle: "Copy a request for the most common interactions.",
+                                        body: intro + "<div class=\"cols\">\(cards)</div>")
     }
 
     // MARK: Campaigns
 
     private static func campaignForm(_ p: DashboardPrincipal, verified: Bool) -> String {
-        guard verified else { return "<div class=\"notice\">Campaign links and QR codes are available after Viadere verifies your organization.</div>" }
-        return """
-        <div class="card"><h2>Create a link</h2><form method="post" action="/dashboard/campaigns">\(DashboardUI.csrf(p))\
-        <div class="cols"><div><label for="campaign">Campaign</label><input id="campaign" name="campaign" type="text" maxlength="64" required placeholder="spring-flyer"></div>\
-        <div><label for="action">Action (optional)</label><input id="action" name="action" type="text" maxlength="64" placeholder="enroll_rewards"></div>\
-        <div><label for="days">Valid for</label><select id="days" name="days"><option value="90">90 days</option><option value="30">30 days</option><option value="365">1 year</option><option value="0">No expiry</option></select></div></div>\
-        <p class="mu sm">The link carries your permanent code plus a signed campaign context. It never contains customer data. The QR code is generated here; nothing is sent to a third party.</p>\
-        <button class="btn" type="submit">Generate link and QR</button></form></div>
-        """
+        guard verified else {
+            return ConsoleUI.callout(.accent, title: "Available after verification", "<p>Campaign links and QR codes are available after Viadere verifies your organization. <a href=\"/dashboard/organization\">See what's left</a></p>")
+        }
+        let fields = ConsoleUI.input("campaign", label: "Campaign", id: "campaign", placeholder: "spring-flyer", help: "A name you'll recognize in reports.", required: true, attrs: ["maxlength": "64"])
+            + ConsoleUI.input("action", label: "Action", id: "action", placeholder: "enroll_rewards", help: "What the app offers when the link opens.", optional: true, attrs: ["maxlength": "64"])
+            + ConsoleUI.select("days", label: "Valid for", id: "days", options: [ConsoleUI.Option("90", "90 days"), ConsoleUI.Option("30", "30 days"), ConsoleUI.Option("365", "1 year"), ConsoleUI.Option("0", "No expiry")],
+                               help: "After this the plain code still works.")
+        return ConsoleUI.card("Create a link", description: "The link carries your permanent code plus a signed campaign context. It never contains customer data, and the QR code is generated here: nothing is sent to a third party.",
+                              ConsoleUI.form("/dashboard/campaigns", csrf: DashboardUI.csrf(p), "<div class=\"cols\">\(fields)</div>" + ConsoleUI.formActions(ConsoleUI.button("Generate link and QR"))))
     }
 
     private static func campaignsPage(_ req: Request) async throws -> Response {
@@ -400,15 +462,17 @@ enum DashboardRoutes {
         let result = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaign(name: form.campaign, action: form.action, validDays: form.days ?? 90)
         let svg = result.qr.svg(title: "QR code for your Viadere connect link")
         let expires = result.expiresAt.map { "Expires \(DashboardFormat.date($0))." } ?? "No expiry."
-        let body = """
-        <div class="card"><h2>Your campaign link</h2><div class="cols"><div><div class="qr">\(svg)</div></div><div>\
-        <h3>Link with signed context</h3><pre>\(DashboardUI.esc(result.link.urlString))</pre><p class="mu sm">\(expires) If the context expires or is invalid, the plain code still works.</p>\
-        <h3>Plain link</h3><pre>\(DashboardUI.esc(result.plainLink.urlString))</pre>\
+        let download = """
         <form method="post" action="/dashboard/campaigns/download">\(DashboardUI.csrf(p))<input type="hidden" name="campaign" value="\(DashboardUI.esc(form.campaign))">\
         <input type="hidden" name="action" value="\(DashboardUI.esc(form.action ?? ""))"><input type="hidden" name="days" value="\(form.days ?? 90)">\
-        <button class="btn s" type="submit">Download SVG</button></form></div></div></div>
-        """ + campaignForm(p, verified: true)
-        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", body: body)
+        <button class="btn s" type="submit">Download SVG</button></form>
+        """
+        let body = ConsoleUI.card("Your campaign link", description: "Print the QR code or share the link. Both open Viadere to your business.", actions: download, """
+        <div class="split"><div><h3>Link with signed context</h3><pre>\(DashboardUI.esc(result.link.urlString))</pre><p class="mu sm">\(expires) If the context expires or is invalid, the plain code still works.</p>\
+        <h3>Plain link</h3><pre>\(DashboardUI.esc(result.plainLink.urlString))</pre></div><div><div class="qr">\(svg)</div></div></div>
+        """) + campaignForm(p, verified: true)
+        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: "Links and QR codes that open Viadere to your business.",
+                                        flash: "Link created.", body: body)
     }
 
     private static func downloadCampaign(_ req: Request) async throws -> Response {
@@ -428,12 +492,18 @@ enum DashboardRoutes {
         let (p, businessId) = try req.businessDashboard
         try p.require(.viewConsent)
         let status = try await DashboardAnalytics(db: req.db, ctx: req.ctx).consentStatus(businessId: businessId)
-        let rows = status.rows.map { [DashboardUI.esc($0.purpose.rawValue), String($0.granted), String($0.notGranted)] }
-        let body = """
-        <div class="grid">\(DashboardFormat.stat(String(status.active), "Connected customers"))\(DashboardFormat.stat(String(status.disconnected), "Disconnected"))</div>\
-        <div class="card"><h2>Consent by purpose</h2>\(DashboardFormat.table(["Purpose", "Granted", "Not granted"], rows, caption: "Consent by purpose"))\
-        <p class="mu sm">Counts of current relationships only. Customers control these; marketing and rewards are off until a customer opts in, and security and account-service messages can't be turned off while connected. Individual customers are not shown.</p></div>
-        """
+        let rows = status.rows.map { row -> [ConsoleUI.Cell] in
+            let total = row.granted + row.notGranted
+            let share = total == 0 ? nil : Double(row.granted) / Double(total)
+            return [.text(row.purpose.rawValue.replacingOccurrences(of: "_", with: " ")), .number(row.granted), .number(row.notGranted),
+                    ConsoleUI.Cell(html: share.map { DashboardFormat.percent($0) } ?? "—", sort: share.map { .number($0) })]
+        }
+        let body = ConsoleUI.stats([ConsoleUI.Stat(String(status.active), "Connected customers"), ConsoleUI.Stat(String(status.disconnected), "Disconnected")])
+            + ConsoleUI.card("Consent by purpose", description: "Counts of current relationships only. Individual customers are not shown.",
+                             ConsoleUI.table([ConsoleUI.Column("Purpose", key: "purpose"), ConsoleUI.Column("Granted", key: "granted", numeric: true),
+                                              ConsoleUI.Column("Not granted", key: "not", numeric: true), ConsoleUI.Column("Opt-in rate", key: "rate", numeric: true)],
+                                             rows, caption: "Consent by purpose", state: ConsoleUI.TableState(req, id: "consent"), empty: "No connected customers yet."))
+            + ConsoleUI.callout(.neutral, title: "Customers decide", "<p class=\"sm\">Marketing and rewards are off until a customer opts in. Security and account-service messages can't be turned off while a customer is connected.</p>")
         return DashboardUI.businessPage(p, title: "Consent", active: "/dashboard/consent", subtitle: "Where your customers stand, in aggregate.", body: body)
     }
 
@@ -455,15 +525,15 @@ enum DashboardRoutes {
             let actor = e.actorId.flatMap { names[$0] } ?? (e.actorKind == AuditActor.Kind.consumer.rawValue ? (e.actorId ?? "customer") : (e.actorId.map { "…" + $0.suffix(6) } ?? ""))
             let metaText = e.metadata.keys.sorted().map { "\($0)=\(e.metadata[$0] ?? "")" }.joined(separator: " ")
             return [DashboardFormat.date(e.occurredAt), "<code>\(DashboardUI.esc(e.action))</code>",
-                    DashboardFormat.badge(e.outcome, e.outcome == "success" ? "ok" : "dg"), "\(DashboardUI.esc(e.actorKind)) \(DashboardUI.esc(actor))",
-                    DashboardUI.esc([e.subjectType, e.subjectId.map { "…" + $0.suffix(6) }].compactMap { $0 }.joined(separator: " ")), "<span class=\"mu sm\">\(DashboardUI.esc(metaText))</span>"]
+                    DashboardFormat.badge(e.outcome, e.outcome == "success" ? "ok" : "dg"), "<span class=\"mu sm\">\(DashboardUI.esc(e.actorKind))</span><br>\(DashboardUI.esc(actor))",
+                    DashboardUI.esc([e.subjectType, e.subjectId.map { "…" + $0.suffix(6) }].compactMap { $0 }.joined(separator: " ")), metaText.isEmpty ? "<span class=\"mu\">—</span>" : "<code class=\"sm\">\(DashboardUI.esc(metaText))</code>"]
         }
-        var pager = "<div class=\"row\">"
-        if page > 0 { pager += "<a class=\"btn s sm\" href=\"/dashboard/audit?page=\(page - 1)\">Newer</a>" }
-        if events.count > size { pager += "<a class=\"btn s sm\" href=\"/dashboard/audit?page=\(page + 1)\">Older</a>" }
-        pager += "</div>"
-        let body = "<div class=\"card\">\(DashboardFormat.table(["When", "Action", "Outcome", "Actor", "Subject", "Details"], Array(rows), empty: "No events yet.", caption: "Audit log"))\(pager)</div><p class=\"mu sm\">Append-only and hash-chained. Secrets and message content are never recorded.</p>"
-        return DashboardUI.businessPage(p, title: "Audit log", active: "/dashboard/audit", subtitle: "Everything that happened in your organization.", body: body)
+        let newer = page > 0 ? ConsoleUI.linkButton("Newer", href: "/dashboard/audit?page=\(page - 1)", small: true) : "<span></span>"
+        let older = events.count > size ? ConsoleUI.linkButton("Older", href: "/dashboard/audit?page=\(page + 1)", small: true) : "<span></span>"
+        let pager = page == 0 && events.count <= size ? "" : "<nav class=\"pager\" aria-label=\"Audit log pages\">\(newer)<span>Page \(page + 1), newest first</span>\(older)</nav>"
+        let body = ConsoleUI.panel(DashboardFormat.table(["When", "Action", "Outcome", "Actor", "Subject", "Details"], Array(rows), empty: "No events yet.", caption: "Audit log") + pager)
+            + ConsoleUI.callout(.neutral, "<p class=\"sm\">Append-only and hash-chained. Secrets and message content are never recorded.</p>")
+        return DashboardUI.businessPage(p, title: "Audit log", active: "/dashboard/audit", subtitle: "Everything that happened in your organization, newest first.", body: body)
     }
 
     // MARK: Team
@@ -478,46 +548,59 @@ enum DashboardRoutes {
         let ctx = req.ctx
         let canManage = p.can(.manageTeam)
         let assignable = OrgRole.allCases.sorted(by: >).filter { p.role?.grantableRoles.contains($0) == true }
-        let memberRows = members.map { m -> [String] in
+        let memberRows = members.map { m -> [ConsoleUI.Cell] in
             let user = byId[m.userId]
             let email = user.flatMap { try? ctx.cipher.openString($0.emailCiphertext, context: "dashboard_users.email", rowId: $0.id!) } ?? ""
             let isSelf = m.userId == p.user.id
-            var role = DashboardFormat.badge(OrgRole(rawValue: m.role)?.title ?? m.role)
+            let roleTitle = OrgRole(rawValue: m.role)?.title ?? m.role
+            var role = DashboardFormat.badge(roleTitle)
             var actions = ""
             let touchable = canManage && !isSelf && (OrgRole(rawValue: m.role).map { p.role?.grantableRoles.contains($0) == true } ?? false)
+            let name = user?.displayName ?? "—"
             if touchable, let id = m.id?.uuidString.lowercased() {
-                let options = assignable.map { "<option value=\"\($0.rawValue)\"\($0.rawValue == m.role ? " selected" : "")>\($0.title)</option>" }.joined()
-                role = "<form method=\"post\" action=\"/dashboard/team/members/\(id)/role\" class=\"row\">\(DashboardUI.csrf(p))<select name=\"role\" aria-label=\"Role\">\(options)</select><button class=\"btn s sm\" type=\"submit\">Save</button></form>"
-                actions = "<form method=\"post\" action=\"/dashboard/team/members/\(id)/remove\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Remove</button></form>"
+                let options = assignable.map { ConsoleUI.Option($0.rawValue, $0.title, selected: $0.rawValue == m.role) }
+                role = "<form method=\"post\" action=\"/dashboard/team/members/\(id)/role\" class=\"row\">\(DashboardUI.csrf(p))<select name=\"role\" aria-label=\"Role of \(DashboardUI.esc(name))\">\(ConsoleUI.options(options))</select>"
+                    + ConsoleUI.button("Save", .secondary, small: true, ariaLabel: "Save the role of \(name)") + "</form>"
+                actions = ConsoleUI.confirm("Remove", ariaLabel: "Remove \(name)", ConsoleUI.form("/dashboard/team/members/\(id)/remove", csrf: DashboardUI.csrf(p),
+                    "<p>\(DashboardUI.esc(name)) loses access to this organization at once and is signed out here. Removing an admin may need your passkey or a second approver.</p>"
+                        + ConsoleUI.button("Remove from the team", .dangerSolid, small: true)))
             }
-            return ["\(DashboardUI.esc(user?.displayName ?? "—"))\(isSelf ? " <span class=\"mu\">(you)</span>" : "")", DashboardUI.esc(email), role, DashboardFormat.date(m.createdAt), actions]
+            return [ConsoleUI.Cell(html: "<strong>\(DashboardUI.esc(name))</strong>\(isSelf ? " " + ConsoleUI.pill("You", .neutral) : "")", sort: .text(name)),
+                    .text(email), ConsoleUI.Cell(html: role, sort: .text(roleTitle)), .date(m.createdAt), ConsoleUI.Cell(html: actions)]
         }
         let invites = try await OrgInviteRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$state == "open")
             .filter(\.$expiresAt > ctx.now).sort(\.$createdAt, .descending).all()
-        let inviteRows = invites.map { i -> [String] in
+        let inviteRows = invites.map { i -> [ConsoleUI.Cell] in
             let email = (try? ctx.cipher.openString(i.emailCiphertext, context: "org_invites.email", rowId: i.id!)) ?? ""
             var action = ""
             if canManage, let id = i.id?.uuidString.lowercased() {
-                action = "<form method=\"post\" action=\"/dashboard/team/invites/\(id)/revoke\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Revoke</button></form>"
+                action = ConsoleUI.form("/dashboard/team/invites/\(id)/revoke", csrf: DashboardUI.csrf(p), ConsoleUI.button("Revoke", .danger, small: true, ariaLabel: "Revoke the invitation for \(email)"))
             }
-            return [DashboardUI.esc(email), DashboardFormat.badge(OrgRole(rawValue: i.role)?.title ?? i.role), DashboardFormat.date(i.expiresAt), action]
+            return [.text(email), ConsoleUI.Cell(html: DashboardFormat.badge(OrgRole(rawValue: i.role)?.title ?? i.role)), .date(i.expiresAt), ConsoleUI.Cell(html: action)]
         }
         var form = ""
         if canManage {
-            let options = assignable.map { "<option value=\"\($0.rawValue)\"\($0 == .developer ? " selected" : "")>\($0.title) — \(DashboardUI.esc($0.summary))</option>" }.joined()
-            form = """
-            <div class="card"><h2>Invite a teammate</h2><form method="post" action="/dashboard/team/invite">\(DashboardUI.csrf(p))\
-            <div class="cols"><div><label for="email">Email</label><input id="email" name="email" type="email" required maxlength="254"></div>\
-            <div><label for="role">Role</label><select id="role" name="role">\(options)</select></div></div>\
-            <p class="mu sm">We email a single-use link to this address, and the person confirms a code we email them as well. Adding an owner needs your passkey.</p>\
-            <button class="btn" type="submit">Send invitation</button></form></div>
-            """
+            let options = assignable.map { ConsoleUI.Option($0.rawValue, "\($0.title) — \($0.summary)", selected: $0 == .developer) }
+            form = ConsoleUI.card("Invite a teammate", id: "invite", description: "We email a single-use link to this address, and the person confirms a code we email them as well.",
+                ConsoleUI.form("/dashboard/team/invite", csrf: DashboardUI.csrf(p),
+                    "<div class=\"cols\">" + ConsoleUI.input("email", label: "Email", id: "email", type: "email", required: true, attrs: ["maxlength": "254", "autocomplete": "off"])
+                    + ConsoleUI.select("role", label: "Role", id: "role", options: options, help: "Give the least access the job needs. You can change it later.") + "</div>"
+                    + ConsoleUI.formActions(ConsoleUI.button("Send invitation") + "<span class=\"mu sm\">Inviting an Owner, Organization Admin or Security Admin asks for your passkey.</span>")))
         }
         let roles = OrgRole.allCases.sorted(by: >).map { "<tr><th scope=\"row\">\($0.title)</th><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
-        let body = form + "<div class=\"card\"><h2>Members</h2>\(DashboardFormat.table(["Name", "Email", "Role", "Joined", ""], memberRows, caption: "Team members"))</div>"
-            + "<div class=\"card\"><h2>Pending invitations</h2>\(DashboardFormat.table(["Email", "Role", "Expires", ""], inviteRows, empty: "None.", caption: "Pending invitations"))</div>"
-            + "<div class=\"card\"><h2>Roles</h2><div class=\"tw\"><table><caption class=\"vh\">Roles and what they can do</caption><tbody>\(roles)</tbody></table></div></div>"
-        return DashboardUI.businessPage(p, title: "Team", active: "/dashboard/team", subtitle: "Everyone signs in with their own passkey.", flash: DashboardFormat.flash(req), body: body)
+        let rolesTable = "<div class=\"tw\"><table><caption class=\"vh\">Roles and what they can do</caption><tbody>\(roles)</tbody></table></div>"
+        let state = ConsoleUI.TableState(req, id: "members")
+        let body = ConsoleUI.card("Members", description: "\(members.count) \(members.count == 1 ? "person" : "people") with access.",
+                                  ConsoleUI.table([ConsoleUI.Column("Name", key: "name"), ConsoleUI.Column("Email", key: "email"), ConsoleUI.Column("Role", key: "role"),
+                                                   ConsoleUI.Column("Joined", key: "joined"), ConsoleUI.Column("", actions: true)], memberRows, caption: "Team members", state: state))
+            + ConsoleUI.card("Pending invitations", description: "Invitations expire after \(Int(ctx.config.dashboard.inviteTTL / 86_400)) days.",
+                             ConsoleUI.table([ConsoleUI.Column("Email"), ConsoleUI.Column("Role"), ConsoleUI.Column("Expires"), ConsoleUI.Column("", actions: true)], inviteRows,
+                                             caption: "Pending invitations", empty: "No open invitations."))
+            + form
+            + ConsoleUI.card("Roles", description: "Each role gets exactly the permissions its job needs.", ConsoleUI.more("What each role can do", rolesTable))
+        let actions = canManage ? ConsoleUI.linkButton("Invite a teammate", href: "#invite", .primary, icon: .plus) : ""
+        return DashboardUI.businessPage(p, title: "Team", active: "/dashboard/team", subtitle: "Everyone signs in with their own passkey. Roles decide what each person can see and change.",
+                                        actions: actions, flash: DashboardFormat.flash(req), body: body)
     }
 
     private static func invite(_ req: Request) async throws -> Response {
@@ -526,11 +609,11 @@ enum DashboardRoutes {
         guard let role = OrgRole.parse(form.role) else { throw APIError.validation("Choose a valid role.") }
         let change = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).invite(email: form.email, role: role)
         if case .awaitingApproval = change { return DashboardResponses.redirect("/dashboard/team?m=pending") }
-        let body = """
-        <div class="card"><h2>Invitation sent</h2><p>We emailed a single-use link to the address you entered. It expires in \(Int(req.ctx.config.dashboard.inviteTTL / 86_400)) days. \
-        To join, your teammate opens it and confirms a code that we email to the same address.</p><p><a class="btn s" href="/dashboard/team">Done</a></p></div>
-        """
-        return DashboardUI.businessPage(p, title: "Invitation", active: "/dashboard/team", body: body)
+        let body = ConsoleUI.card("Invitation sent", """
+        <p>We emailed a single-use link to the address you entered. It expires in \(Int(req.ctx.config.dashboard.inviteTTL / 86_400)) days. \
+        To join, your teammate opens it and confirms a code that we email to the same address.</p>\(ConsoleUI.formActions(ConsoleUI.linkButton("Back to the team", href: "/dashboard/team", .primary)))
+        """)
+        return DashboardUI.businessPage(p, title: "Invitation", active: "/dashboard/team", flash: "Invitation created.", body: body)
     }
 
     // MARK: Billing
@@ -545,15 +628,22 @@ enum DashboardRoutes {
                          InvoicePreview.format(micros: $0.unitMicros), InvoicePreview.format(micros: $0.totalMicros)] }
         }
         let tier = p.business?.tier ?? "free"
-        let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(usage.totals.interactions), "Interactions this month"))\(DashboardFormat.stat(String(usage.totals.smsSegments), "SMS segments"))\(DashboardFormat.stat(String(usage.totals.rcsMessages), "RCS messages"))\(DashboardFormat.stat(tier.capitalized, "Plan"))</div>"
-        let body = tiles + """
-        <div class="card"><h2>Platform fees</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.platform), caption: "Platform fees"))\
-        <p><strong>Platform subtotal: \(InvoicePreview.format(micros: invoice.platformTotalMicros))</strong></p></div>\
-        <div class="card"><h2>Transport (carrier and provider pass-through)</h2>\(DashboardFormat.table(["Item", "Quantity", "Unit", "Amount"], lines(invoice.transport), caption: "Transport pass-through"))\
-        <p><strong>Transport subtotal: \(InvoicePreview.format(micros: invoice.transportTotalMicros))</strong></p></div>\
-        <div class="card"><h2>Preview total</h2><p class="stat"><span class="n">\(InvoicePreview.format(micros: invoice.totalMicros))</span></p>\
-        <p class="mu sm">\(DashboardFormat.date(invoice.periodStart)) – \(DashboardFormat.date(invoice.periodEnd)). This is a usage preview, not an invoice: no payment processor is connected, rates are configurable and final pricing is not yet set. Your plan affects quotas only — it never changes the priority of your messages or bypasses a customer's consent.</p></div>
-        """
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(InvoicePreview.format(micros: invoice.totalMicros), "Preview total this month", hint: "Platform \(InvoicePreview.format(micros: invoice.platformTotalMicros)) · transport \(InvoicePreview.format(micros: invoice.transportTotalMicros))"),
+            ConsoleUI.Stat(String(usage.totals.interactions), "Interactions this month"), ConsoleUI.Stat(String(usage.totals.smsSegments), "SMS segments"),
+            ConsoleUI.Stat(String(usage.totals.rcsMessages), "RCS messages"), ConsoleUI.Stat(tier.capitalized, "Plan", hint: "Quotas only; never message priority"),
+        ])
+        func linesTable(_ items: [InvoicePreview.Line], caption: String, subtotal: Int) -> String {
+            let columns = [ConsoleUI.Column("Item"), ConsoleUI.Column("Quantity", numeric: true), ConsoleUI.Column("Unit", numeric: true), ConsoleUI.Column("Amount", numeric: true)]
+            return ConsoleUI.table(columns, lines(items).map { $0.map { ConsoleUI.Cell(html: $0) } }, caption: caption, empty: "Nothing billed yet this month.")
+                + "<p class=\"row end\"><span class=\"mu\">Subtotal</span> <strong>\(InvoicePreview.format(micros: subtotal))</strong></p>"
+        }
+        let body = ConsoleUI.callout(.neutral, title: "A usage preview, not an invoice", """
+        <p class="sm">\(DashboardFormat.date(invoice.periodStart)) – \(DashboardFormat.date(invoice.periodEnd)). No payment processor is connected, rates are configurable and final pricing is not yet set. \
+        Your plan affects quotas only: it never changes the priority of your messages or bypasses a customer's consent.</p>
+        """) + tiles
+            + "<div class=\"cols\">" + ConsoleUI.card("Platform fees", linesTable(invoice.platform, caption: "Platform fees", subtotal: invoice.platformTotalMicros))
+            + ConsoleUI.card("Transport (carrier and provider pass-through)", linesTable(invoice.transport, caption: "Transport pass-through", subtotal: invoice.transportTotalMicros)) + "</div>"
         return DashboardUI.businessPage(p, title: "Billing and usage", active: "/dashboard/billing", subtitle: "Metered usage and an invoice preview for this month.", body: body)
     }
 }

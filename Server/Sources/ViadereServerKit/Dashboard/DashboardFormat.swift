@@ -56,7 +56,8 @@ enum DashboardFormat {
 
     static func flash(_ request: Request) -> String? { request.query[String.self, at: "m"].flatMap { flash[$0] } }
 
-    static func badge(_ text: String, _ kind: String = "") -> String { "<span class=\"badge \(kind)\">\(DashboardUI.esc(text))</span>" }
+    /// A status pill. `kind` is the legacy tone name (`ok`, `dg`, `mu`, `wa`, empty for accent); see `ConsoleUI.pill`.
+    static func badge(_ text: String, _ kind: String = "") -> String { ConsoleUI.pill(text, ConsoleUI.tone(legacy: kind)) }
 
     static func statusBadge(_ status: VerificationStatus) -> String {
         switch status {
@@ -67,19 +68,15 @@ enum DashboardFormat {
         }
     }
 
-    /// A data table. `caption` names it for screen-reader users (visually hidden); header cells carry `scope="col"`; an empty header cell (an
-    /// actions column) is labelled "Actions".
+    /// A data table of markup cells (no sorting). `caption` names it for screen-reader users (visually hidden); header cells carry
+    /// `scope="col"`; an empty header cell (an actions column) is labelled "Actions"; no rows renders the empty state. New pages use
+    /// `ConsoleUI.table`, which adds sortable columns, numeric alignment and pagination.
     static func table(_ headers: [String], _ rows: [[String]], empty: String = "Nothing here yet.", caption: String? = nil) -> String {
-        guard !rows.isEmpty else { return "<p class=\"mu\">\(DashboardUI.esc(empty))</p>" }
-        let head = headers.map { $0.isEmpty ? "<th scope=\"col\"><span class=\"vh\">Actions</span></th>" : "<th scope=\"col\">\(DashboardUI.esc($0))</th>" }.joined()
-        let body = rows.map { "<tr>" + $0.map { "<td>\($0)</td>" }.joined() + "</tr>" }.joined()
-        let cap = caption.map { "<caption class=\"vh\">\(DashboardUI.esc($0))</caption>" } ?? ""
-        return "<div class=\"tw\"><table>\(cap)<thead><tr>\(head)</tr></thead><tbody>\(body)</tbody></table></div>"
+        let columns = headers.map { ConsoleUI.Column($0, actions: $0.isEmpty) }
+        return ConsoleUI.table(columns, rows.map { $0.map { ConsoleUI.Cell(html: $0) } }, caption: caption ?? "Table", empty: empty)
     }
 
-    static func stat(_ value: String, _ label: String) -> String {
-        "<div class=\"stat\"><div class=\"n\">\(DashboardUI.esc(value))</div><div class=\"l\">\(DashboardUI.esc(label))</div></div>"
-    }
+    static func stat(_ value: String, _ label: String) -> String { ConsoleUI.stat(ConsoleUI.Stat(value, label)) }
 
     /// Inline-SVG bar chart (no script, no external asset).
     static func barChart(_ points: [(day: Date, count: Int)], label: String) -> String {
