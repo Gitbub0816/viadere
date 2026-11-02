@@ -65,6 +65,8 @@ struct AuthMatchGroups {
     /// then durable even though the request is refused); `reserve` repeats it inside the transaction under the row lock.
     func check(businessId: UUID, consumerId: UUID, members: AuthMatchTagMembers, alert: Bool = true) async throws {
         guard let tag = members.matchTag, AuthMatchTags.isValidTag(tag) else { throw APIError.validation("match_tag is required.", details: ["match_tag": "invalid"]) }
+        // R23-09: the prefix tag is validated like the tag (any other string would mark a request as 3-digit).
+        if let prefix = members.matchPrefixTag, !AuthMatchTags.isValidTag(prefix) { throw APIError.validation("match_prefix_tag is invalid.", details: ["match_prefix_tag": "invalid"]) }
         let open = try await AuthMatchTagRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$consumerId == consumerId).all()
             .map { MatchGroupPolicy.Open(tag: $0.tag, prefixTag: $0.prefixTag) }
         switch MatchGroupPolicy.evaluate(new: (tag, members.matchPrefixTag), open: open) {

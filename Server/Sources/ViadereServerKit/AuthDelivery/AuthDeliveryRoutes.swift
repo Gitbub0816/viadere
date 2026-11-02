@@ -95,6 +95,33 @@ enum AuthDeliveryRoutes {
             try AuthDeliveryGate.require(req.ctx)
             return try req.jsonResponse(try await AuthDeliveryDeviceService(db: req.db, ctx: req.ctx).list(principal: try req.consumer))
         }
+
+        // MARK: Push approvals (ADR-0022): behind `AUTH_DELIVERY_ENABLED` and `APPROVE_V2_ENABLED`
+        routes.api(APIRoutes.businessAuthApprovalCreate, scope: BusinessAPIKeys.Scope.approvalsManage) { req in
+            try AuthApprovalService.requireEnabled(req.ctx)
+            _ = try BusinessIdempotency.requireKey(req.idempotencyHeader)
+            let result = try await AuthApprovalService(db: req.db, ctx: req.ctx).create(principal: try req.business, body: req.bodyBytes)
+            return try req.jsonResponse(result.view, status: result.created ? .created : .ok)
+        }
+        routes.api(APIRoutes.businessAuthApprovalGet, scope: BusinessAPIKeys.Scope.approvalsManage) { req in
+            try AuthApprovalService.requireEnabled(req.ctx)
+            let principal = try req.business
+            try await AuthDeliveryService(db: req.db, ctx: req.ctx).requireLiveKeyAssurance(principal)
+            let service = ApproveRequestService(db: req.db, ctx: req.ctx)
+            guard let id = req.parameters.get("requestId"), ApproveIdentifiers.isValidRequestId(id) else { throw APIError.notFound }
+            let record = try await service.record(requestId: id, principal: principal)
+            guard record.matchDigits != nil else { throw APIError.notFound }
+            return try req.jsonResponse(try service.view(record))
+        }
+        routes.api(APIRoutes.approveRequestDeny) { req in
+            try AuthApprovalService.requireEnabled(req.ctx)
+            let body: ApproveDenyRequest
+            if req.bodyBytes.isEmpty { body = ApproveDenyRequest() } else {
+                do { body = try ViadereJSON.decode(ApproveDenyRequest.self, from: req.bodyBytes) } catch { throw APIError.validation("The request failed validation.") }
+            }
+            return try req.jsonResponse(try await AuthApprovalService(db: req.db, ctx: req.ctx).deny(principal: try req.consumer, deliveryId: try req.uuidPath("approvalId"),
+                                                                                                    report: body.report ?? false))
+        }
         routes.api(APIRoutes.authDeliveryGet) { req in
             try AuthDeliveryGate.require(req.ctx)
             return try req.jsonResponse(try await AuthDeliveryDeviceService(db: req.db, ctx: req.ctx).get(principal: try req.consumer, id: try deliveryId(req)))

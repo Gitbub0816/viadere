@@ -41,17 +41,22 @@ struct ApproveNotifier {
     }
 
     /// A generic push for a new approval request. Carries **no** business, amount or payee: the app fetches the request over the
-    /// authenticated API (and decrypts it, for an end-to-end request).
-    func pushRequest(to deviceIds: [UUID]) async {
-        guard !deviceIds.isEmpty else { return }
+    /// authenticated API (and decrypts it, for an end-to-end request). ADR-0022 §5.5 and Stage 4 review R4-03: the payload carries `req` (this device's
+    /// delivery id, so the notification's Deny can answer without unlock and Review opens the right request), the interruption level is **`active`**
+    /// (never `time-sensitive`), and `apns-collapse-id` is that same id (R23-05).
+    func pushRequest(to deliveries: [(deviceId: UUID, deliveryId: UUID)]) async {
+        guard !deliveries.isEmpty else { return }
         do {
-            let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ deviceIds).filter(\.$invalidatedAt == nil).all()
+            let byDevice = Dictionary(deliveries.map { ($0.deviceId, $0.deliveryId) }, uniquingKeysWith: { first, _ in first })
+            let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ Array(byDevice.keys)).filter(\.$invalidatedAt == nil).all()
             for token in tokens {
+                guard let deliveryId = byDevice[token.deviceId] else { continue }
+                let req = deliveryId.uuidString.lowercased()
                 let message = PushMessage(deviceToken: token.record.token, environment: token.record.environment,
                                           topic: token.record.bundleId.isEmpty ? ctx.config.appBundleID : token.record.bundleId,
                                           title: PushPayloadBuilder.genericTitle, body: "Action needed. Open to review a security request.",
-                                          category: "viadere.approve", threadID: "viadere.approve", interruptionLevel: "time-sensitive",
-                                          mutableContent: true, interactionId: nil, highPriority: true)
+                                          category: ApprovePushPayloadPolicy.category, threadID: "viadere.approve", interruptionLevel: ApprovePushPayloadPolicy.interruptionLevel,
+                                          mutableContent: true, interactionId: nil, highPriority: true, collapseID: req, approveRequestId: req)
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }

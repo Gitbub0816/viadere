@@ -157,6 +157,10 @@ final class ApproveRequestRecord: Model, @unchecked Sendable {
     @OptionalField(key: "result_jws") var resultJWS: String?
     /// Keys the request was delivered to (count).
     @Field(key: "delivered") var delivered: Int
+    /// `auth-approvals` only (`AuthApprovals.v1`): the number-match length, the business `session_handle`, and the v2 `deny_reason`.
+    @OptionalField(key: "match_digits") var matchDigits: Int?
+    @OptionalField(key: "session_handle") var sessionHandle: String?
+    @OptionalField(key: "deny_reason") var denyReason: String?
 
     init() {}
 

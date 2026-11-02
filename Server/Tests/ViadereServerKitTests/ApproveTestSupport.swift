@@ -188,7 +188,7 @@ extension TestHarness {
         let response = try fetched.json(ApprovalResultResponse.self)
         let details: ApprovalSubject = request.transaction.map { .transaction($0) } ?? .authentication(request.authentication!)
         let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: request.requestId, challenge: request.challenge ?? "",
-                                              subjectDetails: details, requestExpiresAt: nil, minimumAMR: minimum)
+                                              subjectDetails: details, numberMatch: .notRequested, requestExpiresAt: nil, minimumAMR: minimum)
         return try await ApprovalResultVerifier.verifyAndConsume(response.result, expecting: expectation, keys: keys, now: clock.now(), replayGuard: replay)
     }
 
