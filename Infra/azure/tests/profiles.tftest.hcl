@@ -242,8 +242,8 @@ run "worker_and_jobs_when_enabled" {
   }
 
   assert {
-    condition     = length(azurerm_container_app.worker) == 1 && length(azurerm_container_app_job.scheduled) == 3
-    error_message = "worker and three scheduled jobs"
+    condition     = length(azurerm_container_app.worker) == 1 && length(azurerm_container_app_job.scheduled) == 4
+    error_message = "worker and four scheduled jobs"
   }
   assert {
     condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e.value if e.name == "RUN_BACKGROUND_JOBS"]) == "false"
@@ -341,11 +341,11 @@ run "lean_private_ghcr_package" {
     ghcr_pull_username = "viadere-bot"
   }
   assert {
-    condition     = azurerm_container_app.api.registry[0].server == "ghcr.io" && azurerm_container_app.api.registry[0].password_secret_name == "ghcr-pull-token" && contains([for s in azurerm_container_app.api.secret : s.name], "ghcr-pull-token")
+    condition     = azurerm_container_app.api.registry[0].server == "ghcr.io" && azurerm_container_app.api.registry[0].password_secret_name == "ghcr-pull-credential" && contains([for s in azurerm_container_app.api.secret : s.name], "ghcr-pull-credential")
     error_message = "a private GHCR package is pulled with the read:packages token from Key Vault"
   }
   assert {
-    condition     = contains(keys(azapi_resource.kv_secret), "ghcr-pull-token") && contains(keys(azurerm_role_assignment.secret_user), "api/ghcr-pull-token")
+    condition     = contains(keys(azapi_resource.kv_secret), "ghcr-pull-credential") && contains(keys(azurerm_role_assignment.secret_user), "api/ghcr-pull-credential")
     error_message = "the pull token is a Key Vault secret readable by the api identity only through its own assignment"
   }
 }

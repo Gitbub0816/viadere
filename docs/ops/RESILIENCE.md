@@ -1,5 +1,9 @@
 # Resilience: RTO/RPO, backup and restore, degraded operation (OPS-007, OPS-008)
 
+> **Retirement note (ADR-0029, 2026-11-02):** Fly.io, Neon and Google Cloud KMS are retired. Command names below that mention `fly`, Neon or `gcloud kms` are historical and are being
+> replaced; the Azure equivalents are: `az containerapp ...` (revisions, jobs, scale: `docs/operations/ROLLBACK.md`), Flexible Server PITR (`RESILIENCE.md` section 3), Key Vault keys and
+> `kv_tool.py` (`KEY-ROTATION.md`), Log Analytics instead of `fly logs`. Authority-tier procedures: `docs/operations/INCIDENT_RESPONSE.md`. Tracked in the ledger as open work.
+
 **Status:** proposal v1, 2026-10-27. Targets below are **proposals for the product owner to approve**; nothing here has been measured yet. Each target
 becomes a commitment only after the first restore test and failover drill produce evidence (section 3.4). Owner: SRE lead.
 

@@ -3,10 +3,10 @@
 
 locals {
   api_host = "${var.api_hostname_label}.${var.apex_domain}"
-  # Enterprise hostname (Tier E, API Shield mTLS). Same Fly origin, same API layer: only the edge asks for a client certificate here.
+  # Enterprise hostname (Tier E, API Shield mTLS). Same Azure origin, same API layer: only the edge asks for a client certificate here.
   mtls_host = "${var.mtls_hostname_label}.${var.apex_domain}"
-  # Azure test hostname served through the Cloudflare Tunnel (migration phase 1, cloudflare_tunnel.tf); empty when not used.
-  azure_test_host = var.enable_azure_tunnel && var.azure_test_hostname_label != "" ? "${var.azure_test_hostname_label}.${var.apex_domain}" : ""
+  # Azure test hostname served through the Cloudflare Tunnel (cloudflare_tunnel.tf); empty when not used.
+  azure_test_host = var.azure_test_hostname_label != "" ? "${var.azure_test_hostname_label}.${var.apex_domain}" : ""
   # Hosts that serve the API (edge rate limits, cache bypass). With one host the expression keeps its original `eq` form.
   api_hosts            = compact([local.api_host, local.azure_test_host])
   api_hosts_expression = length(local.api_hosts) == 1 ? "http.host eq \"${local.api_host}\"" : "http.host in {${join(" ", [for h in local.api_hosts : "\"${h}\""])}}"
@@ -39,7 +39,7 @@ resource "cloudflare_zone_setting" "ciphers" {
   value      = var.tls12_cipher_suites
 }
 
-# Cloudflare -> origin: validate the origin certificate (Fly's Let's Encrypt certificate for api.<apex>).
+# Cloudflare -> origin: validate the origin certificate (the tunnel's origin certificate).
 resource "cloudflare_zone_setting" "ssl" {
   zone_id    = var.cloudflare_zone_id
   setting_id = "ssl"
@@ -97,7 +97,7 @@ resource "cloudflare_zone_dnssec" "this" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# DNS: apex, www, api (proxied to Fly), status. The _acme-challenge CNAME is NOT proxied (Fly validates it by DNS-01).
+# DNS: apex, www, api (proxied to the Azure tunnel), status.
 # ---------------------------------------------------------------------------------------------------------------------
 resource "cloudflare_dns_record" "api" {
   zone_id = var.cloudflare_zone_id
@@ -106,25 +106,7 @@ resource "cloudflare_dns_record" "api" {
   content = local.api_origin_target
   proxied = true
   ttl     = 1 # automatic
-  comment = var.api_origin == "azure" ? "Azure Container Apps through Cloudflare Tunnel (Infra/azure). Proxied: WAF and rate limits apply." : "Fly.io origin (Infra/fly). Proxied: all traffic passes the WAF and rate limits."
-
-  lifecycle {
-    precondition {
-      condition     = var.api_origin == "fly" || var.enable_azure_tunnel
-      error_message = "api_origin = \"azure\" needs enable_azure_tunnel = true (the CNAME points at the tunnel)."
-    }
-  }
-}
-
-resource "cloudflare_dns_record" "api_acme_challenge" {
-  count   = var.fly_acme_challenge_cname == "" ? 0 : 1
-  zone_id = var.cloudflare_zone_id
-  name    = "_acme-challenge.${local.api_host}"
-  type    = "CNAME"
-  content = var.fly_acme_challenge_cname
-  proxied = false
-  ttl     = 300
-  comment = "Fly certificate DNS-01 validation."
+  comment = "Azure Container Apps through Cloudflare Tunnel (Infra/azure). Proxied: WAF and rate limits apply."
 }
 
 # Until the site Worker exists, apex and www are proxied placeholders (traffic never reaches them: a Cloudflare 4xx/5xx
@@ -159,10 +141,10 @@ resource "cloudflare_dns_record" "status" {
   content = var.status_page_target
   proxied = false # hosted status page: must NOT depend on our own stack (OPS-009 contact paths independent of Viadere)
   ttl     = 300
-  comment = "Hosted status page, intentionally independent of Fly/Cloudflare Workers."
+  comment = "Hosted status page, intentionally independent of our own stack and of Cloudflare Workers."
 }
 
-# Certificate issuance allow-list. Cloudflare Universal SSL uses these CAs; Fly uses Let's Encrypt.
+# Certificate issuance allow-list. Cloudflare Universal SSL uses these CAs.
 resource "cloudflare_dns_record" "caa" {
   for_each = toset(["letsencrypt.org", "digicert.com", "pki.goog", "ssl.com", "sectigo.com"])
   zone_id  = var.cloudflare_zone_id
@@ -200,7 +182,7 @@ resource "cloudflare_workers_custom_domain" "www" {
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Authenticated Origin Pulls (mTLS from Cloudflare to the origin). Enabling it makes Cloudflare present a client certificate.
-# ENFORCEMENT happens at the origin, and the Fly proxy cannot verify client certificates: see Infra/fly/README.md step 6.
+# ENFORCEMENT happens at the origin, enforcement is the server's origin lock (docs/ops/KILL-SWITCHES.md).
 # ---------------------------------------------------------------------------------------------------------------------
 resource "cloudflare_authenticated_origin_pulls_settings" "zone" {
   zone_id = var.cloudflare_zone_id
@@ -283,7 +265,7 @@ resource "cloudflare_dns_record" "api_mtls" {
   content = local.api_origin_target
   proxied = true
   ttl     = 1 # automatic
-  comment = var.api_origin == "azure" ? "Tier E: API Shield mTLS hostname (same Azure origin through the tunnel)." : "Tier E: API Shield mTLS hostname (same Fly origin). Add its certificate on Fly: fly certs add."
+  comment = "Tier E: API Shield mTLS hostname (same Azure origin through the tunnel)."
 }
 
 resource "cloudflare_ruleset" "mtls_enforce" {

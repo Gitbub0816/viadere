@@ -37,7 +37,7 @@ resource "azurerm_federated_identity_credential" "gh_deploy" {
   user_assigned_identity_id = azurerm_user_assigned_identity.gh_deploy.id
   issuer                    = "https://token.actions.githubusercontent.com"
   audience                  = ["api://AzureADTokenExchange"]
-  subject                   = "repo:${var.github_repository}:environment:${local.github_deploy_environment}"
+  subject                   = var.oidc_subject_workflow_ref ? "repo:${var.github_repository}:environment:${local.github_deploy_environment}:job_workflow_ref:${var.github_repository}/.github/workflows/azure.yml@refs/heads/main" : "repo:${var.github_repository}:environment:${local.github_deploy_environment}"
 }
 
 # ---- Deploy identity --------------------------------------------------------------------------------------------------

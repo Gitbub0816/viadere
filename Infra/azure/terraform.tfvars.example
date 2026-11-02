@@ -17,7 +17,7 @@ key_vault_allowed_ip_ranges                = [] # lean: your admin IP for `az ke
 
 # First apply only (afterwards the deploy workflow owns the image): the current release image from GHCR, by digest.
 image              = "ghcr.io/OWNER/viadere/viadere-server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
-ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns the read:packages token in Key Vault (ghcr-pull-token)
+ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns the read:packages token in Key Vault (ghcr-pull-credential)
 
 api_min_replicas = 0 # first apply only (no replica starts before secrets and database roles exist); then remove the line (lean default 1)
 
@@ -28,6 +28,7 @@ api_min_replicas = 0 # first apply only (no replica starts before secrets and da
 app_env = {
   ASSET_DOMAIN                             = "viadere-assets.cksites.dev" # Brand Kits asset host: its own tunnel hostname (AZURE-SETUP.md 9.1, Infra/cloudflare/add_asset_host.py)
   APPROVE_V2_ENABLED                       = "false"
+  AUTH_DESTINATION_SIGNATURE_REQUIRED      = "true"  # ADR-0031: false is refused in staging and production
   AUTH_DELIVERY_ENABLED                    = "false" # ADR-0019: off until the pilot gate; AUTH_SECRET_KEY is a secret, AUTH_LIVE_KEY_ASSURANCE defaults to mtls
   APP_ATTEST_ASSERTION_MODE                = "report" # WP-C2; `require` once the shipping app attests (`off` is refused in staging/production)
   KEY_DIRECTORY_LOG_ID                     = "viadere.key-directory.v1"

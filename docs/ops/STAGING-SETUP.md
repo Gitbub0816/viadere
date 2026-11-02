@@ -1,6 +1,10 @@
 # Staging setup from zero (macOS)
 
-An ordered, copy-paste checklist for the first staging deployment of Viadere: Fly.io (server), Neon (PostgreSQL 18), Cloudflare (DNS, TLS, origin lock), Apple Developer (identifiers, APNs key), MailerSend (SMS and email), and the iOS app's `Staging` build configuration.
+> **Fly.io, Neon and Google Cloud are retired (ADR-0029).** Staging runs on Azure (OpenTofu `Infra/azure`, deploy `azure.yml`). The server, database, secrets, deploy and verification steps of this guide are now
+> in `docs/ops/AZURE-SETUP.md` (sections 3 to 10 and the Cloud Shell helpers); this file keeps the provider-side steps that are not Azure: Apple Developer, Cloudflare, MailerSend, the app and TestFlight, the website.
+> Where a step below says "see AZURE-SETUP.md" do that instead of any Fly or Neon command you may remember.
+
+An ordered, copy-paste checklist for the first staging deployment of Viadere: Azure (server, PostgreSQL 18, Key Vault: `docs/ops/AZURE-SETUP.md`), Cloudflare (DNS, TLS, origin lock), Apple Developer (identifiers, APNs key), MailerSend (SMS and email), and the iOS app's `Staging` build configuration.
 
 Staging uses **production rules** (`ENVIRONMENT=staging`, `Server/Sources/ViadereServerKit/Config/ServerConfig.swift`): every secret is mandatory, https only, the origin lock (`EDGE_TOKEN`) is enforced, `seed` is refused. It shares no secret with production. Non-secret configuration is `Infra/fly/fly.staging.toml`; secret names are `Infra/fly/secrets.txt`; the reference for the Fly side is `Infra/fly/README.md`.
 
@@ -57,28 +61,9 @@ Staging runs under **`cksites.dev`** until `viadere.com` is registered: the web 
 1. `cksites.dev` must be an **Active** zone in your Cloudflare account. (If you later move to `viadere.com`, add that zone the same way and swap the names in `fly.staging.toml`, `App/Configs/Staging.xcconfig` and this guide.)
 2. The zone holds your other sites too. Everything below uses the `viadere` / `viadere-api` names only, so it cannot touch other records. (`Infra/terraform/cloudflare.tf` is for the managed setup; this guide does the staging pieces by hand in the dashboard.)
 
-## 4. Neon (PostgreSQL 18)
+## 4. Database (Azure Database for PostgreSQL)
 
-1. Sign up at <https://console.neon.tech>. **Create project**: name `viadere-staging`, **Postgres version 18**, **region AWS US East 1 (N. Virginia)** (`us-east-1`, next to Fly `iad`), database name `viadere`.
-2. Open the project's SQL Editor (connected as the default owner role) and create the two logins. Choose two long random passwords (for example `python3 -c "import secrets;print(secrets.token_urlsafe(32))"`), use letters, digits, `-` and `_` only so the URLs need no escaping:
-
-   ```sql
-   CREATE ROLE viadere_migrator LOGIN PASSWORD '<migrator password>';
-   CREATE ROLE viadere_app      LOGIN PASSWORD '<app password>';
-   ALTER DATABASE viadere OWNER TO viadere_migrator;
-   GRANT CONNECT ON DATABASE viadere TO viadere_app;
-   GRANT ALL ON SCHEMA public TO viadere_migrator;
-   ```
-
-   Roles made with SQL get no special Neon group; do not add `viadere_app` to any group. The first deploy's `migrate` (release command) creates the tables as `viadere_migrator` and then grants `viadere_app` DML only, sets default privileges and revokes `CREATE` on `public` (`docs/ops/RUNBOOKS.md`, "Database role bootstrap"). `DATABASE_APP_ROLE = "viadere_app"` is already in `fly.staging.toml`.
-3. **Connection details** > Branch `main`, Database `viadere`, switch off **Connection pooling** (you want the **direct** host: no `-pooler` in the hostname; the server uses prepared statements and a release-command role). Build two URLs from the host `ep-xxxxx.us-east-1.aws.neon.tech`:
-
-   ```text
-   DATABASE_MIGRATION_URL = postgres://viadere_migrator:<migrator password>@ep-xxxxx.us-east-1.aws.neon.tech/viadere?sslmode=verify-full
-   DATABASE_URL           = postgres://viadere_app:<app password>@ep-xxxxx.us-east-1.aws.neon.tech/viadere?sslmode=verify-full
-   ```
-
-   `DATABASE_MIGRATION_URL` must start with `postgres://` or `postgresql://` (`OperationsConfig.swift`). Keep both in a password manager.
+Created by OpenTofu (`Infra/azure/postgres.tf`), Entra token authentication, roles per `docs/ops/AZURE-SETUP.md` section 8. Nothing to do here.
 
 ## 5. MailerSend (SMS)
 
@@ -134,39 +119,20 @@ Steps 7.1 to 7.3 can be done now. Step 7.4 needs the Fly app from step 8.2, and 
 6. Keep WAF **Bot Fight Mode / Super Bot Fight Mode** off or add a skip rule for `/.well-known/apple-app-site-association`: a challenge page is not a `200` AASA file and Apple's fetcher cannot solve it.
 7. Optional hardening (production has it through Terraform): minimum TLS 1.2 (SSL/TLS > Edge Certificates > Minimum TLS Version), Always Use HTTPS.
 
-## 8. Fly.io app
+## 8. The server (Azure Container Apps)
 
-1. Fill the placeholders in `Infra/fly/fly.staging.toml` (three lines):
-
-   | Line | Key | Replace with |
-   |---|---|---|
-   | `APPLE_TEAM_ID = "REPLACE_WITH_TEAM_ID"` | `APPLE_TEAM_ID` | your `TEAMID` (also in the AASA file) |
-   | `APNS_KEY_ID = "REPLACE_WITH_KEY_ID"` | `APNS_KEY_ID` | the `.p8` Key ID from step 2.5 |
-   | `APNS_TEAM_ID = "REPLACE_WITH_TEAM_ID"` | `APNS_TEAM_ID` | your `TEAMID` |
-
-   ```bash
-   grep -n "REPLACE_WITH" Infra/fly/fly.staging.toml     # must print nothing afterwards
-   ```
-
-   Everything else in the toml already matches staging (`PUBLIC_BASE_URL`, `RP_ID`, `RP_ORIGIN`, `APP_ATTEST_MODE = "report"`, `APNS_ENVIRONMENT = "sandbox"`, `TRUSTED_PROXY_COUNT = "2"`, ...).
-2. Create the app (the name must match `app = "viadere-server-staging"`):
-
-   ```bash
-   fly apps create viadere-server-staging
-   ```
-
-   (Add `--org <your-org>` if you have more than one organisation: `fly orgs list`.)
+Created by OpenTofu and deployed by `azure.yml` (`docs/ops/AZURE-SETUP.md` sections 5 and 6). Non-secret configuration is `app_env` in `terraform.tfvars` (`Infra/azure/terraform.tfvars.example`); the Cloudflare Tunnel is section 9 there.
 
 ## 9. Secrets and the first deploy
 
 ### 9.1 Generate the server-owned secrets
 
 ```bash
-python3 -I Infra/fly/generate_secrets.py --check           # self-check of the generator (prints OK)
-python3 -I Infra/fly/generate_secrets.py --env-file ~/viadere-staging-secrets.env
+python3 -I Infra/azure/generate_secrets.py --check           # self-check of the generator (prints OK)
+python3 -I Infra/azure/generate_secrets.py --env-file ~/viadere-staging-secrets.env
 ```
 
-The script (`Infra/fly/generate_secrets.py`, standard library only) writes a mode-600 file with `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY` (base64url, 32 bytes, all different), `KEY_DIRECTORY_LOG_KEY` (a valid P-256 scalar), `EDGE_TOKEN` and `METRICS_TOKEN` (64 URL-safe characters, 32 to 256 required). Without `--env-file` it prints a ready-made `fly secrets set` command instead. `--check FILE` validates an existing file.
+The script (`Infra/azure/generate_secrets.py`, standard library only) writes a mode-600 file with `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY` (base64url, 32 bytes, all different), `KEY_DIRECTORY_LOG_KEY` (a valid P-256 scalar), `EDGE_TOKEN` and `METRICS_TOKEN` (64 URL-safe characters, 32 to 256 required). Without `--env-file` it prints a ready-made `fly secrets set` command instead. `--check FILE` validates an existing file.
 
 Back up the file's contents in a password manager **before** deleting it: losing `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER` or `AUDIT_CHAIN_KEY` makes staging data unreadable (rebuild the database and regenerate, which is acceptable for staging).
 
@@ -176,14 +142,9 @@ Copy the `EDGE_TOKEN` value into the Cloudflare rule of step 7.5:
 grep '^EDGE_TOKEN=' ~/viadere-staging-secrets.env
 ```
 
-### 9.2 Set them on Fly
+### 9.2 Store them in Key Vault
 
-`--stage` stores secrets without restarting machines (there are none yet):
-
-```bash
-fly secrets import --app viadere-server-staging --stage < ~/viadere-staging-secrets.env
-rm -P ~/viadere-staging-secrets.env            # after the password-manager copy
-```
+`python3 -I Infra/azure/kv_tool.py put-env` (AZURE-SETUP.md section 7); never paste secrets into a terminal history or a file that stays on disk.
 
 ### 9.3 Set the third-party secrets
 
@@ -201,30 +162,9 @@ The set the server requires in staging: `DATABASE_URL`, `CONNECT_LINK_SIGNING_KE
 
 Leave unset: `RCS_*`, `PASS_*`, `DIDIT_*`, `WALLET_*`, the audit-export values, every `*_PREVIOUS` (rotation only, `docs/ops/KEY-ROTATION.md`).
 
-### 9.4 First deploy from the laptop (staging only)
+### 9.4 First deploy
 
-Production deploys come from CI only (`.github/workflows/release.yml`, signed image by digest); this one-off laptop deploy is for staging. flyctl builds the image on Fly's **remote builder** (no Docker needed):
-
-```bash
-fly deploy --config Infra/fly/fly.staging.toml --dockerfile Server/Dockerfile --remote-only
-```
-
-Flags checked against <https://docs.fly.io/flyctl/deploy> (`-c/--config`, `--dockerfile`, `--remote-only`; `--app` is optional because the toml names the app). Run it from the repository root: `Server/Dockerfile` copies `Packages/ViadereCore` and `Server/...`, so the build context must be the root. The first build takes 10 to 20 minutes (Swift release build). The release command `migrate --yes --env production` runs on a temporary machine first; if it fails the deploy aborts (read its log in the output).
-
-If flyctl reports `COPY Packages/ViadereCore: not found`, the context was the wrong directory; run from the root with a temporary root-level copy of the config instead, and delete it afterwards:
-
-```bash
-cp Infra/fly/fly.staging.toml fly.toml
-fly deploy --dockerfile Server/Dockerfile --remote-only
-rm fly.toml
-```
-
-Afterwards:
-
-```bash
-fly status --app viadere-server-staging
-fly logs   --app viadere-server-staging        # JSON, secrets redacted
-```
+`azure.yml` verifies the signed image and deploys it by digest (AZURE-SETUP.md section 6); there is no deploy from a laptop.
 
 ### 9.5 Verify
 
@@ -373,7 +313,7 @@ The server prints `Startup failed: <error>` and exits (`Server/Sources/ViadereSe
 | `Missing required configuration: ENVIRONMENT (...)` / `Invalid configuration: ENVIRONMENT (...)` | `[env] ENVIRONMENT` is absent or misspelled; it must be `staging` in `fly.staging.toml`. |
 | `Missing required configuration: DATABASE_URL` | Secret not set (step 9.3). |
 | `Missing required configuration: CONNECT_LINK_SIGNING_KEY` / `SERVER_PEPPER` / `DATA_ENCRYPTION_KEY` / `AUDIT_CHAIN_KEY` / `SUBJECT_REF_KEY` | Secret not set. Run step 9.1 and 9.2. |
-| `Invalid configuration: X (base64url, at least 32 bytes)` | Value is not base64url or is too short, typically truncated while pasting. Regenerate it, or `python3 -I Infra/fly/generate_secrets.py --check file.env`. |
+| `Invalid configuration: X (base64url, at least 32 bytes)` | Value is not base64url or is too short, typically truncated while pasting. Regenerate it, or `python3 -I Infra/azure/generate_secrets.py --check file.env`. |
 | `Invalid configuration: A and B must be different values` | Two of the five keys are equal. Regenerate one. |
 | `Missing required configuration: EDGE_TOKEN` | Secret not set. `Invalid configuration: EDGE_TOKEN (at least 32 printable characters, no spaces)`: re-copy; no spaces or quotes. |
 | `Missing required configuration: APNS_KEY_P8 or APNS_KEY_PATH` | `.p8` secret missing (step 9.3). |
@@ -398,4 +338,4 @@ The server prints `Startup failed: <error>` and exits (`Server/Sources/ViadereSe
 
 ## Files this guide touches
 
-`Infra/fly/fly.staging.toml` (three placeholders), `Infra/fly/generate_secrets.py`, `App/Configs/Staging.xcconfig` (pins), `App/Configs/Local.xcconfig` (team ID; TestFlight overrides), `App/Scripts/compute-spki-pins.py`, `App/Scripts/check-release-pins.sh`, `App/project.yml`, `Site/deploy/upload.py`.
+`Infra/fly/fly.staging.toml` (three placeholders), `Infra/azure/generate_secrets.py`, `App/Configs/Staging.xcconfig` (pins), `App/Configs/Local.xcconfig` (team ID; TestFlight overrides), `App/Scripts/compute-spki-pins.py`, `App/Scripts/check-release-pins.sh`, `App/project.yml`, `Site/deploy/upload.py`.

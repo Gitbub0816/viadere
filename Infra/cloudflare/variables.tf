@@ -31,17 +31,6 @@ variable "api_hostname_label" {
   default     = "api"
 }
 
-variable "fly_origin_hostname" {
-  description = "The Fly app hostname the proxied api record points to, e.g. viadere-server.fly.dev."
-  type        = string
-}
-
-variable "fly_acme_challenge_cname" {
-  description = "Target of the _acme-challenge CNAME printed by `fly certs show` (leave empty before the certificate is added)."
-  type        = string
-  default     = ""
-}
-
 variable "site_worker_name" {
   description = "Name of the Workers Static Assets script the Site deploy uploads (Site/deploy/upload.py owns its contents)."
   type        = string
@@ -95,7 +84,7 @@ variable "hsts_preload" {
 }
 
 variable "edge_token" {
-  description = "Random value of the X-Viadere-Edge-Token request header Cloudflare adds to every origin request (shared with Fly secret EDGE_TOKEN). Sensitive; rotate with an overlap window."
+  description = "Random value of the X-Viadere-Edge-Token request header Cloudflare adds to every origin request (shared with the Key Vault secret edge-token, server variable EDGE_TOKEN). Sensitive; rotate with an overlap window."
   type        = string
   sensitive   = true
 }
@@ -144,91 +133,13 @@ variable "aop_client_private_key" {
   sensitive = true
 }
 
-# ---- Google Cloud KMS ---------------------------------------------------------------------------------------
-variable "gcp_project_id" {
-  description = "Dedicated project that holds only the Viadere key ring and its audit sink."
-  type        = string
-}
-
-variable "kms_location" {
-  description = "KMS location. Use a multi-region such as `us` or a region next to the Fly primary region; HSM keys are available in both."
-  type        = string
-  default     = "us-east1"
-}
-
-variable "kms_signing_principals" {
-  description = "Additional principals (group:/user:) allowed to VIEW key metadata. Never grant sign or decrypt to humans here."
-  type        = list(string)
-  default     = []
-}
-
-variable "kms_key_rotation_period" {
-  description = "Automatic rotation for symmetric keys (seconds with s suffix). Asymmetric keys cannot rotate automatically: rotate them with the runbook (docs/ops/RUNBOOKS.md, signing-key compromise)."
-  type        = string
-  default     = "7776000s" # 90 days
-}
-
-variable "kms_workload_identity_pool" {
-  description = "Workload identity pool principal that the Fly machines present (principalSet://iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/POOL/attribute.app/viadere-server). The server impersonates the dedicated service account through it; there is no downloaded key."
-  type        = string
-}
-
-variable "security_alert_notification_channel_ids" {
-  description = "Cloud Monitoring notification channel ids (pager/email) for key-use alerts."
-  type        = list(string)
-  default     = []
-}
-
-# ---- Neon ---------------------------------------------------------------------------------------------------
-variable "neon_org_id" {
-  type = string
-}
-
-variable "neon_region_id" {
-  description = "Neon region, next to the Fly primary region (aws-us-east-1 for iad)."
-  type        = string
-  default     = "aws-us-east-1"
-}
-
-variable "neon_pg_version" {
-  description = "PostgreSQL major version (policy: 18). The plan checks that the provider accepts it."
-  type        = number
-  default     = 18
-}
-
-variable "neon_history_retention_seconds" {
-  description = "Point-in-time-restore window. Production target 7 days (604800); raise if the plan allows. Drives RPO (docs/ops/RESILIENCE.md)."
-  type        = number
-  default     = 604800
-}
-
-variable "neon_allowed_ips" {
-  description = "Optional IP allow-list for Neon connections (Fly egress addresses). Empty = Neon default (TLS + password). Fly machines have no static egress unless you allocate static egress IPs (`fly ips allocate-egress`)."
-  type        = list(string)
-  default     = []
-}
-
 # ---- Azure origin through Cloudflare Tunnel (cloudflare_tunnel.tf; docs/ops/AZURE-SETUP.md section 9) ------------------------------
-variable "enable_azure_tunnel" {
-  description = "Create the Cloudflare Tunnel for the Azure Container Apps origin (Infra/azure). Off until the Azure environment exists."
-  type        = bool
-  default     = false
-}
-
+# The tunnel reaches ca-viadere-api only. The private authority (Infra/azure-authority, ADR-0019) has no tunnel route and no hostname here
+# (policy_check.py rule AUTH-NO-PUBLIC-INGRESS fails when a Cloudflare file names it).
 variable "azure_test_hostname_label" {
-  description = "Label of a test hostname routed through the tunnel before cutover (e.g. viadere-api-az). Empty = none."
+  description = "Label of an extra test hostname routed through the tunnel (e.g. viadere-api-az). Empty = none."
   type        = string
   default     = ""
-}
-
-variable "api_origin" {
-  description = "Where the api (and Tier E mTLS) hostname points: fly (today) or azure (Cloudflare Tunnel; needs enable_azure_tunnel). Cutover and rollback are a change of this value."
-  type        = string
-  default     = "fly"
-  validation {
-    condition     = contains(["fly", "azure"], var.api_origin)
-    error_message = "api_origin must be fly or azure."
-  }
 }
 
 variable "azure_tunnel_origin_service" {

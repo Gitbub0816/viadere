@@ -12,7 +12,7 @@
 # No long-lived cloud credential exists anywhere: OpenTofu uses the providers' native GitHub OIDC support (ARM_USE_OIDC) and the deploy
 # job logs in with `az login --federated-token` (Azure CLI is Python and preinstalled on the runner). The third-party `azure/login`
 # JavaScript action is NOT used (CLAUDE.md rule 4); the only actions are GitHub's own checkout, pinned to a full SHA. OpenTofu and cosign
-# are checksum-pinned downloads. Fly workflows stay untouched until cutover (plan section 4).
+# are checksum-pinned downloads. Fly was retired (ADR-0029).
 name: Azure
 
 on:
@@ -100,6 +100,7 @@ jobs:
         run: |
           python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json
           python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/standard_plan.json
+          python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json --source Infra/azure --source Infra/cloudflare --source Infra/azure-authority
 
   plan:
     name: Plan and policy check (${{ inputs.environment || 'staging' }})

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the server-owned secrets for a Viadere Fly app (staging by default). Python standard library only.
+"""Generate the server-owned secrets for a Viadere environment (Azure Key Vault, kv_tool.py put-env). Python standard library only.
 
-    python3 -I Infra/fly/generate_secrets.py                      # print a ready-to-paste `fly secrets set` command
-    python3 -I Infra/fly/generate_secrets.py --env-file s.env     # write NAME=value lines to a new chmod-600 file instead
-    python3 -I Infra/fly/generate_secrets.py --check              # self-check: generate a set and validate it against the server's rules
-    python3 -I Infra/fly/generate_secrets.py --check s.env        # validate an existing env file (e.g. before `fly secrets import`)
+    python3 -I Infra/azure/generate_secrets.py --env-file s.env   # write NAME=value lines to a new chmod-600 file (then kv_tool.py put-env)
+    python3 -I Infra/azure/generate_secrets.py --check            # self-check: generate a set and validate it against the server's rules
+    python3 -I Infra/azure/generate_secrets.py --check s.env      # validate an existing env file (e.g. before kv_tool.py put-env)
+    python3 -I Infra/azure/generate_secrets.py                    # print NAME=value lines to the terminal (shown once)
 
 What is generated (formats and minimum lengths come from Server/Sources/ViadereServerKit/Config/*.swift and Approve/ApproveSettings.swift):
 
@@ -159,7 +159,6 @@ def write_env_file(path, values):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Generate Viadere server secrets.")
-    parser.add_argument("--app", default="viadere-server-staging", help="Fly app name (default: %(default)s)")
     parser.add_argument("--env-file", metavar="PATH", help="write NAME=value lines to this new file (mode 600) instead of printing them")
     parser.add_argument("--no-log-key", action="store_true", help="skip KEY_DIRECTORY_LOG_KEY and LINK_DESCRIPTOR_SIGNING_KEY (only needed once APPROVE_V2_ENABLED=true)")
     parser.add_argument("--check", nargs="?", const="", metavar="ENV_FILE",
@@ -192,18 +191,14 @@ def main(argv=None):
     assert not validate(values), "generated values failed validation"
     if args.env_file:
         write_env_file(args.env_file, values)
-        print("Wrote %d secrets to %s (mode 600). Load them, then delete the file:" % (len(values), args.env_file))
-        print("  fly secrets import --app %s --stage < %s && rm -P %s" % (args.app, args.env_file, args.env_file))
+        print("Wrote %d secrets to %s (mode 600). Load them into Key Vault with kv_tool.py put-env (docs/ops/AZURE-SETUP.md section 7),"
+              " then delete the file." % (len(values), args.env_file))
     else:
-        print("# 1) Server-owned secrets (generated now; shown once; keep DATA_ENCRYPTION_KEY, SERVER_PEPPER, AUDIT_CHAIN_KEY safe):")
-        print("fly secrets set --app %s --stage \\" % args.app)
-        print(" \\\n".join("  %s='%s'" % (name, value) for name, value in values.items()))
+        print("# Server-owned secrets (generated now; shown once; keep DATA_ENCRYPTION_KEY, SERVER_PEPPER, AUDIT_CHAIN_KEY safe):")
+        print("\n".join("%s=%s" % (name, value) for name, value in values.items()))
     print()
-    print("# 2) Third-party values (YOU fill these in; see docs/ops/STAGING-SETUP.md):")
-    print("fly secrets set --app %s --stage \\" % args.app)
-    print(" \\\n".join("  %s=%s" % (name, placeholder) for name, placeholder in THIRD_PARTY))
-    print()
-    print("# EDGE_TOKEN is also the value of the Cloudflare 'X-Viadere-Edge-Token' request header rule (docs/ops/STAGING-SETUP.md, Cloudflare).")
+    print("# Third-party values (YOU supply these; docs/ops/AZURE-SETUP.md section 7): " + ", ".join(name for name, _ in THIRD_PARTY))
+    print("# EDGE_TOKEN is also the value of the Cloudflare 'X-Viadere-Edge-Token' request header rule (Infra/cloudflare).")
     return 0
 
 

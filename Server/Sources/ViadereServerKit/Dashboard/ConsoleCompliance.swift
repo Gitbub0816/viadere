@@ -156,7 +156,7 @@ enum ConsoleCompliance {
         }
         let body = ConsoleUI.callout(.accent, title: "Shorten, never lengthen", """
         <p class="sm">You can shorten the classes marked adjustable for your own data, never lengthen them. A legal hold placed by Viadere on your organization suspends purging until it is released. \
-        Backups keep erased data until they age out (Neon: 7 days point-in-time, 30 days snapshots).\(manage ? " Saving asks for your passkey." : "")</p>
+        Backups keep erased data until they age out (point-in-time recovery window: 7 days in staging, 35 days in production).\(manage ? " Saving asks for your passkey." : "")</p>
         """) + ConsoleUI.panel(ConsoleUI.table([ConsoleUI.Column("Data", key: "data"), ConsoleUI.Column("Platform days", key: "platform", numeric: true), ConsoleUI.Column("Allowed range"),
                                                  ConsoleUI.Column("Applies to you", key: "applies", numeric: true), ConsoleUI.Column("", actions: true)],
                                                 rows, caption: "Retention by data class", state: ConsoleUI.TableState(req, id: "r")))

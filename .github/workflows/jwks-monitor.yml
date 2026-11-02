@@ -1,0 +1,58 @@
+# Independent JWKS monitor (ADR-0024 section 7.4). Holds NO Azure or Cloudflare write credential and runs in no deployment environment: it only
+# reads the live documents of the id. host every 15 minutes, alerts (a failing run, which GitHub e-mails to the watchers) on any kid not in
+# the attested inventory, on a changed issuer/jwks_uri/alg list, or on an unreachable document. The dead-man check (a missing run for 45
+# minutes) is an external heartbeat the owner configures (AUTHORITY-OWNER-CHECKLIST.md). Enabled by the repository variable JWKS_MONITOR_HOST.
+name: JWKS monitor
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jwks-monitor
+  cancel-in-progress: true
+
+jobs:
+  monitor:
+    name: Compare the live documents with the attested inventory
+    if: vars.JWKS_MONITOR_HOST != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HOST: ${{ vars.JWKS_MONITOR_HOST }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the live documents (unreachable = alert)
+        run: |
+          for doc in oidc/jwks.json grant/jwks.json .well-known/openid-configuration; do
+            mkdir -p "$RUNNER_TEMP/live/$(dirname "${doc}")"
+            curl --proto '=https' --tlsv1.2 -fsS --retry 3 --retry-delay 5 "https://${HOST}/${doc}" -o "$RUNNER_TEMP/live/${doc}" \
+              || { echo "ALERT: ${doc} unreachable on ${HOST}" >&2; exit 1; }
+          done
+      - name: Latest attested inventory
+        run: |
+          run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow authority-admin.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          [ -n "${run_id}" ] || { echo "ALERT: no successful authority-admin run, so no attested inventory exists" >&2; exit 1; }
+          gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" --name authority-key-inventory --dir "$RUNNER_TEMP/inv"
+          gh attestation verify "$RUNNER_TEMP/inv/key-inventory.json" --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/authority-admin.yml" --source-ref refs/heads/main
+      - name: Unknown kid, discovery drift
+        run: |
+          for set in oidc/jwks.json grant/jwks.json; do
+            python3 -I .github/scripts/key_inventory.py --check "$RUNNER_TEMP/live/${set}" "$RUNNER_TEMP/inv/key-inventory.json" || { echo "ALERT: unknown kid or invalid JWK in ${set}" >&2; exit 1; }
+          done
+          python3 -I - "$RUNNER_TEMP/live/.well-known/openid-configuration" Site/content/id/.well-known/openid-configuration <<'PY'
+          import json, sys
+          live, committed = (json.load(open(p)) for p in sys.argv[1:3])
+          for field in ("issuer", "jwks_uri", "id_token_signing_alg_values_supported"):
+              if live.get(field) != committed.get(field):
+                  sys.exit(f"ALERT: discovery field {field} differs from the committed copy")
+          PY

@@ -31,12 +31,12 @@ FIRST_RUN=1; migrate_has_run && FIRST_RUN=0
 
 step "2/6 secrets"
 if [ "$FIRST_RUN" = 1 ]; then
-  python3 -I ../fly/generate_secrets.py --no-log-key --env-file "$WORK/s.env" >/dev/null || fail "generate secrets"
+  python3 -I generate_secrets.py --no-log-key --env-file "$WORK/s.env" >/dev/null || fail "generate secrets"
   # MailerSend is not connected yet: random placeholders keep the server's required values filled (no mail or SMS is sent with them).
   python3 -I -c 'import secrets
 for n in ("EMAIL_API_KEY","MAILERSEND_SMS_API_TOKEN","MAILERSEND_SMS_INBOUND_SECRET","MAILERSEND_SMS_WEBHOOK_SECRET"):
     print(f"{n}=placeholder-{secrets.token_urlsafe(24)}")' >> "$WORK/s.env" || fail "placeholders"
-  python3 -I ../fly/generate_secrets.py --check "$WORK/s.env" || fail "secret check"
+  python3 -I generate_secrets.py --check "$WORK/s.env" || fail "secret check"
   python3 -I kv_tool.py put-env --vault-id "$KV_ID" --map "$WORK/map.json" --env-file "$WORK/s.env" || fail "store secrets"
   EDGE_TOKEN_VALUE="$(grep '^EDGE_TOKEN=' "$WORK/s.env" | cut -d= -f2-)"
 else
@@ -47,7 +47,7 @@ if [ -n "$P8" ]; then python3 -I kv_tool.py put --vault-id "$KV_ID" --name apns-
 echo
 echo "GitHub token for pulling the server image (classic token, read:packages only). Enter skips (package is public or token already stored):"
 read -rs GHCR_TOKEN; echo
-if [ -n "$GHCR_TOKEN" ]; then printf '%s' "$GHCR_TOKEN" | python3 -I kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-token || fail "store ghcr-pull-token"; fi
+if [ -n "$GHCR_TOKEN" ]; then printf '%s' "$GHCR_TOKEN" | python3 -I kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-credential || fail "store ghcr-pull-credential"; fi
 unset GHCR_TOKEN
 echo "Cloudflare Tunnel token (Zero Trust > Networks > Tunnels > viadere-staging-azure; the long value after --token). Enter skips:"
 read -rs TUNNEL_TOKEN; echo

@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored). No secrets here: edge_token, provider credentials and the AOP key come from TF_VAR_* / env in CI.
+environment           = "staging"
+cloudflare_account_id = "REPLACE"
+cloudflare_zone_id    = "REPLACE"
+apex_domain           = "viadere.com"
+api_hostname_label    = "api"
+min_tls_version       = "1.2"

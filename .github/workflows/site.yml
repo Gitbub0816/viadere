@@ -70,6 +70,13 @@ jobs:
         with:
           name: site-dist
           path: Site/dist
+      # The `id.` host's JWKS and discovery documents are published only by authority-publish.yml (ADR-0024 section 7): this token has no scope for them.
+      - name: Refuse authority files
+        run: |
+          if [ -d Site/dist/id ] || find Site/dist -path '*/id/*.json' -print -quit | grep -q .; then
+            echo "Site/content/id/** is published by authority-publish.yml only" >&2
+            exit 1
+          fi
       - name: Upload (Python standard library; token scoped to Workers Scripts:Edit for this account)
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

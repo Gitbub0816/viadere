@@ -135,7 +135,7 @@ jobs:
         run: swift run -c release viadere-site lint --dist dist
 
   infrastructure:
-    name: Infrastructure (OpenTofu validate, Fly config, workflows)
+    name: Infrastructure (OpenTofu validate, env coverage, workflows)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -146,8 +146,8 @@ jobs:
         run: .github/scripts/install-tools.sh actionlint
       - name: Lint workflows
         run: actionlint -color
-      - name: Fly config covers every Server/.env.example variable
-        run: python3 -I Infra/fly/check_env_coverage.py
+      - name: Azure deployment covers every Server/.env.example variable
+        run: python3 -I Infra/azure/check_env_coverage.py
       - name: Install OpenTofu
         env:
           TOFU_VERSION: 1.13.2
@@ -157,8 +157,8 @@ jobs:
           curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
           echo "${TOFU_SHA256}  /tmp/tofu.zip" | sha256sum --check --status
           unzip -q /tmp/tofu.zip tofu -d "$HOME/.local/bin"
-      - name: Validate
-        working-directory: Infra/terraform
+      - name: Validate Infra/cloudflare
+        working-directory: Infra/cloudflare
         run: |
           tofu fmt -check -recursive
           tofu init -backend=false -input=false

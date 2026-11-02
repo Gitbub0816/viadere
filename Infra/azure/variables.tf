@@ -134,7 +134,7 @@ variable "cloudflared_image" {
 }
 
 variable "ghcr_pull_username" {
-  description = "Lean profile: GitHub user that owns the read:packages token stored in Key Vault secret ghcr-pull-token. Empty = the GHCR package is public and no registry credential is configured."
+  description = "Lean profile: GitHub user that owns the read:packages token stored in Key Vault secret ghcr-pull-credential. Empty = the GHCR package is public and no registry credential is configured."
   type        = string
   default     = ""
 }
@@ -251,4 +251,17 @@ variable "resource_locks" {
   description = "CanNotDelete locks on the data and security resource groups. Default: on in standard, off in lean."
   type        = bool
   default     = null
+}
+
+# ---- Authority tier (Infra/azure-authority, ADR-0019, ADR-0028) ----------------------------------------------------------------------
+variable "authority_database_access" {
+  description = "Open 5432 from snet-auth to the PostgreSQL subnet. Set true only together with authority_enabled in Infra/azure-authority."
+  type        = bool
+  default     = false
+}
+
+variable "oidc_subject_workflow_ref" {
+  description = "true: the deploy identity's federated credential pins job_workflow_ref (azure.yml on main), ADR-0028 section 6.1. Needs the repository's OIDC subject template to include job_workflow_ref FIRST (docs/ops/AUTHORITY-OWNER-CHECKLIST.md); false is a recorded exception (AUTH-OIDC-SUBJECT)."
+  type        = bool
+  default     = false
 }
