@@ -36,7 +36,7 @@ extension Color {
     }
 }
 
-public struct BrandStyle: Equatable {
+public struct BrandStyle: Equatable, Sendable {
     public let style: BrandAppearanceStyle
 
     public init(_ style: BrandAppearanceStyle = .neutral) { self.style = style }
