@@ -291,7 +291,7 @@ struct P3ShellTests {
         let model = AppModel(services: services)
         await model.bootstrap()
         #expect(model.phase == .ready)
-        #expect(AppTab.allCases == [.messages, .alerts, .benefits, .businesses]) // Activity is the History segment of Alerts (spec C1, variant A)
+        #expect(AppTab.allCases == [.alerts, .messages, .benefits, .businesses, .you]) // Activity is the History segment of Alerts (docs/APP-IA.md)
         #expect(!model.activity.content.isEmpty && model.activity.needsYouCount == 2)
         #expect(model.wallet.canAddPasses == false)    // default library: Wallet unavailable until the app supplies PassKit
         await model.rewards.load()

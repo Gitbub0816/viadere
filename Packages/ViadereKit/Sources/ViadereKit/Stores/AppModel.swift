@@ -4,11 +4,12 @@ import ViadereCore
 import Observation
 #endif
 
-/// The stable primary bar (spec C1; plan 4.8 variant A, the owner's decision): Messages, Alerts, Benefits, Businesses. Activity is the
-/// History segment of Alerts; Settings is a secondary destination opened from the context bar, never a tab; Add business lives in Businesses
-/// and next to the selector. The bar never grows with the number of businesses.
+/// The stable primary bar (spec C1; docs/APP-IA.md): Alerts, Messages, Benefits, Businesses and You. Alerts comes first because it is where the
+/// app opens; Activity is the History segment of Alerts; You holds the account, security, notifications, privacy and appearance (it replaced
+/// the Settings sheet behind the context bar, which owners could not find). Add business lives in Businesses and next to the selector. The
+/// bar never grows with the number of businesses.
 public enum AppTab: String, CaseIterable, Sendable, Hashable {
-    case messages, alerts, benefits, businesses
+    case alerts, messages, benefits, businesses, you
 
     public var destination: OrganizationDestination {
         switch self {
@@ -16,8 +17,12 @@ public enum AppTab: String, CaseIterable, Sendable, Hashable {
         case .alerts: .alerts
         case .benefits: .benefits
         case .businesses: .businesses
+        case .you: .settings
         }
     }
+
+    /// Whether the business selector filters this tab (You is global; per-business settings live on the business page).
+    public var isFilteredByContext: Bool { destination.isFilteredByContext }
 }
 
 /// A request to start the connect flow with a code that arrived by link, QR, NFC or App Clip.
@@ -37,8 +42,11 @@ public final class AppModel {
 
     public private(set) var phase: Phase = .launching
     public var selectedTab: AppTab = .alerts
-    /// Settings, opened from the context bar (secondary, not a tab).
-    public var settingsPresented = false
+    /// Settings live in the You tab. Kept for callers that used to present the Settings sheet: setting it selects You.
+    public var settingsPresented: Bool {
+        get { selectedTab == .you }
+        set { if newValue { selectedTab = .you } }
+    }
     /// Add business (+): from the Businesses directory or next to the selector; also opened by connect codes, QR and link sessions.
     public var addBusinessPresented = false
     /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
@@ -204,7 +212,14 @@ public final class AppModel {
 
     // MARK: App lock & scene phases
 
-    public func reviewDevices() { reviewDevicesRequested = true; settingsPresented = true }
+    public func reviewDevices() { reviewDevicesRequested = true; selectedTab = .you }
+
+    /// Opens the connect review for a business the customer is no longer connected to (its permanent code; the review shows it again).
+    public func reconnect(_ business: BusinessSummary) {
+        selectedTab = .businesses
+        pendingConnect = PendingConnect(code: business.code, link: nil, source: .code)
+        addBusinessPresented = true
+    }
 
     public func sceneDidEnterBackground() { backgroundedAt = services.clock() }
 
@@ -235,7 +250,6 @@ public final class AppModel {
         pendingLinkSession = nil
         conversationToOpen = nil
         businessToOpen = nil
-        settingsPresented = false
         addBusinessPresented = false
         toast = nil
     }
@@ -281,7 +295,7 @@ public final class AppModel {
             selectedTab = .businesses
         case .accountLink(let token):
             pendingAccountLinkToken = token
-            settingsPresented = true
+            selectedTab = .you
         case .handoff(let token):
             selectedTab = .alerts
             guard let redeemed = try? await services.api.redeemHandoff(token: token) else {
@@ -296,7 +310,7 @@ public final class AppModel {
                 selectedTab = .businesses
                 addBusinessPresented = true
             case .accountHelp:
-                settingsPresented = true
+                selectedTab = .you
             }
         case .interaction(let id):
             await openInteraction(id)
@@ -304,10 +318,10 @@ public final class AppModel {
             conversationToOpen = id
             selectedTab = .messages
         case .settings:
-            settingsPresented = true
+            selectedTab = .you
         case .approveEnrollment(let code, let rootKid, let secret):
             pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid, secret: secret)
-            settingsPresented = true
+            selectedTab = .you
         case .linkSession(let code, let secret):
             pendingLinkSession = PendingLinkSession(code: code, secret: secret)
             selectedTab = .businesses
@@ -414,7 +428,6 @@ public final class AppModel {
         queuedLink = nil
         keysNeedRecheck = false
         selectedTab = .alerts
-        settingsPresented = false
         addBusinessPresented = false
         organization.reset()
         alerts.reset()

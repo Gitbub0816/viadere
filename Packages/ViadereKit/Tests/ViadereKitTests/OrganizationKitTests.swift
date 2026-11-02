@@ -30,21 +30,26 @@ struct OrganizationKitTests {
 
     // MARK: IA
 
-    @Test func theBarIsMessagesAlertsBenefitsBusinessesAndSettingsIsSecondary() async throws {
-        #expect(AppTab.allCases == [.messages, .alerts, .benefits, .businesses])
-        #expect(AppTab.allCases.map(\.destination) == OrganizationDestination.primary)
+    @Test func theBarIsAlertsMessagesBenefitsBusinessesAndYou() async throws {
+        // docs/APP-IA.md: the app opens on its first tab; Settings became the You tab (it was a sheet behind the context bar).
+        #expect(AppTab.allCases == [.alerts, .messages, .benefits, .businesses, .you])
+        #expect(Set(AppTab.allCases.filter(\.isFilteredByContext).map(\.destination)) == Set(OrganizationDestination.primary))
+        #expect(AppTab.you.destination == .settings && !AppTab.you.isFilteredByContext)
         let (model, _, _, _) = await world()
         #expect(model.selectedTab == .alerts)
         await model.handle(.settings)
+        #expect(model.selectedTab == .you)
         #expect(model.settingsPresented)
-        #expect(model.selectedTab == .alerts)
+        model.selectedTab = .alerts
+        model.reviewDevices()
+        #expect(model.selectedTab == .you && model.reviewDevicesRequested)
         // A connect code opens Add business in the Businesses destination (there is no Connect tab any more).
         await model.handle(.connect(code: try #require(BusinessCode(parsing: "AF2345")), link: nil))
         #expect(model.selectedTab == .businesses)
         #expect(model.addBusinessPresented)
         #expect(model.pendingConnect != nil)
         model.lock()
-        #expect(!model.addBusinessPresented && !model.settingsPresented)
+        #expect(!model.addBusinessPresented)
     }
 
     @Test func bootstrapLoadsBusinessesAndTheAlertsReadModel() async {

@@ -12,7 +12,7 @@ public actor MockViadereAPI: ViadereAPI {
     let clock: @Sendable () -> Date
     private var envelopes: [InteractionID: InteractionEnvelope] = [:]
     private var interactionOrder: [InteractionID] = []
-    private var relationshipList: [Relationship] = []
+    private(set) var relationshipList: [Relationship] = []
     private var consentStore: [RelationshipID: [ConsentGrant]] = [:]
     var deviceList: [Device] = []
     var deviceKeys: [DeviceID: [DeviceKeyPurpose: DevicePublicKey]] = [:]
