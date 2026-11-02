@@ -247,8 +247,15 @@ struct ConversationService {
                   let summary = try await DirectoryService(db: db).summary(for: business) else { return }
             let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$revokedAt == nil).all()
             let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id)).filter(\.$invalidatedAt == nil).all()
+            // A business message is never security-critical: the account's quiet hours (and a quieter level) make it arrive quietly.
+            let quiet = await PreferenceService(db: db, ctx: ctx).silences(consumer: consumerId, business: businessId.uuid, kind: .message,
+                                                                           purpose: .accountService, actionRequired: false)
             for token in tokens {
-                let message = PushPayloadBuilder.messageNotice(business: summary, token: token.record, topic: ctx.config.appBundleID)
+                var message = PushPayloadBuilder.messageNotice(business: summary, token: token.record, topic: ctx.config.appBundleID)
+                if quiet {
+                    message.interruptionLevel = "passive"
+                    message.highPriority = false
+                }
                 if await ctx.apns.send(message) == .tokenInvalid {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }

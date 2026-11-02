@@ -59,7 +59,14 @@ struct AlertService {
     func list(principal: ConsumerPrincipal, query: AlertQuery) async throws -> AlertPage {
         let now = ctx.now
         let fullScope = try await OrganizationScope.load(consumer: principal.consumerId, db: db, ctx: ctx)
-        let filter = try fullScope.authorize(query.businessId)
+        // Installed Loops the customer allows alerts from (owner decision F-4): only that Loop's own alerts, never the business's other items.
+        let installAlerts = try await InstalledLoopAlertScope.load(consumer: principal.consumerId.uuid, db: db)
+        let filter: UUID?
+        if let requested = query.businessId, !fullScope.contains(requested.uuid), installAlerts.businesses.contains(requested.uuid) {
+            filter = requested.uuid
+        } else {
+            filter = try fullScope.authorize(query.businessId)
+        }
         let scope = fullScope.narrowed(to: filter)
         let limit = query.limit
         var drafts: [Draft] = []
@@ -72,7 +79,7 @@ struct AlertService {
         add(try await approveRequests(principal: principal, scope: scope, query: query, limit: limit, now: now))
         add(try await verifications(scope: scope, query: query, limit: limit, now: now))
         add(try await profileRequests(scope: scope, query: query, limit: limit, now: now))
-        add(try await loopTasks(scope: scope, query: query, limit: limit, now: now))
+        add(try await loopTasks(scope: scope, installed: installAlerts.narrowed(to: filter), query: query, limit: limit, now: now))
         if filter == nil { add(try await securityNotices(consumer: principal.consumerId.uuid, query: query, limit: limit)) }
 
         if let cursor = query.cursor { drafts = drafts.filter { cursor.precedes(createdAt: $0.createdAt, alertId: $0.alertId) } }
@@ -297,13 +304,21 @@ struct AlertService {
 
     /// Loop tasks (WP-3.9): the account's own Loop instances. An active instance waits for the customer (action required, with its
     /// expiry); a submitted one waits for the business (shown pending, no action); outcomes arrive by the opaque push and the next sync.
-    private func loopTasks(scope: OrganizationScope, query: AlertQuery, limit: Int, now: Date) async throws -> (drafts: [Draft], full: Bool) {
+    ///
+    /// Two bases, nothing wider: every Loop of a business the customer is connected to, and **only the installed Loops the customer allows
+    /// alerts from** (`loop_installs.alerts_enabled`, owner decision F-4) without a connection. The second is keyed on the Loop's own
+    /// publications, never on the business, so an install-only customer sees no other item from that business and no other Loop of it.
+    private func loopTasks(scope: OrganizationScope, installed: InstalledLoopAlertScope, query: AlertQuery, limit: Int, now: Date) async throws -> (drafts: [Draft], full: Bool) {
         let me = scope.consumerId
         let businesses = Array(scope.own)
-        guard !businesses.isEmpty else { return ([], false) }
+        let publications = Array(installed.publicationIds)
+        guard !businesses.isEmpty || !publications.isEmpty else { return ([], false) }
         let open = [LoopInstanceState.active.rawValue, LoopInstanceState.submitted.rawValue]
         func make() -> QueryBuilder<LoopInstanceRecord> {
-            var q = LoopInstanceRecord.query(on: db).filter(\.$consumerId == me).filter(\.$businessId ~~ businesses)
+            var q = LoopInstanceRecord.query(on: db).filter(\.$consumerId == me).group(.or) { or in
+                if !businesses.isEmpty { or.filter(\.$businessId ~~ businesses) }
+                if !publications.isEmpty { or.filter(\.$publicationId ~~ publications) }
+            }
             switch query.status {
             case .pending?: q = q.filter(\.$state ~~ open)
             case .expired?:

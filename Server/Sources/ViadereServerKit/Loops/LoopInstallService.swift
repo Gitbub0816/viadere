@@ -177,6 +177,8 @@ struct LoopInstallService {
                 existing.mode = request.mode.rawValue
                 existing.source = wasActive ? existing.source : request.source.rawValue
                 if !wasActive { existing.installedAt = now }
+                // Alerts are off unless the customer chooses them: a fresh install starts off, a repeated one keeps its choice unless it carries one.
+                existing.alertsEnabled = request.alertsEnabled ?? (wasActive ? existing.alertsEnabled : false)
                 existing.uninstalledAt = nil
                 existing.updatedAt = now
                 try await existing.update(on: tx)
@@ -189,6 +191,7 @@ struct LoopInstallService {
                 row.source = request.source.rawValue
                 row.installedAt = now
                 row.updatedAt = now
+                row.alertsEnabled = request.alertsEnabled ?? false
                 try await row.create(on: tx)
             }
             // The install sheet carries the per-business authorization sentence: record it (a new grant revokes the previous one of the
@@ -208,13 +211,31 @@ struct LoopInstallService {
                                                                    metadata: ["scope": "business", "version": String(current.version), "via": "install"])
             }
             _ = try await AuditService(db: tx, ctx: ctx).record("loop.installed", principal: principal, businessId: BusinessID(businessId),
-                subjectType: "loop_definition", subjectId: loopId.description, metadata: ["mode": request.mode.rawValue, "source": request.source.rawValue])
+                subjectType: "loop_definition", subjectId: loopId.description,
+                metadata: ["mode": request.mode.rawValue, "source": request.source.rawValue, "alerts": request.alertsEnabled == true ? "on" : "off"])
         } } catch let error where error.isConstraintViolation {
             // A concurrent install of the same Loop by the same account won the unique (consumer, Loop) row; its result stands.
         }
         ctx.metrics.count(.loopInstalled)
         guard let view = try await installed(consumer: consumer).first(where: { $0.loopId == loopId }) else { throw APIError.internalError }
         return LoopInstallResult(installed: view, consent: try await LoopRuntimeService(db: db, ctx: ctx).consentStatus(consumer: consumer))
+    }
+
+    /// Allows or stops this installed Loop's own alerts in Alerts (owner decision F-4). Only the Loop's alerts: it subscribes the customer to
+    /// nothing else from the business. `404` when the Loop is not installed (or the business is blocked).
+    func setAlerts(principal: ConsumerPrincipal, loopId: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop {
+        let consumer = principal.consumerId.uuid
+        try await ctx.limiter.enforce("loop-install", key: consumer.uuidString.lowercased(), rule: ctx.config.loops.installRate)
+        guard let row = try await activeInstall(consumer: consumer, definition: loopId.uuid) else { throw APIError.notFound }
+        if row.alertsEnabled != enabled {
+            row.alertsEnabled = enabled
+            row.updatedAt = ctx.now
+            try await row.update(on: db)
+            _ = try await AuditService(db: db, ctx: ctx).record("loop.alerts_changed", principal: principal, businessId: BusinessID(row.businessId),
+                subjectType: "loop_definition", subjectId: loopId.description, metadata: ["alerts": enabled ? "on" : "off"])
+        }
+        guard let view = try await installed(consumer: consumer).first(where: { $0.loopId == loopId }) else { throw APIError.notFound }
+        return view
     }
 
     func uninstall(principal: ConsumerPrincipal, loopId: LoopDefinitionID) async throws -> [InstalledLoop] {
@@ -239,6 +260,7 @@ struct LoopInstallService {
     func end(_ row: LoopInstallRecord, reason: String) async throws -> Bool {
         let now = ctx.now
         row.uninstalledAt = now
+        row.alertsEnabled = false
         row.updatedAt = now
         try await row.update(on: db)
         let publications = try await LoopPublicationRecord.query(on: db).filter(\.$definitionId == row.definitionId).all().compactMap(\.id)
@@ -312,7 +334,7 @@ struct LoopInstallService {
                                      installedAt: row.installedAt, connected: connected.contains(row.businessId),
                                      publicationId: candidate.map { LoopPublicationID($0.publication.id!) }, entryPoints: candidate?.definition.entryPoints ?? [],
                                      openInstances: instances.filter { ownIds.contains($0.publicationId) }.prefix(5).compactMap { $0.id.map(LoopInstanceID.init) },
-                                     brandKitId: kit))
+                                     brandKitId: kit, alertsEnabled: row.alertsEnabled))
         }
         return out.sorted { ($0.title, $0.loopId.description) < ($1.title, $1.loopId.description) }
     }
