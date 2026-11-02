@@ -171,7 +171,7 @@ struct LoopInstallService {
         }
         let now = ctx.now
         let ctx = self.ctx
-        try await db.transaction { tx in
+        do { try await db.transaction { tx in
             if let existing {
                 let wasActive = existing.isActive
                 existing.mode = request.mode.rawValue
@@ -209,6 +209,8 @@ struct LoopInstallService {
             }
             _ = try await AuditService(db: tx, ctx: ctx).record("loop.installed", principal: principal, businessId: BusinessID(businessId),
                 subjectType: "loop_definition", subjectId: loopId.description, metadata: ["mode": request.mode.rawValue, "source": request.source.rawValue])
+        } } catch let error where error.isConstraintViolation {
+            // A concurrent install of the same Loop by the same account won the unique (consumer, Loop) row; its result stands.
         }
         ctx.metrics.count(.loopInstalled)
         guard let view = try await installed(consumer: consumer).first(where: { $0.loopId == loopId }) else { throw APIError.internalError }

@@ -179,7 +179,7 @@ public final class LoopDetailViewModel {
         return definition
     }
 
-    public var isInstalled: Bool { library?.isInstalled(loopId) ?? entry?.installed ?? false }
+    public var isInstalled: Bool { library?.isInstalled(loopId) == true || entry?.installed == true }
     public var isConnected: Bool { entry?.connected ?? false }
     /// "Install and connect" is offered only when the customer is not already connected.
     public var offersConnect: Bool { !isConnected }

@@ -34,6 +34,11 @@ struct LoopDetailView: View {
                     ViadereLoading()
                 case .unavailable:
                     ViadereEmptyState("Not available", message: "This Loop isn't available to you right now.")
+                    // A paused or withdrawn Loop can still be removed from Your Loops.
+                    if model.loopLibrary.isInstalled(detail.loopId) {
+                        Button("Remove Loop") { confirmingRemove = true }
+                            .buttonStyle(.viadere(.quiet))
+                    }
                 case .failed(let message):
                     ViadereNotice(message, kind: .warning)
                     Button("Try again") { Task { await detail.load() } }
