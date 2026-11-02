@@ -28,7 +28,6 @@ public actor MockViadereAPI: ViadereAPI {
     private var conversationList: [ConversationSummary] = []
     private var messageStore: [SessionID: [ConversationMessage]] = [:]
     private var phones: [PhoneLink] = []
-    private var pendingPhoneCodes: [PhoneLinkID: String] = [:]
     private var consumerSessions: [ConsumerSession]
     private var noticeList: [SecurityNotice] = []
     /// Test hook: when true, dismissing answers `403 device_cool_down` like a device that is not trusted yet.
@@ -475,48 +474,38 @@ public actor MockViadereAPI: ViadereAPI {
 
     // MARK: Phones & sessions
 
-    public func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse {
-        let id = PhoneLinkID()
-        pendingPhoneCodes[id] = "123456"
-        return PhoneLinkStartResponse(phoneLinkId: id, expiresAt: clock().addingTimeInterval(600))
+    /// A begun link in the mock: `sentText()` plays the person sending the nonce from the phone (the real server binds on the inbound text).
+    public struct MockPhoneChallenge: Sendable { public var id: PhoneLinkID; public var phone: PhoneNumber; public var nonce: String; public var expiresAt: Date }
+    public private(set) var phoneChallenges: [MockPhoneChallenge] = []
+    public private(set) var beginRequests: [PhoneNumber] = []
+    public private(set) var keptPhoneLinks: [PhoneLinkID] = []
+    public static let mockSendTo = "+15550001111"
+
+    public func beginPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkMOBeginResponse {
+        beginRequests.append(phone)
+        let challenge = MockPhoneChallenge(id: PhoneLinkID(), phone: phone, nonce: PhoneLinkMO.generateNonce(), expiresAt: clock().addingTimeInterval(PhoneLinkMO.ttl))
+        phoneChallenges.removeAll { $0.phone == phone }
+        phoneChallenges.append(challenge)
+        return PhoneLinkMOBeginResponse(phoneLinkId: challenge.id, nonce: challenge.nonce, sendTo: Self.mockSendTo, expiresAt: challenge.expiresAt)
     }
 
-    public func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink {
-        guard let expected = pendingPhoneCodes[id], ConstantTime.equals(expected, code) else {
-            throw APIError.server(status: 400, code: .validationFailed, message: "That code isn't right")
-        }
-        pendingPhoneCodes[id] = nil
-        let link = PhoneLink(id: id, maskedPhone: "+1 ••• ••• 0123", verifiedAt: clock())
-        phones.append(link)
-        return link
-    }
-
-    /// What the mock's link preview reports (tests change it).
-    public private(set) var linkPreviewPhone = "+1 ••• ••• 0123"
-    public private(set) var previewedLinkTokens: [String] = []
-    public private(set) var redeemRequests: [SMSLinkRedeemRequest] = []
-    public func setLinkPreview(_ masked: String) { linkPreviewPhone = masked }
-
-    public func previewPhoneLink(token: String) async throws -> SMSLinkPreview {
-        guard token.count >= 8 else { throw APIError.server(status: 404, code: .notFound, message: "This link isn't valid anymore.") }
-        previewedLinkTokens.append(token)
-        return SMSLinkPreview(maskedPhone: linkPreviewPhone, expiresAt: clock().addingTimeInterval(600))
-    }
-
-    /// Like the server: the confirmation must match the number the token is bound to, and a number linked from a token is not
-    /// usable for 24 hours unless a trusted device confirms it.
-    public func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink {
-        let digits = linkPreviewPhone.filter { $0.isASCII && $0.isNumber }
-        guard request.confirmPhoneLast4 == String(digits.suffix(4)),
-              request.confirmMaskedPhone.map({ $0 == linkPreviewPhone }) ?? true else {
-            throw APIError.server(status: 403, code: .forbidden, message: "That doesn't match the number this link is for.")
-        }
-        redeemRequests.append(request)
+    /// The person sent the pre-filled text from the phone: like the server, only a live challenge for the number binds, in a cool-down.
+    public func sentText(for id: PhoneLinkID, from phone: PhoneNumber? = nil) {
+        guard let index = phoneChallenges.firstIndex(where: { $0.id == id }) else { return }
+        let challenge = phoneChallenges.remove(at: index)
+        guard challenge.expiresAt > clock(), phone == nil || phone == challenge.phone else { return }
         let now = clock()
-        let link = PhoneLink(id: PhoneLinkID(), maskedPhone: linkPreviewPhone, verifiedAt: now, usableFrom: now.addingTimeInterval(Self.newDeviceCoolDown))
-        phones.append(link)
-        return link
+        phones.append(PhoneLink(id: id, maskedPhone: challenge.phone.masked, verifiedAt: now, usableFrom: now.addingTimeInterval(Self.newDeviceCoolDown * 3),
+                                assurance: PhoneLinkMO.assuranceLabel))
     }
+
+    public func phoneLinkStatus(_ id: PhoneLinkID) async throws -> PhoneLinkMOStatus {
+        if let link = phones.first(where: { $0.id == id }) { return PhoneLinkMOStatus(state: .verified, link: link) }
+        if let challenge = phoneChallenges.first(where: { $0.id == id }), challenge.expiresAt > clock() { return PhoneLinkMOStatus(state: .pending) }
+        return PhoneLinkMOStatus(state: .expired)
+    }
+
+    public func keepPhoneNumber(_ id: PhoneLinkID) async throws { keptPhoneLinks.append(id) }
 
     public func confirmPhoneLink(_ id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink {
         let confirmer = try trustedConfirmer(for: proof, target: nil)
@@ -645,11 +634,6 @@ public actor MockViadereAPI: ViadereAPI {
     public func interaction(_ id: InteractionID) async throws -> InteractionEnvelope {
         guard let envelope = envelopes[id] else { throw Self.notFound() }
         return envelope
-    }
-
-    public func redeemHandoff(token: String) async throws -> HandoffRedeemResponse {
-        guard let id = interactionOrder.first(where: { envelopes[$0]?.status == .pending }) else { throw Self.notFound() }
-        return HandoffRedeemResponse(purpose: .interaction, interactionId: id)
     }
 
     public func decide(_ id: InteractionID, _ request: DecideInteractionRequest) async throws -> InteractionOutcome {

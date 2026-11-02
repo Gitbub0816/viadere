@@ -33,8 +33,6 @@ public enum OnboardingFlow {
 @Observable
 #endif
 public final class OnboardingViewModel {
-    public enum PhoneStage: Equatable, Sendable { case entry, verify, linked(String) }
-
     public private(set) var step: OnboardingStep
     public private(set) var isWorking = false
     public private(set) var errorMessage: String?
@@ -42,10 +40,8 @@ public final class OnboardingViewModel {
     public private(set) var enrolled: DeviceRecord?
     public private(set) var skippedKeys: [DeviceKeyPurpose] = []
 
-    public private(set) var phoneRaw = ""
-    public private(set) var otp = ""
-    public private(set) var phoneStage: PhoneStage = .entry
-    private var phoneLinkId: PhoneLinkID?
+    /// Linking a number by sending one text from the phone (ADR-0027). Nothing is texted to the person.
+    public let phoneLink: PhoneLinkViewModel
     private let services: ViadereServices
     /// Shows the passkey explanation before the system sheet when an enrollment after a passkey sign-in needs an assertion.
     public let passkeyGate = PasskeyExplanationGate()
@@ -70,15 +66,13 @@ public final class OnboardingViewModel {
 
     public init(services: ViadereServices, deviceName: String = "My iPhone", start: OnboardingStep = .welcome) {
         self.services = services
+        self.phoneLink = PhoneLinkViewModel(services: services)
         self.deviceName = deviceName
         self.step = start
     }
 
     /// No personal field is needed: only that nothing else is running.
     public var canCreateAccount: Bool { !isWorking }
-    public var phoneNumber: PhoneNumber? { PhoneInput.normalize(phoneRaw) }
-    public var canSendCode: Bool { phoneNumber != nil && !isWorking }
-    public var canVerify: Bool { OTPInput.isComplete(otp) && !isWorking }
     public var maxAssurance: DecisionAssurance { enrolled?.maxAssurance ?? .none }
     /// At least one recovery credential was added during setup.
     public var isProtected: Bool { hasRecoveryCodes || hasPasskey }
@@ -110,9 +104,6 @@ public final class OnboardingViewModel {
         step = .device
     }
 
-    public func setPhone(_ raw: String) { phoneRaw = PhoneInput.displayFormat(raw) }
-    /// Digits only, six at most.
-    public func setOTP(_ raw: String) { otp = OTPInput.normalize(raw) }
 
     /// "I already have an account": a passkey sign-in (an existing account, or discovering it on a new iPhone). This iPhone is then enrolled
     /// with that account and starts unapproved until one of its trusted devices approves it.
@@ -245,26 +236,6 @@ public final class OnboardingViewModel {
     }
 
     private var afterNotifications: OnboardingStep { services.preferences.bool(.protectionPromptShown) ? .phone : .protect }
-
-    public func sendCode() async {
-        guard let phone = phoneNumber else { return }
-        await run {
-            let response = try await services.api.startPhoneLink(phone: phone)
-            phoneLinkId = response.phoneLinkId
-            otp = ""
-            phoneStage = .verify
-        }
-    }
-
-    public func verifyCode() async {
-        guard let id = phoneLinkId, OTPInput.isComplete(otp) else { return }
-        await run {
-            let link = try await services.api.verifyPhoneLink(id: id, code: otp)
-            phoneStage = .linked(link.maskedPhone)
-        }
-    }
-
-    public func editPhone() { phoneStage = .entry; otp = ""; errorMessage = nil }
 
     public func finish() {
         services.preferences.setBool(true, for: .onboardingComplete)

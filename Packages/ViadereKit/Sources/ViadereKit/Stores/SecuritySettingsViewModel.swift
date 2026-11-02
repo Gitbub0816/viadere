@@ -47,9 +47,11 @@ public final class SecuritySettingsViewModel {
 
     public init(services: ViadereServices) {
         self.services = services
+        addPhone = PhoneLinkViewModel(services: services)
         appLockEnabled = services.preferences.bool(.appLockEnabled)
         richPreviewsEnabled = services.preferences.bool(.richNotificationPreviews)
         appLockMethod = services.appLock.methodName
+        addPhone.onLinked = { [weak self] link in self?.phoneLinked(link) }
     }
 
     public func load() async {
@@ -323,10 +325,13 @@ public final class SecuritySettingsViewModel {
     public func coolDownNote(for phone: PhoneLink) -> String? {
         let now = services.clock()
         guard let until = phone.usableFrom, until > now else { return nil }
+        if phone.assurance == PhoneLinkMO.assuranceLabel { return "Businesses can reach you by text there from \(CoolDownPolicy.timeText(until, now: now))." }
         return "Messages start working \(CoolDownPolicy.timeText(until, now: now)), or confirm it now."
     }
 
     public func canConfirm(_ phone: PhoneLink) -> Bool {
+        // A number linked by text waits out its period: the confirming device is the requester's own and adds no protection (ADR-0027).
+        guard phone.assurance != PhoneLinkMO.assuranceLabel else { return false }
         guard let until = phone.usableFrom, until > services.clock() else { return false }
         return canConfirmOthers
     }
@@ -373,95 +378,21 @@ public final class SecuritySettingsViewModel {
         }
     }
 
-    // MARK: Linking another phone
+    // MARK: Linking a phone by sending one text from it (ADR-0027)
 
-    public enum AddPhoneStage: Equatable, Sendable { case idle, awaitingCode, failed(String) }
-    public private(set) var addPhoneStage: AddPhoneStage = .idle
-    private var pendingPhoneLinkId: PhoneLinkID?
+    /// The flow behind "Link a number": the app shows a nonce, the person sends it from the phone, the server binds the number.
+    /// A number linked this way proves control of the number only: it is not a sign-in factor, and a trusted-device confirmation does not shorten
+    /// its waiting period.
+    public let addPhone: PhoneLinkViewModel
 
-    /// Starts linking a number (`PhoneInput` accepts "(480) 555-0123"); an SMS code follows.
-    public func startAddPhone(_ raw: String) async {
-        guard let phone = PhoneInput.normalize(raw) else { addPhoneStage = .failed("Enter a full mobile number."); return }
-        do {
-            pendingPhoneLinkId = try await services.api.startPhoneLink(phone: phone).phoneLinkId
-            addPhoneStage = .awaitingCode
-        } catch {
-            addPhoneStage = .failed((error as? APIError)?.userMessage ?? "Couldn't send a code.")
-        }
-    }
-
-    public func verifyAddPhone(code: String) async {
-        guard let id = pendingPhoneLinkId, OTPInput.isComplete(code) else { return }
-        do {
-            let link = try await services.api.verifyPhoneLink(id: id, code: OTPInput.normalize(code))
-            phones.append(link)
-            lastLinkedPhone = link
-            pendingPhoneLinkId = nil
-            addPhoneStage = .idle
-        } catch {
-            addPhoneStage = .failed((error as? APIError)?.userMessage ?? "That code isn't right.")
-        }
-    }
-
-    public func cancelAddPhone() { pendingPhoneLinkId = nil; addPhoneStage = .idle }
-
-    // MARK: SMS account link (https://viadere.com/l/{token})
-
-    /// Warning shown on the link confirmation screen. Linking someone else's number lets them message businesses as you.
-    public static let accountLinkWarning = "Only continue if you started this from your own phone. Linking someone else's number lets them message businesses as you."
-
-    public enum AccountLinkPhase: Equatable, Sendable {
-        case idle, loading
-        /// The token is valid; the screen shows the masked number and waits for an explicit "This is my phone".
-        case ready(SMSLinkPreview)
-        case failed(String)
-    }
-
-    public private(set) var accountLinkPhase: AccountLinkPhase = .idle
-
-    /// Fetches what the one-time token would link (masked number and expiry). Read-only: nothing is linked yet.
-    public func loadAccountLinkPreview(token: String) async {
-        accountLinkPhase = .loading
-        do {
-            accountLinkPhase = .ready(try await services.api.previewPhoneLink(token: token))
-        } catch {
-            accountLinkPhase = .failed((error as? APIError)?.userMessage ?? "This link isn't valid anymore.")
-        }
-    }
-
-    /// The phone the last redemption linked (it may carry `usableFrom`).
+    /// The phone the last link flow produced (it carries `usableFrom` while it waits).
     public private(set) var lastLinkedPhone: PhoneLink?
 
-    /// Redeems the token for the number previewed. Refuses unless the person explicitly confirmed "This is my phone"
-    /// for a preview that is still valid. Sends both the last four digits and the exact masked number from the preview.
-    public func redeemAccountLink(token: String, confirmedOwnPhone: Bool) async -> Bool {
-        guard confirmedOwnPhone, case .ready(let preview) = accountLinkPhase, preview.expiresAt > services.clock(),
-              let last4 = preview.last4 else { return false }
-        do {
-            let link = try await services.api.redeemSMSLink(
-                SMSLinkRedeemRequest(token: token, confirmPhoneLast4: last4, confirmMaskedPhone: preview.maskedPhone))
-            phones.removeAll { $0.id == link.id }
-            phones.append(link)
-            lastLinkedPhone = link
-            accountLinkPhase = .idle
-            return true
-        } catch {
-            errorMessage = (error as? APIError)?.userMessage ?? "We couldn't link that number."
-            return false
-        }
+    private func phoneLinked(_ link: PhoneLink) {
+        phones.removeAll { $0.id == link.id }
+        phones.append(link)
+        lastLinkedPhone = link
     }
-
-    /// What to tell the person after a successful redemption: when the number starts working.
-    public var accountLinkResultMessage: String? {
-        guard let link = lastLinkedPhone else { return nil }
-        let now = services.clock()
-        if let until = link.usableFrom, until > now {
-            return "\(link.maskedPhone) is linked. For your security it starts working \(CoolDownPolicy.timeText(until, now: now)), or confirm it now from a device you trust."
-        }
-        return "\(link.maskedPhone) is linked."
-    }
-
-    public func resetAccountLink() { accountLinkPhase = .idle }
 
     public func removePhone(_ phone: PhoneLink) async {
         do { try await services.api.removePhoneLink(phone.id); phones.removeAll { $0.id == phone.id } } catch {

@@ -64,6 +64,7 @@ public final class SecurityNoticesViewModel {
         case .cancelRecovery?: "Cancel recovery"
         case .cancelDeviceReplacement?: "Cancel"
         case .cancelVaultRecovery?: "Cancel release"
+        case .keepPhoneNumber?: "Keep my number"
         case .unknown?, nil: nil
         }
     }
@@ -74,6 +75,7 @@ public final class SecurityNoticesViewModel {
         case .cancelRecovery?: "Stops the account recovery that was started"
         case .cancelDeviceReplacement?: "Removes the new iPhone and keeps this one"
         case .cancelVaultRecovery?: "Stops the request to release your vault's recovery key envelope"
+        case .keepPhoneNumber?: "Refuses the request to link your number to another account"
         case .unknown?, nil: nil
         }
     }
@@ -98,6 +100,10 @@ public final class SecurityNoticesViewModel {
                 guard let id = notice.subjectId.flatMap(UUID.init(uuidString:)) else { throw APIError.invalidRequest("id") }
                 try await services.api.cancelVaultRecoveryRelease(id)
                 message = Self.vaultReleaseCancelledMessage
+            case .keepPhoneNumber:
+                guard let id = notice.subjectId.flatMap(PhoneLinkID.init) else { throw APIError.invalidRequest("id") }
+                try await services.api.keepPhoneNumber(id)
+                message = Self.phoneKeptMessage
             case .unknown:
                 return false
             }
@@ -127,6 +133,7 @@ public final class SecurityNoticesViewModel {
     public static let vaultReleaseCancelledMessage = "The request was cancelled. Nothing was released. If you didn't ask for it, replace your recovery key in Authenticator."
     public static let replacementCancelledMessage = "The new iPhone was removed. This one keeps working."
     public static let coolDownActionMessage = "This iPhone hasn't been approved yet, so it can't do that. Use a device you already trust."
+    public static let phoneKeptMessage = "Your number stays linked to this account."
     public static let alreadyHandledMessage = "That was already taken care of."
 
     // MARK: Copy
@@ -161,6 +168,8 @@ public final class SecurityNoticesViewModel {
         case .approvalRequestsPaused: return "A business sent you several approval requests, so Viadere paused it \(when)."
         case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
         case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
+        case .phoneTransferRequested: return "Someone asked to link your phone number to another Viadere account \(when). If that number is still yours, keep it."
+        case .phoneUnlinked: return "Your phone number was unlinked by a text from that number."
         case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
         case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."
         case .unknown:
@@ -175,6 +184,7 @@ public final class SecurityNoticesViewModel {
         case .cancelRecovery?: return "Not you? Cancel recovery."
         case .cancelDeviceReplacement?: return "Not you? Cancel."
         case .cancelVaultRecovery?: return "Not you? Cancel the release now."
+        case .keepPhoneNumber?: return "If you don't keep it, the request goes through after its waiting period."
         case .unknown?, nil: break
         }
         switch notice.topic {

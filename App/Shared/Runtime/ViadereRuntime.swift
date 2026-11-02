@@ -13,7 +13,7 @@ enum ViadereRuntime {
         let allowLocalHTTP = false
         #endif
         let configuration = ViadereConfiguration.resolve(info: Bundle.main.infoDictionary ?? [:], allowLocalHTTP: allowLocalHTTP)
-        // Every link parser (connect, Approve enrollment, link sessions, account link, handoff) accepts only this build's link domain (WP-C3).
+        // Every link parser (connect, Approve enrollment, link sessions, the retired account-link and handoff prefixes) accepts only this build's link domain (WP-C3).
         configuration.installLinkDomain()
         return configuration
     }()

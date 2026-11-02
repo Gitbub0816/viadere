@@ -54,7 +54,6 @@ public final class AppModel {
         didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
     }
     public var pendingConnect: PendingConnect?
-    public var pendingAccountLinkToken: String?
     /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
     public var pendingApproveEnrollment: PendingApproveEnrollment?
     /// A business link session opened from a QR or link (`/k/…`); the Connect tab presents it.
@@ -260,7 +259,6 @@ public final class AppModel {
         lockEpoch += 1
         presentedApproval = nil
         pendingConnect = nil
-        pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil
@@ -309,25 +307,11 @@ public final class AppModel {
             // customer's own choice in the selector does.
             businessToOpen = handle
             selectedTab = .businesses
-        case .accountLink(let token):
-            pendingAccountLinkToken = token
-            selectedTab = .you
-        case .handoff(let token):
+        case .retiredLink:
+            // An old text link: nothing is read or redeemed. The person is told and sees what is waiting in the app.
             selectedTab = .alerts
-            guard let redeemed = try? await services.api.redeemHandoff(token: token) else {
-                toast = "That link has expired. Open Viadere to see your requests."
-                await home.load()
-                return
-            }
-            switch redeemed.purpose {
-            case .interaction:
-                if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
-            case .manageBusinesses:
-                selectedTab = .businesses
-                addBusinessPresented = true
-            case .accountHelp:
-                selectedTab = .you
-            }
+            toast = "This link is no longer used. Open Viadere to see your requests."
+            await home.load()
         case .interaction(let id):
             await openInteraction(id)
         case .conversation(let id):
@@ -440,7 +424,6 @@ public final class AppModel {
     private func reset() {
         presentedApproval = nil
         pendingConnect = nil
-        pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil

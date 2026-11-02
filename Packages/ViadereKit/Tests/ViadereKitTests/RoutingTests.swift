@@ -25,9 +25,12 @@ struct DeepLinkTests {
         #expect(DeepLinkRouter.route("https://viadere.com:8443/c/AF2345") == nil)
     }
 
-    @Test func accountLinkAndHandoff() {
-        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token)") == .accountLink(token: token))
-        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)") == .handoff(token: token))
+    @Test func retiredAccountLinkAndHandoffOnlyOpenTheNoLongerUsedNotice() {
+        // ADR-0027: old text links carry no token into the app. They route to one case that redeems and reads nothing.
+        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token)") == .retiredLink)
+        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)") == .retiredLink)
+        #expect(DeepLinkRouter.route("viadere://h/\(token)") == nil)
+        #expect(DeepLinkRouter.route("viadere://l/\(token)") == nil)
         #expect(DeepLinkRouter.route("https://viadere.com/h/short") == nil)
         #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)?next=https://evil.com") == nil)
         #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)#frag") == nil)
@@ -144,8 +147,8 @@ struct LinkDomainRoutingTests {
         }
         #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: staging) != nil)
         #expect(DeepLinkRouter.route("https://www.viadere.cksites.dev/c/AF2345", domain: staging) != nil)
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/l/\(token)", domain: staging) == .accountLink(token: token))
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/h/\(token)", domain: staging) == .handoff(token: token))
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/l/\(token)", domain: staging) == .retiredLink)
+        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/h/\(token)", domain: staging) == .retiredLink)
         #expect(DeepLinkRouter.route("https://viadere.cksites.dev/a/ABCDEFGH", domain: staging) == .approveEnrollment(code: "ABCDEFGH", rootKid: nil, secret: nil))
         // And a production build refuses staging links.
         #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: .production) == nil)

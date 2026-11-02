@@ -218,16 +218,13 @@ characters are removed, line breaks become spaces, stacked combining marks and l
 sheet, notification, card, watch list, Live Activity and Activity/Home/Messages surfaces; the amount always comes first so
 truncation can never hide it. The card's verification badge uses the real `isVerified` flag.
 
-**SMS account links.** Only the https universal link `https://viadere.com/l/{token}` is accepted (no `viadere://l/`). The
-confirmation sheet first previews what the token would link (Core's `SMSLinkPreview`: masked number, expiry), warns, and
-links only after an explicit "This is my phone"; redeem sends `{token, confirmPhoneLast4, confirmMaskedPhone}` (both from the
-preview) and the result shows when the number starts working (`usableFrom`). Silent status pushes (`content-available`, same `iid`) start or
+**Linking a phone (ADR-0027).** No code and no link is ever texted to the phone. Settings and onboarding use Kit's `PhoneLinkViewModel`: the app shows a one-time nonce, opens the system compose sheet pre-filled with "Link my number to my Viadere app VDR-…" (`MFMessageComposeViewController`, never an `sms:` URL; the person taps Send), or shows the text to copy when the device cannot send texts, then polls until the number is linked or the ten minutes end ("We didn't receive your text…" only then). The result says when the number starts working (`usableFrom`); a number linked this way is control of the number only, never a sign-in factor. Old `/l/` and `/h/` text links open a "no longer used" notice (`DeepLink.retiredLink`). Silent status pushes (`content-available`, same `iid`) start or
 update Live Activities; `pushType: .token` update tokens and the iOS 17.2 push-to-start token are registered through
 `/v1/live-activities/tokens`; the APNs token through `/v1/push/apns-token`.
 
 ## Screens (P2 scope, structured for P3–P5)
 
-Onboarding (animated mark, passkey, device enrollment, notification priming, optional phone link with OTP) ·
+Onboarding (animated mark, passkey, device enrollment, notification priming, optional phone link by sending one text from the phone) ·
 Home · Connect (`@handle`, auto-formatted codes with I→1/O→0, name search, QR scanner, universal links, verified card,
 purpose-scoped consent) · Business detail · **Approval sheet** · Messages (threads, structured `choose` chips,
 composer) · Settings/Security (devices, app lock, linked phones, consent history, sessions, sign out, delete).

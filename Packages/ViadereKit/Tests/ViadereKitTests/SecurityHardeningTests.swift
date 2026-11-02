@@ -125,7 +125,6 @@ struct AppLockHardeningTests {
         await model.unlock()
         let id = try #require(model.home.content.pending.first?.id)
         await model.openInteraction(id)
-        model.pendingAccountLinkToken = "token"
         model.pendingConnect = PendingConnect(code: try #require(BusinessCode(parsing: "AF2345")), link: nil, source: .code)
         #expect(model.presentedApproval != nil)
         let epoch = model.lockEpoch
@@ -135,7 +134,6 @@ struct AppLockHardeningTests {
         model.lock()
         #expect(model.isLocked)
         #expect(model.presentedApproval == nil)
-        #expect(model.pendingAccountLinkToken == nil)
         #expect(model.pendingConnect == nil)
         #expect(model.lockEpoch == epoch + 1)
         model.lock() // idempotent
@@ -514,42 +512,22 @@ struct ClipAndConfigTests {
     }
 }
 
-// MARK: - #2 Link preview
+// MARK: - #2 Retired text links
 
-@Suite("Account link confirmation")
+@Suite("Retired text links")
 @MainActor
-struct AccountLinkTests {
-    @Test func theCustomSchemeRouteIsGone() {
+struct RetiredLinkTests {
+    @Test func aRetiredLinkOnlyTellsThePersonAndRedeemsNothing() async throws {
         let token = String(repeating: "A", count: 43)
         #expect(DeepLinkRouter.route("viadere://l/\(token)") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token)") == .accountLink(token: token))
-    }
-
-    @Test func previewShowsTheMaskedNumberAndRedeemNeedsConfirmation() async throws {
-        let api = MockViadereAPI(seed: false)
-        await api.setLinkPreview("+1 ••• ••• 4821")
-        let services = await ViadereServices.mock(api: api)
-        let model = SecuritySettingsViewModel(services: services)
-        let token = String(repeating: "B", count: 43)
-        #expect(model.accountLinkPhase == .idle)
-        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: true))) // no preview yet
-        await model.loadAccountLinkPreview(token: token)
-        guard case .ready(let preview) = model.accountLinkPhase else { Issue.record("expected a preview"); return }
-        #expect(preview.maskedPhone == "+1 ••• ••• 4821")
-        #expect(preview.last4 == "4821")
-        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: false)))
-        #expect(try await api.phoneLinks().isEmpty)
-        #expect(await model.redeemAccountLink(token: token, confirmedOwnPhone: true))
-        #expect(model.phones.last?.maskedPhone == "+1 ••• ••• 4821")
-        #expect(SecuritySettingsViewModel.accountLinkWarning.hasPrefix("Only continue if you started this from your own phone."))
-    }
-
-    @Test func invalidTokensFailGracefully() async throws {
-        let services = await ViadereServices.mock(api: MockViadereAPI(seed: false))
-        let model = SecuritySettingsViewModel(services: services)
-        await model.loadAccountLinkPreview(token: "x")
-        if case .failed = model.accountLinkPhase {} else { Issue.record("expected failure") }
-        #expect(!(await model.redeemAccountLink(token: "x", confirmedOwnPhone: true)))
+        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token)") == .retiredLink)
+        let services = await ViadereServices.mock()
+        let model = AppModel(services: services)
+        await model.bootstrap()
+        await model.unlock()
+        await model.handle(.retiredLink)
+        #expect(model.toast == "This link is no longer used. Open Viadere to see your requests.")
+        #expect(model.selectedTab == .alerts)
     }
 }
 
