@@ -26,15 +26,13 @@ struct LoopInstanceSheet: View {
                         if let notice = vm.endedNotice { ViadereNotice(notice, kind: .info) }
                         if case .failed(let message) = vm.status { ViadereNotice(message, kind: .warning) }
                         PresentationView(tree: vm.tree, model: vm)
-                        #if VIADERE_STAGING
-                        // Staging builds only: which check refused the Loop (an enum code, never business content). Release keeps the
-                        // single generic message (docs/SECURITY.md §2.98).
-                        if let reason = vm.tree.fallbackReason {
+                        // Staging builds only (ViadereStagingDiagnostics): which check refused the Loop (an enum code, never business
+                        // content). Release keeps the single generic message (docs/SECURITY.md §2.98).
+                        if model.services.configuration.stagingDiagnostics, let reason = vm.tree.fallbackReason {
                             Text("Staging diagnostic: \(reason)")
                                 .font(ViadereType.caption)
                                 .foregroundStyle(ViadereColor.textSecondary)
                         }
-                        #endif
                         if let error = vm.errorMessage { ViadereNotice(error, kind: .warning) }
                         if vm.reportSent { ViadereNotice("Thanks. Viadere will review this request.", kind: .info) }
                     }

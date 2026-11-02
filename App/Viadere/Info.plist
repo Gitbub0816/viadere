@@ -92,6 +92,8 @@
 	<string>$(VIADERE_LINK_DOMAIN)</string>
 	<key>ViadereWalletBetaLabel</key>
 	<string>$(VIADERE_WALLET_BETA_LABEL)</string>
+	<key>ViadereStagingDiagnostics</key>
+	<string>$(VIADERE_STAGING_DIAGNOSTICS)</string>
 	<key>ViadereLinkDescriptorKeys</key>
 	<string>$(VIADERE_LINK_DESCRIPTOR_KEYS)</string>
 	<key>ViadereBrandManifestKeys</key>

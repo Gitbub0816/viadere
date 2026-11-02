@@ -36,6 +36,8 @@ VIADERE_DISPLAY_NAME = Viadere
 // pass-type-identifiers entitlement to see whether a pass is already in Wallet. The Beta label on Wallet screens is an owner decision.
 VIADERE_PASS_TYPE_IDENTIFIER = pass.com.viadere.wallet
 VIADERE_WALLET_BETA_LABEL = YES
+// Staging-only diagnostics (YES only in Staging.xcconfig; Release and Debug never show them).
+VIADERE_STAGING_DIAGNOSTICS = NO
 
 // Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
 DEVELOPMENT_TEAM =

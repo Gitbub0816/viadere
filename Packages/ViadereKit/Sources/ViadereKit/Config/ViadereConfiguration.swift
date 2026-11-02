@@ -39,6 +39,9 @@ public struct ViadereConfiguration: Sendable {
     /// Whether Wallet screens carry a "Beta" label (Info.plist `ViadereWalletBetaLabel`, build setting `VIADERE_WALLET_BETA_LABEL`).
     /// On unless the build explicitly says `NO`/`false`: whether to drop it is an open owner decision (docs/WALLET.md).
     public var walletBetaLabel = true
+    /// Staging-only diagnostics, e.g. the machine reason under a refused Loop's generic notice (Info.plist `ViadereStagingDiagnostics`,
+    /// build setting `VIADERE_STAGING_DIAGNOSTICS`, YES only in Staging.xcconfig). Off unless explicitly on.
+    public var stagingDiagnostics = false
     /// Viadere's `brand-manifest` verification keys, pinned in the build (`ManifestKeyPins`; Info.plist `ViadereBrandManifestKeys`). Empty =
     /// every Brand Kit renders neutral.
     public var brandManifestKeys: [PinnedManifestKey] = []
@@ -129,6 +132,8 @@ public struct ViadereConfiguration: Sendable {
         config.applyManifestKeyPins(from: info)
         if let raw = info["ViadereWalletBetaLabel"] as? String, ["no", "false", "0"].contains(raw.lowercased()) { config.walletBetaLabel = false }
         if let flag = info["ViadereWalletBetaLabel"] as? Bool { config.walletBetaLabel = flag }
+        if let raw = info["ViadereStagingDiagnostics"] as? String, ["yes", "true", "1"].contains(raw.lowercased()) { config.stagingDiagnostics = true }
+        if let flag = info["ViadereStagingDiagnostics"] as? Bool { config.stagingDiagnostics = flag }
         #if DEBUG
         config.apnsEnvironment = .sandbox
         #endif

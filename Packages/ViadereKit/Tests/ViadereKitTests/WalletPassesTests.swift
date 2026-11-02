@@ -99,6 +99,10 @@ struct WalletPassesTests {
         #expect(ViadereConfiguration.resolve(info: [:], allowLocalHTTP: false).walletBetaLabel)
         #expect(!ViadereConfiguration.resolve(info: ["ViadereWalletBetaLabel": "NO"], allowLocalHTTP: false).walletBetaLabel)
         #expect(!ViadereConfiguration.resolve(info: ["ViadereWalletBetaLabel": false], allowLocalHTTP: false).walletBetaLabel)
+        // Staging diagnostics are off unless the build turns them on.
+        #expect(!ViadereConfiguration.resolve(info: [:], allowLocalHTTP: false).stagingDiagnostics)
+        #expect(!ViadereConfiguration.resolve(info: ["ViadereStagingDiagnostics": "NO"], allowLocalHTTP: false).stagingDiagnostics)
+        #expect(ViadereConfiguration.resolve(info: ["ViadereStagingDiagnostics": "YES"], allowLocalHTTP: false).stagingDiagnostics)
         #expect(ViadereConfiguration.resolve(info: ["ViadereWalletBetaLabel": "$(VIADERE_WALLET_BETA_LABEL)"], allowLocalHTTP: false).walletBetaLabel)
     }
 

@@ -52,5 +52,6 @@ APS_ENVIRONMENT = $(VIADERE_STAGING_APS_ENVIRONMENT:default=development)
 APP_ATTEST_ENVIRONMENT = $(VIADERE_STAGING_APP_ATTEST_ENVIRONMENT:default=development)
 
 // ---- diagnostics -------------------------------------------------------------------------------------------------------------
-// Staging-only diagnostics (e.g. the Loop fallback reason under the generic "can't be shown" notice). Release never defines it.
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) VIADERE_STAGING
+// Staging-only diagnostics (e.g. the Loop fallback reason under the generic "can't be shown" notice), read at run time from Info.plist
+// (ViadereStagingDiagnostics). Release never sets it.
+VIADERE_STAGING_DIAGNOSTICS = YES
