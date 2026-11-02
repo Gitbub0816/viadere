@@ -113,3 +113,19 @@ validates again; a failed POST renders the error page with the fields to check a
   inside their card, never the page.
 * `WP6ConsoleTests` audits every console page structurally (one `h1`, landmarks, labels, captions, names, no inline style or handler).
   `ConsoleDesignSystemTests` covers escaping, tables, back links and the stylesheet. Add your page's paths to those audits.
+
+## Rendering check
+
+`Server/Tests/browser/test_console_render.py` renders every console page in headless Chromium at 1440, 1024, 820, 560 and 390 px, light and
+dark, under the real response headers (so a stylesheet change that is not covered by the CSP pin fails). It fails on CSP violations, page-level
+horizontal overflow and text below WCAG AA contrast, and lists targets under 24 px. The pages come from the test-only dump
+`ConsoleRenderDump` (skipped unless `CONSOLE_DUMP_DIR` is set):
+
+```sh
+CONSOLE_DUMP_DIR=/tmp/console-dump swift test --package-path Server --filter ConsoleRenderDump
+python Server/Tests/browser/test_console_render.py /tmp/console-dump --out /tmp/console-shots
+```
+
+Rules this found: a `.vh` (visually hidden) element is `position:absolute`, so every horizontal scroller (`.tw`, `.tabs`, the mobile nav
+strip) must be `position:relative` or the hidden text widens the whole page; the operator sidebar in dark mode is a raised charcoal surface, not
+the inverted ivory of light mode. Before/after screenshots: `docs/ops/console-screenshots/`.
