@@ -1,0 +1,17 @@
+# Current stable releases, checked 2026-11-02 (CLAUDE.md "Current versions"): Kotlin on Maven Central / the Gradle plugin portal,
+# AGP and AndroidX on Google's Maven repository, Gradle on services.gradle.org, the SDK platform in Google's repository2-4.xml.
+[versions]
+agp = "9.5.0"
+kotlin = "2.4.21"
+compose-bom = "2026.09.00"
+junit = "4.13.2"
+
+[libraries]
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+compose-ui = { group = "androidx.compose.ui", name = "ui" }
+compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
