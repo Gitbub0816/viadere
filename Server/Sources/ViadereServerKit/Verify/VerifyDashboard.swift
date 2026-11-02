@@ -36,13 +36,14 @@ enum VerifyDashboard {
         let entitled = try await EntitlementService(db: db, ctx: ctx).snapshot(businessId: businessId)
         guard !entitled.capabilities.isDisjoint(with: VerifyService.supportedCapabilities) else { return "" }
         guard ctx.config.verify.enabled else {
-            return "<div class=\"card\"><h2>Verify</h2><p class=\"mu sm\">Verify is not enabled for the platform yet. Nothing has been requested.</p></div>"
+            return ConsoleUI.card("Verify", ConsoleUI.empty("Verify is not enabled for the platform yet", "Nothing has been requested.", icon: .verify))
         }
         let counts = try await counts(db: db, ctx: ctx, businessId: businessId, days: days)
         let total = counts.reduce(Counts()) { Counts(verified: $0.verified + $1.counts.verified, notVerified: $0.notVerified + $1.counts.notVerified, pending: $0.pending + $1.counts.pending) }
-        let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(total.total), "Verification requests"))\(DashboardFormat.stat(String(total.verified), "Verified"))\(DashboardFormat.stat(String(total.notVerified), "Not verified"))\(DashboardFormat.stat(String(total.pending), "Waiting for the customer"))</div>"
+        let tiles = ConsoleUI.stats([ConsoleUI.Stat(String(total.total), "Verification requests"), ConsoleUI.Stat(String(total.verified), "Verified"),
+                                     ConsoleUI.Stat(String(total.notVerified), "Not verified"), ConsoleUI.Stat(String(total.pending), "Waiting for the customer")])
         let rows = counts.map { [DashboardUI.esc($0.capability.rawValue), String($0.counts.verified), String($0.counts.notVerified), String($0.counts.pending)] }
-        let table = rows.isEmpty ? "<p class=\"mu sm\">No verification requests in this period.</p>" : DashboardFormat.table(["Capability", "Verified", "Not verified", "Pending"], rows, caption: "Verification requests by capability")
-        return "<div class=\"card\"><h2>Verify</h2>\(tiles)\(table)<p class=\"mu sm\">Counts only. \"Not verified\" covers every way a request can end without a positive result, including a customer who declined: Viadere does not tell you why, and neither does this page.</p></div>"
+        let table = rows.isEmpty ? ConsoleUI.empty("No verification requests in this period") : DashboardFormat.table(["Capability", "Verified", "Not verified", "Pending"], rows, caption: "Verification requests by capability")
+        return ConsoleUI.card("Verify", description: "Counts only. \"Not verified\" covers every way a request can end without a positive result, including a customer who declined: Viadere does not tell you why, and neither does this page.", tiles + table)
     }
 }

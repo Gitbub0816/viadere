@@ -52,9 +52,9 @@ enum OperatorRoutes {
 
         routes.grouped(webLimiter).get("operator", "login") { req -> Response in
             DashboardUI.authPage(title: "Operator sign in", body: """
-            <h1>Operator console</h1><p class="mu">Viadere staff only. Sign in with your passkey.</p>\
+            <h1>Operator console</h1><p class="mu">Viadere staff only. Sign in with your passkey; every action you take here is audited with your name.</p>\
             <form data-passkey="login" data-begin="/operator/auth/login/begin" data-finish="/operator/auth/login/finish" data-next="/operator">\
-            <button class="btn" type="submit">Sign in with passkey</button></form><p id="pk-msg" class="sm err" role="alert"></p>
+            <div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Sign in with passkey</button></div></form><p id="pk-msg" class="sm err" role="alert"></p>
             """)
         }
         routes.grouped(webLimiter).get("operator", "enroll", ":token") { req -> Response in
@@ -65,7 +65,7 @@ enum OperatorRoutes {
             return DashboardUI.authPage(title: "Operator enrollment", body: """
             <h1>Set up your passkey</h1><p class="mu">Register a passkey for the operator console.</p>\
             <form data-passkey="register" data-begin="/operator/auth/enroll/begin" data-finish="/operator/auth/enroll/finish" data-next="/operator">\
-            <input type="hidden" name="token" value="\(DashboardUI.esc(token))"><button class="btn" type="submit">Create passkey</button></form>\
+            <input type="hidden" name="token" value="\(DashboardUI.esc(token))"><div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Create passkey</button></div></form>\
             <p id="pk-msg" class="sm err" role="alert"></p>
             """)
         }
@@ -183,15 +183,30 @@ enum OperatorRoutes {
         let pending = try await BusinessApplicationRecord.query(on: req.db).filter(\.$state == "pending").sort(\.$submittedAt, .ascending).all()
         let businesses = try await BusinessRecord.query(on: req.db).filter(\.$id ~~ pending.map(\.businessId)).all()
         let byId = Dictionary(businesses.compactMap { b in b.id.map { ($0, b) } }, uniquingKeysWith: { a, _ in a })
-        let rows = pending.map { a -> [String] in
+        let rows = pending.map { a -> [ConsoleUI.Cell] in
             let b = byId[a.businessId]
-            return ["<a href=\"/operator/applications/\(a.businessId.uuidString.lowercased())\">\(DashboardUI.esc(b?.displayName ?? "—"))</a>",
-                    DashboardUI.esc(b?.category.replacingOccurrences(of: "_", with: " ") ?? ""), DashboardUI.esc(a.requestedHandle.map { "@" + $0 } ?? "—"),
-                    DashboardUI.esc(a.website ?? "—"), DashboardFormat.date(a.submittedAt)]
+            let name = b?.displayName ?? "—"
+            return [ConsoleUI.Cell(html: "<a href=\"/operator/applications/\(a.businessId.uuidString.lowercased())\">\(DashboardUI.esc(name))</a>", sort: .text(name)),
+                    .text(b?.category.replacingOccurrences(of: "_", with: " ") ?? ""), .text(a.requestedHandle.map { "@" + $0 } ?? "—"),
+                    .text(a.website ?? "—"), .date(a.submittedAt),
+                    ConsoleUI.Cell(html: ConsoleUI.linkButton("Review", href: "/operator/applications/\(a.businessId.uuidString.lowercased())", small: true, ariaLabel: "Review \(name)"))]
         }
+        let counts = try await OperatorOps.queueCounts(req)
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(pending.count), "Applications waiting", hint: pending.first.map { "Oldest: \(DashboardFormat.day($0.submittedAt))" }, tone: pending.isEmpty ? nil : .accent),
+            ConsoleUI.Stat(String(counts.goLive), "Go-live requests", tone: counts.goLive > 0 ? .accent : nil, href: "#go-live"),
+            ConsoleUI.Stat(String(counts.legal), "Legal entity reviews", tone: counts.legal > 0 ? .accent : nil, href: "#legal"),
+            ConsoleUI.Stat(String(counts.brand), "Brand items waiting", tone: counts.brand > 0 ? .accent : nil, href: "/operator/brand"),
+            ConsoleUI.Stat(String(counts.loops), "Loop revisions waiting", tone: counts.loops > 0 ? .accent : nil, href: "/operator/loops"),
+            ConsoleUI.Stat(String(counts.support), "Open tickets and appeals", tone: counts.support > 0 ? .warning : nil, href: "/operator/support"),
+        ])
+        let table = ConsoleUI.card("Pending applications", description: "Oldest first. Verify the organization exists, the website is theirs and the use fits Viadere's policy.",
+            ConsoleUI.table([ConsoleUI.Column("Organization", key: "org"), ConsoleUI.Column("Category", key: "category"), ConsoleUI.Column("Handle"), ConsoleUI.Column("Website"),
+                             ConsoleUI.Column("Submitted", key: "submitted"), ConsoleUI.Column("", actions: true)], rows, caption: "Pending applications",
+                            state: ConsoleUI.TableState(req, id: "a", defaultSort: "submitted"), empty: "No pending applications", emptyMessage: "New business applications appear here."))
         let queues = try await OperatorOps.queues(req)
-        return DashboardUI.operatorPage(p, title: "Applications", active: "/operator", subtitle: "Pending business verification.", flash: DashboardFormat.flash(req),
-                                        body: "<div class=\"card\">\(DashboardFormat.table(["Organization", "Category", "Handle", "Website", "Submitted"], rows, empty: "No pending applications.", caption: "Pending applications"))</div>" + queues)
+        return DashboardUI.operatorPage(p, title: "Applications", active: "/operator", subtitle: "What waits for a decision, oldest first.", flash: DashboardFormat.flash(req),
+                                        body: tiles + table + queues)
     }
 
     private static func application(_ req: Request) async throws -> Response {
@@ -204,24 +219,28 @@ enum OperatorRoutes {
         let ownerLines = users.map { u in
             "\(DashboardUI.esc(u.displayName)) · \(DashboardUI.esc((try? req.ctx.cipher.openString(u.emailCiphertext, context: "dashboard_users.email", rowId: u.id!)) ?? ""))"
         }.joined(separator: "<br>")
+        let facts = ConsoleUI.card("Application", actions: DashboardFormat.statusBadge(business.status), ConsoleUI.keyValues([
+            ("Display name", DashboardUI.esc(business.displayName)), ("Legal name", DashboardUI.esc(app.legalName ?? "—")), ("Category", DashboardUI.esc(business.category.replacingOccurrences(of: "_", with: " "))),
+            ("Website", DashboardUI.esc(app.website ?? "—")), ("Requested handle", DashboardUI.esc(app.requestedHandle.map { "@" + $0 } ?? "—")), ("Owners", ownerLines.isEmpty ? "—" : ownerLines),
+            ("Submitted", DashboardFormat.date(app.submittedAt)), ("State", DashboardUI.esc(app.state)),
+        ]) + "<h3>What they will use Viadere for</h3><p>\(DashboardUI.esc(app.detail ?? "—"))</p>")
         var decide = ""
         if app.state == "pending" {
-            decide = """
-            <div class="cols"><form method="post" action="/operator/applications/\(id.uuidString.lowercased())/approve">\(DashboardUI.csrf(p))<h3>Approve</h3>\
-            <label for="handle">Handle to issue (blank = as requested)</label><input id="handle" name="handle" type="text" maxlength="30" placeholder="\(DashboardUI.esc(app.requestedHandle ?? ""))">\
-            <label for="anote">Note</label><textarea id="anote" name="note" maxlength="500"></textarea>\
-            <p class="mu sm">Issues the handle and a permanent code and makes the business discoverable. Requires your passkey.</p><button class="btn" type="submit">Verify business</button></form>\
-            <form method="post" action="/operator/applications/\(id.uuidString.lowercased())/reject">\(DashboardUI.csrf(p))<h3>Decline</h3>\
-            <label for="rnote">Reason (shown to the applicant)</label><textarea id="rnote" name="note" maxlength="500"></textarea><button class="btn d" type="submit">Decline</button></form></div>
-            """
+            let base = "/operator/applications/\(id.uuidString.lowercased())"
+            let approve = ConsoleUI.card("Approve", description: "Issues the handle and a permanent code and makes the business discoverable.",
+                ConsoleUI.form("\(base)/approve", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("handle", label: "Handle to issue", id: "handle", placeholder: app.requestedHandle ?? "", help: "Leave blank to issue the requested handle.", optional: true, attrs: ["maxlength": "30"])
+                    + ConsoleUI.textarea("note", label: "Note", id: "anote", help: "Recorded with the decision.", optional: true, attrs: ["maxlength": "500"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Verify business", passkey: true) + ConsoleUI.passkeyNote())))
+            let decline = ConsoleUI.card("Decline", description: "The applicant sees your reason and can apply again or appeal.", tone: .danger,
+                ConsoleUI.form("\(base)/reject", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.textarea("note", label: "Reason", id: "rnote", help: "Shown to the applicant. Say what to fix.", attrs: ["maxlength": "500"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Decline", .danger, passkey: true))))
+            decide = ConsoleUI.sectionTitle("Decision", description: "Both actions ask for your passkey and are audited with your name.") + "<div class=\"cols\">\(approve)\(decline)</div>"
         }
-        let body = """
-        <div class="card"><h2>\(DashboardUI.esc(business.displayName)) \(DashboardFormat.statusBadge(business.status))</h2>\
-        <p class="sm">Legal name: \(DashboardUI.esc(app.legalName ?? "—")) · Category: \(DashboardUI.esc(business.category)) · Website: \(DashboardUI.esc(app.website ?? "—"))</p>\
-        <p class="sm">Requested handle: \(DashboardUI.esc(app.requestedHandle.map { "@" + $0 } ?? "—"))</p><p class="sm">Owner(s):<br>\(ownerLines)</p>\
-        <h3>Description</h3><p>\(DashboardUI.esc(app.detail ?? "—"))</p><p class="mu sm">Submitted \(DashboardFormat.date(app.submittedAt)) · \(DashboardUI.esc(app.state))</p>\(decide)</div>
-        """
-        return DashboardUI.operatorPage(p, title: "Application", active: "/operator", flash: DashboardFormat.flash(req), body: body)
+        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator", subtitle: "Business application", flash: DashboardFormat.flash(req),
+                                        breadcrumbs: [ConsoleUI.Crumb("Operator", "/operator"), ConsoleUI.Crumb("Applications", "/operator"), ConsoleUI.Crumb(business.displayName, nil)],
+                                        body: facts + decide)
     }
 
     private static func businesses(_ req: Request) async throws -> Response {
@@ -229,16 +248,22 @@ enum OperatorRoutes {
         let all = try await BusinessRecord.query(on: req.db).sort(\.$createdAt, .descending).limit(200).all()
         let controls = try await BusinessControlRecord.query(on: req.db).all()
         let byId = Dictionary(controls.map { ($0.businessId, $0) }, uniquingKeysWith: { a, _ in a })
-        let rows = all.map { b -> [String] in
+        let rows = all.map { b -> [ConsoleUI.Cell] in
             let c = b.id.flatMap { byId[$0] }
             var flags = ""
             if c?.throttled == true { flags += DashboardFormat.badge("Throttled", "dg") + " " }
             if let ceiling = c?.priorityCeiling { flags += DashboardFormat.badge("Cap: \(ceiling)", "mu") }
-            return ["<a href=\"/operator/businesses/\(b.id?.uuidString.lowercased() ?? "")\">\(DashboardUI.esc(b.displayName))</a>", DashboardFormat.statusBadge(b.status),
-                    DashboardUI.esc(b.tier), flags, DashboardFormat.date(b.createdAt)]
+            return [ConsoleUI.Cell(html: "<a href=\"/operator/businesses/\(b.id?.uuidString.lowercased() ?? "")\">\(DashboardUI.esc(b.displayName))</a>", sort: .text(b.displayName)),
+                    ConsoleUI.Cell(html: DashboardFormat.statusBadge(b.status), sort: .text(b.verificationStatus)), .text(b.tier), ConsoleUI.Cell(html: flags.isEmpty ? "<span class=\"mu\">—</span>" : flags), .date(b.createdAt)]
         }
-        return DashboardUI.operatorPage(p, title: "Businesses", active: "/operator/businesses", flash: DashboardFormat.flash(req),
-                                        body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Status", "Tier", "Controls", "Created"], rows, caption: "Businesses"))</div>")
+        let verified = all.filter { $0.status == .verified }.count
+        let suspended = all.filter { $0.status == .suspended }.count
+        let tiles = ConsoleUI.stats([ConsoleUI.Stat(String(all.count), "Businesses", hint: all.count >= 200 ? "Newest 200 shown" : nil), ConsoleUI.Stat(String(verified), "Verified", tone: .success),
+                                     ConsoleUI.Stat(String(suspended), "Suspended", tone: suspended > 0 ? .danger : nil), ConsoleUI.Stat(String(controls.filter(\.throttled).count), "Throttled")])
+        return DashboardUI.operatorPage(p, title: "Businesses", active: "/operator/businesses", subtitle: "Every organization, its status and the controls Viadere applied.", flash: DashboardFormat.flash(req),
+                                        body: tiles + ConsoleUI.panel(ConsoleUI.table([ConsoleUI.Column("Business", key: "name"), ConsoleUI.Column("Status", key: "status"), ConsoleUI.Column("Tier", key: "tier"),
+                                                                                          ConsoleUI.Column("Controls"), ConsoleUI.Column("Created", key: "created")], rows, caption: "Businesses",
+                                                                                         state: ConsoleUI.TableState(req, id: "b", defaultSort: "created", defaultAscending: false), pageSize: 50)))
     }
 
     private static func business(_ req: Request) async throws -> Response {
@@ -248,53 +273,69 @@ enum OperatorRoutes {
         let controls = try await BusinessControls.load(id, on: req.db)
         let m = try await AbuseService(db: req.db, ctx: req.ctx).metrics(for: id)
         let settings = await AbuseService(db: req.db, ctx: req.ctx).thresholds()
-        let tiles = """
-        <div class="grid">\(DashboardFormat.stat(String(m.issued), "Interactions (window)"))\(DashboardFormat.stat(DashboardFormat.percent(m.complaintRate), "Complaint rate (limit \(DashboardFormat.percent(settings.complaintRate)))"))\
-        \(DashboardFormat.stat(DashboardFormat.percent(m.optOutRate), "Opt-out rate (limit \(DashboardFormat.percent(settings.optOutRate)))"))\(DashboardFormat.stat(String(m.rateLimitHits), "Rate-limit hits"))</div>
-        """
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(m.issued), "Interactions (window)"),
+            ConsoleUI.Stat(DashboardFormat.percent(m.complaintRate), "Complaint rate (limit \(DashboardFormat.percent(settings.complaintRate)))", tone: m.complaintRate >= settings.complaintRate ? .danger : nil),
+            ConsoleUI.Stat(DashboardFormat.percent(m.optOutRate), "Opt-out rate (limit \(DashboardFormat.percent(settings.optOutRate)))", tone: m.optOutRate >= settings.optOutRate ? .danger : nil),
+            ConsoleUI.Stat(String(m.rateLimitHits), "Rate-limit hits"),
+        ])
         let csrf = DashboardUI.csrf(p)
         let base = "/operator/businesses/\(id.uuidString.lowercased())"
-        let ceilingOptions = ["none": "No extra cap", "high": "High", "normal": "Normal", "low": "Low"].sorted { $0.key > $1.key }.map { key, title in
-            "<option value=\"\(key)\"\((controls?.priorityCeiling ?? "none") == key ? " selected" : "")>\(title)</option>"
-        }.joined()
-        var status = "<div class=\"card\"><h2>Status</h2><p>\(DashboardFormat.statusBadge(business.status)) · plan \(DashboardUI.esc(business.tier))"
-        if let reason = controls?.suspensionReason { status += " · reason: \(DashboardUI.esc(reason))" }
-        status += "</p>"
-        if business.status == .verified {
-            status += "<form method=\"post\" action=\"\(base)/suspend\">\(csrf)<label for=\"reason\">Reason</label><input id=\"reason\" name=\"reason\" type=\"text\" maxlength=\"300\" required><p class=\"mu sm\">Blocks the business's API keys and interactions immediately and cancels pending interactions. Requires your passkey.</p><button class=\"btn d\" type=\"submit\">Suspend</button></form>"
-        } else if business.status == .suspended {
-            status += "<form method=\"post\" action=\"\(base)/unsuspend\">\(csrf)<button class=\"btn\" type=\"submit\">Reinstate</button></form>"
+        let ceilingOptions = [("none", "No extra cap"), ("high", "High"), ("normal", "Normal"), ("low", "Low")].map { key, title in
+            ConsoleUI.Option(key, title, selected: (controls?.priorityCeiling ?? "none") == key)
         }
-        status += "</div>"
-        let controlsCard = """
-        <div class="card"><h2>Trust controls</h2><p class="mu sm">Overrides only ever restrict. A ceiling caps the priority the Trust Engine would allow; it can never raise it, and the billing plan is never consulted.</p>\
-        <div class="cols"><form method="post" action="\(base)/ceiling">\(csrf)<label for="ceiling">Priority ceiling</label><select id="ceiling" name="ceiling">\(ceilingOptions)</select><p><button class="btn s" type="submit">Apply</button></p></form>\
-        <form method="post" action="\(base)/throttle">\(csrf)<label for="reason2">Throttle (quota and API rate × \(settings.throttleFactor))</label>\
-        <input id="reason2" name="reason" type="text" maxlength="200" placeholder="Reason"><input type="hidden" name="throttled" value="\(controls?.throttled == true ? "off" : "on")">\
-        <p><button class="btn s" type="submit">\(controls?.throttled == true ? "Clear throttle (currently \(DashboardUI.esc(controls?.throttleSource ?? "")))" : "Throttle")</button></p></form></div></div>
-        """
+        var statusBody = ConsoleUI.keyValues([("Status", DashboardFormat.statusBadge(business.status)), ("Plan", DashboardUI.esc(business.tier))]
+                                             + (controls?.suspensionReason.map { [("Suspension reason", DashboardUI.esc($0))] } ?? []))
+        if business.status == .verified {
+            statusBody += "<h3>Suspend</h3>" + ConsoleUI.form("\(base)/suspend", csrf: csrf,
+                ConsoleUI.reason(id: "reason", help: "Blocks the business's API keys and interactions immediately and cancels pending interactions. Recorded in the audit log.", minLength: 0)
+                + ConsoleUI.formActions(ConsoleUI.button("Suspend", .danger, passkey: true) + ConsoleUI.passkeyNote()))
+        } else if business.status == .suspended {
+            statusBody += ConsoleUI.form("\(base)/unsuspend", csrf: csrf, ConsoleUI.formActions(ConsoleUI.button("Reinstate", passkey: true) + ConsoleUI.passkeyNote()))
+        }
+        let status = ConsoleUI.card("Status", tone: business.status == .suspended ? .danger : nil, statusBody)
+        let throttleOn = controls?.throttled == true
+        let controlsCard = ConsoleUI.card("Trust controls", description: "Overrides only ever restrict. A ceiling caps the priority the Trust Engine would allow; it can never raise it, and the billing plan is never consulted.", """
+        <div class="cols">\(ConsoleUI.form("\(base)/ceiling", csrf: csrf, ConsoleUI.select("ceiling", label: "Priority ceiling", id: "ceiling", options: ceilingOptions) + ConsoleUI.formActions(ConsoleUI.button("Apply", .secondary, passkey: true))))\
+        \(ConsoleUI.form("\(base)/throttle", csrf: csrf, ConsoleUI.input("reason", label: "Throttle (quota and API rate × \(settings.throttleFactor))", id: "reason2", placeholder: "Reason",
+                                                                       help: throttleOn ? "Currently throttled (\(controls?.throttleSource ?? ""))." : "Recorded with the change.", attrs: ["maxlength": "200"])
+            + ConsoleUI.hidden("throttled", throttleOn ? "off" : "on")
+            + ConsoleUI.formActions(ConsoleUI.button(throttleOn ? "Clear throttle (currently \(controls?.throttleSource ?? ""))" : "Throttle", throttleOn ? .secondary : .danger, passkey: true))))</div>
+        """)
         let entitlements = PolicyOperatorRoutes.summaryCard(businessId: id, snapshot: try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: id))
         let ops = try await OperatorOps.businessPanel(req, p: p, business: business)
-        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", flash: DashboardFormat.flash(req), body: tiles + status + ops + entitlements + controlsCard)
+        return DashboardUI.operatorPage(p, title: business.displayName, active: "/operator/businesses", subtitle: "Status, onboarding, entitlements and controls. Every change needs your passkey.",
+                                        flash: DashboardFormat.flash(req), body: tiles + "<div class=\"split\"><div>\(ops)</div><div>\(status)\(entitlements)\(controlsCard)</div></div>")
     }
 
     private static func abuse(_ req: Request) async throws -> Response {
         let p = try operatorPrincipal(req)
         let verified = try await BusinessRecord.query(on: req.db).filter(\.$verificationStatus == VerificationStatus.verified.rawValue).limit(200).all()
         let service = AbuseService(db: req.db, ctx: req.ctx)
+        let settings = await service.thresholds()
         var entries: [(BusinessRecord, AbuseService.Metrics, BusinessControlRecord?)] = []
         for business in verified {
             guard let id = business.id else { continue }
             entries.append((business, try await service.metrics(for: id), try await BusinessControls.load(id, on: req.db)))
         }
         entries.sort { max($0.1.complaintRate, $0.1.optOutRate) > max($1.1.complaintRate, $1.1.optOutRate) }
-        let rows = entries.map { business, m, c -> [String] in
-            ["<a href=\"/operator/businesses/\(business.id?.uuidString.lowercased() ?? "")\">\(DashboardUI.esc(business.displayName))</a>", String(m.issued), String(m.reports),
-             DashboardFormat.percent(m.complaintRate), String(m.optOuts), DashboardFormat.percent(m.optOutRate), String(m.rateLimitHits),
-             c?.throttled == true ? DashboardFormat.badge("Throttled: \(c?.throttleReason ?? "")", "dg") : DashboardFormat.badge("OK", "ok")]
+        func rate(_ value: Double, limit: Double) -> ConsoleUI.Cell {
+            ConsoleUI.Cell(html: value >= limit ? "<strong class=\"err\">\(DashboardFormat.percent(value))</strong>" : DashboardFormat.percent(value), sort: .number(value))
         }
-        let days = Int(await AbuseService(db: req.db, ctx: req.ctx).thresholds().window / 86_400)
-        return DashboardUI.operatorPage(p, title: "Abuse signals", active: "/operator/abuse", subtitle: "Last \(days) days. Aggregates only.",
-            body: "<div class=\"card\">\(DashboardFormat.table(["Business", "Issued", "Reports", "Complaint rate", "Opt-outs", "Opt-out rate", "Rate-limit hits", "State"], rows, caption: "Abuse signals by business"))</div>")
+        let rows = entries.map { business, m, c -> [ConsoleUI.Cell] in
+            [ConsoleUI.Cell(html: "<a href=\"/operator/businesses/\(business.id?.uuidString.lowercased() ?? "")\">\(DashboardUI.esc(business.displayName))</a>", sort: .text(business.displayName)), .number(m.issued), .number(m.reports),
+             rate(m.complaintRate, limit: settings.complaintRate), .number(m.optOuts), rate(m.optOutRate, limit: settings.optOutRate), .number(m.rateLimitHits),
+             ConsoleUI.Cell(html: c?.throttled == true ? DashboardFormat.badge("Throttled: \(c?.throttleReason ?? "")", "dg") : DashboardFormat.badge("OK", "ok"), sort: .text(c?.throttled == true ? "a" : "b"))]
+        }
+        let over = entries.filter { $0.1.complaintRate >= settings.complaintRate || $0.1.optOutRate >= settings.optOutRate }.count
+        let days = Int(settings.window / 86_400)
+        let tiles = ConsoleUI.stats([ConsoleUI.Stat(String(entries.count), "Verified businesses"), ConsoleUI.Stat(String(over), "Over a limit", tone: over > 0 ? .danger : nil),
+                                     ConsoleUI.Stat(DashboardFormat.percent(settings.complaintRate), "Complaint-rate limit"), ConsoleUI.Stat(DashboardFormat.percent(settings.optOutRate), "Opt-out-rate limit")])
+        return DashboardUI.operatorPage(p, title: "Abuse signals", active: "/operator/abuse", subtitle: "Last \(days) days. Aggregates only; worst first.",
+            actions: ConsoleUI.linkButton("Adjust thresholds", href: "/operator/switches#abuse", small: true),
+            body: tiles + ConsoleUI.panel(ConsoleUI.table([ConsoleUI.Column("Business", key: "name"), ConsoleUI.Column("Issued", key: "issued", numeric: true), ConsoleUI.Column("Reports", key: "reports", numeric: true),
+                                                           ConsoleUI.Column("Complaint rate", key: "complaints", numeric: true), ConsoleUI.Column("Opt-outs", key: "optouts", numeric: true),
+                                                           ConsoleUI.Column("Opt-out rate", key: "optoutrate", numeric: true), ConsoleUI.Column("Rate-limit hits", key: "rl", numeric: true), ConsoleUI.Column("State", key: "state")],
+                                                          rows, caption: "Abuse signals by business", state: ConsoleUI.TableState(req, id: "x"), pageSize: 50, empty: "No verified businesses yet.")))
     }
 }

@@ -262,7 +262,11 @@ enum OperatorOps {
     // MARK: Pages
 
     private static func reasonField(_ id: String) -> String {
-        "<label for=\"\(id)\">Reason (recorded)</label><input id=\"\(id)\" name=\"reason\" type=\"text\" minlength=\"8\" maxlength=\"300\" required>"
+        ConsoleUI.reason(id: id, label: "Reason (recorded)", help: "8 to 300 characters, recorded in the audit log with your name.")
+    }
+
+    private static func switchState(_ on: Bool, onText: String, offText: String) -> String {
+        on ? DashboardFormat.badge(onText, "dg") : DashboardFormat.badge(offText, "ok")
     }
 
     private static func switchesPage(_ req: Request) async throws -> Response {
@@ -271,47 +275,55 @@ enum OperatorOps {
         let flags = PlatformFlags(db: req.db, ctx: req.ctx)
         let snapshot = await flags.snapshot()
         func state(_ flag: PlatformFlag, scope: String = "global") -> PlatformFlagCache.Entry? { snapshot[PlatformFlags.key(flag, scope)] }
-        var body = ""
+        var body = ConsoleUI.callout(.warning, title: "Emergency controls", "<p class=\"sm\">Each switch takes effect on the next request. Every change needs your passkey and a recorded reason, and is audited with your name. Capability switches (messaging, approvals, verification and so on) are under <a href=\"/operator/policy\">Capability policy</a>.</p>")
         let maintenance = state(.maintenance)
-        body += """
-        <div class="card"><h2>Maintenance (read-only) mode \(maintenance == nil ? DashboardFormat.badge("Off", "ok") : DashboardFormat.badge("On", "dg"))</h2>\
-        <p class="mu sm">While on, every write returns 503 with the message below. Reads, health checks, this console and the SMS/RCS provider callbacks (opt-outs are never lost) keep working.</p>\
-        <form method="post" action="/operator/switches/maintenance">\(csrf)<label for="message">Status message shown to clients (plain text, up to 200 characters)</label><input id="message" name="message" type="text" maxlength="200" value="\(DashboardUI.esc(maintenance?.value ?? ""))">\
-        \(reasonField("r-m"))<div class="row"><button class="btn d" type="submit" name="action" value="on">Turn on</button><button class="btn s" type="submit" name="action" value="off">Turn off</button></div></form></div>
-        """
+        body += ConsoleUI.card("Maintenance (read-only) mode", id: "maintenance", description: "While on, every write returns 503 with the message below. Reads, health checks, this console and the SMS/RCS provider callbacks (opt-outs are never lost) keep working.",
+                               actions: switchState(maintenance != nil, onText: "On", offText: "Off"), tone: maintenance == nil ? nil : .danger,
+            ConsoleUI.form("/operator/switches/maintenance", csrf: csrf,
+                ConsoleUI.input("message", label: "Status message shown to clients", id: "message", value: maintenance?.value ?? "", help: "Plain text, up to 200 characters.", attrs: ["maxlength": "200"])
+                + reasonField("r-m")
+                + ConsoleUI.formActions(ConsoleUI.button("Turn on", .danger, name: "action", value: "on", passkey: true) + ConsoleUI.button("Turn off", .secondary, name: "action", value: "off", passkey: true))))
         func toggle(_ flag: PlatformFlag, _ title: String) -> String {
             let on = state(flag) != nil
-            return "<form method=\"post\" action=\"/operator/switches/signup\">\(csrf)<input type=\"hidden\" name=\"scope\" value=\"\(flag.rawValue)\"><h3>\(DashboardUI.esc(title)) \(on ? DashboardFormat.badge("Stopped", "dg") : DashboardFormat.badge("Open", "ok"))</h3>\(reasonField("r-" + flag.rawValue.replacingOccurrences(of: ".", with: "-")))<div class=\"row\"><button class=\"btn d sm\" type=\"submit\" name=\"action\" value=\"on\">Stop</button><button class=\"btn s sm\" type=\"submit\" name=\"action\" value=\"off\">Reopen</button></div></form>"
+            return ConsoleUI.card(title, actions: on ? DashboardFormat.badge("Stopped", "dg") : DashboardFormat.badge("Open", "ok"), tone: on ? .danger : nil,
+                "<form method=\"post\" action=\"/operator/switches/signup\">\(csrf)<input type=\"hidden\" name=\"scope\" value=\"\(flag.rawValue)\">\(reasonField("r-" + flag.rawValue.replacingOccurrences(of: ".", with: "-")))"
+                + ConsoleUI.formActions(ConsoleUI.button("Stop", .danger, small: true, name: "action", value: "on", ariaLabel: "Stop: \(title)", passkey: true)
+                                        + ConsoleUI.button("Reopen", .secondary, small: true, name: "action", value: "off", ariaLabel: "Reopen: \(title)", passkey: true)) + "</form>")
         }
-        body += "<div class=\"card\"><h2>Sign-ups</h2><p class=\"mu sm\">Existing accounts keep working.</p><div class=\"cols\">\(toggle(.signupConsumer, "New consumer accounts"))\(toggle(.signupBusiness, "New business organizations"))\(toggle(.inviteDashboard, "New dashboard invitations"))</div></div>"
-        body += "<div class=\"card\"><h2>Loops</h2><p class=\"mu sm\">Stops every hosted Loop: no new instances, existing ones show a neutral paused state and nothing is actionable. Messaging, approvals and every core feature keep working. Per-Loop and per-business switches are under Loops.</p>\(toggle(.loops, "Hosted Loops"))</div>"
+        body += ConsoleUI.sectionTitle("Sign-ups", description: "Existing accounts keep working.")
+            + "<div class=\"cols\">\(toggle(.signupConsumer, "New consumer accounts"))\(toggle(.signupBusiness, "New business organizations"))\(toggle(.inviteDashboard, "New dashboard invitations"))</div>"
+        body += ConsoleUI.sectionTitle("Loops", description: "Stops every hosted Loop: no new instances, existing ones show a neutral paused state and nothing is actionable. Messaging, approvals and every core feature keep working. Per-Loop and per-business switches are under Loops.")
+            + "<div class=\"cols\">\(toggle(.loops, "Hosted Loops"))</div>"
         let webhookRows = snapshot.filter { $0.key.hasPrefix(PlatformFlag.webhooksPause.rawValue + "|") }.map { [DashboardUI.esc(String($0.key.split(separator: "|").last ?? "")), DashboardUI.esc($0.value.reason), DashboardFormat.date($0.value.updatedAt)] }
-        body += """
-        <div class="card"><h2>Webhook delivery pause</h2><p class="mu sm">Queued deliveries stay queued. Leave the business id empty to pause the whole platform.</p>\(DashboardFormat.table(["Scope", "Reason", "Since"], webhookRows, empty: "Not paused.", caption: "Webhook pauses"))\
-        <form method="post" action="/operator/switches/webhooks">\(csrf)<label for="wb">Business id (optional)</label><input id="wb" name="businessId" type="text" maxlength="40">\(reasonField("r-w"))\
-        <div class="row"><button class="btn d" type="submit" name="action" value="on">Pause</button><button class="btn s" type="submit" name="action" value="off">Resume</button></div></form></div>
-        """
+        body += ConsoleUI.sectionTitle("Delivery")
+        body += "<div class=\"cols\">" + ConsoleUI.card("Webhook delivery pause", description: "Queued deliveries stay queued. Leave the business id empty to pause the whole platform.",
+                                                        actions: switchState(!webhookRows.isEmpty, onText: "\(webhookRows.count) paused", offText: "Not paused"),
+            DashboardFormat.table(["Scope", "Reason", "Since"], webhookRows, empty: "Not paused.", caption: "Webhook pauses")
+            + ConsoleUI.form("/operator/switches/webhooks", csrf: csrf,
+                ConsoleUI.input("businessId", label: "Business id", id: "wb", placeholder: "Whole platform", optional: true, attrs: ["maxlength": "40", "spellcheck": "false"]) + reasonField("r-w")
+                + ConsoleUI.formActions(ConsoleUI.button("Pause", .danger, name: "action", value: "on", passkey: true) + ConsoleUI.button("Resume", .secondary, name: "action", value: "off", passkey: true))))
         let messagingRows = snapshot.filter { $0.key.hasPrefix(PlatformFlag.messagingRestrict.rawValue + "|") }.map { [DashboardUI.esc(String($0.key.split(separator: "|").last ?? "")), "<code>\(DashboardUI.esc($0.value.value))</code>", DashboardUI.esc($0.value.reason)] }
-        body += """
-        <div class="card"><h2>Emergency messaging restriction</h2><p class="mu sm">Blocks or rate-clamps outbound SMS, RCS or push for one business or the platform. Sign-in and payment approvals (security purpose) are never covered.</p>\(DashboardFormat.table(["Scope", "Restriction", "Reason"], messagingRows, empty: "No restriction.", caption: "Messaging restrictions"))\
-        <form method="post" action="/operator/switches/messaging">\(csrf)<label for="mb">Business id (optional)</label><input id="mb" name="businessId" type="text" maxlength="40">\
-        <label for="mode">Mode</label><select id="mode" name="mode"><option value="block">Block</option><option value="clamp">Clamp</option></select>\
-        <fieldset><legend>Channels</legend><label class="ck"><input type="checkbox" name="channels[]" value="sms"> SMS</label><label class="ck"><input type="checkbox" name="channels[]" value="rcs"> RCS</label><label class="ck"><input type="checkbox" name="channels[]" value="push"> Push</label></fieldset>\
-        <label for="pm">Clamp: messages per minute (1 to \(MessagingRestriction.maximumClamp))</label><input id="pm" name="perMinute" type="number" min="1" max="\(MessagingRestriction.maximumClamp)">\(reasonField("r-ms"))\
-        <div class="row"><button class="btn d" type="submit" name="action" value="on">Apply</button><button class="btn s" type="submit" name="action" value="off">Remove</button></div></form></div>
-        """
+        body += ConsoleUI.card("Emergency messaging restriction", description: "Blocks or rate-clamps outbound SMS, RCS or push for one business or the platform. Sign-in and payment approvals (security purpose) are never covered.",
+                               actions: switchState(!messagingRows.isEmpty, onText: "\(messagingRows.count) active", offText: "None"),
+            DashboardFormat.table(["Scope", "Restriction", "Reason"], messagingRows, empty: "No restriction.", caption: "Messaging restrictions")
+            + ConsoleUI.form("/operator/switches/messaging", csrf: csrf,
+                ConsoleUI.input("businessId", label: "Business id", id: "mb", placeholder: "Whole platform", optional: true, attrs: ["maxlength": "40", "spellcheck": "false"])
+                + ConsoleUI.select("mode", label: "Mode", id: "mode", options: [ConsoleUI.Option("block", "Block"), ConsoleUI.Option("clamp", "Clamp")])
+                + "<fieldset><legend>Channels</legend><div class=\"row\"><label class=\"ck\"><input type=\"checkbox\" name=\"channels[]\" value=\"sms\"> SMS</label><label class=\"ck\"><input type=\"checkbox\" name=\"channels[]\" value=\"rcs\"> RCS</label><label class=\"ck\"><input type=\"checkbox\" name=\"channels[]\" value=\"push\"> Push</label></div></fieldset>"
+                + ConsoleUI.input("perMinute", label: "Clamp: messages per minute", id: "pm", type: "number", help: "1 to \(MessagingRestriction.maximumClamp); only for Clamp.", optional: true, attrs: ["min": "1", "max": String(MessagingRestriction.maximumClamp)])
+                + reasonField("r-ms")
+                + ConsoleUI.formActions(ConsoleUI.button("Apply", .danger, name: "action", value: "on", passkey: true) + ConsoleUI.button("Remove", .secondary, name: "action", value: "off", passkey: true)))) + "</div>"
         let override = state(.abuseThresholds)
-        body += """
-        <div class="card"><h2>Abuse thresholds \(override == nil ? DashboardFormat.badge("Deployment values", "mu") : DashboardFormat.badge("Overridden", "dg"))</h2>\
-        <p class="mu sm">Bounded: complaint rate \(AbuseOverride.complaintRateBounds.lowerBound) to \(AbuseOverride.complaintRateBounds.upperBound), opt-out rate \(AbuseOverride.optOutRateBounds.lowerBound) to \(AbuseOverride.optOutRateBounds.upperBound), sample \(AbuseOverride.minimumSampleBounds.lowerBound) to \(AbuseOverride.minimumSampleBounds.upperBound), window \(Int(AbuseOverride.windowDaysBounds.lowerBound)) to \(Int(AbuseOverride.windowDaysBounds.upperBound)) days, throttle factor \(AbuseOverride.throttleFactorBounds.lowerBound) to \(AbuseOverride.throttleFactorBounds.upperBound). Leave a field empty to keep the deployment value.</p>\
-        \(override.map { "<p class=\"sm\">Current override: <code>\(DashboardUI.esc($0.value))</code></p>" } ?? "")\
-        <form method="post" action="/operator/switches/abuse">\(csrf)<div class="cols">\
-        <div><label for="ac">Complaint rate</label><input id="ac" name="complaintRate" type="number" step="0.001"></div><div><label for="ao">Opt-out rate</label><input id="ao" name="optOutRate" type="number" step="0.001"></div>\
-        <div><label for="as">Minimum sample</label><input id="as" name="minimumSample" type="number"></div><div><label for="aw">Window (days)</label><input id="aw" name="windowDays" type="number" step="1"></div>\
-        <div><label for="at">Throttle factor</label><input id="at" name="throttleFactor" type="number" step="0.05"></div></div>\(reasonField("r-a"))\
-        <div class="row"><button class="btn" type="submit" name="action" value="on">Apply</button><button class="btn s" type="submit" name="action" value="off">Reset to deployment values</button></div></form></div>
-        """
-        body += "<p class=\"mu sm\">Capability switches (messaging, approvals, verification and so on) are under <a href=\"/operator/policy\">Capability policy</a>.</p>"
+        body += ConsoleUI.card("Abuse thresholds", id: "abuse", description: "Bounded: complaint rate \(AbuseOverride.complaintRateBounds.lowerBound) to \(AbuseOverride.complaintRateBounds.upperBound), opt-out rate \(AbuseOverride.optOutRateBounds.lowerBound) to \(AbuseOverride.optOutRateBounds.upperBound), sample \(AbuseOverride.minimumSampleBounds.lowerBound) to \(AbuseOverride.minimumSampleBounds.upperBound), window \(Int(AbuseOverride.windowDaysBounds.lowerBound)) to \(Int(AbuseOverride.windowDaysBounds.upperBound)) days, throttle factor \(AbuseOverride.throttleFactorBounds.lowerBound) to \(AbuseOverride.throttleFactorBounds.upperBound). Leave a field empty to keep the deployment value.",
+                               actions: override == nil ? DashboardFormat.badge("Deployment values", "mu") : DashboardFormat.badge("Overridden", "wa"),
+            (override.map { "<p class=\"sm\">Current override: <code>\(DashboardUI.esc($0.value))</code></p>" } ?? "")
+            + ConsoleUI.form("/operator/switches/abuse", csrf: csrf, "<div class=\"cols\">"
+                + ConsoleUI.input("complaintRate", label: "Complaint rate", id: "ac", type: "number", optional: true, attrs: ["step": "0.001"])
+                + ConsoleUI.input("optOutRate", label: "Opt-out rate", id: "ao", type: "number", optional: true, attrs: ["step": "0.001"])
+                + ConsoleUI.input("minimumSample", label: "Minimum sample", id: "as", type: "number", optional: true)
+                + ConsoleUI.input("windowDays", label: "Window (days)", id: "aw", type: "number", optional: true, attrs: ["step": "1"])
+                + ConsoleUI.input("throttleFactor", label: "Throttle factor", id: "at", type: "number", optional: true, attrs: ["step": "0.05"]) + "</div>" + reasonField("r-a")
+                + ConsoleUI.formActions(ConsoleUI.button("Apply", name: "action", value: "on", passkey: true) + ConsoleUI.button("Reset to deployment values", .secondary, name: "action", value: "off", passkey: true))))
         return DashboardUI.operatorPage(p, title: "Platform switches", active: "/operator/switches", subtitle: "Emergency controls. Every change is audited with your name and a reason.", flash: DashboardFormat.flash(req), body: body)
     }
 
@@ -319,64 +331,80 @@ enum OperatorOps {
         let p = try principal(req)
         let csrf = DashboardUI.csrf(p)
         let freezes = try await ConsumerFreeze(db: req.db, ctx: req.ctx).freezes()
-        let rows = freezes.map { [ "<code>\($0.consumerId.uuidString.lowercased())</code>", DashboardUI.esc($0.reason), DashboardFormat.date($0.frozenAt), $0.releasedAt.map(DashboardFormat.date) ?? DashboardFormat.badge("Frozen", "dg") ] }
-        let body = """
-        <div class="card"><h2>Freeze an account</h2><p class="mu sm">Ends every session and device of the account at once and blocks approvals and sign-in. The person is told (in the app and by a generic push). Lifting the freeze restores sign-in only; devices stay revoked and the person recovers through the normal flows.</p>\
-        <form method="post" action="/operator/consumers/freeze">\(csrf)<label for="cid">Account id</label><input id="cid" name="consumerId" type="text" maxlength="40" required>\(reasonField("r-f"))<button class="btn d" type="submit">Freeze and sign out</button></form></div>\
-        <div class="card"><h2>Lift a freeze</h2><form method="post" action="/operator/consumers/unfreeze">\(csrf)<label for="uid">Account id</label><input id="uid" name="consumerId" type="text" maxlength="40" required>\(reasonField("r-u"))<button class="btn s" type="submit">Unfreeze</button></form></div>\
-        <div class="card"><h2>Recent freezes</h2>\(DashboardFormat.table(["Account", "Reason", "Frozen", "Lifted"], rows, empty: "No freezes.", caption: "Account freezes"))</div>
-        """
+        let rows = freezes.map { [ConsoleUI.Cell(html: "<code>\($0.consumerId.uuidString.lowercased())</code>"), .text($0.reason), .date($0.frozenAt),
+                                  ConsoleUI.Cell(html: $0.releasedAt.map(DashboardFormat.date) ?? DashboardFormat.badge("Frozen", "dg"))] }
+        let freeze = ConsoleUI.dangerZone("Freeze an account", description: "Ends every session and device of the account at once and blocks approvals and sign-in. The person is told (in the app and by a generic push).",
+            ConsoleUI.form("/operator/consumers/freeze", csrf: csrf,
+                ConsoleUI.input("consumerId", label: "Account id", id: "cid", help: "The account's UUID.", required: true, attrs: ["maxlength": "40", "spellcheck": "false", "autocomplete": "off"]) + reasonField("r-f")
+                + ConsoleUI.formActions(ConsoleUI.button("Freeze and sign out", .dangerSolid, passkey: true) + ConsoleUI.passkeyNote())))
+        let lift = ConsoleUI.card("Lift a freeze", description: "Restores sign-in only; devices stay revoked and the person recovers through the normal flows.",
+            ConsoleUI.form("/operator/consumers/unfreeze", csrf: csrf,
+                ConsoleUI.input("consumerId", label: "Account id", id: "uid", required: true, attrs: ["maxlength": "40", "spellcheck": "false", "autocomplete": "off"]) + reasonField("r-u")
+                + ConsoleUI.formActions(ConsoleUI.button("Unfreeze", .secondary, passkey: true))))
+        let body = "<div class=\"cols\">\(freeze)\(lift)</div>" + ConsoleUI.card("Recent freezes", ConsoleUI.table([ConsoleUI.Column("Account"), ConsoleUI.Column("Reason"), ConsoleUI.Column("Frozen"), ConsoleUI.Column("Lifted")],
+                                                                                                               rows, caption: "Account freezes", empty: "No freezes."))
         return DashboardUI.operatorPage(p, title: "Consumer accounts", active: "/operator/consumers", subtitle: "Freeze an account for fraud, coercion or a reported compromise.", flash: DashboardFormat.flash(req), body: body)
     }
+
+    private static let severities = [ConsoleUI.Option("info", "Information"), ConsoleUI.Option("important", "Important"), ConsoleUI.Option("critical", "Critical")]
 
     private static func noticesPage(_ req: Request) async throws -> Response {
         let p = try principal(req)
         let csrf = DashboardUI.csrf(p)
         let recent = try await OperatorNoticeRecord.query(on: req.db).sort(\.$createdAt, .descending).limit(30).all()
-        let rows = recent.map { [DashboardUI.esc($0.title), DashboardUI.esc($0.scope.replacingOccurrences(of: "_", with: " ")), DashboardFormat.badge($0.severity, $0.severity == "info" ? "mu" : "dg"), DashboardFormat.badge($0.status, $0.status == "done" ? "ok" : ""), String($0.delivered), DashboardFormat.date($0.createdAt)] }
-        let scopes = OperatorNotices.Scope.allCases.map { "<option value=\"\($0.rawValue)\">\($0.rawValue.replacingOccurrences(of: "_", with: " "))</option>" }.joined()
-        let body = """
-        <div class="card"><h2>Notify affected parties</h2><p class="mu sm">Business notices are emailed to Owners, Organization Admins, Security Admins and the security contacts, and listed under Support &gt; Notices. Consumer notices appear in the app's security notices with a generic push. Large audiences are delivered in batches.</p>\
-        <form method="post" action="/operator/notices">\(csrf)<label for="scope">Audience</label><select id="scope" name="scope">\(scopes)</select>\
-        <label for="nb">Business id (for “business” and “consumers of business”)</label><input id="nb" name="businessId" type="text" maxlength="40">\
-        <label for="sev">Severity</label><select id="sev" name="severity"><option value="info">Information</option><option value="important">Important</option><option value="critical">Critical</option></select>\
-        <label for="title">Title</label><input id="title" name="title" type="text" maxlength="100" required><label for="body">Message (plain text; up to 300 characters for consumers)</label><textarea id="body" name="body" maxlength="2000" required></textarea>\
-        <p><button class="btn" type="submit">Queue notice</button></p></form></div>\
-        <div class="card"><h2>Recent notices</h2>\(DashboardFormat.table(["Title", "Audience", "Severity", "State", "Delivered", "Created"], rows, empty: "None.", caption: "Recent notices"))</div>
-        """
-        return DashboardUI.operatorPage(p, title: "Notices", active: "/operator/notices", flash: DashboardFormat.flash(req), body: body)
+        let rows = recent.map { [ConsoleUI.Cell.text($0.title), .text($0.scope.replacingOccurrences(of: "_", with: " ")), ConsoleUI.Cell(html: DashboardFormat.badge($0.severity, $0.severity == "info" ? "mu" : ($0.severity == "critical" ? "dg" : "wa"))),
+                                 ConsoleUI.Cell(html: DashboardFormat.badge($0.status, $0.status == "done" ? "ok" : "wa")), .number($0.delivered), .date($0.createdAt)] }
+        let scopes = OperatorNotices.Scope.allCases.map { ConsoleUI.Option($0.rawValue, $0.rawValue.replacingOccurrences(of: "_", with: " ").capitalized) }
+        let form = ConsoleUI.card("Notify affected parties", description: "Business notices are emailed to Owners, Organization Admins, Security Admins and the security contacts, and listed under Support > Notices. Consumer notices appear in the app's security notices with a generic push. Large audiences are delivered in batches.",
+            ConsoleUI.form("/operator/notices", csrf: csrf, "<div class=\"cols\">"
+                + ConsoleUI.select("scope", label: "Audience", id: "scope", options: scopes)
+                + ConsoleUI.input("businessId", label: "Business id", id: "nb", help: "For the “business” and “consumers of business” audiences.", optional: true, attrs: ["maxlength": "40", "spellcheck": "false"])
+                + ConsoleUI.select("severity", label: "Severity", id: "sev", options: severities) + "</div>"
+                + ConsoleUI.input("title", label: "Title", id: "title", required: true, attrs: ["maxlength": "100"])
+                + ConsoleUI.textarea("body", label: "Message", id: "body", help: "Plain text; up to 300 characters for consumers.", required: true, attrs: ["maxlength": "2000"])
+                + ConsoleUI.formActions(ConsoleUI.button("Queue notice", passkey: true) + ConsoleUI.passkeyNote())))
+        let body = form + ConsoleUI.card("Recent notices", ConsoleUI.table([ConsoleUI.Column("Title"), ConsoleUI.Column("Audience"), ConsoleUI.Column("Severity"), ConsoleUI.Column("State"),
+                                                                             ConsoleUI.Column("Delivered", numeric: true), ConsoleUI.Column("Created")], rows, caption: "Recent notices", empty: "None."))
+        return DashboardUI.operatorPage(p, title: "Notices", active: "/operator/notices", subtitle: "Tell businesses and customers about incidents and maintenance.", flash: DashboardFormat.flash(req), body: body)
     }
 
     private static func retentionPage(_ req: Request) async throws -> Response {
         let p = try principal(req)
         let csrf = DashboardUI.csrf(p)
         let policy = RetentionPolicy(db: req.db, ctx: req.ctx)
-        var rows: [[String]] = []
+        var rows: [[ConsoleUI.Cell]] = []
         for cls in RetentionClass.allCases {
             let def = cls.definition
             let days = try await policy.platformDays(cls)
-            rows.append(["<code>\(cls.rawValue)</code><br><span class=\"mu sm\">\(DashboardUI.esc(def.summary))</span>", "\(def.defaultDays)", "\(def.minDays) to \(def.maxDays)", def.tenantAdjustable ? "Shorten only" : "No",
-                         "<form method=\"post\" action=\"/operator/retention/\(cls.rawValue)\" class=\"row\">\(csrf)<label class=\"vh\" for=\"p-\(cls.rawValue)\">Days for \(cls.rawValue)</label><input id=\"p-\(cls.rawValue)\" name=\"days\" type=\"number\" min=\"\(def.minDays)\" max=\"\(def.maxDays)\" value=\"\(days)\"><label class=\"vh\" for=\"pr-\(cls.rawValue)\">Reason</label><input id=\"pr-\(cls.rawValue)\" name=\"reason\" type=\"text\" minlength=\"8\" maxlength=\"300\" placeholder=\"Reason\" required><button class=\"btn s sm\" type=\"submit\">Set</button></form>"])
+            rows.append([ConsoleUI.Cell(html: "<code>\(cls.rawValue)</code><br><span class=\"mu sm\">\(DashboardUI.esc(def.summary))</span>", sort: .text(cls.rawValue)),
+                         ConsoleUI.Cell(html: "\(def.defaultDays)", sort: .number(Double(def.defaultDays))), .text("\(def.minDays) to \(def.maxDays)"), .text(def.tenantAdjustable ? "Shorten only" : "No"),
+                         ConsoleUI.Cell(html: "<form method=\"post\" action=\"/operator/retention/\(cls.rawValue)\" class=\"row\">\(csrf)<label class=\"vh\" for=\"p-\(cls.rawValue)\">Days for \(cls.rawValue)</label><input id=\"p-\(cls.rawValue)\" name=\"days\" type=\"number\" min=\"\(def.minDays)\" max=\"\(def.maxDays)\" value=\"\(days)\"><label class=\"vh\" for=\"pr-\(cls.rawValue)\">Reason</label><input id=\"pr-\(cls.rawValue)\" name=\"reason\" type=\"text\" minlength=\"8\" maxlength=\"300\" placeholder=\"Reason\" required><button class=\"btn s sm\" type=\"submit\">\(ConsoleUI.icon(.key))Set</button></form>")])
         }
         let holds = try await LegalHoldRecord.query(on: req.db).sort(\.$createdAt, .descending).limit(50).all()
-        let holdRows = holds.map { h -> [String] in
-            let release = h.releasedAt == nil ? "<form method=\"post\" action=\"/operator/holds/\(h.id?.uuidString.lowercased() ?? "")/release\">\(csrf)<button class=\"btn s sm\" type=\"submit\">Release</button></form>" : DashboardFormat.date(h.releasedAt!)
-            return [DashboardUI.esc(h.scopeKind), DashboardUI.esc(h.scopeId ?? "—"), DashboardUI.esc(h.reason), DashboardFormat.date(h.createdAt), release]
+        let holdRows = holds.map { h -> [ConsoleUI.Cell] in
+            let release = h.releasedAt == nil
+                ? ConsoleUI.confirm("Release", ariaLabel: "Release the hold on \(h.scopeKind) \(h.scopeId ?? "")", "<form method=\"post\" action=\"/operator/holds/\(h.id?.uuidString.lowercased() ?? "")/release\">\(csrf)<p>Purging of the matching records resumes.</p><button class=\"btn dd sm\" type=\"submit\">\(ConsoleUI.icon(.key))Release</button></form>")
+                : DashboardFormat.date(h.releasedAt!)
+            return [.text(h.scopeKind), .text(h.scopeId ?? "—"), .text(h.reason), .date(h.createdAt), ConsoleUI.Cell(html: release)]
         }
         let deletions = try await TenantDataRequests(db: req.db, ctx: req.ctx).openDeletions()
-        let deletionRows = deletions.map { r -> [String] in
+        let deletionRows = deletions.map { r -> [ConsoleUI.Cell] in
             let id = r.id?.uuidString.lowercased() ?? ""
-            return ["<a href=\"/operator/businesses/\(r.businessId.uuidString.lowercased())\">\(r.businessId.uuidString.lowercased().prefix(8))…</a>", DashboardFormat.date(r.createdAt),
-                    "<div class=\"row\"><form method=\"post\" action=\"/operator/data-requests/\(id)/complete\">\(csrf)<button class=\"btn d sm\" type=\"submit\">Carry out deletion</button></form><form method=\"post\" action=\"/operator/data-requests/\(id)/reject\">\(csrf)<label class=\"vh\" for=\"n-\(id)\">Reason</label><input id=\"n-\(id)\" name=\"note\" type=\"text\" maxlength=\"300\" placeholder=\"Reason\" required><button class=\"btn s sm\" type=\"submit\">Reject</button></form></div>"]
+            let carry = ConsoleUI.confirm("Carry out deletion", "<form method=\"post\" action=\"/operator/data-requests/\(id)/complete\">\(csrf)<p>Keys and webhooks are removed, the team is signed out and contact data is deleted. This cannot be undone.</p><button class=\"btn dd sm\" type=\"submit\">\(ConsoleUI.icon(.key))Carry out deletion</button></form>")
+            let reject = "<form method=\"post\" action=\"/operator/data-requests/\(id)/reject\" class=\"row\">\(csrf)<label class=\"vh\" for=\"n-\(id)\">Reason</label><input id=\"n-\(id)\" name=\"note\" type=\"text\" maxlength=\"300\" placeholder=\"Reason\" required><button class=\"btn s sm\" type=\"submit\">Reject</button></form>"
+            return [ConsoleUI.Cell(html: "<a href=\"/operator/businesses/\(r.businessId.uuidString.lowercased())\">\(r.businessId.uuidString.lowercased().prefix(8))…</a>"), .date(r.createdAt), ConsoleUI.Cell(html: "<div class=\"row\">\(carry)\(reject)</div>")]
         }
-        let body = """
-        <div class="card"><h2>Retention by data class</h2>\(DashboardFormat.table(["Class", "Default", "Bounds", "Business may change", ""], rows, caption: "Retention by data class"))\
-        <p class="mu sm">Values are bounded; the purge jobs run every minute. Backups keep erased data until they age out.</p></div>\
-        <div class="card"><h2>Legal holds</h2><p class="mu sm">A hold stops the purge of the matching records until it is released. Scope: the whole platform, one business id, or one consumer id.</p>\(DashboardFormat.table(["Scope", "Id", "Reason", "Placed", ""], holdRows, empty: "No holds.", caption: "Legal holds"))\
-        <form method="post" action="/operator/holds">\(csrf)<label for="sk">Scope</label><select id="sk" name="scopeKind"><option value="business">Business</option><option value="consumer">Consumer</option><option value="global">Whole platform</option></select>\
-        <label for="si">Id</label><input id="si" name="scopeId" type="text" maxlength="40">\(reasonField("r-h"))<button class="btn" type="submit">Place hold</button></form></div>\
-        <div class="card"><h2>Organization deletion requests</h2>\(DashboardFormat.table(["Business", "Requested", ""], deletionRows, empty: "None waiting.", caption: "Deletion requests"))</div>
-        """
+        let body = ConsoleUI.card("Organization deletion requests", description: "Requested by an Owner; review before carrying them out.",
+                                  ConsoleUI.table([ConsoleUI.Column("Business"), ConsoleUI.Column("Requested"), ConsoleUI.Column("", actions: true)], deletionRows, caption: "Deletion requests", empty: "None waiting."))
+            + ConsoleUI.card("Retention by data class", description: "Values are bounded; the purge jobs run every minute. Backups keep erased data until they age out. Setting a value asks for your passkey and a reason.",
+                             ConsoleUI.table([ConsoleUI.Column("Class", key: "class"), ConsoleUI.Column("Default", key: "default", numeric: true), ConsoleUI.Column("Bounds"), ConsoleUI.Column("Business may change"), ConsoleUI.Column("", actions: true)],
+                                             rows, caption: "Retention by data class", state: ConsoleUI.TableState(req, id: "r")))
+            + ConsoleUI.card("Legal holds", description: "A hold stops the purge of the matching records until it is released. Scope: the whole platform, one business id, or one consumer id.",
+                DashboardFormat.table(["Scope", "Id", "Reason", "Placed", ""], holdRows.map { $0.map(\.html) }, empty: "No holds.", caption: "Legal holds")
+                + "<h3>Place a hold</h3>" + ConsoleUI.form("/operator/holds", csrf: csrf, "<div class=\"cols\">"
+                    + ConsoleUI.select("scopeKind", label: "Scope", id: "sk", options: [ConsoleUI.Option("business", "Business"), ConsoleUI.Option("consumer", "Consumer"), ConsoleUI.Option("global", "Whole platform")])
+                    + ConsoleUI.input("scopeId", label: "Id", id: "si", help: "Empty for the whole platform.", optional: true, attrs: ["maxlength": "40", "spellcheck": "false"]) + "</div>"
+                    + reasonField("r-h") + ConsoleUI.formActions(ConsoleUI.button("Place hold", passkey: true) + ConsoleUI.passkeyNote())))
         return DashboardUI.operatorPage(p, title: "Data and retention", active: "/operator/retention", subtitle: "Retention, legal holds and tenant data requests.", flash: DashboardFormat.flash(req), body: body)
     }
 
@@ -385,16 +413,22 @@ enum OperatorOps {
         let csrf = DashboardUI.csrf(p)
         let tickets = try await SupportTicketRecord.query(on: req.db).filter(\.$status != "closed").sort(\.$createdAt, .ascending).limit(100).all()
         let desk = SupportDesk(db: req.db, ctx: req.ctx)
+        let names = Dictionary(try await BusinessRecord.query(on: req.db).filter(\.$id ~~ Array(Set(tickets.map(\.businessId)))).all().compactMap { b in b.id.map { ($0, b.displayName) } }, uniquingKeysWith: { a, _ in a })
         let cards = tickets.map { t -> String in
             let id = t.id?.uuidString.lowercased() ?? ""
-            return """
-            <div class="card"><h2>\(DashboardUI.esc(t.subject)) \(DashboardFormat.badge(t.kind, t.kind == "appeal" ? "dg" : "mu"))</h2><p class="mu sm">\(DashboardFormat.date(t.createdAt)) · <a href="/operator/businesses/\(t.businessId.uuidString.lowercased())">business</a> · reference \(id.prefix(8))</p>\
-            <p>\(DashboardUI.esc(desk.body(of: t)))</p>\
-            <form method="post" action="/operator/support/\(id)">\(csrf)<label for="n-\(id)">Reply</label><textarea id="n-\(id)" name="note" maxlength="1000" required></textarea><label class="ck"><input type="checkbox" name="close" value="1"> Close</label><button class="btn s" type="submit">Send reply</button></form></div>
-            """
+            let business = "<a href=\"/operator/businesses/\(t.businessId.uuidString.lowercased())\">\(DashboardUI.esc(names[t.businessId] ?? "business"))</a>"
+            return ConsoleUI.card(t.subject, descriptionHTML: "\(DashboardFormat.date(t.createdAt)) · \(business) · reference <code>\(id.prefix(8))</code>",
+                                  actions: DashboardFormat.badge(t.kind == "appeal" ? "Appeal" : "Ticket", t.kind == "appeal" ? "wa" : "mu"), tone: t.kind == "appeal" ? .warning : nil, """
+            <p>\(DashboardUI.esc(desk.body(of: t)))</p>\(t.kind == "appeal" ? ConsoleUI.callout(.neutral, "<p class=\"sm\">Appeals are reviewed by someone who was not involved in the decision.</p>") : "")\
+            \(ConsoleUI.form("/operator/support/\(id)", csrf: csrf, ConsoleUI.textarea("note", label: "Reply", id: "n-\(id)", help: "Emailed to the business and shown in its console.", required: true, attrs: ["maxlength": "1000"])
+                + ConsoleUI.checkbox("close", label: "Close after replying") + ConsoleUI.formActions(ConsoleUI.button("Send reply", .secondary, passkey: true))))
+            """)
         }.joined()
-        return DashboardUI.operatorPage(p, title: "Support", active: "/operator/support", subtitle: "Tickets and appeals that are open.", flash: DashboardFormat.flash(req),
-                                        body: cards.isEmpty ? "<p class=\"mu\">Nothing is open.</p>" : cards)
+        let appeals = tickets.filter { $0.kind == "appeal" }.count
+        let tiles = ConsoleUI.stats([ConsoleUI.Stat(String(tickets.count), "Open"), ConsoleUI.Stat(String(appeals), "Appeals", tone: appeals > 0 ? .warning : nil),
+                                     ConsoleUI.Stat(tickets.first.map { DashboardFormat.day($0.createdAt) } ?? "—", "Oldest open since")])
+        return DashboardUI.operatorPage(p, title: "Support", active: "/operator/support", subtitle: "Tickets and appeals that are open, oldest first.", flash: DashboardFormat.flash(req),
+                                        body: tiles + (cards.isEmpty ? ConsoleUI.empty("Nothing is open", "New tickets and appeals from businesses appear here.", icon: .check) : cards))
     }
 
     // MARK: Panels used by the business page and the queue
@@ -408,6 +442,32 @@ enum OperatorOps {
         let row = try await service.row(id)
         let state = try await service.state(businessId: id)
         var out = ""
+        // Open reviews first: they are what an operator came here to decide.
+        if state.legalEntity == .submitted {
+            out += ConsoleUI.card("Legal entity review", description: "Check the registry details below against the public registry.", tone: .warning, ConsoleUI.keyValues([
+                ("Registered name", DashboardUI.esc(row.legalRegistryName ?? "—")), ("Registry number", DashboardUI.esc(row.legalRegistryNumber ?? "—")),
+                ("Jurisdiction", DashboardUI.esc(row.legalJurisdiction ?? "—")), ("Evidence", row.evidenceReferences.isEmpty ? "—" : row.evidenceReferences.map { DashboardUI.esc($0) }.joined(separator: "<br>")),
+            ]) + ConsoleUI.form("\(base)/legal-entity", csrf: csrf,
+                ConsoleUI.textarea("note", label: "Note", id: "ln", help: "Shown to the business if declined.", optional: true, attrs: ["maxlength": "500"])
+                + ConsoleUI.formActions(ConsoleUI.button("Approve", name: "decision", value: "approve", passkey: true) + ConsoleUI.button("Decline", .danger, name: "decision", value: "reject", passkey: true))))
+        }
+        if state.enhanced == .pending {
+            out += ConsoleUI.card("Additional review (sensitive category)", tone: .warning,
+                ConsoleUI.form("\(base)/enhanced-review", csrf: csrf,
+                    ConsoleUI.input("reference", label: "Reference of the review that was done", id: "er", required: true, attrs: ["minlength": "4", "maxlength": "120"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Approve", name: "decision", value: "approve", passkey: true) + ConsoleUI.button("Decline", .danger, name: "decision", value: "reject", passkey: true))))
+        }
+        if state.goLive == .requested || state.goLive == .approved {
+            let blockers = state.approvalBlockers
+            let request = row.goLiveUseCase.map { ConsoleUI.keyValues([("Use case", DashboardUI.esc($0)), ("Volume", DashboardUI.esc(row.goLiveVolume ?? ""))]) } ?? ""
+            out += ConsoleUI.card("Production access", actions: DashboardFormat.badge(state.goLive.rawValue, state.goLive == .approved ? "ok" : "wa"), tone: state.goLive == .requested ? .warning : nil,
+                request + (blockers.isEmpty ? "" : ConsoleUI.callout(.warning, title: "Open before approval", "<p class=\"sm\">\(blockers.map { DashboardUI.esc($0.title) }.joined(separator: "; ")).</p>"))
+                + ConsoleUI.form("\(base)/go-live", csrf: csrf,
+                    ConsoleUI.textarea("note", label: "Note", id: "gn", help: "Shown to the business.", optional: true, attrs: ["maxlength": "500"])
+                    + ConsoleUI.formActions(state.goLive == .requested
+                        ? ConsoleUI.button("Approve", name: "decision", value: "approve", passkey: true) + ConsoleUI.button("Decline", .danger, name: "decision", value: "reject", passkey: true)
+                        : ConsoleUI.button("Revoke production access", .danger, name: "decision", value: "revoke", passkey: true))))
+        }
         let facts: [[String]] = [
             ["Domain control", state.domainVerified ? "Verified \(DashboardUI.esc(row.controlDomain ?? "")) (\(DashboardUI.esc(row.controlMethod ?? "")))" : "Not verified"],
             ["Legal entity", "\(state.legalEntity.rawValue)" + (row.legalRegistryNumber.map { " · \(DashboardUI.esc($0)) · \(DashboardUI.esc(row.legalJurisdiction ?? "")) · \(DashboardUI.esc(row.legalRegistryName ?? ""))" } ?? "")
@@ -418,56 +478,46 @@ enum OperatorOps {
             ["Go-live", "\(state.goLive.rawValue)" + (row.goLiveUseCase.map { "<br>Use case: \(DashboardUI.esc($0))<br>Volume: \(DashboardUI.esc(row.goLiveVolume ?? ""))" } ?? "")],
             ["Assurance", row.assuranceFailure.map { "Failing: \(DashboardUI.esc($0))" } ?? "In good standing"],
         ]
-        out += "<div class=\"card\"><h2>Onboarding (stage: \(state.stage.rawValue))</h2>\(DashboardFormat.table(["Item", "State"], facts, caption: "Onboarding facts"))</div>"
+        out += ConsoleUI.card("Onboarding", actions: ConsoleUI.pill("Stage: \(state.stage.rawValue)", .accent), ConsoleUI.keyValues(facts.map { ($0[0], $0[1]) }))
         // WP-1.9: the category, with the reclassify action (healthcare is refused platform-wide).
         let banned = OnboardingService.isBanned(business.category)
-        let options = (DashboardAuthService.categories + ["healthcare"]).map { c in
-            "<option value=\"\(c)\"\(c == business.category ? " selected" : "")>\(DashboardUI.esc(c.replacingOccurrences(of: "_", with: " ")))</option>"
-        }.joined()
-        let bannedNotice = banned ? "<div class=\"notice dg\" role=\"alert\">This business is in a category Viadere does not serve (healthcare). Follow the offboarding runbook.</div>" : ""
-        out += """
-        <div class="card"><h2>Category</h2>\(bannedNotice)<p class="mu sm">Current: \(DashboardUI.esc(business.category)). Reclassifying into healthcare revokes every entitlement and suspends the business.</p>\
-        <form method="post" action="\(base)/category">\(csrf)<label for="cat">Category</label><select id="cat" name="category">\(options)</select>\
-        <label for="catn">Reason (recorded in the audit log)</label><input id="catn" name="note" type="text" minlength="8" maxlength="300" required>\
-        <button class="btn" type="submit">Change category</button></form></div>
-        """
-        if state.legalEntity == .submitted {
-            out += """
-            <div class="card"><h2>Legal entity review</h2><form method="post" action="\(base)/legal-entity">\(csrf)<label for="ln">Note (shown to the business if declined)</label><textarea id="ln" name="note" maxlength="500"></textarea>\
-            <div class="row"><button class="btn" type="submit" name="decision" value="approve">Approve</button><button class="btn d" type="submit" name="decision" value="reject">Decline</button></div></form></div>
-            """
-        }
-        if state.enhanced == .pending {
-            out += """
-            <div class="card"><h2>Additional review (sensitive category)</h2><form method="post" action="\(base)/enhanced-review">\(csrf)<label for="er">Reference of the review that was done</label><input id="er" name="reference" type="text" minlength="4" maxlength="120" required>\
-            <div class="row"><button class="btn" type="submit" name="decision" value="approve">Approve</button><button class="btn d" type="submit" name="decision" value="reject">Decline</button></div></form></div>
-            """
-        }
-        if state.goLive == .requested || state.goLive == .approved {
-            let blockers = state.approvalBlockers
-            out += """
-            <div class="card"><h2>Production access</h2>\(blockers.isEmpty ? "" : "<p class=\"mu sm\">Open before approval: \(blockers.map { DashboardUI.esc($0.title) }.joined(separator: "; ")).</p>")\
-            <form method="post" action="\(base)/go-live">\(csrf)<label for="gn">Note (shown to the business)</label><textarea id="gn" name="note" maxlength="500"></textarea><div class="row">\
-            \(state.goLive == .requested ? "<button class=\"btn\" type=\"submit\" name=\"decision\" value=\"approve\">Approve</button><button class=\"btn d\" type=\"submit\" name=\"decision\" value=\"reject\">Decline</button>" : "<button class=\"btn d\" type=\"submit\" name=\"decision\" value=\"revoke\">Revoke production access</button>")\
-            </div></form></div>
-            """
-        }
+        let options = (DashboardAuthService.categories + ["healthcare"]).map { c in ConsoleUI.Option(c, c.replacingOccurrences(of: "_", with: " "), selected: c == business.category) }
+        let bannedNotice = banned ? ConsoleUI.callout(.danger, urgent: true, "<p>This business is in a category Viadere does not serve (healthcare). Follow the offboarding runbook.</p>") : ""
+        out += ConsoleUI.card("Category", description: "Current: \(business.category). Reclassifying into healthcare revokes every entitlement and suspends the business.",
+            bannedNotice + ConsoleUI.form("\(base)/category", csrf: csrf, "<div class=\"cols\">" + ConsoleUI.select("category", label: "Category", id: "cat", options: options)
+                + ConsoleUI.input("note", label: "Reason", id: "catn", help: "Recorded in the audit log.", required: true, attrs: ["minlength": "8", "maxlength": "300"]) + "</div>"
+                + ConsoleUI.formActions(ConsoleUI.button("Change category", .secondary, passkey: true))))
         let keys = try await BusinessAPIKeyRecord.query(on: req.db).filter(\.$businessId == id).sort(\.$createdAt, .descending).all()
         let keyRows = keys.map { k -> [String] in
             let active = k.isUsable(at: req.ctx.now)
-            let revoke = active ? "<form method=\"post\" action=\"\(base)/revoke-key/\(k.id?.uuidString.lowercased() ?? "")\">\(csrf)<label class=\"vh\" for=\"kn-\(k.id?.uuidString.lowercased() ?? "")\">Reason</label><input id=\"kn-\(k.id?.uuidString.lowercased() ?? "")\" name=\"note\" type=\"text\" maxlength=\"200\" placeholder=\"Reason\" required><button class=\"btn d sm\" type=\"submit\">Revoke</button></form>" : DashboardFormat.badge("Not active", "mu")
+            let kid = k.id?.uuidString.lowercased() ?? ""
+            let revoke = active ? ConsoleUI.confirm("Revoke", ariaLabel: "Revoke \(k.name)", "<form method=\"post\" action=\"\(base)/revoke-key/\(kid)\">\(csrf)<label class=\"vh\" for=\"kn-\(kid)\">Reason</label><input id=\"kn-\(kid)\" name=\"note\" type=\"text\" maxlength=\"200\" placeholder=\"Reason (shown to the business)\" required><p class=\"help\">The business is notified; it is not suspended.</p><button class=\"btn dd sm\" type=\"submit\">\(ConsoleUI.icon(.key))Revoke</button></form>") : DashboardFormat.badge("Not active", "mu")
             return [DashboardUI.esc(k.name), "<code>\(DashboardUI.esc(k.prefix))\(DashboardUI.esc(k.kid ?? "…" + k.last4))</code>", k.livemode ? "Live" : "Test", DashboardFormat.optional(k.lastUsedAt), revoke]
         }
-        out += """
-        <div class="card"><h2>API keys</h2>\(DashboardFormat.table(["Name", "Key", "Mode", "Last used", ""], keyRows, empty: "No keys.", caption: "API keys of the business"))\
-        <p class="mu sm">Revoking keys does not suspend the business.</p>\
-        <form method="post" action="\(base)/revoke-keys">\(csrf)<label for="rs">Which keys</label><select id="rs" name="scope"><option value="all">All active keys</option><option value="live">Live keys</option><option value="test">Test keys</option></select>\
-        <label for="rn">Reason (shown to the business)</label><input id="rn" name="note" type="text" maxlength="200" required><button class="btn d" type="submit">Revoke keys without suspending</button></form></div>
-        <div class="card"><h2>Notify the business</h2><form method="post" action="\(base)/notify">\(csrf)<input type="hidden" name="scope" value="business">\
-        <label for="nt">Title</label><input id="nt" name="title" type="text" maxlength="100" required><label for="nb2">Message</label><textarea id="nb2" name="body" maxlength="2000" required></textarea>\
-        <label for="ns">Severity</label><select id="ns" name="severity"><option value="info">Information</option><option value="important">Important</option><option value="critical">Critical</option></select><button class="btn s" type="submit">Send</button></form></div>
-        """
+        out += ConsoleUI.card("API keys", description: "Revoking keys does not suspend the business.",
+            DashboardFormat.table(["Name", "Key", "Mode", "Last used", ""], keyRows, empty: "No keys.", caption: "API keys of the business")
+            + "<h3>Revoke several</h3>" + ConsoleUI.form("\(base)/revoke-keys", csrf: csrf, "<div class=\"cols\">"
+                + ConsoleUI.select("scope", label: "Which keys", id: "rs", options: [ConsoleUI.Option("all", "All active keys"), ConsoleUI.Option("live", "Live keys"), ConsoleUI.Option("test", "Test keys")])
+                + ConsoleUI.input("note", label: "Reason", id: "rn", help: "Shown to the business.", required: true, attrs: ["maxlength": "200"]) + "</div>"
+                + ConsoleUI.formActions(ConsoleUI.button("Revoke keys without suspending", .danger, passkey: true))))
+        out += ConsoleUI.card("Notify the business",
+            ConsoleUI.form("\(base)/notify", csrf: csrf, ConsoleUI.hidden("scope", "business")
+                + ConsoleUI.input("title", label: "Title", id: "nt", required: true, attrs: ["maxlength": "100"])
+                + ConsoleUI.textarea("body", label: "Message", id: "nb2", required: true, attrs: ["maxlength": "2000"])
+                + ConsoleUI.select("severity", label: "Severity", id: "ns", options: severities)
+                + ConsoleUI.formActions(ConsoleUI.button("Send", .secondary, passkey: true))))
         return out
+    }
+
+    /// Counts for the operator's landing page.
+    static func queueCounts(_ req: Request) async throws -> (goLive: Int, legal: Int, brand: Int, loops: Int, support: Int) {
+        let goLive = try await BusinessOnboardingRecord.query(on: req.db).filter(\.$goLiveStatus == OnboardingGoLive.requested.rawValue).count()
+        let legal = try await BusinessOnboardingRecord.query(on: req.db).filter(\.$legalStatus == OnboardingReview.submitted.rawValue).count()
+        let kits = try await BrandKitRecord.query(on: req.db).filter(\.$status == BrandKitService.KitStatus.pendingReview.rawValue).count()
+        let assets = try await BrandAssetRecord.query(on: req.db).filter(\.$state == BrandKitService.AssetState.pendingReview.rawValue).count()
+        let loops = try await LoopRevisionRecord.query(on: req.db).filter(\.$state == LoopRevisionState.inReview.rawValue).count()
+        let support = try await SupportTicketRecord.query(on: req.db).filter(\.$status != "closed").count()
+        return (goLive, legal, kits + assets, loops, support)
     }
 
     /// Open onboarding reviews, for the operator's landing page.
@@ -477,9 +527,12 @@ enum OperatorOps {
         let ids = Set(goLive.map(\.businessId) + legal.map(\.businessId))
         let names = Dictionary(try await BusinessRecord.query(on: req.db).filter(\.$id ~~ Array(ids)).all().compactMap { b in b.id.map { ($0, b.displayName) } }, uniquingKeysWith: { a, _ in a })
         func link(_ id: UUID) -> String { "<a href=\"/operator/businesses/\(id.uuidString.lowercased())\">\(DashboardUI.esc(names[id] ?? "—"))</a>" }
-        let g = goLive.map { [link($0.businessId), DashboardFormat.optional($0.goLiveRequestedAt)] }
-        let l = legal.map { [link($0.businessId), DashboardFormat.optional($0.legalSubmittedAt)] }
-        return "<div class=\"card\"><h2>Go-live requests</h2>\(DashboardFormat.table(["Organization", "Requested"], g, empty: "None waiting.", caption: "Go-live requests"))</div>"
-            + "<div class=\"card\"><h2>Legal entity reviews</h2>\(DashboardFormat.table(["Organization", "Submitted"], l, empty: "None waiting.", caption: "Legal entity reviews"))</div>"
+        func open(_ id: UUID) -> String { ConsoleUI.linkButton("Review", href: "/operator/businesses/\(id.uuidString.lowercased())", small: true, ariaLabel: "Review \(names[id] ?? "business")") }
+        let g = goLive.map { [link($0.businessId), DashboardFormat.optional($0.goLiveRequestedAt), open($0.businessId)] }
+        let l = legal.map { [link($0.businessId), DashboardFormat.optional($0.legalSubmittedAt), open($0.businessId)] }
+        return "<div class=\"cols\">"
+            + ConsoleUI.card("Go-live requests", id: "go-live", description: "Production access, oldest first.", DashboardFormat.table(["Organization", "Requested", ""], g, empty: "None waiting.", caption: "Go-live requests"))
+            + ConsoleUI.card("Legal entity reviews", id: "legal", description: "Registry checks, oldest first.", DashboardFormat.table(["Organization", "Submitted", ""], l, empty: "None waiting.", caption: "Legal entity reviews"))
+            + "</div>"
     }
 }

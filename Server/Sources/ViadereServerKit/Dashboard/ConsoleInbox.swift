@@ -98,39 +98,39 @@ enum ConsoleInbox {
         let read = try await inbox.readIds(staffId: staff, items: items.compactMap(\.id))
         let unread = try await inbox.unreadCount(businessId: businessId, staffId: staff)
         let titles = try await loopTitles(items.map(\.instanceId), on: req.db)
-        let rows = items.map { item -> [String] in
+        let rows = items.map { item -> [ConsoleUI.Cell] in
             let isRead = read.contains(item.id!)
             let label = titles[item.instanceId] ?? "Request"
-            return ["<a href=\"\(inboxPath)/\(item.id!.uuidString.lowercased())\">\(isRead ? "" : "<strong>")\(DashboardUI.esc(label))\(isRead ? "" : "</strong> <span class=\"vh\">(unread)</span>")</a>",
-                    DashboardUI.esc(item.queueKey), stateBadge(item.state), item.assigneeId == staff ? "You" : (item.assigneeId == nil ? "—" : "Assigned"),
-                    DashboardFormat.date(item.createdAt)]
+            let link = "<a href=\"\(inboxPath)/\(item.id!.uuidString.lowercased())\">\(isRead ? "" : "<strong>")\(DashboardUI.esc(label))\(isRead ? "" : "</strong> <span class=\"vh\">(unread)</span>")</a>"
+            return [ConsoleUI.Cell(html: (isRead ? "" : ConsoleUI.pill("New", .accent) + " ") + link, sort: .text(label)), .text(item.queueKey), ConsoleUI.Cell(html: stateBadge(item.state), sort: .text(item.state)),
+                    .text(item.assigneeId == staff ? "You" : (item.assigneeId == nil ? "—" : "Assigned")), .date(item.createdAt)]
         }
-        let filters = ["": "All", "new": "New", "open": "Open", "waiting": "Waiting for customer", "closed": "Closed"].sorted { $0.key < $1.key }.map { key, title in
-            "<a href=\"\(inboxPath)\(key.isEmpty ? "" : "?state=\(key)")\"\((state ?? "") == key ? " aria-current=\"page\"" : "")>\(title)</a>"
-        }.joined(separator: " · ")
+        let filters = ConsoleUI.segmented([("", "All"), ("new", "New"), ("open", "Open"), ("waiting", "Waiting for customer"), ("closed", "Closed")].map { key, title in
+            (title, "\(inboxPath)\(key.isEmpty ? "" : "?state=\(key)")", (state ?? "") == key)
+        }, label: "Filter requests")
         let queues = try await InboxQueueRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$key).all()
-        let queueRows = queues.map { q -> [String] in
+        let queueRows = queues.map { q -> [ConsoleUI.Cell] in
             let hours = q.hoursJSON.flatMap { try? JSONDecoder().decode(OperatingHours.self, from: Data($0.utf8)) }
             let zone = TimeZone(identifier: q.timezone) ?? .gmt
             let open = hours.map { $0.isOpen(at: req.ctx.now, timezone: zone) } ?? true
-            return [DashboardUI.esc(q.key), DashboardUI.esc(hours?.text ?? "Always open"), DashboardUI.esc(q.timezone), open ? DashboardFormat.badge("Open now", "ok") : DashboardFormat.badge("Closed now", "mu")]
+            return [.text(q.key), .text(hours?.text ?? "Always open"), .text(q.timezone), ConsoleUI.Cell(html: open ? DashboardFormat.badge("Open now", "ok") : DashboardFormat.badge("Closed now", "mu"))]
         }
-        let hoursForm = p.can(.manageInbox) ? """
-        <form method="post" action="\(inboxPath)/hours">\(DashboardUI.csrf(p))<div class="cols">\
-        <div><label for="q">Queue</label><input id="q" name="queue" type="text" maxlength="40" value="\(LoopPublicationService.defaultQueue)" required></div>\
-        <div><label for="h">Hours (blank = always open)</label><input id="h" name="hours" type="text" maxlength="200" placeholder="1-5 09:00-17:00; 6 10:00-14:00"></div>\
-        <div><label for="tz">Time zone</label><input id="tz" name="timezone" type="text" maxlength="64" value="UTC" required></div></div>\
-        <p class="mu sm">Hours are shown to your team. Requests still arrive, and customers keep seeing "waiting for them to confirm", outside hours.</p>\
-        <button class="btn s" type="submit">Save hours</button></form>
-        """ : ""
-        let body = """
-        <div class="card"><h2>Requests <span class="badge">\(unread) unread</span></h2>\
+        let hoursForm = p.can(.manageInbox) ? ConsoleUI.form("\(inboxPath)/hours", csrf: DashboardUI.csrf(p),
+            "<div class=\"cols\">"
+            + ConsoleUI.input("queue", label: "Queue", id: "q", value: LoopPublicationService.defaultQueue, required: true, attrs: ["maxlength": "40"])
+            + ConsoleUI.input("hours", label: "Hours", id: "h", placeholder: "1-5 09:00-17:00; 6 10:00-14:00", help: "For example 1-5 09:00-17:00 for Monday to Friday. Blank means always open.", optional: true, attrs: ["maxlength": "200"])
+            + ConsoleUI.input("timezone", label: "Time zone", id: "tz", value: "UTC", help: "An IANA name, for example America/New_York.", required: true, attrs: ["maxlength": "64"])
+            + "</div>" + ConsoleUI.formActions(ConsoleUI.button("Save hours", .secondary))) : ""
+        let body = ConsoleUI.card("Requests", actions: filters, """
         <p role="status" aria-live="polite" class="mu sm">\(unread) unread request\(unread == 1 ? "" : "s"). Reload the page to see new requests.</p>\
-        <nav aria-label="Filter requests" class="sm">\(filters)</nav>\
-        \(DashboardFormat.table(["Request", "Queue", "State", "Assignee", "Received"], rows, empty: "No requests yet.", caption: "Inbox requests"))</div>\
-        <div class="card"><h2>Queues and operating hours</h2>\(DashboardFormat.table(["Queue", "Hours", "Time zone", "Now"], queueRows, empty: "Requests go to the default queue.", caption: "Queues"))\(hoursForm)</div>
-        """
-        return DashboardUI.businessPage(p, title: "Inbox", active: inboxPath, subtitle: "Requests customers sent through your Loops.", flash: flash(req), body: body)
+        \(ConsoleUI.table([ConsoleUI.Column("Request", key: "request"), ConsoleUI.Column("Queue", key: "queue"), ConsoleUI.Column("State", key: "state"), ConsoleUI.Column("Assignee"),
+                           ConsoleUI.Column("Received", key: "received")], rows, caption: "Inbox requests", state: ConsoleUI.TableState(req, id: "i", defaultSort: "received", defaultAscending: false),
+                          empty: "No requests yet", emptyMessage: "Requests customers send through your Loops arrive here."))
+        """) + ConsoleUI.card("Queues and operating hours", description: "Hours are shown to your team. Requests still arrive, and customers keep seeing \"waiting for them to confirm\", outside hours.",
+                               ConsoleUI.table([ConsoleUI.Column("Queue"), ConsoleUI.Column("Hours"), ConsoleUI.Column("Time zone"), ConsoleUI.Column("Now")], queueRows, caption: "Queues",
+                                               empty: "Requests go to the default queue.") + hoursForm)
+        return DashboardUI.businessPage(p, title: "Inbox", active: inboxPath, subtitle: "Requests customers sent through your Loops.", actions: ConsoleUI.pill("\(unread) unread", unread > 0 ? .accent : .neutral),
+                                        flash: flash(req), body: body)
     }
 
     private static func item(_ req: Request) async throws -> Response {
@@ -138,10 +138,11 @@ enum ConsoleInbox {
         guard p.can(.viewInbox), let staff = p.user.id else { throw APIError.forbidden }
         let detail = try await LoopInbox(db: req.db, ctx: req.ctx).open(itemId: try req.uuid("id"), businessId: businessId, staffId: staff)
         let id = detail.item.id!.uuidString.lowercased()
-        let answers = detail.answers.map { [DashboardUI.esc($0.step), DashboardUI.esc($0.label), DashboardUI.esc($0.value)] }
+        let answers = detail.answers.map { [ConsoleUI.Cell.text($0.step), .text($0.label), .text($0.value)] }
         let notes = detail.notes.map { note in
-            "<li><span class=\"badge\">\(note.kind == "info_request" ? "Asked customer" : "Note")</span> \(DashboardUI.esc(note.author)), \(DashboardFormat.date(note.at)): \(DashboardUI.esc(note.text))</li>"
-        }.joined()
+            (titleHTML: "\(DashboardFormat.badge(note.kind == "info_request" ? "Asked customer" : "Note", note.kind == "info_request" ? "" : "mu")) \(DashboardUI.esc(note.author))",
+             meta: DashboardFormat.date(note.at), bodyHTML: DashboardUI.esc(note.text))
+        }
         let outcome = detail.outcome.map { LoopStringCatalog.outcomeText($0, business: "your organization") } ?? "—"
         var actions = ""
         if p.can(.manageInbox) {
@@ -149,33 +150,28 @@ enum ConsoleInbox {
             let members = try await OrgMembershipRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$removedAt == nil).all()
                 .filter { OrgRole(rawValue: $0.role)?.permits(.viewInbox) == true }
             let users = try await DashboardUserRecord.query(on: req.db).filter(\.$id ~~ members.map(\.userId)).all()
-            let options = "<option value=\"none\">Nobody</option>" + users.map { u in
-                "<option value=\"\(u.id!.uuidString.lowercased())\"\(detail.item.assigneeId == u.id ? " selected" : "")>\(DashboardUI.esc(u.displayName))</option>"
-            }.joined()
+            let options = [ConsoleUI.Option("none", "Nobody")] + users.map { ConsoleUI.Option($0.id!.uuidString.lowercased(), $0.displayName, selected: detail.item.assigneeId == $0.id) }
             let final = detail.outcome?.isFinal == true
-            actions = """
-            <div class="card"><h2>Answer</h2>\(final ? "<p class=\"mu\">This request has a final answer.</p>" : """
-            <form method="post" action="\(inboxPath)/\(id)/decide">\(csrf)<fieldset><legend>Decision</legend>\
-            <label class="ck"><input type="radio" name="decision" value="accept" required> Confirm</label>\
-            <label class="ck"><input type="radio" name="decision" value="reject"> Decline</label>\
-            <label class="ck"><input type="radio" name="decision" value="ask_info"> Ask for more information</label></fieldset>\
-            <label for="dn">Note (internal; required when asking for information)</label><textarea id="dn" name="note" maxlength="1000"></textarea>\
-            <button class="btn" type="submit">Send answer</button></form>
-            """)</div>\
-            <div class="card"><h2>Assignment and notes</h2><div class="cols">\
-            <form method="post" action="\(inboxPath)/\(id)/assign">\(csrf)<label for="as">Assign to</label><select id="as" name="assignee">\(options)</select><p><button class="btn s" type="submit">Assign</button></p></form>\
-            <form method="post" action="\(inboxPath)/\(id)/note">\(csrf)<label for="nt">Internal note</label><textarea id="nt" name="note" maxlength="1000" required></textarea><p><button class="btn s" type="submit">Add note</button></p></form>\
-            </div></div>
-            """
+            let answer = final ? ConsoleUI.callout(.success, "<p>This request has a final answer.</p>") : ConsoleUI.form("\(inboxPath)/\(id)/decide", csrf: csrf,
+                ConsoleUI.choices("decision", legend: "Decision", [ConsoleUI.Choice("accept", "Confirm", help: "The customer sees that you confirmed."),
+                                                                   ConsoleUI.Choice("reject", "Decline", help: "The customer sees that you couldn't do this.", tone: .danger),
+                                                                   ConsoleUI.Choice("ask_info", "Ask for more information", help: "The customer is notified.")], required: true)
+                + ConsoleUI.textarea("note", label: "Note", id: "dn", help: "Internal. Required when asking for information.", optional: true, attrs: ["maxlength": "1000"])
+                + ConsoleUI.formActions(ConsoleUI.button("Send answer")))
+            actions = ConsoleUI.card("Answer", answer)
+                + ConsoleUI.card("Assignment",
+                    ConsoleUI.form("\(inboxPath)/\(id)/assign", csrf: csrf, ConsoleUI.select("assignee", label: "Assign to", id: "as", options: options) + ConsoleUI.formActions(ConsoleUI.button("Assign", .secondary))))
+                + ConsoleUI.card("Internal note",
+                    ConsoleUI.form("\(inboxPath)/\(id)/note", csrf: csrf, ConsoleUI.textarea("note", label: "Note", id: "nt", help: "Only your team sees notes.", required: true, attrs: ["maxlength": "1000"])
+                                   + ConsoleUI.formActions(ConsoleUI.button("Add note", .secondary))))
         }
-        let body = """
-        <div class="card"><h2>\(DashboardUI.esc(detail.definition?.title ?? "Request"))</h2>\
-        <p class="sm">State: \(stateBadge(detail.item.state)) · Customer sees: \(DashboardUI.esc(outcome)) · Received \(DashboardFormat.date(detail.item.createdAt)) · Read by \(detail.readers)</p>\
-        <p class="mu sm">The customer is identified only by this request. Don't ask for health details, passwords or card numbers.</p>\
-        \(DashboardFormat.table(["Step", "Field", "Answer"], answers, empty: "No answers.", caption: "What the customer entered"))\
-        <h3>History</h3><ul class="plain">\(notes.isEmpty ? "<li class=\"mu\">No notes yet.</li>" : notes)</ul></div>\(actions)
-        """
-        return DashboardUI.businessPage(p, title: "Request", active: inboxPath, flash: flash(req), body: body)
+        let summary = ConsoleUI.card(detail.definition?.title ?? "Request", actions: stateBadge(detail.item.state), ConsoleUI.keyValues([
+            ("Customer sees", DashboardUI.esc(outcome)), ("Received", DashboardFormat.date(detail.item.createdAt)), ("Read by", String(detail.readers)),
+        ]) + ConsoleUI.callout(.neutral, "<p class=\"sm\">The customer is identified only by this request. Don't ask for health details, passwords or card numbers.</p>")
+            + "<h3>What the customer entered</h3>" + ConsoleUI.table([ConsoleUI.Column("Step"), ConsoleUI.Column("Field"), ConsoleUI.Column("Answer")], answers, caption: "What the customer entered", empty: "No answers.")
+            + "<h3>History</h3>" + (notes.isEmpty ? "<p class=\"mu\">No notes yet.</p>" : ConsoleUI.timeline(notes, label: "Request history")))
+        let body = actions.isEmpty ? summary : "<div class=\"split\"><div>\(summary)</div><div>\(actions)</div></div>"
+        return DashboardUI.businessPage(p, title: "Request", active: inboxPath, actions: ConsoleUI.linkButton("Back to the inbox", href: inboxPath, small: true), flash: flash(req), body: body)
     }
 
     private static func loops(_ req: Request) async throws -> Response {
@@ -183,7 +179,7 @@ enum ConsoleInbox {
         guard ConsoleLoopStudio.canView(p) else { throw APIError.forbidden }
         let revisions = try await LoopRevisionRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$createdAt, .descending).limit(50).all()
         let definitions = Dictionary(try await LoopDefinitionRecord.query(on: req.db).filter(\.$businessId == businessId).all().map { ($0.id!, $0.key) }, uniquingKeysWith: { a, _ in a })
-        var rows: [[String]] = []
+        var rows: [[ConsoleUI.Cell]] = []
         for revision in revisions {
             let reviews = try await LoopReviewRecord.query(on: req.db).filter(\.$revisionId == revision.id!).sort(\.$at, .ascending).all()
             var messages = LoopPublicationService.hits(revision.ruleHitsJSON).filter { !$0.rule.isReviewFlag }.map { "\($0.rule.rawValue) at \($0.path.isEmpty ? "definition" : $0.path)" }
@@ -192,31 +188,37 @@ enum ConsoleInbox {
                     messages.append("Reviewer: \(text)")
                 }
             }
-            let stages = "Checks \(reviews.contains { $0.stage == "automated" && $0.decision == "pass" } ? "passed" : "failed") · " +
-                "Reviews \(reviews.filter { $0.stage != "automated" && $0.decision == "approve" }.count)/\(revision.requiredReview == LoopReviewLevel.twoPerson.rawValue ? 2 : 1)"
+            let checks = reviews.contains { $0.stage == "automated" && $0.decision == "pass" }
+            let approvals = reviews.filter { $0.stage != "automated" && $0.decision == "approve" }.count
+            let needed = revision.requiredReview == LoopReviewLevel.twoPerson.rawValue ? 2 : 1
+            let pipeline = "\(DashboardFormat.badge(checks ? "Checks passed" : "Checks failed", checks ? "ok" : "dg")) \(DashboardFormat.badge("Reviews \(approvals)/\(needed)", approvals >= needed ? "ok" : "mu"))"
             var withdraw = ""
             if revision.stateValue == .inReview && p.can(.submitLoops) {
                 withdraw = "<form method=\"post\" action=\"\(loopsPath)/revisions/\(revision.id!.uuidString.lowercased())/withdraw\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Withdraw</button></form>"
             }
-            rows.append([DashboardUI.esc(definitions[revision.definitionId] ?? "—"), String(revision.revision), DashboardUI.esc(revision.state.replacingOccurrences(of: "_", with: " ")),
-                         DashboardUI.esc(stages), DashboardUI.esc(messages.prefix(6).joined(separator: "; ")), withdraw])
+            let state = revision.stateValue
+            let tone = state == .published ? "ok" : ([.rejected, .validationFailed].contains(state) ? "dg" : (state == .changesRequested ? "wa" : "mu"))
+            rows.append([.text(definitions[revision.definitionId] ?? "—"), .number(revision.revision), ConsoleUI.Cell(html: DashboardFormat.badge(ConsoleLoopStudio.stateLabel(state), tone), sort: .text(revision.state)),
+                         ConsoleUI.Cell(html: pipeline), ConsoleUI.Cell(html: messages.isEmpty ? "<span class=\"mu\">—</span>" : "<span class=\"sm\">\(DashboardUI.esc(messages.prefix(6).joined(separator: "; ")))</span>"),
+                         ConsoleUI.Cell(html: withdraw)])
         }
-        let body = """
-        <div class="card"><h2>Your Loops</h2><p class="mu sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer \
-        (two for high-risk actions), then a signed publication. You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review.</p>\
-        \(DashboardFormat.table(["Loop", "Revision", "State", "Pipeline", "Messages", ""], rows, empty: "No Loops submitted yet.", caption: "Loop revisions"))</div>\
-        <div class="card"><h2>Build or change a Loop</h2><p class="sm">Use <a href="\(ConsoleLoopStudio.path)">Loop Studio</a> to start from a template, edit it with \
-        a form, check the automated report and preview, and submit it for Viadere review.</p>\
-        <p class="mu sm">Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p></div>
-        """
-        return DashboardUI.businessPage(p, title: "Loops", active: loopsPath, subtitle: "Requests customers can send you from the Viadere app.", flash: flash(req), body: body)
+        let body = ConsoleUI.callout(.accent, title: "How review works", """
+        <p class="sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer (two for high-risk actions), then a signed publication. \
+        You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review. Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p>
+        """) + ConsoleUI.card("Your Loops", ConsoleUI.table([ConsoleUI.Column("Loop", key: "loop"), ConsoleUI.Column("Revision", key: "rev", numeric: true), ConsoleUI.Column("State", key: "state"),
+                                                          ConsoleUI.Column("Pipeline"), ConsoleUI.Column("Messages"), ConsoleUI.Column("", actions: true)],
+                                                         rows, caption: "Loop revisions", state: ConsoleUI.TableState(req, id: "l"), empty: "No Loops submitted yet",
+                                                         emptyMessage: "Start from a template in Loop Studio, check the preview, and submit it for Viadere review.",
+                                                         emptyAction: ConsoleUI.linkButton("Open Loop Studio", href: ConsoleLoopStudio.path, .primary, small: true)))
+        return DashboardUI.businessPage(p, title: "Loops", active: loopsPath, subtitle: "Requests customers can send you from the Viadere app.",
+                                        actions: ConsoleUI.linkButton("Open Loop Studio", href: ConsoleLoopStudio.path, .primary), flash: flash(req), body: body)
     }
 
     static func stateBadge(_ state: String) -> String {
         switch state {
         case "new": DashboardFormat.badge("New", "ok")
         case "open": DashboardFormat.badge("Open")
-        case "waiting": DashboardFormat.badge("Waiting for customer", "mu")
+        case "waiting": DashboardFormat.badge("Waiting for customer", "wa")
         default: DashboardFormat.badge("Closed", "mu")
         }
     }

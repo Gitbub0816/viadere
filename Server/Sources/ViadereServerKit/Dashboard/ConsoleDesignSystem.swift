@@ -43,7 +43,7 @@ enum ConsoleUI {
     .vh{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
     :focus-visible{outline:2px solid var(--ac);outline-offset:2px}
     .btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
-    main:focus{outline:none}
+    main:focus{outline:none}[id]{scroll-margin-top:4.5rem}
     .ico{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
     .skip{position:absolute;left:var(--s2);top:-4rem;z-index:50;background:var(--pf);color:var(--op);padding:.6rem 1rem;border-radius:999px;font-weight:600;text-decoration:none}.skip:focus{top:var(--s2)}
     .shell{display:grid;grid-template-columns:var(--side) minmax(0,1fr);min-height:100vh}
@@ -73,7 +73,8 @@ enum ConsoleUI {
     .card>:last-child{margin-bottom:0}.card.t-danger{border-color:var(--dg)}.card.t-danger h2{color:var(--dg)}.card.t-warning{border-color:var(--wa)}.card.flush{padding:0;overflow:hidden}.card.flush>.card-h{padding:var(--s5) var(--s5) 0}
     .sec{margin:var(--s6) 0 var(--s3)}.sec h2{margin:0}.sec p{color:var(--mu);font-size:var(--fs-sm);margin:.25rem 0 0}
     .cols{display:grid;gap:var(--s4);grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}.cols>*{min-width:0}
-    .split{display:grid;gap:var(--s4);grid-template-columns:minmax(0,1fr) minmax(0,360px);align-items:start}
+    .split{display:grid;gap:var(--s4);grid-template-columns:minmax(0,1fr) minmax(0,360px);align-items:start}.split.wa{grid-template-columns:minmax(0,1fr) minmax(0,430px)}
+    .loop-editor>fieldset{background:var(--bg)}.loop-editor fieldset fieldset{background:var(--sf)}.loop-editor fieldset fieldset fieldset{background:var(--bg)}.loop-editor legend{font-size:.95rem}
     .row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}.row.end{justify-content:flex-end}.row>form{margin:0}
     .kpis,.grid{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));margin-bottom:var(--s4)}
     .stat{display:block;background:var(--sf);border:1px solid var(--hl);border-radius:var(--r3);padding:var(--s4) var(--s4) .9rem;color:var(--fg);text-decoration:none;box-shadow:var(--sh);min-width:0}
@@ -85,7 +86,7 @@ enum ConsoleUI {
     th{font-size:var(--fs-xs);font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--hl2);white-space:nowrap;background:var(--sf)}
     td{padding:.7rem .7rem;border-bottom:1px solid var(--hl);vertical-align:top}tbody tr:last-child td{border-bottom:0}tbody tr:hover td{background:var(--mus)}
     th[scope=row]{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--fg);white-space:normal;background:none;border-bottom:1px solid var(--hl)}
-    .num{text-align:right;font-variant-numeric:tabular-nums}.act{text-align:right;white-space:nowrap}.act>*{display:inline-flex;vertical-align:top}.act .row{justify-content:flex-end}
+    .num{text-align:right;font-variant-numeric:tabular-nums}.act{text-align:right;white-space:nowrap}.act .row{justify-content:flex-end}
     td>form,td .row>form{margin:0}td>form+form{margin-top:var(--s2)}
     th a.sort{display:inline-flex;align-items:center;gap:.25rem;color:inherit;text-decoration:none}th a.sort:hover{color:var(--fg)}th a.sort .ico{width:14px;height:14px;opacity:.55}th[aria-sort] a.sort{color:var(--fg)}th[aria-sort] a.sort .ico{opacity:1}
     table caption{caption-side:top;text-align:left;font-weight:600;padding:.25rem .7rem .5rem}
@@ -154,6 +155,7 @@ enum ConsoleUI {
     .code li.del{background:var(--dgs);box-shadow:inset 3px 0 0 var(--dg)}.code li.add{background:var(--oks);box-shadow:inset 3px 0 0 var(--ok)}
     .device{display:inline-block;max-width:100%;padding:10px;border:1px solid var(--hl2);border-radius:30px;background:var(--sk)}.device iframe{display:block;border-radius:22px}
     iframe{max-width:100%;border:1px solid var(--hl);border-radius:var(--r2);background:#fff}
+    .sw{display:inline-flex;align-items:center;gap:.45rem}.sw svg{width:18px;height:18px;flex:none;border-radius:4px;box-shadow:0 0 0 1px var(--hl2)}
     .secret{font-size:.95rem;padding:.9rem 1rem;border:1px dashed var(--ac);border-radius:var(--r2);background:var(--acs);word-break:break-all;-webkit-user-select:all;user-select:all}
     .qr{width:224px;height:224px;background:#fff;border-radius:var(--r2);padding:8px;display:block}.qr svg{width:100%;height:100%;display:block}
     .bars rect.b{fill:var(--ac)}.bars rect.t{fill:var(--hl2)}.bars text{fill:var(--mu);font:11px -apple-system,system-ui,sans-serif}
@@ -463,6 +465,13 @@ enum ConsoleUI {
 
     /// A card without a header (a table or a form that the page heading already names).
     static func panel(_ html: String, cls: String? = nil) -> String { "<section class=\"card\(cls.map { " " + $0 } ?? "")\">\(html)</section>" }
+
+    /// A colour sample next to its hex value. Drawn with an SVG `fill` presentation attribute (not a style attribute, so the CSP holds);
+    /// anything other than a validated `#RRGGBB` is shown as escaped text only.
+    static func swatch(_ hex: String) -> String {
+        guard hex.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil else { return esc(hex) }
+        return "<span class=\"sw\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\" focusable=\"false\"><rect width=\"16\" height=\"16\" rx=\"4\" fill=\"\(hex)\"/></svg><code>\(hex)</code></span>"
+    }
 
     /// A heading for a group of cards.
     static func sectionTitle(_ title: String, description: String? = nil) -> String {

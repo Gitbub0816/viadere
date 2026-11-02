@@ -221,7 +221,7 @@ enum ConsoleDevelopers {
                                             help: "When set, the key works only from these networks. Leave empty to allow any address.", optional: true, attrs: ["maxlength": "400", "spellcheck": "false"]) + mtls)
                         + ConsoleUI.formActions(ConsoleUI.button("Create key", passkey: true) + ConsoleUI.passkeyNote("You'll confirm with your passkey. The secret is shown once."), sep: true)))
             } else {
-                form = ConsoleUI.callout(.accent, title: "Keys unlock after domain verification", "<p>Verify a domain you control first. <a href=\"/dashboard/organization/domains\">Open Organization &gt; Domains</a></p>")
+                form = ConsoleUI.callout(.accent, title: "Keys unlock when you have verified a domain you control", "<p><a href=\"/dashboard/organization/domains\">Open Organization &gt; Domains</a></p>")
             }
             // Requests of mine that a second person approved are completed here (I alone see the new secret).
             let mine = try await PendingChanges(db: req.db, ctx: req.ctx).open(businessId: businessId).filter { $0.requestedBy == p.user.id && $0.status == "approved" && $0.kind != PendingChanges.Kind.roleGrant.rawValue && $0.kind != PendingChanges.Kind.securitySetting.rawValue }
@@ -347,7 +347,7 @@ enum ConsoleDevelopers {
                         + ConsoleUI.checkbox("opaque", label: "Opaque v2 envelope (ids and a result reference only; for approval and interaction events)")
                         + ConsoleUI.formActions(ConsoleUI.button("Add endpoint", passkey: true) + ConsoleUI.passkeyNote("You'll confirm with your passkey. The signing secret is shown once."), sep: true)))
             } else {
-                form = ConsoleUI.callout(.accent, title: "Webhooks unlock after domain verification", "<p>Add endpoints once you have verified a domain you control. <a href=\"/dashboard/organization/domains\">Open Organization &gt; Domains</a></p>")
+                form = ConsoleUI.callout(.accent, title: "Webhooks can be added once you have verified a domain you control", "<p><a href=\"/dashboard/organization/domains\">Open Organization &gt; Domains</a></p>")
             }
         }
         let list = ConsoleUI.card("Endpoints", actions: webhookTools,

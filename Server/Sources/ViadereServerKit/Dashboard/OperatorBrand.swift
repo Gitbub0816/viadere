@@ -99,7 +99,7 @@ enum OperatorBrand {
     }
 
     private static func reasonField(_ id: String, required: Bool) -> String {
-        "<label for=\"\(id)\">Reason\(required ? " (recorded)" : " (optional)")</label><input id=\"\(id)\" name=\"reason\" type=\"text\" \(required ? "minlength=\"8\" required " : "")maxlength=\"300\">"
+        ConsoleUI.reason(id: id, label: required ? "Reason (recorded)" : "Note", required: required, help: required ? "8 to 300 characters; shown to the business." : "Recorded with the approval.")
     }
 
     static func queue(_ req: Request) async throws -> Response {
@@ -116,57 +116,77 @@ enum OperatorBrand {
         for id in Set(pendingKits.map(\.businessId) + pendingAssets.map(\.businessId) + liveKits.map(\.businessId) + liveAssets.map(\.businessId)) {
             names[id] = try await BusinessRecord.find(id, on: req.db)?.displayName ?? "?"
         }
-        func business(_ id: UUID) -> String { "\(DashboardUI.esc(names[id] ?? "?")) <code class=\"sm\">\(id.uuidString.lowercased())</code>" }
+        func business(_ id: UUID) -> String { "<a href=\"/operator/businesses/\(id.uuidString.lowercased())\">\(DashboardUI.esc(names[id] ?? "?"))</a> <code class=\"sm\">\(id.uuidString.lowercased())</code>" }
+        func decision(_ kind: String, _ id: String, label: String) -> String {
+            "<div class=\"cols\">"
+                + ConsoleUI.form("\(path)/\(kind)/\(id)/approve", csrf: csrf, reasonField("\(kind == "kits" ? "ka" : "aa")-\(id)", required: false) + ConsoleUI.formActions(ConsoleUI.button("Approve", small: true, ariaLabel: "Approve \(label)", passkey: true)))
+                + ConsoleUI.form("\(path)/\(kind)/\(id)/reject", csrf: csrf, reasonField("\(kind == "kits" ? "kr" : "ar")-\(id)", required: true) + ConsoleUI.formActions(ConsoleUI.button("Reject", .danger, small: true, ariaLabel: "Reject \(label)", passkey: true)))
+                + "</div>"
+        }
 
-        var body = "<div class=\"notice\">Check every kit and image against the brand-content rules: no impersonation of another organization or of Viadere, no security or payment imagery, no health content (healthcare businesses are refused outright), nothing that imitates a verified badge or approval buttons. Approving a kit requires its images to be approved first.</div>"
-        let kitRows = pendingKits.map { k -> [String] in
+        var body = ConsoleUI.callout(.accent, title: "Brand-content rules", "<p class=\"sm\">No impersonation of another organization or of Viadere, no security or payment imagery, no health content (healthcare businesses are refused outright), nothing that imitates a verified badge or approval buttons. Approving a kit requires its images to be approved first. Every decision asks for your passkey.</p>")
+        body += ConsoleUI.stats([ConsoleUI.Stat(String(pendingKits.count), "Kits waiting", tone: pendingKits.isEmpty ? nil : .accent), ConsoleUI.Stat(String(pendingAssets.count), "Images waiting", tone: pendingAssets.isEmpty ? nil : .accent),
+                                 ConsoleUI.Stat(String(liveKits.count), "Live kits"), ConsoleUI.Stat(String(liveAssets.count), "Live images")])
+
+        body += ConsoleUI.sectionTitle("Kits waiting for review", description: "Oldest first. The preview is the business's draft rendered in a sandbox.")
+        if pendingKits.isEmpty { body += ConsoleUI.empty("No kits waiting", nil, icon: .check) }
+        for k in pendingKits {
             let id = k.id!.uuidString.lowercased()
             let tokens = BrandKitService.draftKit(k)?.tokens
             let warnings = tokens.map(BrandPreview.contrastWarnings) ?? []
-            let summary = tokens.map { "primary \($0.primary.hex)" + ($0.accent.map { ", accent \($0.hex)" } ?? "") } ?? "unreadable tokens"
-            return [business(k.businessId), "\(DashboardUI.esc(k.name)) <code>\(DashboardUI.esc(k.kitKey))</code> v\(k.version)",
-                    DashboardUI.esc(summary) + (warnings.isEmpty ? "" : " " + DashboardFormat.badge("\(warnings.count) contrast override(s)", "mu")),
-                    "<a href=\"\(path)/kits/\(id)/preview\">Preview</a>",
-                    """
-                    <form method="post" action="\(path)/kits/\(id)/approve">\(csrf)\(reasonField("ka-\(id)", required: false))<button class="btn sm" type="submit">Approve</button></form>\
-                    <form method="post" action="\(path)/kits/\(id)/reject">\(csrf)\(reasonField("kr-\(id)", required: true))<button class="btn d sm" type="submit">Reject</button></form>
-                    """]
+            var colors: [(String, String)] = []
+            if let tokens {
+                colors.append(("Primary", tokens.primary.hex))
+                if let c = tokens.secondary { colors.append(("Secondary", c.hex)) }
+                if let c = tokens.accent { colors.append(("Accent", c.hex)) }
+                if let c = tokens.surface { colors.append(("Background", c.hex)) }
+            }
+            let facts = ConsoleUI.keyValues([("Business", business(k.businessId)), ("Kit", "\(DashboardUI.esc(k.name)) <code>\(DashboardUI.esc(k.kitKey))</code> v\(k.version)")]
+                + colors.map { ($0.0, ConsoleUI.swatch($0.1)) })
+                + (tokens == nil ? ConsoleUI.callout(.danger, "<p>Unreadable tokens.</p>") : "")
+                + (warnings.isEmpty ? "" : ConsoleUI.callout(.warning, title: "\(warnings.count) contrast override(s)", "<ul>\(warnings.map { "<li>\(DashboardUI.esc($0))</li>" }.joined())</ul>"))
+            body += ConsoleUI.card("\(names[k.businessId] ?? "?") · \(k.name)", actions: DashboardFormat.badge("Waiting", "wa"),
+                "<div class=\"split wa\"><div>\(facts)<h3>Decision</h3>\(decision("kits", id, label: k.name))</div><div>"
+                + ConsoleUI.preview(src: "\(path)/kits/\(id)/preview", title: "Preview of \(k.name), not exactly what customers see", width: 420, height: 640)
+                + "<p class=\"sm\"><a href=\"\(path)/kits/\(id)/preview\">Open the preview on its own</a></p></div></div>")
         }
-        body += "<div class=\"card\"><h2>Kits waiting for review</h2>\(DashboardFormat.table(["Business", "Kit", "Tokens", "Preview", ""], kitRows, empty: "No kits waiting.", caption: "Kits waiting for review"))</div>"
-        let assetRows = pendingAssets.map { a -> [String] in
+
+        body += ConsoleUI.sectionTitle("Images waiting for review", description: "Re-encoded PNGs, already stripped of metadata.")
+        if pendingAssets.isEmpty { body += ConsoleUI.empty("No images waiting", nil, icon: .check) }
+        let assetCards = pendingAssets.map { a -> String in
             let id = a.id!.uuidString.lowercased()
-            return [business(a.businessId), "<img src=\"\(path)/assets/\(id)/image\" alt=\"Uploaded \(DashboardUI.esc(a.slot)) image\" width=\"96\" height=\"96\">",
-                    "\(DashboardUI.esc(a.slot)) · \(a.width) × \(a.height) · \(a.bytes / 1024) KB",
-                    """
-                    <form method="post" action="\(path)/assets/\(id)/approve">\(csrf)\(reasonField("aa-\(id)", required: false))<button class="btn sm" type="submit">Approve</button></form>\
-                    <form method="post" action="\(path)/assets/\(id)/reject">\(csrf)\(reasonField("ar-\(id)", required: true))<button class="btn d sm" type="submit">Reject</button></form>
-                    """]
-        }
-        body += "<div class=\"card\"><h2>Images waiting for review</h2>\(DashboardFormat.table(["Business", "Image", "Details", ""], assetRows, empty: "No images waiting.", caption: "Images waiting for review"))</div>"
+            return ConsoleUI.card("\(names[a.businessId] ?? "?") · \(a.slot)", description: "\(a.width) × \(a.height) · \(a.bytes / 1024) KB",
+                "<p><img src=\"\(path)/assets/\(id)/image\" alt=\"Uploaded \(DashboardUI.esc(a.slot)) image\" width=\"160\" height=\"160\"></p>\(ConsoleUI.keyValues([("Business", business(a.businessId))]))\(decision("assets", id, label: "\(a.slot) image"))")
+        }.joined()
+        if !assetCards.isEmpty { body += "<div class=\"cols\">\(assetCards)</div>" }
+
         let liveKitRows = liveKits.map { k -> [String] in
             let id = k.id!.uuidString.lowercased()
             return [business(k.businessId), "\(DashboardUI.esc(k.name)) <code>\(DashboardUI.esc(k.kitKey))</code> live v\(k.approvedVersion ?? 0)",
-                    "<form method=\"post\" action=\"\(path)/kits/\(id)/takedown\">\(csrf)\(reasonField("kt-\(id)", required: true))<button class=\"btn d sm\" type=\"submit\">Take down</button></form>"]
+                    ConsoleUI.confirm("Take down", ariaLabel: "Take down \(k.name)", ConsoleUI.form("\(path)/kits/\(id)/takedown", csrf: csrf, reasonField("kt-\(id)", required: true)
+                        + "<p>Customers see neutral styling at once.</p>" + ConsoleUI.button("Take down", .dangerSolid, small: true, passkey: true)))]
         }
         let liveAssetRows = liveAssets.map { a -> [String] in
             let id = a.id!.uuidString.lowercased()
             return [business(a.businessId), "<img src=\"\(path)/assets/\(id)/image\" alt=\"Live \(DashboardUI.esc(a.slot)) image\" width=\"56\" height=\"56\"> \(DashboardUI.esc(a.slot))",
-                    "<form method=\"post\" action=\"\(path)/assets/\(id)/takedown\">\(csrf)\(reasonField("at-\(id)", required: true))<button class=\"btn d sm\" type=\"submit\">Take down</button></form>"]
+                    ConsoleUI.confirm("Take down", ariaLabel: "Take down this \(a.slot) image", ConsoleUI.form("\(path)/assets/\(id)/takedown", csrf: csrf, reasonField("at-\(id)", required: true)
+                        + ConsoleUI.button("Take down", .dangerSolid, small: true, passkey: true)))]
         }
-        body += "<div class=\"card\"><h2>Live kits</h2>\(DashboardFormat.table(["Business", "Kit", ""], liveKitRows, empty: "No live kits.", caption: "Live kits"))</div>"
-        body += "<div class=\"card\"><h2>Live images</h2>\(DashboardFormat.table(["Business", "Image", ""], liveAssetRows, empty: "No live images.", caption: "Live images"))</div>"
+        body += ConsoleUI.sectionTitle("Live", description: "Take down anything that breaks the rules; customers see neutral styling at once.")
+        body += "<div class=\"cols\">" + ConsoleUI.card("Live kits", DashboardFormat.table(["Business", "Kit", ""], liveKitRows, empty: "No live kits.", caption: "Live kits"))
+            + ConsoleUI.card("Live images", DashboardFormat.table(["Business", "Image", ""], liveAssetRows, empty: "No live images.", caption: "Live images")) + "</div>"
 
         let snapshot = await PlatformFlags(db: req.db, ctx: req.ctx).snapshot()
         let switches = snapshot.filter { $0.key.hasPrefix(PlatformFlag.brandKits.rawValue + "|") }
             .map { [DashboardUI.esc(String($0.key.split(separator: "|").last ?? "")), DashboardUI.esc($0.value.reason), DashboardFormat.date($0.value.updatedAt)] }
-        body += """
-        <div class="card"><h2>Brand Kits kill switch</h2><p class="mu sm">While on, no brand manifest and no brand image is served for the scope; every app renders Viadere's neutral style at once. Leave the business id empty for the whole platform.</p>\
-        \(DashboardFormat.table(["Scope", "Reason", "Since"], switches, empty: "Brand Kits are on.", caption: "Brand Kits switches"))\
-        <form method="post" action="\(path)/switch">\(csrf)<label for="bk-b">Business id (optional)</label><input id="bk-b" name="businessId" type="text" maxlength="40">\(reasonField("bk-r", required: true))\
-        <div class="row"><button class="btn d" type="submit" name="action" value="on">Switch branding off</button><button class="btn s" type="submit" name="action" value="off">Switch branding back on</button></div></form></div>
-        """
+        body += ConsoleUI.card("Brand Kits kill switch", description: "While on, no brand manifest and no brand image is served for the scope; every app renders Viadere's neutral style at once. Leave the business id empty for the whole platform.",
+                               actions: switches.isEmpty ? DashboardFormat.badge("Branding on", "ok") : DashboardFormat.badge("\(switches.count) off", "dg"), tone: switches.isEmpty ? nil : .danger,
+            DashboardFormat.table(["Scope", "Reason", "Since"], switches, empty: "Brand Kits are on.", caption: "Brand Kits switches")
+            + ConsoleUI.form("\(path)/switch", csrf: csrf,
+                ConsoleUI.input("businessId", label: "Business id", id: "bk-b", placeholder: "Whole platform", optional: true, attrs: ["maxlength": "40", "spellcheck": "false"]) + reasonField("bk-r", required: true)
+                + ConsoleUI.formActions(ConsoleUI.button("Switch branding off", .danger, name: "action", value: "on", passkey: true) + ConsoleUI.button("Switch branding back on", .secondary, name: "action", value: "off", passkey: true))))
         let flash = req.query[String.self, at: "m"].flatMap { Self.flash[$0] }
         return DashboardUI.operatorPage(p, title: "Brand review", active: path, subtitle: "New and changed Brand Kits and images wait here before customers see them.",
-                                        flash: flash, body: body)
+                                        flash: flash, body: body, frames: !pendingKits.isEmpty)
     }
 }

@@ -165,6 +165,19 @@ final class WP6ConsoleTests: XCTestCase {
             if !tag.contains("role=") { fail("notice without role: \(tag)") }
         }
         if html.range(of: #" on[a-z]+=""#, options: .regularExpression) != nil { fail("inline event handler") }
+        // Ids are unique (labels and descriptions point at exactly one control) and forms never nest (a nested form's fields would be lost).
+        var seen = Set<String>()
+        let idPattern = try! NSRegularExpression(pattern: #"\sid="([^"]+)""#)
+        for match in idPattern.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            let id = String(html[Range(match.range(at: 1), in: html)!])
+            if !seen.insert(id).inserted { fail("duplicate id \(id)") }
+        }
+        var depth = 0
+        let formTags = try! NSRegularExpression(pattern: "<(/?)form[ >]")
+        for match in formTags.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            depth += html[Range(match.range(at: 1), in: html)!].isEmpty ? 1 : -1
+            if depth > 1 { fail("nested form"); break }
+        }
         if html.contains(" style=\"") { fail("inline style (blocked by the CSP and not themeable)") }
     }
 
@@ -175,7 +188,8 @@ final class WP6ConsoleTests: XCTestCase {
             _ = key
             var paths = Set<String>(["/dashboard/organization/domains", "/dashboard/webhooks/deliveries", "/dashboard/webhooks/schemas", "/dashboard/webhooks/simulate?failures=2",
                                      "/dashboard/security/approvals", "/dashboard/compliance/retention", "/dashboard/compliance/requests", "/dashboard/billing", "/dashboard/audit",
-                                     "/dashboard/consent", "/dashboard/campaigns", "/dashboard/templates", "/dashboard/team", "/dashboard/support/appeals"])
+                                     "/dashboard/consent", "/dashboard/campaigns", "/dashboard/templates", "/dashboard/team", "/dashboard/support/appeals",
+                                     "/dashboard/brand/kits/new", "/dashboard/team?members_sort=name&members_dir=desc"])
             for section in DashboardUI.sections { paths.insert(section.path); for child in section.children { paths.insert(child.path) } }
             XCTAssertGreaterThan(paths.count, 30)
             for path in paths.sorted() {
@@ -200,7 +214,11 @@ final class WP6ConsoleTests: XCTestCase {
     func testTheOperatorConsoleAndSignInPagesMeetTheSameChecks() async throws {
         try await withHarness { h in
             let (op, _) = try await h.makeOperator()
-            for path in ["/operator", "/operator/businesses", "/operator/abuse", "/operator/policy", "/operator/switches", "/operator/consumers", "/operator/notices", "/operator/retention", "/operator/support"] {
+            let (_, _, businessId) = try await h.verifiedOwner()
+            let business = "/operator/businesses/\(businessId.uuidString.lowercased())"
+            for path in ["/operator", "/operator/businesses", "/operator/abuse", "/operator/policy", "/operator/switches", "/operator/consumers", "/operator/notices", "/operator/retention", "/operator/support",
+                         "/operator/brand", "/operator/loops", business, business + "/entitlements", business + "/profile-categories",
+                         "/operator/applications/\(businessId.uuidString.lowercased())"] {
                 let result = try await h.page(path, op)
                 XCTAssertEqual(result.status, .ok, path)
                 assertAccessible(result.text, path: path)
