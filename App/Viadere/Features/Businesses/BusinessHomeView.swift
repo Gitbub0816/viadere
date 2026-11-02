@@ -7,6 +7,10 @@ import ViadereKit
 /// verified Brand Kit (clamped colors, a registered frame, the hash-checked logo) when they arrive; nothing waits for either. The kit
 /// decorates the header band and accents only: the name, verified badge, handle, every action, wording, navigation and security surface
 /// stay Viadere's. Modules with nothing to show are left out rather than drawn as empty placeholders (C8.3).
+///
+/// Organization (docs/APP-IA.md): identity and the quick actions (Message, Settings, favorite) first, then what needs you, then the
+/// business's modules, then "Your connection" (how it may interrupt, and everything else about the connection one tap away). Requests built
+/// by the business (Loops) and its rewards always have a place, even when its layout leaves them out.
 struct BusinessHomeView: View {
     let entry: ConnectedBusiness
     let model: AppModel
@@ -14,6 +18,7 @@ struct BusinessHomeView: View {
     @State private var decoration: BusinessHomeDecoration
     @State private var loops: LoopCatalogViewModel
     @State private var rewards: BusinessRewardsViewModel
+    @State private var showingSettings = false
     @Environment(\.dismiss) private var dismiss
 
     init(entry: ConnectedBusiness, model: AppModel) {
@@ -38,18 +43,13 @@ struct BusinessHomeView: View {
                 ForEach(home.modules, id: \.module) { module in
                     moduleView(module.module)
                 }
+                if !home.modules.contains(where: { $0.module == "rewards" }) {
+                    BusinessRewardsEntry(business: business, model: model, vm: rewards)
+                }
                 if !home.modules.contains(where: { $0.module == "loops" }) {
                     BusinessLoopsSection(business: business, model: model, catalog: loops)
                 }
-                ViadereRowGroup {
-                    NavigationLink {
-                        BusinessDetailView(relationship: entry.relationship, model: model)
-                    } label: {
-                        ViadereRow("Settings for \(business.safeName)", subtitle: "Notifications, permissions, block or disconnect",
-                                   leading: { ViadereIconTile(systemName: "slider.horizontal.3") })
-                    }
-                    .buttonStyle(.plain)
-                }
+                connection
             }
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.xl)
@@ -58,6 +58,9 @@ struct BusinessHomeView: View {
         .viadereScreenBackground()
         .environment(\.brandStyle, brand)
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $showingSettings) {
+            BusinessDetailView(relationship: entry.relationship, model: model)
+        }
         .task {
             await home.load()
             await model.alerts.ensureLoaded(scope)
@@ -76,7 +79,7 @@ struct BusinessHomeView: View {
     @ViewBuilder private func moduleView(_ id: String) -> some View {
         switch id {
         case "profile": profile
-        case "message": message
+        case "message": EmptyView() // a quick action under the profile
         case "approvals": requests(title: "Waiting for you", matching: { $0.category == .approval || ($0.category == .request) })
         case "verification_requests": requests(title: "Verification requests", matching: { $0.category == .verification })
         case "offers": offers
@@ -107,8 +110,55 @@ struct BusinessHomeView: View {
                     .font(ViadereType.subhead)
                     .foregroundStyle(ViadereColor.textSecondary)
             }
+            .accessibilityElement(children: .combine)
+            quickActions
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    private var isFavorite: Bool { model.businesses.entry(business.id)?.preferences.favorite ?? entry.preferences.favorite }
+
+    /// The things people come to a business page for, in one row: message it, star it, open its settings.
+    private var quickActions: some View {
+        HStack(alignment: .top, spacing: ViadereSpace.s) {
+            if home.modules.contains(where: { $0.module == "message" }) {
+                ViadereQuickAction("Message", symbol: "bubble.left") { startMessage() }
+            }
+            ViadereQuickAction(isFavorite ? "Favorite" : "Add favorite", symbol: isFavorite ? "star.fill" : "star") {
+                Task { await model.businesses.setFavorite(business.id, !isFavorite) }
+            }
+            .accessibilityValue(Text(isFavorite ? "Selected" : ""))
+            ViadereQuickAction("Settings", symbol: "slider.horizontal.3") { showingSettings = true }
+        }
+        .padding(.top, ViadereSpace.xs)
+    }
+
+    private func startMessage() {
+        Task { if await model.messages.start(with: business.id) != nil { model.selectedTab = .messages } }
+    }
+
+    /// "Your connection": how this business may interrupt (at a glance) and everything else about the connection behind one row.
+    private var connection: some View {
+        let preferences = model.businesses.entry(business.id)?.preferences ?? entry.preferences
+        let now = model.services.clock()
+        let preset = InterruptionPreset(preferences.effectiveMute(at: now))
+        return VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Your connection")
+            ViadereRowGroup {
+                Button { showingSettings = true } label: {
+                    ViadereRow("Notifications", subtitle: preset.summary(until: preferences.muteUntil, now: now)) {
+                        ViadereIconTile(systemName: "bell")
+                    }
+                }
+                .buttonStyle(.plain)
+                ViadereHairline(inset: 50)
+                Button { showingSettings = true } label: {
+                    ViadereRow("Settings for \(business.safeName)", subtitle: "What it can contact you about, privacy, block or disconnect") {
+                        ViadereIconTile(systemName: "slider.horizontal.3")
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     /// The logo (verified bytes, else the monogram) on the kit's band. Decoration only: the identity below is neutral.
@@ -127,20 +177,6 @@ struct BusinessHomeView: View {
         } else {
             ViadereAvatar(name: business.safeName, size: 72, isVerified: business.isVerified)
         }
-    }
-
-    private var message: some View {
-        Button {
-            Task {
-                if await model.messages.start(with: business.id) != nil { model.selectedTab = .messages }
-            }
-        } label: {
-            HStack(spacing: ViadereSpace.xs) {
-                Image(systemName: "bubble.left")
-                Text("Message \(business.safeName)")
-            }
-        }
-        .buttonStyle(.viadere(.secondary))
     }
 
     @ViewBuilder private func requests(title: String, matching: (AlertEntry) -> Bool) -> some View {

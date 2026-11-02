@@ -155,6 +155,21 @@ struct AppIATests {
         #expect(model.pendingConnect?.code == business.code)
     }
 
+    @Test func archivedConversationsSurviveAReloadAndCanBeRestored() async throws {
+        let (model, _) = await world()
+        await model.messages.load()
+        let thread = try #require(model.messages.visible(context: .all).first)
+        await model.messages.setArchived(thread.id, true)
+        await model.messages.load() // the server keeps the mark; the thread is hidden, not lost
+        #expect(!model.messages.visible(context: .all).contains { $0.id == thread.id })
+        #expect(model.messages.archived(context: .all).map(\.id) == [thread.id])
+        #expect(model.messages.archived(context: .business(BusinessID())).isEmpty)
+        await model.messages.setArchived(thread.id, false)
+        await model.messages.load()
+        #expect(model.messages.visible(context: .all).contains { $0.id == thread.id })
+        #expect(model.messages.archived(context: .all).isEmpty)
+    }
+
     @Test func aBusinessThatWasNeverConnectedCannotBeUnblocked() async {
         let (model, _) = await world()
         #expect(await model.businesses.unblock(BusinessID()) == false)

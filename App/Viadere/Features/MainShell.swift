@@ -5,26 +5,29 @@ import ViadereKit
 extension AppTab {
     var title: String {
         switch self {
-        case .messages: "Messages"
         case .alerts: "Alerts"
+        case .messages: "Messages"
         case .benefits: "Benefits"
         case .businesses: "Businesses"
+        case .you: "You"
         }
     }
 
     var symbol: String {
         switch self {
-        case .messages: "bubble.left"
         case .alerts: "bell"
+        case .messages: "bubble.left"
         case .benefits: "tag"
         case .businesses: "building.2"
+        case .you: "person.crop.circle"
         }
     }
 }
 
-/// The stable bar (spec C1; plan 4.8 variant A): Messages, Alerts, Benefits, Businesses on a hand-built bar, each tab with its own
-/// `NavigationStack` (system bar hidden). The business selector at the top of every tab filters Messages, Alerts and Benefits the same way;
-/// Settings and Add business open as sheets from it. The bar never grows with the number of businesses.
+/// The stable bar (docs/APP-IA.md): Alerts, Messages, Benefits, Businesses and You on a hand-built bar, each tab with its own
+/// `NavigationStack` (system bar hidden; the edge swipe back still works, see `ViadereNavigationGestures.swift`). The business selector at
+/// the top of the business tabs filters Messages, Alerts and Benefits the same way; You is the account (security, notifications, privacy,
+/// appearance). Add business opens as a sheet. The bar never grows with the number of businesses.
 struct MainShell: View {
     @Bindable var model: AppModel
 
@@ -32,10 +35,11 @@ struct MainShell: View {
         VStack(spacing: 0) {
             Group {
                 switch model.selectedTab {
-                case .messages: MessagesView(model: model)
                 case .alerts: AlertsView(model: model)
+                case .messages: MessagesView(model: model)
                 case .benefits: BenefitsView(model: model)
                 case .businesses: BusinessesView(model: model)
+                case .you: SettingsView(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -83,12 +87,6 @@ struct MainShell: View {
                     .presentationBackground(ViadereColor.background)
             }
         }
-        .sheet(isPresented: $model.settingsPresented) {
-            SettingsView(model: model)
-                .presentationDetents([.large])
-                .presentationCornerRadius(ViadereRadius.sheet)
-                .presentationBackground(ViadereColor.background)
-        }
         .sheet(isPresented: $model.addBusinessPresented, onDismiss: {
             Task { await model.businesses.load() }
         }) {
@@ -111,10 +109,12 @@ struct MainShell: View {
     }
 
     /// Alerts: what is actionable now (the server's read model, re-checked by the device clock). Messages: unread. Never both for one event.
+    /// You: an account notice (a new device, a recovery in progress) waiting to be reviewed.
     private func badge(for tab: AppTab) -> Int {
         switch tab {
         case .alerts: model.alerts.badgeCount()
         case .messages: model.messages.unreadTotal
+        case .you: model.securityNotices.current == nil ? 0 : 1
         default: 0
         }
     }

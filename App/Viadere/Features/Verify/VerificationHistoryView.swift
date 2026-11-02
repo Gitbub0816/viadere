@@ -16,7 +16,7 @@ struct VerificationHistoryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ViadereBackButton("Settings") { dismiss() }.padding(.top, ViadereSpace.s)
+                ViadereBackButton("You") { dismiss() }.padding(.top, ViadereSpace.s)
                 ViadereHeader("Verification history")
                 if let message = vm.errorMessage { ViadereNotice(message, kind: .warning).padding(.bottom, ViadereSpace.s) }
                 if !vm.pending.isEmpty {

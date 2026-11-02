@@ -3,17 +3,23 @@ import UIKit
 import ViadereCore
 import ViadereKit
 
-enum SettingsRoute: Hashable {
-    case devices, phones, consents, sessions, household, acknowledgments, recovery, authenticator, verifications, approvals, dataExport, profile, profileReceipts, loops
+/// Where the You tab can go: a settings screen, or a business's settings (from Notifications → Business by business).
+enum YouRoute: Hashable {
+    case settings(SettingsDestination)
+    case business(BusinessID)
 }
 
-/// Security and account: devices, app lock, linked phones, consent history, sessions, sign out, delete.
+/// The You tab (docs/APP-IA.md): the account in one place. A security summary first, then searchable groups (Account, Security,
+/// Notifications, Privacy and sharing, Records, Appearance), then sign out and delete. Each row says its current state, so most questions
+/// are answered without opening anything; the screens behind the rows hold the controls. Rows for features the server does not offer
+/// are hidden, never shown broken.
 struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var vm: SecuritySettingsViewModel
     @State private var household: HouseholdViewModel
     @State private var acknowledgments: AcknowledgmentsViewModel
-    @State private var path: [SettingsRoute] = []
+    @State private var path: [YouRoute] = []
+    @State private var query = ""
     @State private var confirmingSignOut = false
     @State private var confirmingDelete = false
     @State private var deleteError: String?
@@ -26,216 +32,253 @@ struct SettingsView: View {
         _acknowledgments = State(initialValue: AcknowledgmentsViewModel(services: model.services))
     }
 
+    private var approve: ApproveController { AppEnvironment.shared.approve }
+
+    private var availability: SettingsAvailability {
+        SettingsAvailability(recovery: vm.recoveryAvailable, phones: vm.phonesAvailable, sessions: vm.sessionsAvailable,
+                             household: household.phase != .unavailable, acknowledgments: acknowledgments.phase != .unavailable,
+                             loops: model.services.loopsAPI != nil)
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ViadereHeader("Settings") {
-                        ViadereIconButton(systemName: "xmark", label: "Close settings") { model.settingsPresented = false }
+                    ViadereHeader("You", subtitle: device?.name ?? "Your account, security and preferences")
+                    ViadereSearchField("Search settings", text: $query)
+                        .padding(.bottom, ViadereSpace.s)
+                    if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        overview
+                    } else {
+                        searchResults
                     }
-                    thisDevice
-                    securitySection
-                    trustSection
-                    notificationsSection
-                    accountSection
-                    footer
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.bottom, ViadereSpace.xl)
+                .animation(ViadereMotion.quick, value: query.isEmpty)
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .viadereScreenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: SettingsRoute.self) { route in
+            .refreshable { await reload() }
+            .navigationDestination(for: YouRoute.self) { route in
                 switch route {
-                case .devices: DevicesView(vm: vm)
-                case .phones: PhonesView(vm: vm)
-                case .consents: ConsentHistoryView(vm: vm)
-                case .sessions: SessionsView(vm: vm)
-                case .household: HouseholdView(vm: household)
-                case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
-                case .recovery: RecoveryCodesSettingsView(vm: vm)
-                case .authenticator: AuthenticatorView(backTitle: "Settings")
-                case .approvals: ApproveSettingsView(controller: AppEnvironment.shared.approve, model: model)
-                case .dataExport: DataExportView(services: model.services)
-                case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
-                case .profile: ProfileView(api: AppEnvironment.shared.profileAPI)
-                case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
-                case .loops: LoopSettingsView(model: model)
+                case .settings(let destination): screen(destination)
+                case .business(let id): businessSettings(id)
                 }
             }
             .task {
-                if model.pendingApproveEnrollment != nil { path = [.approvals] }
+                if model.pendingApproveEnrollment != nil { path = [.settings(.approvals)] }
                 openDevicesIfRequested()
-                await vm.load()
-                device = try? await model.services.records.load()
-                await household.load()
-                await acknowledgments.load()
+                await reload()
             }
         }
         .onChange(of: model.reviewDevicesRequested) { _, _ in openDevicesIfRequested() }
         .onChange(of: model.pendingApproveEnrollment) { _, pending in
-            if pending != nil, path.last != .approvals { path = [.approvals] }
+            if pending != nil, path.last != .settings(.approvals) { path = [.settings(.approvals)] }
         }
         .sheet(isPresented: Binding(get: { model.pendingAccountLinkToken != nil }, set: { if !$0 { model.pendingAccountLinkToken = nil } })) {
             if let token = model.pendingAccountLinkToken {
                 AccountLinkSheet(vm: vm, token: token) { model.pendingAccountLinkToken = nil }
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
                     .presentationBackground(ViadereColor.background)
             }
         }
     }
 
-    /// "Review" on the Home security banner lands here, on the device list where anything unfamiliar can be removed.
+    private func reload() async {
+        await vm.load()
+        device = try? await model.services.records.load()
+        await household.load()
+        await acknowledgments.load()
+    }
+
+    /// "Review" on a security notice lands on the device list, where anything unfamiliar can be removed.
     private func openDevicesIfRequested() {
         guard model.reviewDevicesRequested else { return }
         model.reviewDevicesRequested = false
-        path = [.devices]
+        path = [.settings(.devices)]
     }
 
-    // MARK: Sections
+    // MARK: Destinations
 
-    private var thisDevice: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ViadereSectionHeader("This iPhone")
-            ViadereCard(padding: ViadereSpace.m) {
-                HStack(spacing: ViadereSpace.m) {
-                    ViadereIconTile(systemName: "iphone")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(device?.name ?? "This iPhone").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        Text(assuranceText).font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+    @ViewBuilder private func screen(_ destination: SettingsDestination) -> some View {
+        switch destination {
+        case .profile: ProfileView(api: AppEnvironment.shared.profileAPI)
+        case .household: HouseholdView(vm: household)
+        case .phones: PhonesView(vm: vm)
+        case .sessions: SessionsView(vm: vm)
+        case .approvals: ApproveSettingsView(controller: approve, model: model)
+        case .devices: DevicesView(vm: vm)
+        case .authenticator: AuthenticatorView(backTitle: "You")
+        case .recovery: RecoveryCodesSettingsView(vm: vm)
+        case .notifications, .lockScreenDetails, .businessNotifications:
+            NotificationSettingsView(model: model, vm: vm) { id in path.append(.business(id)) }
+        case .loops: LoopSettingsView(model: model)
+        case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
+        case .consents: ConsentHistoryView(vm: vm)
+        case .verifications: VerificationHistoryView(api: AppEnvironment.shared.verifyAPI, center: AppEnvironment.shared.verification)
+        case .acknowledgments: AcknowledgmentsView(vm: acknowledgments)
+        case .dataExport: DataExportView(services: model.services)
+        case .appearance: AppearanceSettingsSlot(model: model)
+        case .appLock: SubScreen(title: "App lock", subtitle: nil) { appLockRow }
+        }
+    }
+
+    @ViewBuilder private func businessSettings(_ id: BusinessID) -> some View {
+        if let entry = model.businesses.entry(id), entry.isActive {
+            BusinessDetailView(relationship: entry.relationship, model: model)
+        } else {
+            SubScreen(title: "Not available", subtitle: "You're no longer connected to this business.") { EmptyView() }
+        }
+    }
+
+    // MARK: Overview
+
+    @ViewBuilder private var overview: some View {
+        securitySummary
+        ForEach(SettingsGroup.allCases, id: \.self) { group in
+            let rows = SettingsCatalog.rows(in: group, available: availability)
+            if !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ViadereSectionHeader(group.title)
+                    ViadereRowGroup {
+                        ForEach(Array(rows.enumerated()), id: \.element) { index, destination in
+                            row(destination)
+                            if index < rows.count - 1 { ViadereHairline(inset: 50) }
+                        }
                     }
-                    Spacer()
+                    if group == .notifications {
+                        Text("Viadere only interrupts when action is required. Security requests can break through Focus; everything else stays quiet.")
+                            .font(ViadereType.footnote)
+                            .foregroundStyle(ViadereColor.textTertiary)
+                            .padding(.top, ViadereSpace.s)
+                    }
                 }
+            }
+        }
+        accountSection
+        footer
+    }
+
+    /// How well the account is protected, in one line (the weakest fact wins), with any account notice under it.
+    private var securitySummary: some View {
+        let posture = SecurityPosture.summarize(assurance: device?.maxAssurance, appLock: vm.appLockEnabled,
+                                                activeDevices: vm.devices.filter { !$0.isRevoked }.count,
+                                                recoveryRemaining: vm.recoveryAvailable ? vm.recoveryInfo?.remainingCodes : nil,
+                                                approvalsFrozen: approve.isAvailable && approve.accountFrozen)
+        return VStack(alignment: .leading, spacing: ViadereSpace.s) {
+            Button {
+                path.append(.settings(posture.headline == "Create recovery codes" ? .recovery : (posture.headline == "Approvals are frozen" ? .approvals : .devices)))
+            } label: {
+                ViadereSummaryCard(symbol: "lock", headline: posture.headline, detail: posture.detail, status: status(posture.level), showsChevron: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text("Opens the setting this summary is about"))
+            if let notice = model.securityNotices.current {
+                SecurityNoticeBanner(vm: model.securityNotices, notice: notice) { path = [.settings(.devices)] }
             }
             if let notice = vm.thisDeviceTrustNotice {
                 ViadereNotice("\(notice) \(CoolDownPolicy.stillAvailable)", kind: .info)
-                    .padding(.top, ViadereSpace.s)
             }
         }
+        .padding(.top, ViadereSpace.xs)
     }
 
-    private var assuranceText: String {
-        switch device?.maxAssurance {
-        case .biometric?: "Approves with Face ID or Touch ID"
-        case .devicePasscode?: "Approves with your passcode"
-        case .none?: "Basic approvals only"
-        case nil: "Checking…"
+    private func status(_ level: SecurityPosture.Level) -> ViadereSummaryCard.Status {
+        switch level {
+        case .strong: .positive
+        case .good: .neutral
+        case .needsAttention: .attention
         }
     }
 
-    private var securitySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ViadereSectionHeader("Security")
+    @ViewBuilder private func row(_ destination: SettingsDestination) -> some View {
+        if destination == .appLock {
+            appLockRow
+        } else {
+            Button { path.append(.settings(destination.screen ?? destination)) } label: {
+                ViadereRow(destination.title, subtitle: summary(destination)) { ViadereIconTile(systemName: destination.symbol) }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// App lock stays a switch: one binary, and the switch is the clearest way to show it.
+    private var appLockRow: some View {
+        HStack(spacing: 14) {
+            ViadereIconTile(systemName: SettingsDestination.appLock.symbol)
+            Toggle(isOn: Binding(get: { vm.appLockEnabled }, set: { newValue in Task { await vm.setAppLock(newValue) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("App lock").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+                    Text("Require \(vm.appLockMethod) to open Viadere").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+                }
+            }
+            .toggleStyle(.viadere)
+        }
+        .padding(.vertical, ViadereSpace.s)
+        .frame(minHeight: 56)
+    }
+
+    /// The row's live second line: the state, not a description, wherever the state is known.
+    private func summary(_ destination: SettingsDestination) -> String {
+        switch destination {
+        case .household:
+            let shared = household.activeGiven.count + household.activeReceived.count
+            return shared == 0 ? destination.detail : "\(shared) active"
+        case .phones: return vm.phones.isEmpty ? "None linked" : (vm.phones.count == 1 ? "1 linked" : "\(vm.phones.count) linked")
+        case .sessions: return vm.sessions.count == 1 ? "1 active" : "\(vm.sessions.count) active"
+        case .approvals:
+            guard approve.isAvailable else { return destination.detail }
+            return approve.accountFrozen ? "Frozen: no business can ask" : destination.detail
+        case .devices:
+            let count = vm.devices.filter { !$0.isRevoked }.count
+            return count == 1 ? "1 active" : "\(count) active"
+        case .recovery: return vm.recoveryStatusLine
+        case .notifications:
+            let quieted = model.businesses.quietedCount(at: model.services.clock())
+            let lock = vm.richPreviewsEnabled ? "Full details on the lock screen" : "Name only on the lock screen"
+            return quieted == 0 ? lock : "\(lock) · \(quieted) quieted"
+        case .loops: return model.loopConsent.isEnabled ? "On" : "Off"
+        default: return destination.detail
+        }
+    }
+
+    // MARK: Search
+
+    @ViewBuilder private var searchResults: some View {
+        let results = SettingsCatalog.search(query, available: availability)
+        if results.isEmpty {
+            Text("No setting matches \u{201C}\(query)\u{201D}.")
+                .font(ViadereType.body)
+                .foregroundStyle(ViadereColor.textSecondary)
+                .padding(.top, ViadereSpace.m)
+        } else {
             ViadereRowGroup {
-                Toggle(isOn: Binding(get: { vm.appLockEnabled }, set: { newValue in Task { await vm.setAppLock(newValue) } })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("App lock").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        Text("Require \(vm.appLockMethod) to open Viadere").font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                ForEach(Array(results.enumerated()), id: \.element) { index, destination in
+                    if destination == .appLock {
+                        appLockRow
+                    } else {
+                        Button { path.append(.settings(destination.screen ?? destination)) } label: {
+                            ViadereRow(destination.title, subtitle: "\(destination.group.title) · \(destination.detail)") {
+                                ViadereIconTile(systemName: destination.symbol)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
-                }
-                .toggleStyle(.viadere)
-                .padding(.vertical, ViadereSpace.xxs)
-                ViadereHairline()
-                Toggle(isOn: Binding(get: { vm.richPreviewsEnabled }, set: { newValue in Task { await vm.setRichPreviews(newValue) } })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Details on the lock screen").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                        Text("Off: approval notifications say only who is asking. On: they also show the amount and place.")
-                            .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
-                    }
-                }
-                .toggleStyle(.viadere)
-                .padding(.vertical, ViadereSpace.xxs)
-                ViadereHairline()
-                if vm.recoveryAvailable {
-                    navRow("Recovery codes", subtitle: vm.recoveryStatusLine, symbol: "list.number", route: .recovery)
-                    ViadereHairline(inset: 50)
-                }
-                navRow("Authenticator", subtitle: "Passkeys and one-time codes", symbol: "key.viewfinder", route: .authenticator)
-                ViadereHairline(inset: 50)
-                navRow("Approvals", subtitle: AppEnvironment.shared.approve.accountFrozen ? "Frozen" : "Payments and sign-ins you confirm", symbol: "checkmark.shield", route: .approvals)
-                ViadereHairline(inset: 50)
-                navRow("Trusted devices", subtitle: "\(vm.devices.filter { !$0.isRevoked }.count) active", symbol: "iphone.gen3", route: .devices)
-                ViadereHairline(inset: 50)
-                if vm.phonesAvailable {
-                    navRow("Linked phones", subtitle: vm.phones.isEmpty ? "None" : "\(vm.phones.count) linked", symbol: "phone", route: .phones)
-                    ViadereHairline(inset: 50)
-                }
-                navRow("Consent history", subtitle: "What you've allowed, and when", symbol: "checklist", route: .consents)
-                ViadereHairline(inset: 50)
-                navRow("Verification history", subtitle: "Age and ID checks, and what was shared", symbol: "person.badge.shield.checkmark", route: .verifications)
-                ViadereHairline(inset: 50)
-                navRow("Profile", subtitle: "Your public name and what you share", symbol: "person.text.rectangle", route: .profile)
-                ViadereHairline(inset: 50)
-                navRow("Sharing history", subtitle: "Profile details you shared or stopped sharing", symbol: "clock.arrow.circlepath", route: .profileReceipts)
-                ViadereHairline(inset: 50)
-                navRow("Download my data", subtitle: "A copy only this iPhone can open", symbol: "square.and.arrow.down", route: .dataExport)
-                if vm.sessionsAvailable {
-                    ViadereHairline(inset: 50)
-                    navRow("Signed-in sessions", subtitle: "\(vm.sessions.count) active", symbol: "person.crop.circle", route: .sessions)
+                    if index < results.count - 1 { ViadereHairline(inset: 50) }
                 }
             }
+            .padding(.top, ViadereSpace.xs)
         }
     }
 
-    /// Household access and acknowledgment records. Each row hides itself if the server doesn't offer the feature yet.
-    @ViewBuilder private var trustSection: some View {
-        let showHousehold = household.phase != .unavailable
-        let showRecords = acknowledgments.phase != .unavailable
-        if showHousehold || showRecords {
-            VStack(alignment: .leading, spacing: 0) {
-                ViadereSectionHeader("Trust and records")
-                ViadereRowGroup {
-                    if showHousehold {
-                        navRow("Household", subtitle: householdSubtitle, symbol: "person.2", route: .household)
-                    }
-                    if showHousehold, showRecords { ViadereHairline(inset: 50) }
-                    if showRecords {
-                        navRow("Acknowledgments", subtitle: "Policies and estimates you've read", symbol: "doc.text", route: .acknowledgments)
-                    }
-                }
-            }
-        }
-    }
-
-    private var householdSubtitle: String {
-        let shared = household.activeGiven.count + household.activeReceived.count
-        return shared == 0 ? "Share limited access with people you trust" : "\(shared) active"
-    }
-
-    private func navRow(_ title: String, subtitle: String, symbol: String, route: SettingsRoute) -> some View {
-        Button { path.append(route) } label: {
-            ViadereRow(title, subtitle: subtitle) { ViadereIconTile(systemName: symbol) }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ViadereSectionHeader("Notifications")
-            ViadereRowGroup {
-                if model.services.loopsAPI != nil {
-                    navRow("Requests built by businesses", subtitle: model.loopConsent.isEnabled ? "On" : "Off",
-                           symbol: "square.stack", route: .loops)
-                    ViadereHairline(inset: 50)
-                }
-                Button {
-                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
-                } label: {
-                    ViadereRow("Notification settings", subtitle: "Alerts, previews and Focus") { ViadereIconTile(systemName: "bell") }
-                }
-                .buttonStyle(.plain)
-            }
-            Text("Viadere only interrupts when action is required. Security requests can break through Focus; everything else stays quiet.")
-                .font(ViadereType.footnote)
-                .foregroundStyle(ViadereColor.textTertiary)
-                .padding(.top, ViadereSpace.s)
-        }
-    }
+    // MARK: Account
 
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
-            ViadereSectionHeader("Account")
+            ViadereSectionHeader("Sign out or leave")
             if confirmingSignOut {
                 confirmCard(title: "Sign out of Viadere?",
                             message: "This erases Viadere's keys and sign-in from this iPhone. Your account and connections stay.",
@@ -258,7 +301,6 @@ struct SettingsView: View {
                 Button("Delete account") { withAnimation(ViadereMotion.standard) { confirmingDelete = true } }.buttonStyle(.viadere(.destructive))
             }
         }
-        .padding(.top, ViadereSpace.s)
     }
 
     private func confirmCard(title: String, message: String, action: String, destructive: Bool,
@@ -286,13 +328,128 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Notifications
+
+/// You → Notifications: what approval notifications show on the lock screen (two choice cards instead of a switch), how loudly each
+/// business may interrupt (a level per business, opened in place), requests built by businesses, and the iOS settings for sounds and
+/// Focus. Security checks and requests that need an answer always come through, whatever is chosen here.
+struct NotificationSettingsView: View {
+    let model: AppModel
+    let vm: SecuritySettingsViewModel
+    let openBusiness: (BusinessID) -> Void
+    @State private var expanded: BusinessID? = nil
+
+    var body: some View {
+        SubScreen(title: "Notifications", subtitle: "Viadere only interrupts when action is required.") {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("On the lock screen")
+                ViadereChoiceCards("Approval notifications on the lock screen",
+                                   selection: Binding(get: { vm.richPreviewsEnabled }, set: { value in Task { await vm.setRichPreviews(value) } }),
+                                   options: [
+                                       .init(false, "Who's asking", detail: "Approval notifications name only the business. Open them to see the amount and place.",
+                                             symbol: "eye.slash"),
+                                       .init(true, "Who, amount and place", detail: "Decide faster from the notification. Anyone who can see your phone sees the details too.",
+                                             symbol: "text.viewfinder"),
+                                   ])
+            }
+            businessLevels
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("More")
+                ViadereRowGroup {
+                    if model.services.loopsAPI != nil {
+                        NavigationLink(value: YouRoute.settings(.loops)) {
+                            ViadereRow(SettingsDestination.loops.title, subtitle: model.loopConsent.isEnabled ? "On" : "Off") {
+                                ViadereIconTile(systemName: SettingsDestination.loops.symbol)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        ViadereHairline(inset: 50)
+                    }
+                    Button {
+                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+                    } label: {
+                        ViadereRow("Sounds, banners and Focus", subtitle: "In the iPhone's Settings app") {
+                            ViadereIconTile(systemName: "gear")
+                        } trailing: {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(ViadereColor.textTertiary)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Every connected business with its level; tapping one opens its level picker in place (one at a time).
+    @ViewBuilder private var businessLevels: some View {
+        let entries = model.businesses.active
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Business by business")
+            if entries.isEmpty {
+                Text("Businesses you connect to appear here.").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+            } else {
+                ViadereRowGroup {
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        businessRow(entry)
+                        if index < entries.count - 1 { ViadereHairline(inset: 50) }
+                    }
+                }
+                if let error = model.businesses.errorMessage { ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.s) }
+                Text("Security checks and requests that need your answer always come through. Everything still appears in Alerts.")
+                    .font(ViadereType.footnote)
+                    .foregroundStyle(ViadereColor.textTertiary)
+                    .padding(.top, ViadereSpace.s)
+            }
+        }
+    }
+
+    @ViewBuilder private func businessRow(_ entry: ConnectedBusiness) -> some View {
+        let now = model.services.clock()
+        let preset = InterruptionPreset(entry.preferences.effectiveMute(at: now))
+        let isOpen = expanded == entry.business.id
+        VStack(alignment: .leading, spacing: ViadereSpace.s) {
+            Button {
+                withAnimation(ViadereMotion.standard) { expanded = isOpen ? nil : entry.business.id }
+            } label: {
+                ViadereRow(entry.business.safeName, subtitle: preset.summary(until: entry.preferences.muteUntil, now: now)) {
+                    ViadereAvatar(name: entry.business.safeName, size: 36, isVerified: entry.business.isVerified)
+                } trailing: {
+                    HStack(spacing: ViadereSpace.xs) {
+                        ViadereLevelMeter(filled: preset.intensity, total: 3, emphasized: preset != .everything)
+                        Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ViadereColor.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text(isOpen ? "Hides the levels" : "Shows the levels"))
+            if isOpen {
+                ViadereLevelPicker("Interruptions from \(entry.business.safeName)",
+                                   selection: Binding(get: { preset },
+                                                      set: { value in Task { await model.businesses.setMute(entry.business.id, value.muteLevel) } }),
+                                   levels: InterruptionPreset.levels,
+                                   caption: preset.explanation(business: entry.business.safeName),
+                                   customizeTitle: "More for \(entry.business.safeName)") { openBusiness(entry.business.id) }
+                    .padding(.bottom, ViadereSpace.s)
+                    .transition(.opacity)
+            }
+        }
+    }
+}
+
 // MARK: - Sub screens
 
-/// A pushed screen: back button, large header, scrolling content. Shared by Settings, Rewards, Activity and Household.
+/// A pushed screen: back button, large header, scrolling content. Shared by You, Rewards, Activity and Household. The back button keeps
+/// the edge swipe back working although the navigation bar is hidden.
 struct SubScreen<Content: View>: View {
     let title: String
     let subtitle: String?
-    var backTitle: String = "Settings"
+    var backTitle: String = "You"
     @ViewBuilder var content: Content
     @Environment(\.dismiss) private var dismiss
 
@@ -604,12 +761,9 @@ struct AccountLinkSheet: View {
                 ViadereValueRow("Link expires", preview.expiresAt.formatted(date: .omitted, time: .shortened))
             }
             ViadereNotice(SecuritySettingsViewModel.accountLinkWarning, kind: .warning)
-            ViadereRowGroup {
-                Toggle(isOn: $confirmedOwnPhone) {
-                    Text("This is my phone").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                }
-                .toggleStyle(.viadere)
-                .padding(.vertical, ViadereSpace.xxs)
+            // An explicit affirmation, so a checkbox rather than a switch.
+            ViadereCheckbox(isOn: $confirmedOwnPhone) {
+                Text("This is my phone, and I asked to link it")
             }
             if failed { ViadereNotice(vm.errorMessage ?? "We couldn't link that number.", kind: .danger) }
         }
