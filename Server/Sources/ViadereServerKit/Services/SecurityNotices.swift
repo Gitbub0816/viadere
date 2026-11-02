@@ -17,7 +17,7 @@ struct SecurityNotices {
         case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
         case recoveryCredentialAdded
         case businessLinked, businessLinkUnconfirmed
-        case phoneTransferRequested, phoneUnlinked
+        case phoneTransferRequested, phoneUnlinked, phoneTransferred
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -25,6 +25,7 @@ struct SecurityNotices {
             case .newPhone: .newPhone
             case .phoneTransferRequested: .phoneTransferRequested
             case .phoneUnlinked: .phoneUnlinked
+            case .phoneTransferred: .phoneTransferred
             case .appClip: .appClip
             case .deviceReplaced, .replacementCancelled: .deviceReplaced
             case .devicePendingReplacement: .devicePendingReplacement
@@ -71,6 +72,8 @@ struct SecurityNotices {
             case .phoneTransferRequested:
                 "Someone asked to link a phone number on your Viadere account to another Viadere account. If that number is still yours, keep it."
             case .phoneUnlinked: "Your phone number was unlinked by a text from that number."
+            case .phoneTransferred:
+                "Your phone number was moved to another Viadere account because you did not keep it. If that number is still yours, text UNLINK from it and link it again."
             case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
             case .deviceReplaced: "A device on your Viadere account was set up again. If this wasn't you, open Viadere and review your devices."
             case .devicePendingReplacement:
@@ -157,9 +160,16 @@ struct SecurityNotices {
     /// The account's undismissed notices of the last 30 days, newest first, without the ones the caller's own device caused.
     func pending(for consumer: UUID, viewedBy device: UUID?) async throws -> [SecurityNotice] {
         let cutoff = ctx.now.addingTimeInterval(-30 * 86_400)
-        return try await SecurityNoticeRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$dismissedAt == nil)
+        let rows = try await SecurityNoticeRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$dismissedAt == nil)
             .filter(\.$createdAt > cutoff).sort(\.$createdAt, .descending).limit(50).all()
             .filter { $0.originDeviceId == nil || $0.originDeviceId != device }
+        // The app now has these notices: remember when (a pending phone transfer waits for it, ADR-0027 section 1.3).
+        let unseen = rows.compactMap { $0.fetchedAt == nil ? $0.id : nil }
+        if !unseen.isEmpty {
+            let now = ctx.now
+            try await SecurityNoticeRecord.query(on: db).filter(\.$id ~~ unseen).filter(\.$fetchedAt == nil).set(\.$fetchedAt, to: now).update()
+        }
+        return rows
             .compactMap { row in
                 row.id.map { SecurityNotice(id: $0, rawKind: row.kind, message: row.message,
                                             createdAt: row.createdAt, subjectId: row.subjectId,
@@ -171,9 +181,8 @@ struct SecurityNotices {
         _ = try await DeviceTrust.require(principal, db: db, now: ctx.now)
         guard let row = try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$consumerId == principal.consumerId.uuid).first()
         else { throw APIError.notFound }
-        if row.dismissedAt == nil {
-            row.dismissedAt = ctx.now
-            try await row.update(on: db)
-        }
+        if row.fetchedAt == nil { row.fetchedAt = ctx.now }
+        if row.dismissedAt == nil { row.dismissedAt = ctx.now }
+        try await row.update(on: db)
     }
 }

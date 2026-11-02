@@ -44,9 +44,13 @@ struct GatewayService {
     // MARK: Inbound
 
     func handleInbound(_ sms: InboundSMS, provider: String) async throws -> InboundResult {
-        // A link text or UNLINK (ADR-0027) is rate-limited per number before anything is opened; over the limit it is dropped without a reply.
+        // A link text and UNLINK (ADR-0027) are rate-limited per number, each in its own bucket, before anything is opened; over the limit they are dropped without a reply.
         if PhoneLinkService.isLinkMessage(sms),
            !(await ctx.limiter.allow("phonelink-mo", key: ctx.hasher.phoneHash(sms.from), rule: ctx.config.rateLimits.phoneLinkMOPerPhone)) {
+            return .processed
+        }
+        if PhoneLinkService.isUnlink(sms),
+           !(await ctx.limiter.allow("phonelink-unlink", key: ctx.hasher.phoneHash(sms.from), rule: ctx.config.rateLimits.phoneUnlinkPerPhone)) {
             return .processed
         }
         for _ in 0..<Self.maxConflictRetries {

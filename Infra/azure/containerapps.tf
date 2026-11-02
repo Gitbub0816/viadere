@@ -466,6 +466,7 @@ resource "azurerm_container_app" "worker" {
 locals {
   scheduled_jobs = var.enable_scheduled_jobs ? {
     maintenance    = "*/5 * * * *"  # sweeps, purges, retention (section 5.7)
+    minute         = "* * * * *"    # phone-link challenge sweep (ADR-0026: expiry + 2 minutes) and pending transfers
     hourly         = "23 * * * *"   # verify maintenance, API-key lifecycle, onboarding assurance
     "audit-export" = "41 */6 * * *" # AUDIT_HEAD_EXPORT_INTERVAL_HOURS = 6
   } : {}

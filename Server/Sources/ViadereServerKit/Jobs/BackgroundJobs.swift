@@ -6,6 +6,7 @@ import Vapor
 ///
 /// The work is split into the task groups the Azure scheduled jobs run (`ViadereServer maintenance <task>`, plan 5.7):
 /// - `maintenance` (every 5 minutes): expiries, the delivery sweeps (the safety net behind the queues), purges and retention;
+/// - `minute` (every minute): the P-class sweep of phone-link challenges (ADR-0026: no row older than expiry + 2 minutes) and pending transfers;
 /// - `hourly`: Verify maintenance, API-key lifecycle, onboarding assurance, pending changes;
 /// - `audit-export`: the signed audit-head export.
 ///
@@ -24,7 +25,7 @@ struct BackgroundJobs {
     }
 
     enum Task: String, CaseIterable, Sendable {
-        case maintenance, hourly
+        case maintenance, hourly, minute
         case auditExport = "audit-export"
     }
 
@@ -43,6 +44,7 @@ struct BackgroundJobs {
         switch task {
         case .maintenance: _ = try await maintenance(gated: false)
         case .hourly: try await hourly(gated: false)
+        case .minute: await minute(gated: false)
         case .auditExport: try await auditExport(gated: false)
         }
         app.ctx.metrics.jobRan(at: app.ctx.now, failed: false)
@@ -60,6 +62,15 @@ struct BackgroundJobs {
             app.logger.warning("background task failed", metadata: ["task": "\(name)", "type": "\(type(of: error))"])
             app.ctx.metrics.jobRan(at: app.ctx.now, failed: true)
         }
+    }
+
+    /// Phone-link challenges are pending secrets (ADR-0026 class P): gone at expiry + 2 minutes, so this runs every minute (its own scheduled job on
+    /// Azure; the in-process loop gates it to once a minute), isolated so an earlier failure elsewhere never skips it. Pending transfers complete here.
+    func minute(gated: Bool) async {
+        guard await gate("phone-link-sweep", gated) else { return }
+        let (db, ctx) = (app.db, app.ctx)
+        await guarded("phone-link-challenges") { _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now) }
+        await guarded("phone-link-transfers") { _ = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers() }
     }
 
     private func maintenance(gated: Bool) async throws -> Report {
@@ -94,10 +105,8 @@ struct BackgroundJobs {
             await ctx.limiter.store.purgeExpired(now: ctx.now)
             // Published outbox rows and old idempotency markers.
             try await QueuePump.purge(on: db, now: ctx.now)
-            // Phone-link challenges are pending secrets (ADR-0026 class P): gone at expiry + 2 minutes, and transfers whose waiting period ended complete.
-            _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now)
-            await guarded("phone-link-transfers") { _ = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers() }
         }
+        await minute(gated: gated)
         if await gate("retention-purge", gated) {
             try await RetentionService(db: db, ctx: ctx).purge()
             _ = try await LoopInbox(db: db, ctx: ctx).purgeClosed(before: ctx.now.addingTimeInterval(-ctx.config.loops.inboxRetention))
@@ -189,14 +198,14 @@ final class BackgroundJobRunner: LifecycleHandler, @unchecked Sendable {
     }
 }
 
-/// `ViadereServer maintenance <maintenance|hourly|audit-export>`: one run of a task group, for the Container Apps scheduled jobs.
+/// `ViadereServer maintenance <maintenance|minute|hourly|audit-export>`: one run of a task group, for the Container Apps scheduled jobs.
 public struct MaintenanceCommand: AsyncCommand {
     public struct Signature: CommandSignature {
         @Argument(name: "task") var task: String
         public init() {}
     }
     public let signature = Signature()
-    public let help = "Runs one maintenance task group once: maintenance, hourly or audit-export."
+    public let help = "Runs one maintenance task group once: maintenance, minute, hourly or audit-export."
     public init() {}
 
     public func run(using context: CommandContext, signature: Signature) async throws {

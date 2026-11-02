@@ -619,6 +619,9 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     case phoneTransferRequested
     /// The account's phone number was unlinked by a text (`UNLINK`) sent from that number.
     case phoneUnlinked
+    /// The account's phone number moved to another account after a transfer request: the account fetched the request, did not keep the number
+    /// and the waiting period ended (ADR-0027 section 1.3).
+    case phoneTransferred
     case unknown
 
     public init(from decoder: any Decoder) throws {

@@ -377,7 +377,7 @@ name the variable, never the value.
 `AZURE_SERVICEBUS_FQDN`, the managed identity `AZURE_CLIENT_ID` / `AZURE_TENANT_ID`, Key Vault (`AZURE_KEY_VAULT_URL` and the key names `AZURE_KEY_VAULT_KEK_KEY`, `_KD_LOG_KEY`, `_LINK_DESCRIPTOR_KEY`,
 `_AUDIT_HEAD_KEY`), the audit container (`AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER`), Entra database authentication (`DATABASE_AUTH=entra`, `DATABASE_HOST`, `DATABASE_PORT`,
 `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_CA_FILE`, `DATABASE_WORKER_ROLE`), `METRICS_BIND_HOST` and `HEALTH_PEER_NETWORKS`, and envelope-wrapped service keys (`<NAME>_WRAPPED`). The Google Cloud
-and R2 export settings are retired and refused. `ViadereServer maintenance <maintenance|hourly|audit-export>` runs one maintenance task group (the Azure scheduled jobs). The Azure coverage of
+and R2 export settings are retired and refused. `ViadereServer maintenance <maintenance|minute|hourly|audit-export>` runs one maintenance task group (the Azure scheduled jobs). The Azure coverage of
 `.env.example` is checked by `python3 -I Infra/azure/check_env_coverage.py`.
 
 **Migrations (`CreatePlatformWP6Schema`, `CreateRetentionDeleteGate`, `GrantRuntimeRolePrivileges`).** Run `ViadereServer migrate` before rolling out (the release command does). Existing `admin`/`support` members become
