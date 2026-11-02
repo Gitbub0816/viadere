@@ -1,0 +1,13 @@
+# Current stable releases, checked 2026-11-02 (CLAUDE.md "Current versions"): Kotlin on Maven Central / the Gradle plugin portal,
+# AGP on Google's Maven repository, Gradle on services.gradle.org, JUnit on Maven Central. No runtime dependency.
+[versions]
+agp = "9.5.0"
+kotlin = "2.4.21"
+junit = "4.13.2"
+
+[libraries]
+kotlin-gradle-plugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
