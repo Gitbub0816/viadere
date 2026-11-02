@@ -25,6 +25,23 @@ public enum AuthMatchTags {
     public static func isValidTag(_ value: String) -> Bool { Base64URL.isValid(value, minLength: 43, maxLength: 43) && Base64URL.decode(value)?.count == 32 }
 }
 
+/// Keys the business SDK derives from its SDK secret (ADR-0022 §5.2 items 1 and 6): `HKDF-SHA256(ikm = secret, no salt, info = label, 32 bytes)`.
+/// Vectors: `docs/protocol/vectors/approval-result-v2.json`.
+public enum AuthSDKKeys {
+    public static let matchTagLabel = "viadere-match-tag-key-v1"
+    public static let sessionHandleLabel = "viadere-session-handle-key-v1"
+
+    public static func derive(secret: SymmetricKey, label: String) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(inputKeyMaterial: secret, info: Data(label.utf8), outputByteCount: 32)
+    }
+
+    /// `session_handle = base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" ‖ initiating_session_id))` (43 characters). The **only** documented way to
+    /// produce one: derive it from the business's own session that started the sign-in, never from the subject or a constant.
+    public static func sessionHandle(key: SymmetricKey, initiatingSessionId: String) -> String {
+        Base64URL.encode(Data(HMAC<SHA256>.authenticationCode(for: Data(("viadere-session-handle-v1\n" + initiatingSessionId).utf8), using: key)))
+    }
+}
+
 /// What the api answers to a new request's tags (all refusals are `409` with nothing created).
 public enum MatchGroupDecision: Equatable, Sendable {
     case accepted
