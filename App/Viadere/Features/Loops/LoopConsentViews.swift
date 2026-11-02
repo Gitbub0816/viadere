@@ -201,6 +201,7 @@ struct LoopSettingsView: View {
                         .padding(.vertical, ViadereSpace.s)
                     }
                     if consent.isEnabled { businesses }
+                    yourLoops
                 }
                 if let error = consent.errorMessage { ViadereNotice(error, kind: .warning) }
             }
@@ -211,6 +212,7 @@ struct LoopSettingsView: View {
         .viadereScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await consent.load() }
+        .task { await model.loopLibrary.load() }
         .sheet(isPresented: $showingEducation) {
             LoopConsentFlowView(consent: consent)
                 .presentationDetents([.large])
@@ -226,6 +228,28 @@ struct LoopSettingsView: View {
             Button("Keep on", role: .cancel) {}
         } message: {
             Text("Open requests are cancelled and no business can send new ones. Your history stays.")
+        }
+    }
+
+    /// Installed Loops (§2.98 "Installed Loops"): each one opens its page, where it can be removed; and the directory.
+    private var yourLoops: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Your Loops")
+            if model.loopLibrary.loops.isEmpty {
+                Text("Loops you add appear here, whether or not you're connected to the business.")
+                    .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
+            } else {
+                InstalledLoopsList(model: model, showsEmptyState: false)
+            }
+            ViadereRowGroup {
+                NavigationLink {
+                    LoopDirectoryView(model: model, backTitle: "Back")
+                } label: {
+                    ViadereRow("Browse Loops", subtitle: "Reviewed by Viadere", leading: { ViadereIconTile(systemName: "square.grid.2x2") })
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, ViadereSpace.xs)
         }
     }
 

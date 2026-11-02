@@ -83,6 +83,7 @@ struct MainShell: View {
                     .presentationBackground(ViadereColor.background)
             }
         }
+        .loopInstallLinks(model: model)
         .sheet(isPresented: $model.settingsPresented) {
             SettingsView(model: model)
                 .presentationDetents([.large])

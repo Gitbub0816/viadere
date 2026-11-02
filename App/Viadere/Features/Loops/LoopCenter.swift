@@ -52,6 +52,27 @@ final class LoopCenter {
         }
     }
 
+    /// Opens an installed Loop from Your Loops: resumes its newest open request, else starts one behind both consents (on the device too).
+    func startInstalled(_ loop: InstalledLoop, model: AppModel) async {
+        if let open = loop.openInstances.first {
+            present(open)
+            return
+        }
+        switch await model.loopLibrary.start(loop) {
+        case .started(let view):
+            present(view.id, initial: view)
+            await model.loopLibrary.load()
+        case .needsConsent(let decision):
+            switch decision {
+            case .needsGlobalConsent: consentPrompt = .enableLoops
+            case .needsBusinessAuthorization: consentPrompt = .authorize(loop.business)
+            case .unavailable, .allowed: model.toast = "This isn't available right now."
+            }
+        case .failed(let message):
+            model.toast = message
+        }
+    }
+
     /// A `viadere.loop` notification (opaque: no business, no content).
     func handle(_ route: LoopNotificationRoute, model: AppModel) async {
         switch route {

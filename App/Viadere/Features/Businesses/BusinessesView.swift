@@ -35,6 +35,16 @@ struct BusinessesView: View {
                     content
                     ViadereSectionHeader("Also in Viadere")
                     ViadereRowGroup {
+                        // Temporary entry to the Loop directory until the new navigation places it (see the Loops report).
+                        if model.services.loopsAPI != nil {
+                            NavigationLink {
+                                LoopDirectoryView(model: model, backTitle: "Businesses")
+                            } label: {
+                                ViadereRow("Loops", subtitle: "Small apps businesses build, reviewed by Viadere", leading: { ViadereIconTile(systemName: "square.grid.2x2") })
+                            }
+                            .buttonStyle(.plain)
+                            ViadereHairline(inset: 50)
+                        }
                         NavigationLink {
                             AuthenticatorView(backTitle: "Businesses")
                         } label: {
