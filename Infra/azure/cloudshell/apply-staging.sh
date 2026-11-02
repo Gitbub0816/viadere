@@ -40,7 +40,27 @@ step "3/4 plan + policy check"
 tofu plan -input=false -var profile=lean -out tfplan || fail "tofu plan"
 tofu show -json tfplan > plan.json || fail "tofu show"
 python3 -I policy_check.py plan.json || fail "policy check"
+# Show every delete/replace and ask before applying (unless ASSUME_YES=1): a different machine or missing optional variable must
+# never silently remove resources.
+python3 -I - plan.json <<'PY' || fail "plan summary"
+import json, sys
+plan = json.load(open(sys.argv[1]))
+counts = {"create": 0, "update": 0, "delete": 0}
+risky = []
+for rc in plan.get("resource_changes", []):
+    actions = rc["change"]["actions"]
+    for a in ("create", "update", "delete"):
+        if a in actions: counts[a] += 1
+    if "delete" in actions:
+        risky.append(("REPLACE" if "create" in actions else "DESTROY") + "  " + rc["address"])
+print(f"plan: {counts['create']} to create, {counts['update']} to update, {counts['delete']} to delete or replace")
+for line in risky: print("  " + line)
+PY
 rm -f plan.json
+if [ "${ASSUME_YES:-}" != "1" ]; then
+  printf "Apply this plan? Type yes: "; read -r answer
+  [ "$answer" = "yes" ] || fail "not applied (nothing changed)"
+fi
 
 step "4/4 apply (20-30 minutes the first time; press Enter now and then so Cloud Shell stays connected)"
 tofu apply -input=false tfplan || fail "tofu apply"
