@@ -1,0 +1,12 @@
+# Code owners (ADR-0028 section 6.6). Branch protection on main must REQUIRE code-owner review for these paths
+# (docs/ops/AUTHORITY-OWNER-CHECKLIST.md). Staging has one human reviewer, the owner (residual R-21).
+/.github/workflows/authority-*.yml        @Gitbub0816
+/.github/workflows/jwks-monitor.yml       @Gitbub0816
+/.github/scripts/key_inventory.py         @Gitbub0816
+/.github/CODEOWNERS                       @Gitbub0816
+/Server/Sources/ViadereAuthority*         @Gitbub0816
+/Server/Dockerfile.authority              @Gitbub0816
+/Infra/azure-authority/                   @Gitbub0816
+/Infra/cloudflare/                        @Gitbub0816
+/Site/content/id/                         @Gitbub0816
+/docs/ops/AUTHORITY-REVIEWERS.md          @Gitbub0816

@@ -122,6 +122,21 @@ resource "azurerm_network_security_group" "pg" {
     destination_address_prefix = local.subnets.pg
     destination_port_range     = "5432"
   }
+  # The private authority (Infra/azure-authority) reaches ITS database on the shared server; database-level CONNECT keeps the roles apart.
+  dynamic "security_rule" {
+    for_each = var.authority_database_access ? [1] : []
+    content {
+      name                       = "allow-postgres-from-authority"
+      priority                   = 105
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_address_prefix      = local.subnets.auth
+      source_port_range          = "*"
+      destination_address_prefix = local.subnets.pg
+      destination_port_range     = "5432"
+    }
+  }
   security_rule {
     name                       = "allow-within-pg-subnet"
     priority                   = 110

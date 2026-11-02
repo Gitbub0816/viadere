@@ -100,6 +100,7 @@ jobs:
         run: |
           python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json
           python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/standard_plan.json
+          python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json --source Infra/azure --source Infra/cloudflare --source Infra/azure-authority
 
   plan:
     name: Plan and policy check (${{ inputs.environment || 'staging' }})

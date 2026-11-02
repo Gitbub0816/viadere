@@ -32,6 +32,12 @@ exceptions table:
   * lean only: nothing that bills a fixed fee beyond the plan's lean table (private endpoints, NAT gateway, public IPs, container registry,
     Service Bus other than Basic, Key Vault Premium, PostgreSQL other than Burstable, dedicated workload profiles).
   * Any other resource with public network access enabled is a violation.
+  * Authority tier (Infra/azure-authority, ADR-0028 section 5; fail in both profiles): AUTH-KEY-SCOPE, AUTH-NO-PUBLIC-INGRESS,
+    AUTH-IDENTITY-SEPARATE, AUTH-DEPLOY-SEPARATE, AUTH-EGRESS, AUTH-KEY-BACKUP, AUTH-SIGNER-ROLE, AUTH-ADMIN-NO-KV, AUTH-STANDBY-ROLE,
+    AUTH-REVOCATIONS-ROLE; plus API-NO-NEW-KEYS (the api holds only the five exception keys), RESIDENCY-US (US regions only) and
+    GHCR-NO-PAT (the registry pull secret is the dedicated credential, not the owner's PAT). Recorded exceptions: AUTH-OIDC-SUBJECT
+    (federated subject without job_workflow_ref) and ACR-AUTH-PUBLIC (lean Basic registry).
+  * `--source DIR` adds static source checks (API-NO-NEW-KEYS in locals.tf, GHCR-NO-PAT, no Cloudflare file naming the authority).
 """
 from __future__ import annotations
 
@@ -40,6 +46,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 PROFILES = ("lean", "standard")
@@ -446,6 +453,15 @@ def check_environment_azapi(r: Resource, rep: Report) -> None:
 
 
 def check_registry(r: Resource, rep: Report) -> None:
+    if r.name == "auth" and rep.profile == "lean":
+        # The authority has no Internet egress, so it cannot use GHCR: a Basic registry (no firewall exists below Premium), Entra only.
+        sku, _ = r.get("sku")
+        if is_true(r, "admin_enabled", default=False) is not False or is_true(r, "anonymous_pull_enabled", default=False) is not False:
+            rep.violate("ACR-ADMIN", r.address, "authority registry: admin user and anonymous pull must be disabled")
+        if isinstance(sku, str) and sku.lower() != "basic":
+            rep.violate("LEAN-FIXED-FEE", r.address, f"lean allows only a Basic authority registry (got {sku})")
+        rep.allow("ACR-AUTH-PUBLIC", r.address, "lean: authority registry (Basic) on its public endpoint, Entra tokens only; no GHCR egress for the authority")
+        return
     if is_true(r, "admin_enabled", default=False) is not False:
         rep.violate("ACR-ADMIN", r.address, "registry admin user must be disabled")
     if is_true(r, "anonymous_pull_enabled", default=False) is not False:
@@ -460,6 +476,214 @@ def check_generic_public(r: Resource, rep: Report) -> None:
     access, _ = r.get("public_network_access")
     if isinstance(access, str) and access.lower() == "enabled":
         rep.violate("PUBLIC-ACCESS", r.address, f"{r.type} has public network access enabled")
+
+
+# ---- Authority tier and cross-tier rules (ADR-0028 section 5) -------------------------------------------------------------------
+US_REGIONS = {"centralus", "eastus", "eastus2", "southcentralus", "northcentralus", "westcentralus", "westus", "westus2", "westus3", "global"}
+API_EXCEPTION_KEYS = {"kek-data", "kd-log-signing", "link-descriptor", "loop-publication", "brand-manifest"}
+OFFICER_VARS = {"var.authority_crypto_officers_group_object_id", "var.authority_secrets_officers_group_object_id"}
+ALLOWED_AUTH_DATA_ACTIONS = {
+    "signer": {"Microsoft.KeyVault/vaults/keys/read", "Microsoft.KeyVault/vaults/keys/sign/action"},
+    "unwrapper": {"Microsoft.KeyVault/vaults/keys/read", "Microsoft.KeyVault/vaults/keys/unwrap/action"},
+    "decrypter": {"Microsoft.KeyVault/vaults/keys/read", "Microsoft.KeyVault/vaults/keys/decrypt/action"},
+}
+# Console/exec on the authority app (verify the exact name with `az provider operation show --namespace Microsoft.App`).
+FORBIDDEN_AUTHORITY_ACTIONS = ("Microsoft.App/containerApps/getAuthToken/action",)
+
+
+def deep_refs(expr: Any) -> list[str]:
+    out: list[str] = []
+    if isinstance(expr, dict):
+        for key, value in expr.items():
+            if key == "references" and isinstance(value, list):
+                out += [v for v in value if isinstance(v, str)]
+            else:
+                out += deep_refs(value)
+    elif isinstance(expr, list):
+        for item in expr:
+            out += deep_refs(item)
+    return out
+
+
+def ref_bases(refs: list[str]) -> set[str]:
+    """`azurerm_user_assigned_identity.authority[0].principal_id` -> `azurerm_user_assigned_identity.authority`."""
+    bases = set()
+    for ref in refs:
+        m = re.match(r"^((?:data\.)?[a-z0-9_]+\.[A-Za-z0-9_]+|var\.[A-Za-z0-9_]+)", ref)
+        if m:
+            bases.add(m.group(1))
+    return bases
+
+
+def index_of(address: str) -> str:
+    m = re.search(r'\["([^"]+)"\]$', address)
+    return m.group(1) if m else ""
+
+
+def is_authority_plan(plan: dict, resources: list[Resource]) -> bool:
+    if "authority_enabled" in (plan.get("variables") or {}):
+        return True
+    return any(r.address.startswith(("azurerm_user_assigned_identity.authority", "azurerm_container_app.authority")) for r in resources)
+
+
+def role_name(r: Resource) -> str:
+    value, _ = r.get("role_definition_name")
+    return value.lower() if isinstance(value, str) else ""
+
+
+def check_cross_tier(resources: list[Resource], rep: Report) -> None:
+    """Rules that apply to the ordinary plan as well (API-NO-NEW-KEYS, GHCR-NO-PAT, RESIDENCY-US)."""
+    for r in resources:
+        if r.type == "azurerm_role_assignment" and r.name == "key_user" and index_of(r.address).startswith("api/"):
+            key = index_of(r.address).split("/", 1)[1]
+            if key not in API_EXCEPTION_KEYS:
+                rep.violate("API-NO-NEW-KEYS", r.address, f"the api identity may hold only the five exception keys, not '{key}' (decision 12, ADR-0028)")
+        if r.type == "azapi_resource" and azapi_type(r) == "microsoft.keyvault/vaults/secrets" and r.after.get("name") == "ghcr-pull-token":
+            rep.violate("GHCR-NO-PAT", r.address, "the registry pull secret must be the dedicated deploy-owned credential (ghcr-pull-credential), not the owner's PAT")
+        location, unknown = r.get("location")
+        if isinstance(location, str) and not unknown and location.lower() not in US_REGIONS:
+            rep.violate("RESIDENCY-US", r.address, f"location {location} is outside the Azure US regions (decision 13)")
+
+
+def _check_role_definition(r: Resource, rep: Report) -> None:
+    name, _ = r.get("name")
+    name = (name or "").lower()
+    perms = r.block("permissions") or {}
+    data_actions = set(perms.get("data_actions") or [])
+    actions = set(perms.get("actions") or [])
+    kind = next((k for k in ALLOWED_AUTH_DATA_ACTIONS if f"authority {k}" in name), None)
+    if kind and not data_actions <= ALLOWED_AUTH_DATA_ACTIONS[kind]:
+        rep.violate("AUTH-SIGNER-ROLE", r.address, f"{name} grants {sorted(data_actions - ALLOWED_AUTH_DATA_ACTIONS[kind])} beyond its allow-list")
+    if "backup" in " ".join(data_actions | actions).lower():
+        rep.violate("AUTH-KEY-BACKUP", r.address, "no custom role may carry keys/backup/action (only the authority crypto-officer group holds it)")
+    for bad in FORBIDDEN_AUTHORITY_ACTIONS:
+        if bad in actions | data_actions:
+            rep.violate("AUTH-SIGNER-ROLE", r.address, f"{bad} (console/exec on the authority app) must not be granted")
+    if rep.profile == "standard" and kind == "unwrapper":
+        rep.violate("AUTH-SIGNER-ROLE", r.address, "standard has no wrapped HPKE seal key: the Unwrapper role must not exist (C-16)")
+
+
+def _check_vault_assignment(r: Resource, rep: Report, principals: set[str], rollover: bool) -> None:
+    role = role_name(r)
+    key = index_of(r.address)
+    officer_only = bool(principals) and principals <= OFFICER_VARS
+    if "azurerm_user_assigned_identity.authority_admin" in principals:
+        rep.violate("AUTH-ADMIN-NO-KV", r.address, "id-viadere-authority-admin must hold no Key Vault role (ADR-0034 section 5.1)")
+    elif not principals or not principals <= ({"azurerm_user_assigned_identity.authority"} | OFFICER_VARS):
+        rep.violate("AUTH-KEY-SCOPE", r.address, "a role on kv-vdr-auth or its keys/secrets goes to id-viadere-authority or the authority officer groups only")
+    if role in {"key vault crypto user", "key vault administrator", "key vault data access administrator"} or (
+            role == "key vault crypto officer" and not officer_only):
+        rep.violate("AUTH-KEY-BACKUP", r.address, f"'{role}' includes keys/backup/action: only the authority crypto-officer group may hold it")
+    if "azurerm_user_assigned_identity.authority" in principals:
+        custom = next((k for k in ALLOWED_AUTH_DATA_ACTIONS if role.startswith("viadere authority ") and k in role), None)
+        if role == "key vault secrets user":
+            pass
+        elif not custom:
+            rep.violate("AUTH-SIGNER-ROLE", r.address, f"id-viadere-authority may hold only the Signer/Unwrapper/Decrypter custom roles and Secrets User, not '{role}'")
+        elif custom == "unwrapper" and key not in {"recovery-seal-kek", "recovery-seal-kek-standby"}:
+            rep.violate("AUTH-SIGNER-ROLE", r.address, "the Unwrapper role is allowed on recovery-seal-kek only")
+        elif custom == "decrypter" and key not in {"recovery-seal-rsa", "recovery-seal-rsa-standby"}:
+            rep.violate("AUTH-SIGNER-ROLE", r.address, "the Decrypter role is allowed on recovery-seal-rsa only")
+        elif custom == "signer" and ("kek" in key or "seal" in key):
+            rep.violate("AUTH-SIGNER-ROLE", r.address, "the Signer role does not belong on seal keys")
+    if "standby" in key and not officer_only and not (r.name == "rollover" and rollover):
+        rep.violate("AUTH-STANDBY-ROLE", r.address, "a standby key has no role before a recorded rollover (rollover_change_file)")
+
+
+def _check_app(r: Resource, rep: Report) -> None:
+    name, _ = r.get("name")
+    bases = ref_bases(deep_refs(r.expressions.get("identity")) + deep_refs(r.expressions.get("registry")))
+    is_auth_app = isinstance(name, str) and "authority" in name
+    if is_auth_app:
+        if any(b.startswith(("azurerm_user_assigned_identity.workload", "azurerm_user_assigned_identity.acrpull")) for b in bases):
+            rep.violate("AUTH-IDENTITY-SEPARATE", r.address, "an ordinary identity is attached to an authority app")
+        if r.type == "azurerm_container_app":
+            ingress = r.block("ingress")
+            if not ingress or ingress.get("external_enabled") is not False:
+                rep.violate("AUTH-NO-PUBLIC-INGRESS", r.address, "authority app ingress must exist and be internal (external_enabled = false)")
+            elif ingress.get("allow_insecure_connections") is not False:
+                rep.violate("AUTH-NO-PUBLIC-INGRESS", r.address, "authority ingress must be HTTPS only (allow_insecure_connections = false)")
+    elif any(b.startswith("azurerm_user_assigned_identity.authority") for b in bases):
+        rep.violate("AUTH-IDENTITY-SEPARATE", r.address, "id-viadere-authority* is attached to an app outside the authority group")
+
+
+def _check_nsg(r: Resource, rep: Report) -> None:
+    rules_ = r.after.get("security_rule") or []
+    outbound_allow = [x.get("priority", 0) for x in rules_ if x.get("direction") == "Outbound" and x.get("access") == "Allow"]
+    deny = [x.get("priority", 0) for x in rules_ if x.get("direction") == "Outbound" and x.get("access") == "Deny"
+            and str(x.get("destination_address_prefix", "")).lower() == "internet"]
+    if not deny or min(deny) <= max(outbound_allow or [0]):
+        rep.violate("AUTH-EGRESS", r.address, "the authority NSG needs a final deny-Internet outbound rule after every allow rule")
+    targets = {str(x.get("destination_address_prefix")) for x in rules_ if x.get("access") == "Allow" and x.get("direction") == "Outbound"}
+    if targets & {"0.0.0.0/0", "*", "Internet"}:
+        rep.violate("AUTH-EGRESS", r.address, "no outbound allow rule may target the whole Internet")
+
+
+def check_authority(resources: list[Resource], rep: Report, plan: dict) -> None:
+    variables = plan.get("variables") or {}
+    rollover = bool((variables.get("rollover_change_file") or {}).get("value"))
+    kv_scope = {"azurerm_key_vault.auth", "azapi_resource.kv_key", "azapi_resource.kv_secret"}
+    tiers: dict[str, set[str]] = {}
+    for r in resources:
+        if r.type == "azurerm_role_definition":
+            _check_role_definition(r, rep)
+        if rep.profile == "standard" and r.type == "azapi_resource" and azapi_type(r) == "microsoft.keyvault/vaults/keys" and r.after.get("name") == "recovery-seal-kek":
+            rep.violate("AUTH-SIGNER-ROLE", r.address, "standard must not create recovery-seal-kek (no wrapped HPKE seal key in production, C-16)")
+        if r.type == "azurerm_role_assignment":
+            principals = ref_bases(r.references("principal_id"))
+            scopes = ref_bases(r.references("scope"))
+            for pr in principals:
+                if pr.startswith(("azurerm_user_assigned_identity.", "var.")):
+                    if any(s.startswith("azurerm_user_assigned_identity.authority") or s in {"azurerm_resource_group.auth", "azurerm_container_registry.auth", "azurerm_container_app_job.admin"} for s in scopes):
+                        tiers.setdefault(pr, set()).add("authority")
+                    if any(s.startswith(("azurerm_user_assigned_identity.workload", "azurerm_resource_group.this")) for s in scopes):
+                        tiers.setdefault(pr, set()).add("ordinary")
+            if scopes & kv_scope:
+                _check_vault_assignment(r, rep, principals, rollover)
+        if r.type in {"azurerm_container_app", "azurerm_container_app_job"}:
+            _check_app(r, rep)
+        if r.type == "azapi_resource" and azapi_type(r) == "microsoft.app/managedenvironments" and "-auth" in str(r.after.get("name", "")):
+            props = azapi_props(r)
+            if (props.get("vnetConfiguration") or {}).get("internal") is not True or str(props.get("publicNetworkAccess", "")).lower() != "disabled":
+                rep.violate("AUTH-NO-PUBLIC-INGRESS", r.address, "the authority environment must be internal with public network access disabled")
+        if r.type == "azurerm_network_security_group" and "-auth" in str(r.after.get("name", "")):
+            _check_nsg(r, rep)
+        if r.type == "azuread_app_role_assignment":
+            bases = ref_bases(deep_refs(r.expressions))
+            if any("worker" in b for b in bases) and any("evidence_submit" in b.lower() for b in bases):
+                rep.violate("AUTH-REVOCATIONS-ROLE", r.address, "the worker identity must not hold Authority.Evidence.Submit (only Authority.Revocations)")
+        if r.type == "azurerm_federated_identity_credential":
+            subject, _ = r.get("subject")
+            if isinstance(subject, str) and "job_workflow_ref" not in subject:
+                rep.allow("AUTH-OIDC-SUBJECT", r.address, "federated subject lacks job_workflow_ref (repository OIDC subject template not customised yet, ADR-0028 section 6.1)")
+    for principal, kinds in tiers.items():
+        if len(kinds) > 1:
+            rep.violate("AUTH-DEPLOY-SEPARATE", principal, "one identity holds rights over both the ordinary and the authority tier")
+    has_nsg = any(r.type == "azurerm_network_security_group" and "-auth" in str(r.after.get("name", "")) for r in resources)
+    associated = any(r.type == "azurerm_subnet_network_security_group_association" and any("network_security_group.auth" in x for x in deep_refs(r.expressions)) for r in resources)
+    if has_nsg and not associated:
+        rep.violate("AUTH-EGRESS", "azurerm_network_security_group.auth", "the authority NSG is not associated with snet-auth")
+
+
+def source_checks(directory: Path, rep: Report) -> None:
+    """Static checks of a module directory (no plan): API-NO-NEW-KEYS, GHCR-NO-PAT and no Cloudflare file naming the authority."""
+    locals_tf = directory / "locals.tf"
+    if locals_tf.exists():
+        text = locals_tf.read_text(encoding="utf-8")
+        m = re.search(r"key_grants\s*=\s*\{(.*?)\n\s*\}", text, re.S)
+        if m:
+            api = re.search(r"^\s*api\s*=\s*\[(.*?)\]", m.group(1), re.S | re.M)
+            keys = set(re.findall(r'"([a-z0-9-]+)"', api.group(1))) if api else set()
+            for extra in sorted(keys - API_EXCEPTION_KEYS):
+                rep.violate("API-NO-NEW-KEYS", str(locals_tf), f"key_grants.api names '{extra}': only the five exception keys are allowed")
+        g = re.search(r'ghcr_pull_secret\s*=\s*"([^"]+)"', text)
+        if g and g.group(1) == "ghcr-pull-token":
+            rep.violate("GHCR-NO-PAT", str(locals_tf), "ghcr_pull_secret still names the owner's PAT secret")
+    if directory.name == "cloudflare":
+        for tf in directory.glob("*.tf"):
+            body = "\n".join(line for line in tf.read_text(encoding="utf-8").splitlines() if not line.strip().startswith("#"))
+            if re.search(r"authority", body, re.I):
+                rep.violate("AUTH-NO-PUBLIC-INGRESS", str(tf), "a Cloudflare file names the authority: it has no tunnel route or hostname")
 
 
 HANDLED = {
@@ -482,11 +706,15 @@ def evaluate(plan: dict, profile: str | None = None) -> Report:
     if profile not in PROFILES:
         raise PlanError(f"unknown profile {profile!r}")
     rep = Report(profile=profile)
-    for r in load_resources(plan):
+    all_resources = load_resources(plan)
+    check_cross_tier(all_resources, rep)
+    if is_authority_plan(plan, all_resources):
+        check_authority(all_resources, rep, plan)
+    for r in all_resources:
         if r.type in NEVER_ALLOWED_TYPES:
             rep.violate("FORBIDDEN-RESOURCE", r.address, NEVER_ALLOWED_TYPES[r.type])
             continue
-        if profile == "lean" and r.type in LEAN_FIXED_FEE_TYPES:
+        if profile == "lean" and r.type in LEAN_FIXED_FEE_TYPES and not (r.type == "azurerm_container_registry" and r.name == "auth"):
             rep.violate("LEAN-FIXED-FEE", r.address, f"lean must not create a {LEAN_FIXED_FEE_TYPES[r.type]}")
         if r.type == "azapi_resource":
             kind = azapi_type(r)
@@ -524,11 +752,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("plan", help="output of `tofu show -json <planfile>`")
     parser.add_argument("--profile", choices=PROFILES, help="expected profile (default: the plan's `profile` variable)")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--source", action="append", default=[], metavar="DIR", help="also run the static source checks on this module directory (repeatable)")
     args = parser.parse_args(argv)
     try:
         with open(args.plan, encoding="utf-8") as fh:
             plan = json.load(fh)
         rep = evaluate(plan, args.profile)
+        for directory in args.source:
+            source_checks(Path(directory), rep)
     except (OSError, ValueError, PlanError) as exc:
         print(f"policy_check: {exc}", file=sys.stderr)
         return 2

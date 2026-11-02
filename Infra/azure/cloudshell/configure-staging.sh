@@ -47,7 +47,7 @@ if [ -n "$P8" ]; then python3 -I kv_tool.py put --vault-id "$KV_ID" --name apns-
 echo
 echo "GitHub token for pulling the server image (classic token, read:packages only). Enter skips (package is public or token already stored):"
 read -rs GHCR_TOKEN; echo
-if [ -n "$GHCR_TOKEN" ]; then printf '%s' "$GHCR_TOKEN" | python3 -I kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-token || fail "store ghcr-pull-token"; fi
+if [ -n "$GHCR_TOKEN" ]; then printf '%s' "$GHCR_TOKEN" | python3 -I kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-credential || fail "store ghcr-pull-credential"; fi
 unset GHCR_TOKEN
 echo "Cloudflare Tunnel token (Zero Trust > Networks > Tunnels > viadere-staging-azure; the long value after --token). Enter skips:"
 read -rs TUNNEL_TOKEN; echo

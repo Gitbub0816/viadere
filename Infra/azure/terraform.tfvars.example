@@ -17,7 +17,7 @@ key_vault_allowed_ip_ranges                = [] # lean: your admin IP for `az ke
 
 # First apply only (afterwards the deploy workflow owns the image): the current release image from GHCR, by digest.
 image              = "ghcr.io/OWNER/viadere/viadere-server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
-ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns the read:packages token in Key Vault (ghcr-pull-token)
+ghcr_pull_username = "" # lean + private GHCR package: the GitHub user that owns the read:packages token in Key Vault (ghcr-pull-credential)
 
 api_min_replicas = 0 # first apply only (no replica starts before secrets and database roles exist); then remove the line (lean default 1)
 

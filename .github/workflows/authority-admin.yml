@@ -1,0 +1,114 @@
+# Run one reviewed authority admin command (ADR-0019 section 5, ADR-0028 section 6.5): `ViadereAuthority admin <command> --change-file <path>`
+# in job-viadere-authority-admin. The change file is a commit on protected main (CODEOWNERS). The environment authority-admin-staging has
+# required reviewers and "Prevent self-review". After the job the workflow reads the execution log (Log Analytics Reader on the authority
+# workspace only), parses the allow-listed key-inventory lines, re-derives every RFC 7638 thumbprint and attests the inventory
+# (GitHub artifact attestation); authority-publish.yml admits a JWK only if it matches that attested inventory (ADR-0024 section 7.3).
+name: Authority admin
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Admin command (e.g. policy-raise, client-register, seal-key create, seal-key exposed, key-version-pin)"
+        type: string
+        required: true
+      change_file:
+        description: "Path of the reviewed change file on main (e.g. Infra/azure-authority/changes/0001.json)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authority-admin
+  cancel-in-progress: false
+
+env:
+  AZ_MIN_VERSION: 2.91.0
+
+jobs:
+  admin:
+    name: Run the admin job and attest the key inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: authority-admin-staging
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      COMMAND: ${{ inputs.command }}
+      CHANGE_FILE: ${{ inputs.change_file }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_AUTH_RESOURCE_GROUP: ${{ vars.AZURE_AUTH_RESOURCE_GROUP }}
+      AZURE_AUTH_LOG_WORKSPACE: ${{ vars.AZURE_AUTH_LOG_WORKSPACE }}
+      JOB: job-viadere-authority-admin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the inputs (main only; change file inside the repository, no traversal)
+        run: |
+          [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "admin commands run from main only" >&2; exit 1; }
+          [[ "${COMMAND}" =~ ^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)?$ ]] || { echo "invalid command" >&2; exit 1; }
+          [[ "${CHANGE_FILE}" =~ ^Infra/azure-authority/changes/[A-Za-z0-9._-]+\.json$ ]] || { echo "change file must be Infra/azure-authority/changes/<name>.json" >&2; exit 1; }
+          [ -f "${CHANGE_FILE}" ] || { echo "change file not found on main" >&2; exit 1; }
+          {
+            echo "### Authority admin run"
+            echo "Command: \`${COMMAND}\` — change file: \`${CHANGE_FILE}\` at \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Azure CLI login (workload identity federation, no secret)
+        run: |
+          az config set extension.use_dynamic_install=no core.only_show_errors=true > /dev/null
+          python3 -I - "$(az version --query '"azure-cli"' -o tsv)" "${AZ_MIN_VERSION}" <<'PY'
+          import sys
+          have, need = (tuple(int(p) for p in v.split(".")[:3]) for v in sys.argv[1:3])
+          sys.exit(0 if have >= need else f"Azure CLI {sys.argv[1]} is older than {sys.argv[2]}")
+          PY
+          token="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          echo "::add-mask::${token}"
+          az login --service-principal --username "${AZURE_CLIENT_ID}" --tenant "${AZURE_TENANT_ID}" --federated-token "${token}" --output none
+          az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+      - name: Start the job with this command and wait
+        id: run
+        run: |
+          # The change file content is read by the job from the repository checkout of the SAME commit (baked path, not an upload).
+          # shellcheck disable=SC2086
+          execution="$(az containerapp job start --name "${JOB}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" \
+            --args admin ${COMMAND} --change-file "${CHANGE_FILE}" --commit "${GITHUB_SHA}" --query name -o tsv)"
+          echo "execution=${execution}" >> "$GITHUB_OUTPUT"
+          for _ in $(seq 1 120); do
+            status="$(az containerapp job execution show --name "${JOB}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --job-execution-name "${execution}" --query properties.status -o tsv)"
+            case "${status}" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "admin job ${status}" >&2; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "admin job did not finish in 30 minutes" >&2
+          exit 1
+      - name: Read the execution log and build the key inventory (allow-listed lines only)
+        env:
+          EXECUTION: ${{ steps.run.outputs.execution }}
+        run: |
+          sleep 240 # Log Analytics ingestion delay
+          az monitor log-analytics query --workspace "${AZURE_AUTH_LOG_WORKSPACE}" --analytics-query \
+            "ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '${EXECUTION}' | project Log_s" -o json > "$RUNNER_TEMP/log.json"
+          python3 -I .github/scripts/key_inventory.py "$RUNNER_TEMP/log.json" key-inventory.json
+      - name: Attest the key inventory
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: key-inventory.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: authority-key-inventory
+          path: key-inventory.json
+          retention-days: 90
+      - name: Log out
+        if: always()
+        run: az logout || true

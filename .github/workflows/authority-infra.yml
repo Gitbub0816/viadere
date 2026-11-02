@@ -1,0 +1,177 @@
+# Plan and apply Infra/azure-authority (ADR-0028 section 7). SEPARATE from azure.yml: its own apply identity (id-gh-infra-auth-apply-<env>),
+# its own state key and its own GitHub environment `azure-infra-authority-staging` (required reviewers). The plan is policy-checked
+# (policy_check.py, AUTH-* rules) before anything is applied. Nothing here runs until the owner set AZURE_AUTH_IAC_ENABLED = "true" (checklist),
+# and with authority_enabled = false (the default) the plan is empty.
+name: Authority infrastructure
+
+on:
+  pull_request:
+    paths:
+      - "Infra/azure-authority/**"
+      - ".github/workflows/authority-infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Infra/azure-authority/**"
+      - ".github/workflows/authority-infra.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the plan (needs approval in azure-infra-authority-staging)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authority-infra
+  cancel-in-progress: false
+
+env:
+  TOFU_VERSION: 1.13.2
+  TOFU_SHA256: 723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5
+
+jobs:
+  static:
+    name: fmt, validate, tofu test, policy tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Format, validate, plan-time tests
+        working-directory: Infra/azure-authority
+        run: |
+          tofu fmt -check -recursive
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu test
+      - name: Policy checker tests and source checks
+        run: |
+          python3 -I -m unittest discover -s Infra/azure/tests -t Infra/azure/tests
+          python3 -I Infra/azure/policy_check.py Infra/azure/tests/fixtures/lean_plan.json --source Infra/azure --source Infra/cloudflare --source Infra/azure-authority
+
+  plan:
+    name: Plan and policy check
+    needs: static
+    if: vars.AZURE_AUTH_IAC_ENABLED == 'true' && github.event_name != 'pull_request' && !inputs.apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: azure-plan-authority-staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_AUTH_INFRA_PLAN_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      TF_VAR_environment: staging
+      TF_VAR_profile: ${{ vars.AZURE_PROFILE }}
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_authority_enabled: ${{ vars.AUTHORITY_ENABLED_IAC }}
+      TF_VAR_image: ${{ vars.AZURE_AUTH_BOOTSTRAP_IMAGE }}
+      TF_VAR_authority_entra_audience: ${{ vars.AUTHORITY_ENTRA_AUDIENCE }}
+      TF_VAR_authority_crypto_officers_group_object_id: ${{ vars.AUTHORITY_CRYPTO_OFFICERS_GROUP_ID }}
+      TF_VAR_oidc_subject_workflow_ref: ${{ vars.OIDC_SUBJECT_WORKFLOW_REF }}
+      TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Init (Azure Storage backend, own state key)
+        working-directory: Infra/azure-authority
+        run: |
+          tofu init -input=false -backend-config="use_oidc=true" -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${ARM_TENANT_ID}" -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}" -backend-config="client_id=${ARM_CLIENT_ID}" \
+            -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=tfstate" -backend-config="key=viadere/azure-authority/staging.tfstate"
+      - name: Plan (read-only identity) and policy check
+        working-directory: Infra/azure-authority
+        run: |
+          tofu plan -lock=false -out=tfplan
+          tofu show -json tfplan > "$RUNNER_TEMP/plan.json"
+          python3 -I ../azure/policy_check.py "$RUNNER_TEMP/plan.json"
+          rm -f "$RUNNER_TEMP/plan.json" tfplan
+
+  apply:
+    name: Apply
+    needs: static
+    if: vars.AZURE_AUTH_IAC_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment:
+      name: azure-infra-authority-staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_AUTH_INFRA_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      TF_VAR_environment: staging
+      TF_VAR_profile: ${{ vars.AZURE_PROFILE }}
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_authority_enabled: ${{ vars.AUTHORITY_ENABLED_IAC }}
+      TF_VAR_image: ${{ vars.AZURE_AUTH_BOOTSTRAP_IMAGE }}
+      TF_VAR_authority_entra_audience: ${{ vars.AUTHORITY_ENTRA_AUDIENCE }}
+      TF_VAR_authority_crypto_officers_group_object_id: ${{ vars.AUTHORITY_CRYPTO_OFFICERS_GROUP_ID }}
+      TF_VAR_oidc_subject_workflow_ref: ${{ vars.OIDC_SUBJECT_WORKFLOW_REF }}
+      TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-pinned)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/tofu.zip" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          echo "${TOFU_SHA256}  $RUNNER_TEMP/tofu.zip" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          unzip -q "$RUNNER_TEMP/tofu.zip" tofu -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Init
+        working-directory: Infra/azure-authority
+        run: |
+          tofu init -input=false -backend-config="use_oidc=true" -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${ARM_TENANT_ID}" -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}" -backend-config="client_id=${ARM_CLIENT_ID}" \
+            -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=tfstate" -backend-config="key=viadere/azure-authority/staging.tfstate"
+      - name: Plan, policy check, apply exactly the checked plan
+        working-directory: Infra/azure-authority
+        run: |
+          tofu plan -out=tfplan
+          tofu show -json tfplan > "$RUNNER_TEMP/plan.json"
+          python3 -I ../azure/policy_check.py "$RUNNER_TEMP/plan.json"
+          rm -f "$RUNNER_TEMP/plan.json"
+          tofu apply -input=false tfplan
+          rm -f tfplan

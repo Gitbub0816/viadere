@@ -279,7 +279,7 @@ python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name apns-p8 < AuthK
 
 ```sh
 # a classic token with read:packages only, for the user in ghcr_pull_username
-python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-token     # paste, Enter (no echo)
+python3 -I Infra/azure/kv_tool.py put --vault-id "$KV_ID" --name ghcr-pull-credential     # paste, Enter (no echo)
 ```
 
 **Wrapped service keys (recommended; plan 5.6).** The server accepts each of `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY`, `CONNECT_LINK_SIGNING_KEY` (and the `*_PREVIOUS` lists) as `<NAME>_WRAPPED` = `kms1:kek-data/<version>:<base64url>`, the plain value encrypted with RSA-OAEP-256 under the Key Vault key `kek-data`, and unwraps it once at boot (SECURITY.md §2.95). A member of `grp-viadere-kv-crypto-officers` wraps the values of `"$WORK/s.env"` without any of them touching a command line or the screen:

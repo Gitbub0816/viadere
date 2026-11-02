@@ -84,6 +84,8 @@ locals {
     cae = cidrsubnet(local.vnet_cidr, 7, 0)   # x.x.0.0/23
     pg  = cidrsubnet(local.vnet_cidr, 12, 32) # x.x.2.0/28
     pe  = cidrsubnet(local.vnet_cidr, 11, 24) # x.x.3.0/27
+    # snet-auth (cidrsubnet(vnet, 11, 32), x.x.4.0/27) belongs to Infra/azure-authority; only its address is used here (PostgreSQL NSG).
+    auth = cidrsubnet(local.vnet_cidr, 11, 32)
     # x.x.4.0/27 is reserved for snet-ops (jump host or Bastion), not created.
   }
 
@@ -135,7 +137,7 @@ locals {
   api_secrets        = merge(local.service_secrets, local.db_password_secret)
   worker_secrets     = merge(local.service_secrets, local.db_password_secret)
   migrate_secrets    = var.postgres_password_auth_enabled ? { DATABASE_MIGRATION_URL = "database-migration-url" } : {}
-  ghcr_pull_secret   = "ghcr-pull-token"
+  ghcr_pull_secret   = "ghcr-pull-credential"
   tunnel_secret      = "cloudflared-tunnel-token"
   ghcr_auth          = !local.p.registry && var.ghcr_pull_username != ""
 

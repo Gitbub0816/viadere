@@ -1,0 +1,61 @@
+# Publish the static discovery and JWKS documents under Site/content/id/ (ADR-0024 section 7). Publishing a key is equivalent to holding the
+# signing key, so this workflow is gated like an authority deploy: environment authority-publish-staging (required reviewers, "Prevent
+# self-review", branch main only), CODEOWNERS on Site/content/id/**, its OWN Cloudflare token scoped to the `id.` host's static assets, and NO
+# Azure credential. A JWK is admitted only if its RFC 7638 thumbprint is in the key inventory attested by authority-admin.yml.
+name: Authority publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      inventory_run_id:
+        description: "Run id of the authority-admin.yml run whose attested key inventory authorises this publication"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authority-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify the inventory attestation, then publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: authority-publish-staging
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.inventory_run_id }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ID_HOST_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the input and the branch
+        run: |
+          [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "publication runs from main only" >&2; exit 1; }
+          [[ "${RUN_ID}" =~ ^[0-9]+$ ]] || { echo "inventory_run_id must be a run id" >&2; exit 1; }
+      - name: Download the inventory and verify its attestation (signer must be authority-admin.yml on main)
+        run: |
+          gh run download "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name authority-key-inventory --dir "$RUNNER_TEMP/inv"
+          gh attestation verify "$RUNNER_TEMP/inv/key-inventory.json" --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/authority-admin.yml" --source-ref refs/heads/main
+      - name: Every JWK of every published set is in the attested inventory
+        run: |
+          shopt -s nullglob
+          for set in Site/content/id/oidc/jwks.json Site/content/id/grant/jwks.json; do
+            [ -f "${set}" ] || continue
+            python3 -I .github/scripts/key_inventory.py --check "${set}" "$RUNNER_TEMP/inv/key-inventory.json"
+          done
+      - name: Upload the static assets of the id. host
+        run: |
+          [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "CLOUDFLARE_ID_HOST_TOKEN missing (AUTHORITY-OWNER-CHECKLIST.md)" >&2; exit 1; }
+          # Site/deploy/upload.py is the repository's Workers Static Assets uploader (ADR-0004); the id. host is its own Worker.
+          python3 -I Site/deploy/upload.py --dist Site/content/id --script viadere-id
