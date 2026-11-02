@@ -63,7 +63,7 @@ struct LoopDirectoryDeviceTests {
         model.mode = .installAndConnect
         #expect(model.permissions.contains { $0.kind == .connection })
         // A manifest signed by a key the device does not pin: nothing is shown and nothing can be installed.
-        let untrusted = PinnedManifestKey(kid: "other", publicKey: try SoftwareP256SigningKey().publicKey)
+        let untrusted = PinnedManifestKey(kid: "other", publicKey: SoftwareP256SigningKey().publicKey)
         let refused = LoopDetailViewModel(loopId: loopId, source: .directory, api: api, keys: { [untrusted] }, consent: { status })
         await refused.load()
         #expect(refused.status == .unavailable)
@@ -158,5 +158,16 @@ struct LoopDirectoryDeviceTests {
         #expect(DeepLinkRouter.route("https://evil.example/lp/\(id)", domain: domain) == nil)
         #expect(DeepLinkRouter.route("viadere://lp/\(id)/extra", domain: domain) == nil)
         #expect(DeepLinkRouter.route("viadere://lp/nope", domain: domain) == nil)
+    }
+
+    @Test func aBusinessPageListsEveryPublishedLoopOfThatBusinessOnly() async throws {
+        let (api, listed, unlisted) = await world()
+        await api.publish(MockLoopsAPI.pickupDefinition, business: PreviewData.harborBank.id, category: .shopping)
+        let status = try await api.consentStatus()
+        let page = LoopDirectoryViewModel(api: api, business: Self.business.id, consent: { status })
+        await page.load()
+        #expect(Set(page.entries.map(\.publicationId)) == [listed.publicationId, unlisted.publicationId])
+        #expect(page.featured.isEmpty)
+        #expect(page.entries.allSatisfy { $0.business.id == Self.business.id })
     }
 }

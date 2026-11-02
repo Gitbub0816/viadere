@@ -25,11 +25,14 @@ public final class LoopDirectoryViewModel {
     public var query = ""
     public private(set) var category: LoopDirectoryCategory?
 
+    /// A business page: every visible published Loop of this business, listed in the directory or not (no featured section).
+    public let business: BusinessID?
     private let api: (any LoopsAPI)?
     private let consent: @MainActor () -> LoopConsentStatus?
 
-    public init(api: (any LoopsAPI)?, consent: @escaping @MainActor () -> LoopConsentStatus?) {
+    public init(api: (any LoopsAPI)?, business: BusinessID? = nil, consent: @escaping @MainActor () -> LoopConsentStatus?) {
         self.api = api
+        self.business = business
         self.consent = consent
     }
 
@@ -61,7 +64,7 @@ public final class LoopDirectoryViewModel {
         defer { isLoading = false }
         errorMessage = nil
         do {
-            page = try await api.directory(query: sentQuery.isEmpty ? nil : sentQuery, category: category, business: nil)
+            page = try await api.directory(query: sentQuery.isEmpty ? nil : sentQuery, category: category, business: business)
         } catch {
             errorMessage = (error as? APIError)?.userMessage ?? "Couldn't load Loops."
         }

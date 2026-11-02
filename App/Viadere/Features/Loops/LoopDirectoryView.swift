@@ -178,3 +178,36 @@ struct LoopIcon: View {
             }
     }
 }
+
+/// A business's Loops for its page when the customer is **not** connected (search result, install link, profile): every visible published
+/// Loop of that business, each opening its install sheet. The page owns and loads `directory` (`makeDirectory`), like
+/// `BusinessLoopsSection`: SwiftUI never runs a `.task` on a view that is empty until it has loaded.
+struct BusinessLoopDirectorySection: View {
+    let business: BusinessSummary
+    let model: AppModel
+    let directory: LoopDirectoryViewModel
+
+    static func makeDirectory(business: BusinessSummary, model: AppModel) -> LoopDirectoryViewModel {
+        let consent = model.loopConsent
+        return LoopDirectoryViewModel(api: model.services.loopsAPI, business: business.id, consent: { consent.status })
+    }
+
+    var body: some View {
+        if !directory.entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Loops")
+                ViadereRowGroup {
+                    ForEach(Array(directory.entries.enumerated()), id: \.element.loopId) { index, entry in
+                        NavigationLink {
+                            LoopDetailView(model: model, loopId: entry.loopId, source: .businessPage, backTitle: business.safeName)
+                        } label: {
+                            LoopEntryRow(entry: entry, brand: model.services.brandKits)
+                        }
+                        .buttonStyle(.plain)
+                        if index < directory.entries.count - 1 { ViadereHairline(inset: 62) }
+                    }
+                }
+            }
+        }
+    }
+}
