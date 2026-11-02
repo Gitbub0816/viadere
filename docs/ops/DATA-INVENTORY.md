@@ -26,8 +26,9 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 | `device_enroll_challenges` | hashed challenges | SEC | | H | expires with challenge (no explicit purge) | gap: add purge |
 | `token_families`, `access_tokens`, `refresh_tokens` | session families, token **hashes**, sealed refresh successor | SEC | P | H; successor sealed | Successor nulled after the grace window (retention job); rows not purged | gap: purge expired/revoked token rows |
 | `recovery_profiles`, `recovery_codes`, `account_recoveries` | peppered hashes of recovery id/codes, pending passkey, state | SEC | P | H | Swept by `RecoveryService.sweep`; deleted with account | recovery codes are bearer secrets (residual risk) |
-| `phone_links` | phone **ciphertext**, hash, masked form, last4, OTP hash, state | OPS | P | E + H | Erased on account deletion | last4 and masked number are readable |
-| `link_tokens` | token hash, phone ciphertext/hash, purpose | OPS | P | E + H | Deleted `LINK_TOKEN_RETENTION_DAYS` (7) after expiry | |
+| `phone_links` | phone **ciphertext**, keyed hash, masked form, last4, state, `source` (`mo` = linked by a text sent from the phone, ADR-0027), `usableFrom`; the `otp_hash` column is cleared and no longer written | OPS | P | E + H | Erased on account deletion; revoked by `UNLINK`; revoked rows keep nothing readable beyond the masked form | last4 and masked number are readable; a number linked by text is `phone_control_mo`, never a factor |
+| `phone_link_mo_challenges` (ADR-0026 class P) | keyed hash of the nonce, keyed hash and ciphertext of the claimed number, account and device, expiry | OPS | P | E + H | **Whole row deleted at use**, and swept at expiry + 2 minutes (class `auth_secrets`, never held); deleted with the account and when the link is removed; an unverified begin keeps nothing but an audit event | the nonce itself is never stored |
+| `link_tokens` | token hash, phone ciphertext/hash, purpose | OPS | P | E + H | **Retired (ADR-0027):** emptied at deploy by `AuthRetention.v1`; the class keeps its 7-day rule (`LINK_TOKEN_RETENTION_DAYS`) until the table is dropped | no route redeems a token any more |
 | `sms_contexts` | SMS conversation state ciphertext | SMP | P | E | Reset on account deletion; opt-out kept as suppression only | state can hold business names and menu context |
 | `sms_consent_events` | phone hash, opt-out keyword, time | OPS | P | H | **Kept** (suppression/consent evidence) | retention `[counsel]` (TCPA/CTIA evidence period) |
 | `sms_outbound` | phone ciphertext, **body ciphertext**, status | SMP | P | E | Finished rows deleted after `OUTBOUND_RETENTION_DAYS` (30) | |
@@ -137,7 +138,7 @@ Sections 1 to 5 are unchanged (they were written before these tables existed). S
 | `kd_log_entries`, `kd_tree_heads` | the business key directory: signed root/key/revoke statements (public keys only), Merkle leaf hashes, signed tree heads | PUB | | integrity (database triggers refuse UPDATE and DELETE; the log is signed by `KEY_DIRECTORY_LOG_KEY`) | **Kept** (a transparency log that forgets is not one) | public keys and key ids only; no customer data |
 | `approve_enrollments` | business, relationship, consumer, `subject_ref`, capability, code **hash**, the device's signed statement, the business confirmation | SEC | P | code H | Rows of cancelled/expired enrollments: with the relationship or account; statements are public keys and signatures | the 8-character code is a short-lived bearer secret (bounded by 10-minute life, rate limits) |
 | `approve_keys` | pairwise approval public key and HPKE public key per relationship, `kid`s, assurance, status | SEC | P | public keys | Revoked with the relationship, the device or the account; rows kept for verification of old results | no private key ever leaves the device |
-| `approve_requests` | request metadata, `subject_ref`, protection mode, hash, **sealed** details (server-visible mode only), decision, `amr`, the compact JWS result | SEC | P | `details_sealed` E; end-to-end requests hold only an opaque envelope | Deleted after **400 days** with their deliveries (`ApproveRequestService` maintenance; the capability's maximum result retention) | 400 days is a placeholder `[counsel]`; the JWS is the business's dispute evidence |
+| `approve_requests` | request metadata, `subject_ref`, protection mode, hash, **sealed** details (server-visible mode only), decision, `amr`, the compact JWS result | SEC | P | `details_sealed` E; end-to-end requests hold only an opaque envelope | Deleted **30 days after the terminal state** with their deliveries (class `auth_delivery_metadata`, ADR-0026; one-time catch-up by `AuthRetention.v1`). A row with a signed result (owner ruling O-3) is kept as high-value evidence with only ids, decision, key, `result_ref` and the JWS, and leaves on the `signed_decisions` schedule (730 days default); routine sign-in results stay high-value for now (decision 16, OQ-1) | the 30 and 730 day periods need privacy/legal approval before production (spec 11.1); the JWS is the business's dispute evidence |
 | `approve_deliveries` | which device was offered which request | OPS | P | none | With the request | |
 | `approve_freezes` | customer-set freeze of approvals (reason code, times) | SEC | P | none | Deleted with the account | |
 
@@ -186,18 +187,35 @@ Implemented in `Operations/Retention.swift` (`RetentionClass`, `RetentionPurger`
 marked tenant-adjustable for its own data (Compliance > Retention, audited `retention.tenant_set`). A **legal hold** (`/operator/holds`: global, one business or one consumer, reason
 required) suspends every holdable class for its scope until released. The deployment's `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS` and `LINK_TOKEN_RETENTION_DAYS` remain the defaults of their classes.
 
+**Classification of authentication stores (ADR-0026, owner decisions 7, 10, 16).** P = pending secret (minutes), T = security transaction metadata (30 days after the terminal state), E-high = high-value audit evidence (longer, access-restricted), E-routine = routine security evidence (30 days).
+
+| Store | Class | Period | Sweep |
+|---|---|---|---|
+| `phone_link_mo_challenges` | P | deleted at use; expiry + 2 minutes | minute job (`PhoneLinkService.purgeChallenges`), daily backstop class `auth_secrets` |
+| `approve_requests`, `approve_deliveries`, `approve_freeze_events` | T | 30 days after the terminal state (a business may shorten) | `auth_delivery_metadata` |
+| signed result on `approve_requests` (`result_jws`, `result_ref`, `decided_kid`, `decision`) | E-high (O-3; OQ-1: routine sign-in results too) | `signed_decisions` class: 730 days (365-2555), holdable | `signed_decisions` |
+| `decisions` | E-high | 730 days, unchanged | `signed_decisions` |
+| `audit_events` | E-high | 2555 days, export before purge, unchanged | `audit_events` |
+| `link_tokens` | T | emptied; 7 days until dropped | `link_tokens` |
+| `webhook_deliveries`, finished `sms_outbound` / `channel_outbound` | T | 30 days, unchanged | `webhook_deliveries`, `outbound_messages` |
+| `outbox_messages` (published), `processed_messages`, queue dead letters | T | 7, 15 and 30 days (all within 30), unchanged | `QueuePump.purge` |
+| authority and auth-delivery tables of the delivery API | P / T / E-routine / E-high per ADR-0026 section 2 | attach to `auth_secrets`, `auth_delivery_metadata`, `auth_evidence_routine` as they are built | `auth_evidence_routine` is reserved (30 days) |
+
 | Class | What is purged | Default (min-max) days | Tenant may shorten | Holdable |
 |---|---|---|---|---|
 | `interaction_content` | payload text, reply and signed decision of **finished** interactions are erased; the row, ids and status stay | 400 (30-1095) | yes | yes |
 | `conversation_content` | message bodies replaced by `[expired]` | 730 (30-3650) | yes | yes |
-| `signed_decisions` | device-signed decisions deleted | 730 (365-2555) | no | yes |
+| `signed_decisions` | device-signed decisions deleted, and Approve v2 signed results (`approve_requests` rows kept as evidence after their 30-day metadata period) | 730 (365-2555) | no | yes |
 | `consent_history` | **superseded** consent versions deleted; the current consent of a relationship never | 1095 (365-3650) | no | yes |
 | `audit_events` | events older than the period **and** already covered by an exported head; a checkpoint keeps the chain verifiable; nothing is purged without an export target | 2555 (730-3650) | no | yes |
 | `business_applications` | free-text description and reviewer note of decided applications | 730 (90-3650) | no | yes |
 | `usage_records` | metering rows | 2555 (365-3650) | no | yes |
 | `webhook_deliveries` | deliveries with their attempts, including never-sent (paused) ones | 30 (1-365) | yes | yes |
 | `outbound_messages` | finished SMS and channel sends | 30 (1-365) | no | yes |
-| `link_tokens` | used or expired link tokens | 7 (1-90) | no | no |
+| `link_tokens` | used or expired link tokens (retired: the table is emptied at deploy) | 7 (1-90) | no | no |
+| `auth_secrets` | pending secrets (`phone_link_mo_challenges`): the daily backstop of the minute sweep (expiry + 2 minutes) | 1 (1-1) | no | no |
+| `auth_delivery_metadata` | approval requests and deliveries 30 days after the terminal state (a signed result keeps its evidence fields and leaves with `signed_decisions`), freeze-event references | 30 (7-90) | yes | yes |
+| `auth_evidence_routine` | routine security evidence (reserved for low-risk issuance records and fatigue, pause and report bookkeeping) | 30 (7-90) | no | yes |
 | `security_tokens` | expired session tokens, enrollment and interaction challenges | 30 (7-180) | no | no |
 | `channel_capability` | RCS capability cache, consumed postbacks, provider message de-duplication markers | 180 (14-730) | no | no |
 | `security_notices` | in-app notices (dismissed ones after 90 days) | 365 (30-1095) | no | no |
@@ -209,7 +227,7 @@ same transaction closes in SQLite); UPDATE stays refused. A process that can run
 write-once export of signed heads, not the trigger (SECURITY.md section 2.77).
 
 **Status of the section 5 gaps.** Gap 1 (no age-based purge) closed for every table listed there, with these exceptions that stay by design: `sms_consent_events` (suppression evidence),
-`businesses`/handles/codes (never reassigned), `passkey_credentials`, `devices` and `relationships` (until account deletion), `kd_*` (public log). Gap 2 closed (14 classes). Gap 3 closed:
+`businesses`/handles/codes (never reassigned), `passkey_credentials`, `devices` and `relationships` (until account deletion), `kd_*` (public log). Gap 2 closed (17 classes). Gap 3 closed:
 `POST /v1/account/exports` is the subject-access export (section 6.4, `consumer_exports`; SECURITY.md section 2.78). Gap 4 (backups) is unchanged.
 
 ## 8. Addendum (2026-10-30, feature expansion v4 Phase 1: Organization)

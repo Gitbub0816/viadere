@@ -437,59 +437,6 @@ struct LinkConfirmationTests {
     }
 }
 
-@Suite("Hand-off confirm (F-08)")
-@MainActor
-struct HandoffConfirmationTests {
-    let token = String(repeating: "a", count: 43)
-
-    @Test func handlingAHandoffLinkNeverRedeemsIt() async {
-        let api = MockViadereAPI()
-        let model = AppModel(services: await ViadereServices.mock(api: api))
-        await model.bootstrap()
-        await model.handle(.handoff(token: token))
-        #expect(model.pendingHandoff?.phase == .confirming)
-        #expect(await api.handoffRedemptions == 0)
-        await model.open(url: URL(string: "https://viadere.com/h/\(token)")!)
-        #expect(await api.handoffRedemptions == 0)
-    }
-
-    @Test func openRedeemsExactlyOnceAndRoutes() async {
-        let api = MockViadereAPI()
-        let model = AppModel(services: await ViadereServices.mock(api: api))
-        await model.bootstrap()
-        await model.handle(.handoff(token: token))
-        await model.confirmHandoff()
-        #expect(await api.handoffRedemptions == 1)
-        #expect(model.pendingHandoff == nil)
-    }
-
-    @Test func thisWasntMeNeverRedeems() async {
-        let api = MockViadereAPI()
-        let vm = HandoffConfirmationViewModel(token: token, api: api, retired: false)
-        #expect(vm.buttons.map(\.role) == [.notMe, .proceed] && vm.buttons.map(\.title) == ["This wasn't me", "Open"])
-        vm.thisWasntMe()
-        #expect(vm.phase == .dismissedAsNotMe && vm.message == AuthDeliveryCopy.handoffNotMeDone)
-        await vm.open()
-        #expect(await api.handoffRedemptions == 0)
-    }
-
-    @Test func aRetiredHandoffShowsTheNoLongerUsedNoticeAndNeverRedeems() async {
-        let api = MockViadereAPI()
-        let vm = HandoffConfirmationViewModel(token: token, api: api, retired: true)
-        #expect(vm.phase == .retired && vm.title == "This link is no longer used. Open Viadere to see your requests." && vm.buttons.isEmpty)
-        await vm.open()
-        #expect(await api.handoffRedemptions == 0)
-    }
-
-    @Test func aTappedLinkPushOpensItsConfirmScreen() async {
-        let api = MockViadereAPI()
-        let model = AppModel(services: await ViadereServices.mock(api: api))
-        await model.bootstrap()
-        await model.apply(.openAuthDelivery(UUID()))
-        #expect(model.pendingAuthDelivery != nil, "a tapped link push opens its confirm screen, not Alerts")
-    }
-}
-
 @Suite("Device-add comparison code (ADR-0033 §4.1)")
 @MainActor
 struct DeviceAddTests {

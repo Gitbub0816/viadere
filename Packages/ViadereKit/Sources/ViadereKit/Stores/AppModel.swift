@@ -54,7 +54,6 @@ public final class AppModel {
         didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
     }
     public var pendingConnect: PendingConnect?
-    public var pendingAccountLinkToken: String?
     /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
     public var pendingApproveEnrollment: PendingApproveEnrollment?
     /// A business link session opened from a QR or link (`/k/…`); the Connect tab presents it.
@@ -64,8 +63,6 @@ public final class AppModel {
     /// A sign-in link delivery (a tapped `viadere.auth.link` push or its "Open" action): the root presents the confirm screen
     /// (`LinkConfirmationViewModel`). Nothing is opened or consumed until the person taps Continue.
     public var pendingAuthDelivery: PendingAuthDelivery?
-    /// A `/h/` hand-off waiting for its confirm step (F-08): the token is redeemed only by `confirmHandoff()`, after an explicit Open.
-    public var pendingHandoff: HandoffConfirmationViewModel?
     /// Set by the app: opens an Approve v2 request (`nil` key: the list of requests). Kept out of the Kit because the controller lives in the app.
     public var openApproveRequest: (@MainActor (String?) async -> Void)?
     public var conversationToOpen: SessionID?
@@ -267,12 +264,10 @@ public final class AppModel {
         lockEpoch += 1
         presentedApproval = nil
         pendingConnect = nil
-        pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil
         pendingAuthDelivery = nil
-        pendingHandoff = nil
         conversationToOpen = nil
         businessToOpen = nil
         addBusinessPresented = false
@@ -318,13 +313,11 @@ public final class AppModel {
             // customer's own choice in the selector does.
             businessToOpen = handle
             selectedTab = .businesses
-        case .accountLink(let token):
-            pendingAccountLinkToken = token
-            selectedTab = .you
-        case .handoff(let token):
-            // F-08 (ADR-0021 §4 item 4): handling the link never redeems it. The confirm screen asks first; `confirmHandoff()` redeems.
+        case .retiredLink:
+            // An old text link: nothing is read or redeemed. The person is told and sees what is waiting in the app.
             selectedTab = .alerts
-            pendingHandoff = HandoffConfirmationViewModel(token: token, api: services.api)
+            toast = "This link is no longer used. Open Viadere to see your requests."
+            await home.load()
         case .authDelivery(let id):
             pendingAuthDelivery = PendingAuthDelivery(id: id)
         case .approveRequest(let key):
@@ -350,28 +343,6 @@ public final class AppModel {
             pendingVerificationSession = PendingVerificationSession(code: code)
         }
     }
-
-    /// Open on the hand-off confirm screen: redeems the token (the one place it happens) and routes to what it was for.
-    public func confirmHandoff() async {
-        guard let confirmation = pendingHandoff else { return }
-        await confirmation.open()
-        guard case .redeemed(let redeemed) = confirmation.phase else {
-            await home.load()
-            return
-        }
-        pendingHandoff = nil
-        switch redeemed.purpose {
-        case .interaction:
-            if let id = redeemed.interactionId { await openInteraction(id) } else { await home.load() }
-        case .manageBusinesses:
-            selectedTab = .businesses
-            addBusinessPresented = true
-        case .accountHelp:
-            selectedTab = .you
-        }
-    }
-
-    public func dismissHandoff() { pendingHandoff = nil }
 
     /// Presents the secure approval sheet for an interaction.
     public func openInteraction(_ id: InteractionID) async {
@@ -471,7 +442,6 @@ public final class AppModel {
     private func reset() {
         presentedApproval = nil
         pendingConnect = nil
-        pendingAccountLinkToken = nil
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil

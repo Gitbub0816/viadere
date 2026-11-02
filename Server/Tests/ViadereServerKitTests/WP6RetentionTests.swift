@@ -26,9 +26,9 @@ final class WP6RetentionTests: XCTestCase {
         // Evidence classes have a floor of at least a year; credentials never wait that long.
         for cls in [RetentionClass.signedDecisions, .consentHistory, .auditEvents] { XCTAssertGreaterThanOrEqual(cls.definition.minDays, 365, "\(cls)") }
         XCTAssertLessThanOrEqual(RetentionClass.linkTokens.definition.maxDays, 90)
-        XCTAssertEqual(Set(RetentionClass.allCases.filter(\.definition.tenantAdjustable)), [.interactionContent, .conversationContent, .webhookDeliveries])
+        XCTAssertEqual(Set(RetentionClass.allCases.filter(\.definition.tenantAdjustable)), [.interactionContent, .conversationContent, .webhookDeliveries, .authDeliveryMetadata])
         // Legal-hold exemptions are only for short-lived security artefacts.
-        XCTAssertEqual(Set(RetentionClass.allCases.filter { !$0.definition.holdable }), [.linkTokens, .securityTokens, .channelCapability, .securityNotices])
+        XCTAssertEqual(Set(RetentionClass.allCases.filter { !$0.definition.holdable }), [.linkTokens, .securityTokens, .channelCapability, .securityNotices, .authSecrets])
     }
 
     func testPlatformValuesStayInsideTheBoundsAndTenantsCanOnlyShorten() async throws {

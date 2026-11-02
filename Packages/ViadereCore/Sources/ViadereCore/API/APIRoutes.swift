@@ -82,11 +82,16 @@ public enum APIRoutes {
     public static let recoveryCodesRegenerate = Endpoint<RecoveryCodesRegenerateRequest, RecoveryCodeSet>(
         "recovery.codes.regenerate", .POST, "/v1/recovery/codes/regenerate", auth: .deviceSignedBearer)
 
-    // MARK: Phone links & SMS account linking
-    public static let phoneLinkStart = Endpoint<PhoneLinkStartRequest, PhoneLinkStartResponse>(
-        "phoneLinks.start", .POST, "/v1/phone-links/start", auth: .deviceSignedBearer)
-    public static let phoneLinkVerify = Endpoint<PhoneLinkVerifyRequest, PhoneLink>(
-        "phoneLinks.verify", .POST, "/v1/phone-links/verify", auth: .deviceSignedBearer)
+    // MARK: Phone links (customer-originated text, ADR-0027)
+    /// Starts a phone link: the response carries a nonce the person sends from their phone to the Viadere number. Trusted device only.
+    public static let phoneLinkMOBegin = Endpoint<PhoneLinkMOBeginRequest, PhoneLinkMOBeginResponse>(
+        "phoneLinks.mo.begin", .POST, "/v1/phone-links/mo/begin", auth: .deviceSignedBearer)
+    /// Poll for the result of a begun link: `pending`, `verified` or `expired`.
+    public static let phoneLinkStatus = Endpoint<EmptyBody, PhoneLinkMOStatus>(
+        "phoneLinks.status", .GET, "/v1/phone-links/{phoneLinkId}", auth: .deviceSignedBearer)
+    /// The current owner of a number refuses a pending transfer of it to another account ("Keep my number", UX_COPY S-PH-07).
+    public static let phoneLinkKeep = Endpoint<EmptyBody, EmptyBody>(
+        "phoneLinks.keep", .POST, "/v1/phone-links/{phoneLinkId}/keep", auth: .deviceSignedBearer)
     public static let phoneLinksList = Endpoint<EmptyBody, [PhoneLink]>(
         "phoneLinks.list", .GET, "/v1/phone-links", auth: .deviceSignedBearer)
     public static let phoneLinkDelete = Endpoint<EmptyBody, EmptyBody>(
@@ -109,17 +114,6 @@ public enum APIRoutes {
     /// Revokes every device and token, erases/anonymizes personal data, keeps a redacted audit record.
     public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
         "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
-
-    /// Read-only: what the one-time SMS link token would link (`{maskedPhone, expiresAt}`). Does not consume the token.
-    public static let smsLinkPreview = Endpoint<EmptyBody, SMSLinkPreview>(
-        "sms.linkTokens.preview", .GET, "/v1/sms/link-tokens/{token}/preview", auth: .deviceSignedBearer)
-    /// The one-time SMS link token is redeemed **inside the app** after the person confirmed the masked phone (device-signed).
-    public static let smsLinkRedeem = Endpoint<SMSLinkRedeemRequest, PhoneLink>(
-        "sms.linkTokens.redeem", .POST, "/v1/sms/link-tokens/redeem", auth: .deviceSignedBearer)
-
-    /// App-side redemption of an SMS secure-handoff token; the token must have been minted for this consumer.
-    public static let handoffRedeem = Endpoint<HandoffRedeemRequest, HandoffRedeemResponse>(
-        "handoff.redeem", .POST, "/v1/handoff/redeem", auth: .deviceSignedBearer)
 
     // MARK: Directory (public, rate-limited)
     /// Query: `q` (required), `limit` (≤ 20), `cursor`.
@@ -454,7 +448,7 @@ public enum APIRoutes {
         deviceReplacementCancel.descriptor,
         recoveryBegin.descriptor, recoveryFinish.descriptor, recoveryComplete.descriptor, recoveryCancel.descriptor, recoveryInfo.descriptor,
         recoveryCodesBegin.descriptor, recoveryCodesRegenerate.descriptor,
-        phoneLinkStart.descriptor, phoneLinkVerify.descriptor, smsLinkPreview.descriptor, smsLinkRedeem.descriptor, handoffRedeem.descriptor,
+        phoneLinkMOBegin.descriptor, phoneLinkStatus.descriptor, phoneLinkKeep.descriptor,
         phoneLinkConfirm.descriptor,
         phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
@@ -498,9 +492,9 @@ public enum APIRoutes {
     public enum Web {
         /// Connect link: `/c/{CODE}` (see `ConnectLink`).
         public static let connectPrefix = "/c/"
-        /// SMS account-link landing: `/l/{token}`.
+        /// Retired (ADR-0027): SMS account-link landing `/l/{token}`. Old texts still open the app, which says the link is no longer used.
         public static let accountLinkPrefix = "/l/"
-        /// Secure handoff landing: `/h/{token}`.
+        /// Retired (ADR-0027): secure hand-off landing `/h/{token}`.
         public static let handoffPrefix = "/h/"
         /// Business dashboard (server-rendered, passkey sign-in).
         public static let dashboardPrefix = "/dashboard"
@@ -514,7 +508,8 @@ public enum APIRoutes {
         /// Verification-session landing ("Verify with Viadere"): `/v/{CODE}`. No secret, no query; the app reads everything from the signed descriptor.
         public static let verificationSessionPrefix = "/v/"
 
-        public static func accountLinkURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(accountLinkPrefix + token) }
-        public static func handoffURL(token: String, domain: LinkDomain = .current) -> URL? { domain.url(handoffPrefix + token) }
+        /// The static on-ramp page named in "get Viadere" texts (UX_COPY SMS-01). Carries no token and no query.
+        public static let getAppPath = "/get"
+        public static func getAppURL(domain: LinkDomain = .current) -> URL? { domain.url(getAppPath) }
     }
 }

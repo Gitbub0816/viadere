@@ -11,7 +11,7 @@ public enum ChannelCapability: Sendable, Equatable {
 }
 
 /// One tappable element of an outbound rich message. Reply suggestions carry an **opaque token** — never an
-/// interaction id, option id or decision — and open-URL suggestions carry a `/h/{token}` handoff link.
+/// interaction id, option id or decision — and and no suggestion carries a link (decision 9).
 public struct OutboundSuggestion: Sendable, Equatable {
     public enum Kind: Sendable, Equatable { case reply, openURL }
     public var kind: Kind
@@ -73,7 +73,7 @@ public struct ChannelEnvironment: Sendable {
     let ctx: ServerContext
     /// Stable reference of our outbox row, for provider correlation.
     let reference: String
-    /// The message contains a secret (a handoff link) and must be wiped after sending.
+    /// The message contains a secret and must be wiped after sending (no Viadere text carries one any more).
     let sensitive: Bool
     /// Business the message is metered against / attributed to.
     let businessId: BusinessID?
@@ -86,7 +86,7 @@ public struct ChannelEnvironment: Sendable {
 /// weaken them):
 /// * A security-sensitive interaction (`authenticate`, `authorize`, unknown kinds, or any interaction whose
 ///   `RequiredAssurance` exceeds `.channelReply`) is **never** rendered as an actionable reply. It becomes a
-///   secure handoff link (`/h/{token}`).
+///   "open the Viadere app" notice (no link, no code).
 /// * Replies on a text channel are unauthenticated (`ProvidedAssurance.unauthenticatedReply`).
 public protocol ChannelAdapter: Sendable {
     var channel: DeliveryChannel { get }
@@ -94,7 +94,7 @@ public protocol ChannelAdapter: Sendable {
     var isEnabled: Bool { get }
     func capability(for phone: PhoneNumber) async -> ChannelCapability
     /// Renders with `ChannelRenderer`. `handoffURL` is only non-nil when a secure handoff is needed.
-    func render(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> ChannelRendering
+    func render(_ interaction: Interaction, business: BusinessSummary) -> ChannelRendering
     func send(_ message: OutboundChannelMessage, to phone: PhoneNumber, environment: ChannelEnvironment) async throws -> ChannelSendResult
     /// Constant-time authenticity check of an inbound provider webhook.
     func verifyInbound(_ request: ProviderWebhookRequest) -> Bool
@@ -163,8 +163,8 @@ public struct SMSChannelAdapter: ChannelAdapter {
 
     public func capability(for phone: PhoneNumber) async -> ChannelCapability { .capable }
 
-    public func render(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> ChannelRendering {
-        let sms = ChannelRenderer.sms(interaction, business: business, handoffURL: handoffURL)
+    public func render(_ interaction: Interaction, business: BusinessSummary) -> ChannelRendering {
+        let sms = ChannelRenderer.sms(interaction, business: business)
         return ChannelRendering(text: sms.body, suggestions: [], isSecureHandoff: sms.isSecureHandoff, smsSegments: sms.encoding.segments)
     }
 
@@ -205,7 +205,7 @@ public struct AppleMessagesForBusinessAdapter: ChannelAdapter {
 
     public func capability(for phone: PhoneNumber) async -> ChannelCapability { .incapable }
 
-    public func render(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> ChannelRendering {
+    public func render(_ interaction: Interaction, business: BusinessSummary) -> ChannelRendering {
         // Even the placeholder honours the no-downgrade rule: the only output is a handoff notice.
         ChannelRendering(text: "[\(SMSEncoding.field(business.displayName, maxLength: 40))]: Open the Viadere app to continue.",
                          suggestions: [], isSecureHandoff: true)

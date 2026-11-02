@@ -78,13 +78,6 @@ struct SettingsView: View {
         .onChange(of: model.pendingApproveEnrollment) { _, pending in
             if pending != nil, path.last != .settings(.approvals) { path = [.settings(.approvals)] }
         }
-        .sheet(isPresented: Binding(get: { model.pendingAccountLinkToken != nil }, set: { if !$0 { model.pendingAccountLinkToken = nil } })) {
-            if let token = model.pendingAccountLinkToken {
-                AccountLinkSheet(vm: vm, token: token) { model.pendingAccountLinkToken = nil }
-                    .presentationDetents([.medium, .large])
-                    .presentationBackground(ViadereColor.background)
-            }
-        }
     }
 
     private func reload() async {
@@ -665,8 +658,6 @@ struct RecoveryCodesSettingsView: View {
 
 struct PhonesView: View {
     @Bindable var vm: SecuritySettingsViewModel
-    @State private var raw = ""
-    @State private var code = ""
 
     var body: some View {
         SubScreen(title: "Linked phones", subtitle: "Numbers that can reach your businesses by text.") {
@@ -691,33 +682,14 @@ struct PhonesView: View {
                 }
             }
             addPhone
-            Text("Texting never approves anything. Sign-ins and purchases are always approved in the app with this iPhone.")
+            Text("A number you link this way proves you control it, nothing more. Texting never approves anything: sign-ins and purchases are always approved in the app with this iPhone.")
                 .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
         }
     }
 
+    /// One text sent from the phone (ADR-0027): the app shows a nonce and opens the compose sheet; nothing is texted to the phone.
     @ViewBuilder private var addPhone: some View {
-        switch vm.addPhoneStage {
-        case .idle, .failed:
-            if case .failed(let message) = vm.addPhoneStage { ViadereNotice(message, kind: .danger) }
-            ViadereTextField("Add a mobile number", text: $raw, prompt: "(480) 555-0123")
-                .keyboardType(.phonePad)
-                .textContentType(.telephoneNumber)
-                .onChange(of: raw) { _, new in raw = PhoneInput.displayFormat(new) }
-            Button("Send code") { Task { await vm.startAddPhone(raw) } }
-                .buttonStyle(.viadere(.primary))
-                .disabled(PhoneInput.normalize(raw) == nil)
-        case .awaitingCode:
-            Text("Enter the code we texted you").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
-            ViadereOTPField(code: $code)
-                .onChange(of: code) { _, new in code = OTPInput.normalize(new) }
-            HStack(spacing: ViadereSpace.s) {
-                Button("Cancel") { vm.cancelAddPhone(); code = "" }.buttonStyle(.viadere(.secondary))
-                Button("Verify") { Task { await vm.verifyAddPhone(code: code); code = ""; raw = "" } }
-                    .buttonStyle(.viadere(.primary))
-                    .disabled(!OTPInput.isComplete(code))
-            }
-        }
+        PhoneLinkFlowView(vm: vm.addPhone)
     }
 }
 
@@ -771,96 +743,6 @@ struct SessionsView: View {
                     if index < vm.sessions.count - 1 { ViadereHairline() }
                 }
             }
-        }
-    }
-}
-
-/// `https://viadere.com/l/{token}`: finish linking a phone that texted Viadere.
-///
-/// Anyone can send you such a link, and opening it while signed in used to link their number to *your* account.
-/// So this screen first asks the server what the link would link, shows the masked number, spells out the risk,
-/// and links only after an explicit "This is my phone". The token itself is never shown.
-struct AccountLinkSheet: View {
-    let vm: SecuritySettingsViewModel
-    let token: String
-    let onDone: () -> Void
-    @State private var confirmedOwnPhone = false
-    @State private var failed = false
-    @State private var working = false
-    /// Set after a successful link: says when the number starts working.
-    @State private var linkedMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: ViadereSpace.l) {
-            ViadereGrabber()
-            Text(linkedMessage == nil ? "Link this phone" : "Phone linked").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
-            content
-            Spacer()
-            footer
-        }
-        .padding(.horizontal, ViadereSpace.screen)
-        .padding(.bottom, ViadereSpace.m)
-        .task { await vm.loadAccountLinkPreview(token: token) }
-        .onDisappear { vm.resetAccountLink() }
-    }
-
-    @ViewBuilder private var content: some View {
-        if let linkedMessage {
-            Text(linkedMessage).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let phone = vm.lastLinkedPhone, let until = phone.usableFrom {
-                ViadereRowGroup { ViadereValueRow("Starts working", CoolDownPolicy.timeText(until, now: Date()), emphasized: true) }
-            }
-        } else {
-        switch vm.accountLinkPhase {
-        case .idle, .loading:
-            HStack { Spacer(); ViadereLoading(); Spacer() }.padding(.vertical, ViadereSpace.xl)
-        case .failed(let message):
-            ViadereNotice(message, kind: .danger)
-        case .ready(let preview):
-            Text("A text from this number asked to link it to your Viadere account.")
-                .font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
-            ViadereRowGroup {
-                ViadereValueRow("Phone number", preview.maskedPhone, emphasized: true)
-                ViadereHairline()
-                ViadereValueRow("Link expires", preview.expiresAt.formatted(date: .omitted, time: .shortened))
-            }
-            ViadereNotice(SecuritySettingsViewModel.accountLinkWarning, kind: .warning)
-            // An explicit affirmation, so a checkbox rather than a switch.
-            ViadereCheckbox(isOn: $confirmedOwnPhone) {
-                Text("This is my phone, and I asked to link it")
-            }
-            if failed { ViadereNotice(vm.errorMessage ?? "We couldn't link that number.", kind: .danger) }
-        }
-        }
-    }
-
-    @ViewBuilder private var footer: some View {
-        if linkedMessage != nil {
-            if let phone = vm.lastLinkedPhone, vm.canConfirm(phone) {
-                Button("Confirm now with Face ID") {
-                    Task {
-                        await vm.confirm(phone)
-                        if vm.lastLinkedPhone.map({ !vm.canConfirm($0) }) ?? true, vm.errorMessage == nil { onDone() }
-                    }
-                }
-                .buttonStyle(.viadere(.primary))
-            }
-            Button("Done", action: onDone).buttonStyle(.viadere(.quiet))
-        } else if case .ready = vm.accountLinkPhase {
-            Button(working ? "Linking…" : "Link phone") {
-                Task {
-                    working = true
-                    failed = !(await vm.redeemAccountLink(token: token, confirmedOwnPhone: confirmedOwnPhone))
-                    working = false
-                    if !failed { linkedMessage = vm.accountLinkResultMessage ?? "Your phone is linked." }
-                }
-            }
-            .buttonStyle(.viadere(.primary))
-            .disabled(!confirmedOwnPhone || working)
-            Button("This isn't my phone", action: onDone).buttonStyle(.viadere(.quiet))
-        } else {
-            Button("Close", action: onDone).buttonStyle(.viadere(.quiet))
         }
     }
 }

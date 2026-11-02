@@ -72,6 +72,7 @@ enum SealedColumns {
         SealedColumn(table: "link_tokens", column: "phone_ciphertext", context: "link_tokens.phone"),
         SealedColumn(table: "loyalty_accounts", column: "member_reference_ciphertext", context: "loyalty_accounts.member_reference"),
         SealedColumn(table: "org_invites", column: "email_ciphertext", context: "org_invites.email"),
+        SealedColumn(table: "phone_link_mo_challenges", column: "phone_ciphertext", context: "phone_link_mo_challenges.phone"),
         SealedColumn(table: "phone_links", column: "phone_ciphertext", context: "phone_links.phone"),
         SealedColumn(table: "refresh_tokens", column: "successor_sealed", context: "refresh_tokens.successor"),
         SealedColumn(table: "sms_contexts", column: "context_ciphertext", context: "sms_contexts.context"),

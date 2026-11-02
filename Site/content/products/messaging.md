@@ -81,7 +81,7 @@ Points, status levels, perks and single-use redemption codes, with Apple Wallet 
 |---|---|---|
 | Viadere app (push and in-app) | Everything, including device-signed decisions | Needs the app |
 | RCS | Text with suggested replies | A tap is an unauthenticated reply |
-| SMS | Plain text and secure handoff links | Not end-to-end encrypted; no authenticated approvals |
+| SMS | Plain text; sensitive requests say to open the Viadere app (no links or codes) | Not end-to-end encrypted; no authenticated approvals |
 :::
 
 ::: section alt

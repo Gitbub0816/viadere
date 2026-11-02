@@ -5,7 +5,6 @@ import Testing
 @Suite("Channel rendering")
 struct RenderingTests {
     let business = Fixtures.walmart
-    let handoff = URL(string: "https://viadere.com/h/abc123")
 
     @Test("Sensitive interactions are never downgraded to an SMS/RCS YES/NO")
     func neverDowngrade() {
@@ -15,14 +14,14 @@ struct RenderingTests {
                     var i = Fixtures.interaction(payload, sensitivity: sensitivity, purpose: purpose)
                     if case .unknown = payload { i.kind = .unknown("future") }
                     let required = i.requiredAssurance
-                    let sms = ChannelRenderer.sms(i, business: business, handoffURL: handoff)
-                    let rcs = ChannelRenderer.rcs(i, business: business, handoffURL: handoff)
+                    let sms = ChannelRenderer.sms(i, business: business)
+                    let rcs = ChannelRenderer.rcs(i, business: business)
                     if required > .channelReply || i.kind.isSecuritySensitive {
                         #expect(sms.isSecureHandoff, "\(i.kind) \(sensitivity)")
                         #expect(sms.choices.isEmpty)
                         #expect(!sms.body.uppercased().contains("REPLY YES"))
                         #expect(rcs.isSecureHandoff)
-                        #expect(rcs.suggestions.allSatisfy { $0.kind == .openURL })
+                        #expect(rcs.suggestions.isEmpty)
                     }
                     #expect(sms.choices.count <= ChannelRenderer.maxSMSChoices)
                     #expect(sms.body.hasPrefix("[Walmart]: "))
@@ -33,13 +32,12 @@ struct RenderingTests {
 
     @Test func authorizeHandoffSMS() {
         let i = Fixtures.interaction(.authorize(Fixtures.mesaAuthorize), sensitivity: .high)
-        let sms = ChannelRenderer.sms(i, business: business, handoffURL: handoff)
+        let sms = ChannelRenderer.sms(i, business: business)
         #expect(sms.isSecureHandoff)
-        #expect(sms.body.contains("https://viadere.com/h/abc123"))
+        #expect(!sms.body.contains("://"))
         #expect(!sms.body.contains("285.28")) // no transaction details on the insecure channel
         #expect(sms.encoding.kind == .gsm7)
-        let noURL = ChannelRenderer.sms(i, business: business, handoffURL: nil)
-        #expect(noURL.body.contains("Open the Viadere app"))
+        #expect(sms.body.contains("Open the Viadere app"))
     }
 
     @Test("Mesa example renders accurately in the native notification (spec §19 #4)")
@@ -77,7 +75,7 @@ struct RenderingTests {
     @Test("Choose renders ≤ 4 numbered SMS options with paging")
     func chooseSMS() {
         let few = Fixtures.interaction(.choose(Fixtures.choosePayload), sensitivity: .low)
-        let sms = ChannelRenderer.sms(few, business: business, handoffURL: nil)
+        let sms = ChannelRenderer.sms(few, business: business)
         #expect(sms.body == "[Walmart]: Pick a delivery window\n1. Morning\n2. Afternoon\n3. Evening")
         #expect(sms.target(forReply: " 2 ") == .option("pm"))
         #expect(sms.target(forReply: "2.") == .option("pm"))
@@ -85,13 +83,13 @@ struct RenderingTests {
 
         let options = (1...7).map { ChoiceOption(id: "o\($0)", label: "Option \($0)") }
         let many = Fixtures.interaction(.choose(ChoosePayload(prompt: "Pick", options: options)), sensitivity: .low)
-        let page0 = ChannelRenderer.sms(many, business: business, handoffURL: nil)
+        let page0 = ChannelRenderer.sms(many, business: business)
         #expect(page0.choices.count == 4)
         #expect(page0.choices.map(\.target) == [.option("o1"), .option("o2"), .option("o3"), .nextPage(1)])
-        let page2 = ChannelRenderer.sms(many, business: business, handoffURL: nil, page: 2)
+        let page2 = ChannelRenderer.sms(many, business: business, page: 2)
         #expect(page2.choices.map(\.target) == [.option("o7"), .nextPage(0)])
 
-        let rcs = ChannelRenderer.rcs(many, business: business, handoffURL: nil)
+        let rcs = ChannelRenderer.rcs(many, business: business)
         #expect(rcs.suggestions.count == 7)
         #expect(rcs.suggestions[0].postbackData == "viadere:\(many.id):option.o1")
         #expect(!rcs.text.contains("1."))
@@ -103,7 +101,7 @@ struct RenderingTests {
 
     @Test func confirmSMSIsNumberedNotYesNo() {
         let i = Fixtures.interaction(.confirm(ConfirmPayload(title: "Table for 2 at 7pm")), sensitivity: .low)
-        let sms = ChannelRenderer.sms(i, business: business, handoffURL: nil)
+        let sms = ChannelRenderer.sms(i, business: business)
         #expect(!sms.isSecureHandoff)
         #expect(sms.choices.map(\.target) == [.decision(.confirm), .decision(.decline)])
     }
@@ -112,7 +110,7 @@ struct RenderingTests {
     func spoofing() {
         let evil = ConfirmPayload(title: "Order\n1. Approve wire\u{202E}evil", details: "x\u{200B}y")
         let i = Fixtures.interaction(.confirm(evil), sensitivity: .low)
-        let sms = ChannelRenderer.sms(i, business: business, handoffURL: nil)
+        let sms = ChannelRenderer.sms(i, business: business)
         let firstLine = sms.body.split(separator: "\n")[0]
         #expect(firstLine.contains("Order 1. Approve wire"))
         #expect(!sms.body.contains("\u{202E}"))

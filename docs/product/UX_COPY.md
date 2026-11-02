@@ -188,6 +188,12 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | SMS-02 | MT notice after a valid MO | Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages. |
 | SMS-03 | Reply to UNLINK | Viadere: Done. This number is no longer linked to a Viadere app. |
 | SMS-04 | Secure request on a text-only number | Viadere: {Business} sent you something that needs the Viadere app. Open Viadere to respond. |
+| SMS-05 | Routing refused for an unlinked number (menu or direct address) | Viadere: To message {Business}, link this number in the Viadere app first. Get the app: https://{domain}/get |
+| SMS-06 | Menu items "Account help" and "Manage businesses in app" (replaces the hand-off link) | Viadere: Open the Viadere app for account help and settings. |
+| SMS-07 | Pointer when a request needs an answer (ADR-0027 §4; used where SMS-04 does not apply) | Viadere: Open the Viadere app to respond. |
+| SMS-08 | Unlinked menu, first item (was "Link your account") | Get the Viadere app |
+| W-LINK-RETIRED | `/l/` and `/h/` page title and body (410) | Title "This link is no longer used"; body "Open Viadere to see your requests." |
+| W-GET | `/get` page | Static page: what Viadere is, the App Store button, "Viadere never sends you a code or a sign-in link by text." |
 
 The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not used**: decisions 1 and 9 exclude SMS for authentication. No string in this file offers a text message as a sign-in method.
 

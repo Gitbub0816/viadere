@@ -73,17 +73,14 @@ public struct LiveViadereAPI: ViadereAPI {
     }
 
     // MARK: Phones & sessions
-    public func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse {
-        try await client.call(APIRoutes.phoneLinkStart, body: PhoneLinkStartRequest(phone: phone))
+    public func beginPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkMOBeginResponse {
+        try await client.call(APIRoutes.phoneLinkMOBegin, body: PhoneLinkMOBeginRequest(phone: phone))
     }
-    public func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink {
-        try await client.call(APIRoutes.phoneLinkVerify, body: PhoneLinkVerifyRequest(phoneLinkId: id, code: code))
+    public func phoneLinkStatus(_ id: PhoneLinkID) async throws -> PhoneLinkMOStatus {
+        try await client.call(APIRoutes.phoneLinkStatus, params: ["phoneLinkId": id.description])
     }
-    public func previewPhoneLink(token: String) async throws -> SMSLinkPreview {
-        try await client.call(APIRoutes.smsLinkPreview, params: ["token": token])
-    }
-    public func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink {
-        try await client.call(APIRoutes.smsLinkRedeem, body: request)
+    public func keepPhoneNumber(_ id: PhoneLinkID) async throws {
+        _ = try await client.call(APIRoutes.phoneLinkKeep, params: ["phoneLinkId": id.description])
     }
     public func phoneLinks() async throws -> [PhoneLink] { try await client.call(APIRoutes.phoneLinksList) }
     public func removePhoneLink(_ id: PhoneLinkID) async throws {
@@ -145,9 +142,6 @@ public struct LiveViadereAPI: ViadereAPI {
     }
     public func decide(_ id: InteractionID, _ request: DecideInteractionRequest) async throws -> InteractionOutcome {
         try await client.call(APIRoutes.interactionDecide, params: ["interactionId": id.description], body: request)
-    }
-    public func redeemHandoff(token: String) async throws -> HandoffRedeemResponse {
-        try await client.call(APIRoutes.handoffRedeem, body: HandoffRedeemRequest(token: token))
     }
 
     // MARK: Conversations

@@ -7,10 +7,9 @@ public enum DeepLink: Sendable, Equatable {
     case connect(code: BusinessCode, link: ConnectLink?)
     /// `viadere://b/{handle}`
     case business(BusinessHandle)
-    /// `https://{link domain}/l/{token}` (universal link only; no custom-scheme equivalent): finish linking a phone that texted Viadere.
-    case accountLink(token: String)
-    /// `https://{link domain}/h/{token}`: secure handoff of a request that can't be completed by text.
-    case handoff(token: String)
+    /// `https://{link domain}/l/{token}` or `/h/{token}` from a text sent by an older build. Viadere no longer texts links that link a
+    /// phone or hand a request over (decision 9, ADR-0027): the app only says so and never reads or redeems the token.
+    case retiredLink
     /// `viadere://i/{interactionId}` (also used by notification taps).
     case interaction(InteractionID)
     /// `viadere://m/{sessionId}`
@@ -86,8 +85,8 @@ public enum DeepLinkRouter {
         // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
         guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,
               components.query == nil, components.port == nil || components.port == 443 else { return nil }
-        if let token = token(in: components.percentEncodedPath, prefix: APIRoutes.Web.accountLinkPrefix) { return .accountLink(token: token) }
-        if let token = token(in: components.percentEncodedPath, prefix: APIRoutes.Web.handoffPrefix) { return .handoff(token: token) }
+        if token(in: components.percentEncodedPath, prefix: APIRoutes.Web.accountLinkPrefix) != nil
+            || token(in: components.percentEncodedPath, prefix: APIRoutes.Web.handoffPrefix) != nil { return .retiredLink }
         return nil
     }
 
@@ -122,12 +121,7 @@ public enum DeepLinkRouter {
             return InteractionID(arg).map(DeepLink.interaction)
         case "m":
             return SessionID(arg).map(DeepLink.conversation)
-        // There is deliberately no `viadere://l/{token}`: any app on the device can open a custom-scheme URL, so a
-        // phone-link token is accepted only from the https universal link (`https://{link domain}/l/{token}`), which
-        // iOS verifies against the app-site association.
-        case "h":
-            guard Base64URL.isValid(arg, minLength: tokenLength, maxLength: tokenLength) else { return nil }
-            return .handoff(token: arg)
+        // There is no `viadere://l/…` or `viadere://h/…`: those links are retired and a custom scheme is never trusted with a token.
         case "settings":
             return arg.isEmpty ? .settings : nil
         case "lp":

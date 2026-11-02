@@ -153,10 +153,11 @@ public struct SMSGatewayEngine: Sendable {
                 audit("gateway.help")
                 return
             }
-            // Link-pending expiry is silent: fall back to UNLINKED.
-            if context.state == .linkPending, let until = context.linkPendingUntil, now >= until {
+            // LINK_PENDING is retired (ADR-0027: nothing is texted to link a number). A thread saved by an older build falls back to UNLINKED.
+            if context.state == .linkPending {
                 context.state = .unlinked
                 context.linkPendingUntil = nil
+                context.menu = nil
             }
             // 5. Session idle expiry.
             if let session = context.session, context.state == .connected || context.state == .sessionMenu,
@@ -392,8 +393,8 @@ public struct SMSGatewayEngine: Sendable {
             case .findBusiness:
                 promptSearch(header: nil)
             case .accountHelp:
-                effects.append(.sendSecureHandoff(.accountHelp))
-                audit("gateway.handoff_account_help")
+                send(GatewayCopy.openAppForAccount)
+                audit("gateway.account_help_pointer")
             case .moreOptions:
                 showMenu(kind: .more, state: mainState, header: "Viadere: More options", options: [
                     MenuOption(number: 1, label: "How Viadere works", action: .howItWorks),
@@ -402,7 +403,7 @@ public struct SMSGatewayEngine: Sendable {
                     MenuOption(number: 4, label: "Back", action: .mainMenu),
                 ])
             case .linkAccount:
-                startLink(header: GatewayCopy.linkSent)
+                sendGetApp(header: nil)
             case .help:
                 send(GatewayCopy.help)
             case .selectBusiness(let business):
@@ -450,8 +451,8 @@ public struct SMSGatewayEngine: Sendable {
             case .privacy:
                 send(GatewayCopy.privacy)
             case .manageInApp:
-                effects.append(.sendSecureHandoff(.manageBusinesses))
-                audit("gateway.handoff_manage")
+                send(GatewayCopy.openAppForAccount)
+                audit("gateway.manage_in_app_pointer")
             }
         }
 
@@ -472,7 +473,7 @@ public struct SMSGatewayEngine: Sendable {
             }
             if config.requireLinkForRouting && !context.isLinked {
                 context.pending = PendingDestination(business: business, message: message, providerMessageId: providerMessageId)
-                startLink(header: GatewayCopy.linkRequired(business))
+                sendGetApp(header: GatewayCopy.linkRequired(business, url: config.getAppURL))
                 return
             }
             if let existing = context.session {
@@ -580,7 +581,6 @@ public struct SMSGatewayEngine: Sendable {
 
         var mainState: GatewayState {
             if context.isLinked { return .idleMenu }
-            if let until = context.linkPendingUntil, now < until { return .linkPending }
             return .unlinked
         }
 
@@ -597,18 +597,10 @@ public struct SMSGatewayEngine: Sendable {
                     MenuOption(number: 3, label: "Account help", action: .accountHelp),
                     MenuOption(number: 4, label: "More options", action: .moreOptions),
                 ])
-            case .linkPending:
-                lines.append("Viadere: Waiting for you to open your account link.")
-                showMenu(kind: .linkPending, state: state, header: lines.joined(separator: "\n"), options: [
-                    MenuOption(number: 1, label: "Resend link", action: .linkAccount),
-                    MenuOption(number: 2, label: "Find a business", action: .findBusiness),
-                    MenuOption(number: 3, label: "Help", action: .help),
-                    MenuOption(number: 4, label: "More options", action: .moreOptions),
-                ])
             default:
                 lines.append("Viadere: How can we help?")
                 showMenu(kind: .unlinkedMain, state: .unlinked, header: lines.joined(separator: "\n"), options: [
-                    MenuOption(number: 1, label: "Link your account", action: .linkAccount),
+                    MenuOption(number: 1, label: "Get the Viadere app", action: .linkAccount),
                     MenuOption(number: 2, label: "Find a business", action: .findBusiness),
                     MenuOption(number: 3, label: "Help", action: .help),
                     MenuOption(number: 4, label: "More options", action: .moreOptions),
@@ -673,13 +665,14 @@ public struct SMSGatewayEngine: Sendable {
             send(([header].compactMap { $0 } + [GatewayCopy.searchPrompt]).joined(separator: "\n"))
         }
 
-        mutating func startLink(header: String) {
-            context.linkPendingUntil = now.addingTimeInterval(config.linkTTL)
-            context.state = .linkPending
+        /// The on-ramp pointer (UX_COPY SMS-01). Nothing is minted or texted to link a number: that happens in the app (ADR-0027). `header`
+        /// replaces the plain pointer when the text already names the page (routing refused for an unlinked number).
+        mutating func sendGetApp(header: String?) {
+            context.linkPendingUntil = nil
             context.menu = nil
-            send(header)
-            effects.append(.sendAccountLink)
-            audit("gateway.link_issued")
+            context.state = .unlinked
+            send(header ?? GatewayCopy.getViadere(url: config.getAppURL))
+            audit("gateway.get_app_pointer")
         }
 
         mutating func showMenu(kind: MenuKind, state: GatewayState, header: String, options: [MenuOption]) {

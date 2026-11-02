@@ -199,8 +199,8 @@ public struct RCSChannelAdapter: ChannelAdapter {
 
     /// Suggested replies and open-URL actions from `ChannelRenderer.rcs`. Reply targets are kept as typed
     /// `RCSPostbackTarget`s; the router swaps each for an opaque, signed, single-use token before sending.
-    public func render(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> ChannelRendering {
-        let rendering = ChannelRenderer.rcs(interaction, business: business, handoffURL: handoffURL)
+    public func render(_ interaction: Interaction, business: BusinessSummary) -> ChannelRendering {
+        let rendering = ChannelRenderer.rcs(interaction, business: business)
         var suggestions: [ChannelRendering.Suggestion] = []
         for suggestion in rendering.suggestions {
             switch suggestion.kind {

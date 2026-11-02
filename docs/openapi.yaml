@@ -57,7 +57,7 @@ info:
     ## Security model
     * Security-sensitive kinds (`authenticate`, `authorize`, unknown kinds, or any `high`/`critical` sensitivity) can only be
       approved by a device-signed decision in the Viadere app. They are never approvable by SMS or RCS reply; text channels
-      receive a secure handoff link instead.
+      receive a notice to open the Viadere app instead (no link and no code are ever texted).
     * You see a per-business pseudonym for each customer, never their Viadere identity or phone number. A decision names the
       deciding **device** by a per-business pseudonym (`deviceRef`) and carries the server's attestation that the device
       signature, the shown context and the assurance were verified (`verification`). You never receive the raw device-signed
@@ -2062,7 +2062,7 @@ components:
       type: string
       description: |
         Where Viadere may deliver. Text channels (`sms`, `rcs`, `appleMessagesForBusiness`) can only carry unauthenticated replies, so
-        security-sensitive interactions sent there become a secure handoff link. `rcs` implies SMS fallback.
+        security-sensitive interactions sent there become a notice to open the Viadere app (no link, no code). `rcs` implies SMS fallback.
       enum: [nativePush, inApp, web, sms, rcs, appleMessagesForBusiness]
     ActionRole:
       type: string

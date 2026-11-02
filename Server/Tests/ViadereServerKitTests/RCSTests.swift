@@ -180,7 +180,9 @@ final class RCSTests: XCTestCase {
             XCTAssertEqual(taps.map(\.text), ["Yes, thanks", "Not yet"])
             // The second message went out later and superseded the first menu only if it had chips; it has none.
             let noChips = sent.first { h.replyTokens(in: $0).isEmpty }!
-            XCTAssertTrue(h.suggestions(in: noChips).contains { ($0["action"] as? [String: Any])?["openUrlAction"] != nil })
+            // No chips and no link: the message says to open the Viadere app (decision 9).
+            XCTAssertTrue(h.suggestions(in: noChips).allSatisfy { ($0["action"] as? [String: Any])?["openUrlAction"] == nil })
+            XCTAssertTrue((((noChips["contentMessage"] as? [String: Any])?["text"] as? String) ?? "").contains("Viadere app"))
             try await eq(try await h.rcsTap(token: taps[1].token).status, .ok)
             let record = try await XCTUnwrapAsync(await InteractionRecord.find(interaction.id.uuid, on: h.db))
             XCTAssertEqual(record.statusValue, .replied)
@@ -198,9 +200,10 @@ final class RCSTests: XCTestCase {
             let message = try h.rcsSentMessages(http)[0]
             XCTAssertTrue(h.replyTokens(in: message).isEmpty)
             let urls = h.suggestions(in: message).compactMap { (($0["action"] as? [String: Any])?["openUrlAction"] as? [String: Any])?["url"] as? String }
-            XCTAssertEqual(urls.count, 1)
-            XCTAssertTrue(urls[0].hasPrefix("https://viadere.com/h/"))
+            XCTAssertTrue(urls.isEmpty, "no suggestion carries a link (decision 9)")
+            XCTAssertTrue(((message["contentMessage"] as? [String: Any])?["text"] as? String)?.contains("Viadere app") == true)
             try await eq(try await RCSPostbackRecord.query(on: h.db).count(), 0)
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0)
         }
     }
 
@@ -342,23 +345,18 @@ final class RCSTests: XCTestCase {
             try await h.runJobs()
             let message = try h.rcsSentMessages(http)[0]
             let text = ((message["contentMessage"] as? [String: Any])?["text"] as? String) ?? ""
-            // A secure handoff only: an "open in Viadere" action, no reply chips, no transaction details.
+            // "Open the Viadere app" only: no link, no reply chips, no transaction details.
             XCTAssertTrue(h.replyTokens(in: message).isEmpty)
             let urls = h.suggestions(in: message).compactMap { (($0["action"] as? [String: Any])?["openUrlAction"] as? [String: Any])?["url"] as? String }
-            XCTAssertEqual(urls.count, 1)
-            XCTAssertTrue(urls[0].hasPrefix("https://viadere.com/h/"))
+            XCTAssertTrue(urls.isEmpty)
+            XCTAssertFalse(text.contains("://"))
+            XCTAssertTrue(text.contains("Open the Viadere app"))
             XCTAssertFalse(text.contains("285.28"))
             XCTAssertFalse(text.contains("Walmart"))
             XCTAssertTrue(text.lowercased().contains("never asks you to approve by text"))
             try await eq(try await RCSPostbackRecord.query(on: h.db).count(), 0)
-            // The handoff token is single-use, bound to the consumer and to this interaction.
-            let token = String(urls[0].dropFirst("https://viadere.com/h/".count))
-            let link = try await XCTUnwrapAsync(await LinkTokenRecord.query(on: h.db).filter(\.$tokenHash == SecureToken.hash(token)).first())
-            XCTAssertEqual(link.kind, "handoff")
-            XCTAssertEqual(link.consumerId, s.consumer.id.uuid)
-            XCTAssertEqual(link.interactionId, interaction.id.uuid)
-            XCTAssertEqual(link.purpose, "interaction")
-            try await eq(try await h.page("/h/\(token)", nil).status, .ok)
+            // No hand-off token is minted for any text channel.
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0)
             // Even if a postback row existed (a bug, a DB write), the service refuses to approve over a text channel.
             let forged = RCSPostbackTokens(hasher: h.ctx.hasher).mint()
             let row = RCSPostbackRecord()
@@ -466,17 +464,13 @@ final class RCSTests: XCTestCase {
             try await h.runJobs()
             let sms = try XCTUnwrap(h.texts.sent.last)
             XCTAssertEqual(sms.to, phone)
-            XCTAssertTrue(sms.body.hasPrefix("[Northwind Air]: "))
-            // A confirm needs an answer, and SMS replies for interactions are not wired: it is a secure handoff, never "1. Confirm".
-            XCTAssertTrue(sms.body.contains("https://viadere.com/h/"), sms.body)
+            // Over SMS an interaction is only ever UX_COPY SMS-04: who sent something and that it needs the app. No link, no content, no way to answer.
+            XCTAssertFalse(sms.body.contains("://"), sms.body)
             XCTAssertFalse(sms.body.contains("1. Confirm"))
-            XCTAssertFalse(sms.body.contains("Seat 14C"), "details stay out of the insecure channel when an answer is needed")
-            let handoff = try await XCTUnwrapAsync(await LinkTokenRecord.query(on: h.db).filter(\.$kind == "handoff").first())
-            XCTAssertEqual(handoff.interactionId, first.id.uuid)
-            let sentRow = try await XCTUnwrapAsync(await SMSOutboundRecord.query(on: h.db).first())
-            XCTAssertEqual(sentRow.bodyCiphertext.hasPrefix("v2."), true)
-            // The secret link is wiped from the queue after sending.
-            XCTAssertEqual(try h.ctx.cipher.openString(sentRow.bodyCiphertext, context: "sms_outbound.body", rowId: sentRow.id!), "[removed]")
+            XCTAssertFalse(sms.body.contains("Seat 14C"), "details stay out of the insecure channel")
+            XCTAssertEqual(sms.body, "Viadere: Northwind Air sent you something that needs the Viadere app. Open Viadere to respond.")
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0)
+            _ = first
             // Capability is cached for 24 h per phone; after that it is looked up again.
             _ = try await issue(h, s, .confirm(ConfirmPayload(title: "Second")))
             try await h.runJobs()
@@ -493,7 +487,7 @@ final class RCSTests: XCTestCase {
         }
     }
 
-    func testInformationalInteractionsFallBackToPlainSMSText() async throws {
+    func testEvenInformationalInteractionsOnlyProduceTheOpenViadereNoticeOverSMS() async throws {
         try await withRCS { h, http in
             http.setCapability(404)
             let s = try await scenario(h)
@@ -501,9 +495,10 @@ final class RCSTests: XCTestCase {
             try await h.runJobs()
             try await h.runJobs()
             let sms = try XCTUnwrap(h.texts.sent.last)
-            XCTAssertEqual(sms.body, "[Northwind Air]: Out for delivery. Arriving 2-4 pm")
-            XCTAssertFalse(sms.body.contains("/h/"))
-            try await eq(try await LinkTokenRecord.query(on: h.db).filter(\.$kind == "handoff").count(), 0)
+            // A number linked by text proves control of the number only (ADR-0027 section 2): no interaction content over SMS.
+            XCTAssertEqual(sms.body, "Viadere: Northwind Air sent you something that needs the Viadere app. Open Viadere to respond.")
+            XCTAssertFalse(sms.body.contains("Out for delivery") || sms.body.contains("2-4"))
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0)
         }
     }
 
@@ -522,8 +517,8 @@ final class RCSTests: XCTestCase {
             let bodies = h.texts.sent.map(\.body)
             XCTAssertEqual(bodies.count, 3)
             for body in bodies {
-                XCTAssertTrue(body.contains("https://viadere.com/h/"), body)
-                XCTAssertTrue(body.lowercased().contains("never asks you to approve by text"), body)
+                XCTAssertEqual(body, "Viadere: Northwind Air sent you something that needs the Viadere app. Open Viadere to respond.")
+                XCTAssertFalse(body.contains("://"), body)
                 for leak in ["999.00", "Online Banking", "9,000", "1234", "Reply", "1. ", "YES"] { XCTAssertFalse(body.contains(leak), "\(leak) in \(body)") }
             }
             XCTAssertEqual(http.sends.count, 0)
@@ -608,7 +603,7 @@ final class RCSTests: XCTestCase {
             try await h.runJobs()
             try await h.runJobs()
             XCTAssertEqual(h.texts.sent.count - before, 1)
-            XCTAssertTrue(h.texts.sent.last!.body.contains("https://viadere.com/h/"))
+            XCTAssertEqual(h.texts.sent.last!.body, "Viadere: Northwind Air sent you something that needs the Viadere app. Open Viadere to respond.")
             // The dead RCS menu can no longer be used.
             try await isTrue(try await RCSPostbackRecord.query(on: h.db).all().allSatisfy { $0.state != "open" || $0.interactionId != rows[0].interactionId })
         }
@@ -717,9 +712,9 @@ final class RCSTests: XCTestCase {
                                           purpose: .transactional, payload: .confirm(ConfirmPayload(title: "Hi")), sensitivity: .standard,
                                           allowedChannels: [.sms, .rcs], createdAt: h.clock.now(), expiresAt: h.clock.now().addingTimeInterval(600),
                                           idempotencyKey: "x", challenge: .generate(), kind: .confirm)
-            let sms = registry.sms.render(interaction, business: business, handoffURL: nil)
-            XCTAssertEqual(sms.text, ChannelRenderer.sms(interaction, business: business, handoffURL: nil).body)
-            let rcs = registry.rcs.render(interaction, business: business, handoffURL: nil)
+            let sms = registry.sms.render(interaction, business: business)
+            XCTAssertEqual(sms.text, ChannelRenderer.sms(interaction, business: business).body)
+            let rcs = registry.rcs.render(interaction, business: business)
             XCTAssertEqual(rcs.suggestions.map(\.text), ["Confirm", "Decline"])
             XCTAssertEqual(rcs.suggestions.compactMap { s -> RCSPostbackTarget? in if case .reply(let t) = s.action { t } else { nil } },
                            [.decision(.confirm), .decision(.decline)])
@@ -760,7 +755,7 @@ final class RCSTests: XCTestCase {
             let interaction = Interaction(businessId: business.id, scope: RelationshipScope(consumerId: ConsumerID(), relationshipId: RelationshipID()),
                                           purpose: .security, payload: .authorize(AuthorizePayload.sample()), sensitivity: .high, allowedChannels: [.appleMessagesForBusiness],
                                           createdAt: h.clock.now(), expiresAt: h.clock.now().addingTimeInterval(300), idempotencyKey: "x", challenge: .generate(), kind: .authorize)
-            let rendering = amb.render(interaction, business: business, handoffURL: nil)
+            let rendering = amb.render(interaction, business: business)
             XCTAssertTrue(rendering.suggestions.isEmpty)
             XCTAssertTrue(rendering.isSecureHandoff)
             // The router can never choose it: AMB is not a delivery path for any interaction.

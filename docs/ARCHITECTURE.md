@@ -92,7 +92,7 @@ Engine (pure): idempotency → opt-out keywords → OPTED_OUT gate → HELP → 
         (menu digits only with an active, unexpired, current menu; @handle/code/name resolution
          via DirectoryLookup; explicit confirmation; verbatim forwarding in CONNECTED)
 Engine → GatewayTransition{context, effects:[sendSMS, openSession, forwardToBusiness, closeSession,
-                                              sendAccountLink, sendSecureHandoff, recordConsent, audit…]}
+                                              recordConsent, audit…]}
 Server: CAS-persist context (revision) → execute effects in order (outbound queue keeps ordering/retries)
 Business reply ──POST /v1/business/messages──▶ Server → engine.deliverBusinessMessage(…)
         → "[Business]: text" only if it belongs to the active session, otherwise holdBusinessMessage (history only)

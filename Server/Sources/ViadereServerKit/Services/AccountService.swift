@@ -10,11 +10,10 @@ struct AccountService {
     // MARK: Phone links
 
     func phoneLinks(for consumer: ConsumerID) async throws -> [PhoneLink] {
-        try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$state == "verified")
-            .sort(\.$createdAt, .ascending).all().compactMap { link in
-                link.id.map { PhoneLink(id: PhoneLinkID($0), maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt,
-                                        usableFrom: link.usableFrom.flatMap { $0 > ctx.now ? $0 : nil }) }
-            }
+        let service = PhoneLinkService(db: db, ctx: ctx)
+        return try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == consumer.uuid)
+            .filter(\.$state ~~ ["verified", PhoneLinkService.statePendingTransfer]).sort(\.$createdAt, .ascending).all()
+            .map { service.dto($0, now: ctx.now) }
     }
 
     func removePhoneLink(principal: ConsumerPrincipal, id: PhoneLinkID) async throws {
@@ -27,6 +26,7 @@ struct AccountService {
             link.verifiedPhoneHash = nil
             link.otpHash = nil
             try await link.update(on: tx)
+            try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$phoneHash == link.phoneHash).delete()
             // Active SMS threads for the number stop being attributed to this account immediately.
             try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == link.phoneHash).set(\.$consumerId, to: nil).update()
             _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.removed", principal: principal, subjectType: "phone_link", subjectId: id.description)
@@ -110,6 +110,8 @@ struct AccountService {
                 link.phoneHash = SecureToken.hash("deleted:" + (link.id?.uuidString ?? ""))
                 try await link.update(on: tx)
             }
+            // A begun phone link is a pending secret: it goes with the account (ADR-0026 §5).
+            try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$consumerId == id).delete()
             // Queued or delivered channel messages addressed to this person.
             for row in try await ChannelOutboundRecord.query(on: tx).filter(\.$consumerId == id).all() {
                 row.phoneCiphertext = try ctx.cipher.seal("[deleted]", context: "channel_outbound.phone", rowId: row.id!)

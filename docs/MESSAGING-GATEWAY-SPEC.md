@@ -44,7 +44,7 @@ Backend outputs typed interaction objects independent of transport:
 - `message`, `choose`, `reply`, `confirm`, `authenticate`, `authorize`, `acknowledge`, `status`, `reward`, `ticket`.
 - Example choice payload: interaction_id, session_id, business_id, prompt, options [{id,label}], expiration, sensitivity, fallback, idempotency_key.
 - SMS adapter renders numbered options; RCS adapter may render suggested replies/cards; AMB adapter may render permitted pickers/quick replies; native iOS uses notification actions or in-app flows.
-- If a channel cannot safely express an interaction, issue a secure, short-lived app/web handoff. Do not downgrade device-bound MFA, payment approval, or sensitive authorization to a simple SMS YES/NO.
+- If a channel cannot safely express an interaction, tell the customer to open the Viadere app (decision 9: no link, no code and no token is ever texted). Do not downgrade device-bound MFA, payment approval, or sensitive authorization to a simple SMS YES/NO.
 - Business APIs/webhooks: verified credentials, tenant-scoped endpoints, signed webhook events, retries, idempotency, correlation IDs, rate limits, event versioning, and delivery acknowledgments.
 - Proposed implementation: C#/.NET backend on Azure, Swift/SwiftUI consumer app, APNs, optional ActivityKit/PassKit, SMS provider initially; Android/FCM later. These are architectural preferences, not deployment commitments.
 

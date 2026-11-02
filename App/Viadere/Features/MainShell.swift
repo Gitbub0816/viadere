@@ -94,14 +94,6 @@ struct MainShell: View {
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
-        .sheet(isPresented: Binding(get: { model.pendingHandoff != nil }, set: { if !$0 { model.dismissHandoff() } })) {
-            // A `/h/` link (F-08): confirm first; the token is redeemed only by Open.
-            if let confirmation = model.pendingHandoff {
-                HandoffConfirmationSheet(appModel: model, confirmation: confirmation)
-                    .presentationDetents([.medium, .large])
-                    .presentationBackground(ViadereColor.background)
-            }
-        }
         .sheet(item: $model.pendingVerificationSession) { pending in
             // A business's "Verify with Viadere" button or QR (`/v/…`).
             VerificationSessionSheet(pending: pending)

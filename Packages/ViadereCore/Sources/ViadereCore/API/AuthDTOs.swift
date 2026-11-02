@@ -163,22 +163,6 @@ public struct AuthRefreshRequest: Codable, Sendable, Hashable {
     public init(refreshToken: String) { self.refreshToken = refreshToken }
 }
 
-/// Redeems a secure-handoff token (`https://viadere.com/h/{token}`) inside the app.
-public struct HandoffRedeemRequest: Codable, Sendable, Hashable {
-    public var token: String
-    public init(token: String) { self.token = token }
-}
-
-/// What the app should continue after redeeming a handoff token.
-public struct HandoffRedeemResponse: Codable, Sendable, Hashable {
-    public var purpose: HandoffPurpose
-    public var interactionId: InteractionID?
-    public init(purpose: HandoffPurpose, interactionId: InteractionID? = nil) {
-        self.purpose = purpose
-        self.interactionId = interactionId
-    }
-}
-
 // MARK: - Devices
 
 /// Server challenge for device enrollment.
@@ -498,27 +482,42 @@ public enum DeviceEnrollment {
 
 // MARK: - Phone links
 
-public struct PhoneLinkStartRequest: Codable, Sendable, Hashable {
+/// Begins a phone link by customer-originated text (ADR-0027). Device-signed, trusted device only.
+public struct PhoneLinkMOBeginRequest: Codable, Sendable, Hashable {
     public var phone: PhoneNumber
     public init(phone: PhoneNumber) { self.phone = phone }
 }
 
-public struct PhoneLinkStartResponse: Codable, Sendable, Hashable {
+/// The challenge the app shows: the person sends `PhoneLinkMO.prefill(nonce:)` **from the phone with that number** to `sendTo`.
+/// The nonce is a secret for `PhoneLinkMO.ttl`; it is shown only on the screen of the trusted device that asked for it and is never
+/// sent to the phone by Viadere.
+public struct PhoneLinkMOBeginResponse: Codable, Sendable, Hashable {
     public var phoneLinkId: PhoneLinkID
+    public var nonce: String
+    /// The Viadere number to text, E.164.
+    public var sendTo: String
     public var expiresAt: Date
-    public init(phoneLinkId: PhoneLinkID, expiresAt: Date) {
+    public init(phoneLinkId: PhoneLinkID, nonce: String, sendTo: String, expiresAt: Date) {
         self.phoneLinkId = phoneLinkId
+        self.nonce = nonce
+        self.sendTo = sendTo
         self.expiresAt = expiresAt
     }
+    /// The text to put in the compose sheet (or to copy when there is none).
+    public var prefill: String { PhoneLinkMO.prefill(nonce: nonce) }
 }
 
-public struct PhoneLinkVerifyRequest: Codable, Sendable, Hashable {
-    public var phoneLinkId: PhoneLinkID
-    /// 6-digit code sent by SMS.
-    public var code: String
-    public init(phoneLinkId: PhoneLinkID, code: String) {
-        self.phoneLinkId = phoneLinkId
-        self.code = code
+/// Where a begun link stands. The app polls until `verified` or `expired`; a text it cannot see being sent is never reported as failed
+/// before the challenge expires.
+public enum PhoneLinkMOState: String, Codable, Sendable { case pending, verified, expired }
+
+public struct PhoneLinkMOStatus: Codable, Sendable, Hashable {
+    public var state: PhoneLinkMOState
+    /// Present once `verified`. `assurance` on it is `PhoneLinkMO.assuranceLabel`: control of the number, never a factor.
+    public var link: PhoneLink?
+    public init(state: PhoneLinkMOState, link: PhoneLink? = nil) {
+        self.state = state
+        self.link = link
     }
 }
 
@@ -532,14 +531,18 @@ public struct PhoneLink: Codable, Sendable, Hashable, Identifiable {
     public var maskedPhone: String
     public var verifiedAt: Date
     public var usableFrom: Date?
-    public init(id: PhoneLinkID, maskedPhone: String, verifiedAt: Date, usableFrom: Date? = nil) {
+    /// How the number was proven. `phone_control_mo`: a text sent from the phone itself (ADR-0027); control of the number only, never an
+    /// authentication factor, and the number receives on-ramp texts only. `nil` for links made by older builds.
+    public var assurance: String?
+    public init(id: PhoneLinkID, maskedPhone: String, verifiedAt: Date, usableFrom: Date? = nil, assurance: String? = nil) {
         self.id = id
         self.maskedPhone = maskedPhone
         self.verifiedAt = verifiedAt
         self.usableFrom = usableFrom
+        self.assurance = assurance
     }
 
-    enum CodingKeys: String, CodingKey { case id, maskedPhone, verifiedAt, usableFrom }
+    enum CodingKeys: String, CodingKey { case id, maskedPhone, verifiedAt, usableFrom, assurance }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -547,35 +550,7 @@ public struct PhoneLink: Codable, Sendable, Hashable, Identifiable {
         maskedPhone = try c.decode(String.self, forKey: .maskedPhone)
         verifiedAt = try c.decode(Date.self, forKey: .verifiedAt)
         usableFrom = try c.decodeIfPresent(Date.self, forKey: .usableFrom)
-    }
-}
-
-/// What an SMS account-link token would link, shown **before** redeeming it
-/// (`GET /v1/sms/link-tokens/{token}/preview`; device-signed, rate-limited, does not consume the token).
-/// The app must show `maskedPhone` in full with "This is my phone" and a warning that anyone who can read this number's
-/// texts will see this account's messages.
-public struct SMSLinkPreview: Codable, Sendable, Hashable {
-    public var maskedPhone: String
-    public var expiresAt: Date
-    public init(maskedPhone: String, expiresAt: Date) {
-        self.maskedPhone = maskedPhone
-        self.expiresAt = expiresAt
-    }
-}
-
-/// Redeem an SMS account-link token from the app (device-signed) after previewing it.
-public struct SMSLinkRedeemRequest: Codable, Sendable, Hashable {
-    /// Token from the `https://viadere.com/l/{token}` link.
-    public var token: String
-    /// Explicit confirmation of the last 4 digits of the phone being linked.
-    public var confirmPhoneLast4: String
-    /// The `maskedPhone` from `SMSLinkPreview`, echoed back after the person confirmed it is their phone. Optional on the wire
-    /// (the app confirms from the preview and sends `confirmPhoneLast4`); when present it must match exactly.
-    public var confirmMaskedPhone: String?
-    public init(token: String, confirmPhoneLast4: String, confirmMaskedPhone: String? = nil) {
-        self.token = token
-        self.confirmPhoneLast4 = confirmPhoneLast4
-        self.confirmMaskedPhone = confirmMaskedPhone
+        assurance = try c.decodeIfPresent(String.self, forKey: .assurance)
     }
 }
 
@@ -639,6 +614,11 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     /// A business confirmed a link session with this account (`subjectId` = the relationship id), or one this account completed was never confirmed
     /// and Viadere ended it (WP-C1).
     case businessLinked, businessLinkUnconfirmed
+    /// Someone asked to link this account's phone number to another account by text (ADR-0027 §1.3; `action == .keepPhoneNumber`,
+    /// `subjectId` = this account's link). The number stays here unless the request outlasts its waiting period unopposed.
+    case phoneTransferRequested
+    /// The account's phone number was unlinked by a text (`UNLINK`) sent from that number.
+    case phoneUnlinked
     case unknown
 
     public init(from decoder: any Decoder) throws {
@@ -654,6 +634,8 @@ public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
     case cancelDeviceReplacement
     /// `POST /v1/vault/recovery-release/{subjectId}/cancel` (a vault device or a trusted device).
     case cancelVaultRecovery
+    /// `POST /v1/phone-links/{subjectId}/keep` (a trusted device): refuses a pending transfer of this number.
+    case keepPhoneNumber
     case unknown
 
     public init(from decoder: any Decoder) throws {

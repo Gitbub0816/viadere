@@ -45,9 +45,7 @@ struct LinkDomainTests {
                 "no www alias on the strict paths")
     }
 
-    @Test func webLinksAreBuiltOnTheConfiguredHost() {
-        let token = String(repeating: "A", count: 43)
-        #expect(APIRoutes.Web.accountLinkURL(token: token, domain: staging)?.absoluteString == "https://viadere.cksites.dev/l/\(token)")
-        #expect(APIRoutes.Web.handoffURL(token: token, domain: staging)?.absoluteString == "https://viadere.cksites.dev/h/\(token)")
+    @Test func theOnRampPageIsOnTheConfiguredHostAndCarriesNoToken() {
+        #expect(APIRoutes.Web.getAppURL(domain: staging)?.absoluteString == "https://viadere.cksites.dev/get")
     }
 }

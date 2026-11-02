@@ -17,11 +17,14 @@ struct SecurityNotices {
         case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
         case recoveryCredentialAdded
         case businessLinked, businessLinkUnconfirmed
+        case phoneTransferRequested, phoneUnlinked
 
         var kind: SecurityNoticeTopic {
             switch self {
             case .newDevice: .newDevice
             case .newPhone: .newPhone
+            case .phoneTransferRequested: .phoneTransferRequested
+            case .phoneUnlinked: .phoneUnlinked
             case .appClip: .appClip
             case .deviceReplaced, .replacementCancelled: .deviceReplaced
             case .devicePendingReplacement: .devicePendingReplacement
@@ -56,6 +59,7 @@ struct SecurityNotices {
             case .devicePendingReplacement: .cancelDeviceReplacement
             case .recoveryStarted: .cancelRecovery
             case .vaultRecoveryRequested, .vaultRecoveryReleased: .cancelVaultRecovery
+            case .phoneTransferRequested: .keepPhoneNumber
             default: nil
             }
         }
@@ -64,6 +68,9 @@ struct SecurityNotices {
             switch self {
             case .newDevice: "A new device was added to your Viadere account. If this wasn't you, open Viadere and remove it."
             case .newPhone: "A phone number was linked to your Viadere account. If this wasn't you, open Viadere and remove it."
+            case .phoneTransferRequested:
+                "Someone asked to link a phone number on your Viadere account to another Viadere account. If that number is still yours, keep it."
+            case .phoneUnlinked: "Your phone number was unlinked by a text from that number."
             case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
             case .deviceReplaced: "A device on your Viadere account was set up again. If this wasn't you, open Viadere and review your devices."
             case .devicePendingReplacement:

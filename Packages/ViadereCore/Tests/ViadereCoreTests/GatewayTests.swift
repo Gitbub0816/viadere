@@ -121,7 +121,7 @@ struct GatewayTests {
         let h = GatewayHarness(linked: false)
         let t = await h.send("hello")
         #expect(h.state == .unlinked)
-        #expect(t.smsBodies.last?.contains("1. Link your account\n2. Find a business\n3. Help\n4. More options") == true)
+        #expect(t.smsBodies.last?.contains("1. Get the Viadere app\n2. Find a business\n3. Help\n4. More options") == true)
     }
 
     // MARK: Acceptance 2 / spec §19 #8 — digits only with an active menu
@@ -223,22 +223,22 @@ struct GatewayTests {
         }
     }
 
-    // MARK: Acceptance 4 — account link flow
+    // MARK: Acceptance 4 — linking happens in the app (ADR-0027), nothing is texted
 
-    @Test("Unlinked user must link before routing; pending destination survives linking")
+    @Test("Unlinked user is pointed at the app before routing; the held destination survives the in-app link")
     func linkFlow() async {
         let h = GatewayHarness(linked: false)
         await h.send("Hi")
         let t = await h.send("@amazon I need help with my order")
         #expect(h.state == .confirmDestination)
         let c = await h.send("1")
-        #expect(h.state == .linkPending)
-        #expect(c.effects.contains(.sendAccountLink))
+        #expect(h.state == .unlinked)
+        #expect(c.smsBodies.last?.contains(GatewayConfiguration().getAppURL) == true)
         #expect(h.forwards(c).isEmpty)
         #expect(h.context.pending?.message == "I need help with my order")
         _ = t
 
-        // While pending, digits never route.
+        // Digits never route while unlinked.
         let d = await h.send("1")
         #expect(h.forwards(d).isEmpty)
 
@@ -251,22 +251,11 @@ struct GatewayTests {
         #expect(h.forwards(done).map(\.2) == ["I need help with my order"])
     }
 
-    @Test("Expired link-pending falls back to UNLINKED")
-    func linkExpiry() async {
-        let h = GatewayHarness(linked: false)
-        await h.send("Hi")
-        await h.send("1")
-        #expect(h.state == .linkPending)
-        await h.send("Hi", advance: 16 * 60)
-        #expect(h.state == .unlinked)
-        #expect(h.context.menu?.kind == .unlinkedMain)
-    }
-
-    @Test func accountHelpIsHandedOffSecurely() async {
+    @Test func accountHelpPointsAtTheAppWithoutALink() async {
         let h = GatewayHarness()
         await h.send("Hi")
         let t = await h.send("3")
-        #expect(t.effects.contains(.sendSecureHandoff(.accountHelp)))
+        #expect(t.smsBodies.last == GatewayCopy.openAppForAccount)
     }
 
     // MARK: Acceptance 5 & 9 — confirm, route, attributed replies

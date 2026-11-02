@@ -43,7 +43,7 @@ enum WebRoutes {
             let appID = "\(ctx.config.appleTeamID).\(ctx.config.appBundleID)"
             let clipID = "\(ctx.config.appleTeamID).\(ctx.config.appClipBundleID)"
             let json: [String: Any] = [
-                // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, account link, handoff, Approve enrollment, link sessions and
+                // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, the retired account-link and handoff prefixes (kept one release so old texts open the app on a "no longer used" screen), Approve enrollment, link sessions and
                 // Loop install links and verification sessions (`/v/`, the "Verify with Viadere" button).
                 // Fragments (`#es=`) are never sent to a server; the matching rules ignore them.
                 "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"], ["/": "/v/*"]]]]],
@@ -58,15 +58,11 @@ enum WebRoutes {
         }
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("c", ":code", use: connectPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("v", ":code", use: verificationSessionPage)
-        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("l", ":token") { req in
-            try await tokenPage(req, kind: "accountLink", title: "Link your phone",
-                body: "<p>To finish linking this phone number, open the Viadere app, sign in with your passkey, and confirm the last four digits of your number when asked.</p><p class=\"muted\">Viadere will never ask you to approve a payment or sign-in by text message.</p>")
-        }
+        // Retired links (ADR-0027): `/l/…` and `/h/…` from texts sent by older builds. Nothing is looked up; the token is never read.
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("l", ":token", use: retiredLinkPage)
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("h", ":token", use: retiredLinkPage)
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("get", use: getAppPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("lp", ":loopId", use: loopInstallPage)
-        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("h", ":token") { req in
-            try await tokenPage(req, kind: "handoff", title: "Continue in Viadere",
-                body: "<p>For your security, this step is completed in the Viadere app. Open the app to continue.</p><p class=\"muted\">Details are never shown on this page.</p>")
-        }
     }
 
     // MARK: Pages
@@ -150,16 +146,26 @@ enum WebRoutes {
         return page(title: "Continue in Viadere", head: head, body: body, ctx: ctx)
     }
 
-    static func tokenPage(_ req: Request, kind: String, title: String, body: String) async throws -> Response {
+    /// UX_COPY S-LINK-RETIRED: an old text link opens the app (universal link) or this page. Viadere no longer texts links that sign you in,
+    /// link you or ask for a decision.
+    @Sendable
+    static func retiredLinkPage(_ req: Request) async throws -> Response {
+        page(title: "This link is no longer used", body: "<p>Open Viadere to see your requests.</p><p class=\"muted\">Viadere never asks you to approve a payment or sign-in by text message.</p>",
+             status: .gone, ctx: req.ctx)
+    }
+
+    /// The static on-ramp page that "get Viadere" texts point at (UX_COPY SMS-01). No token, no query, nothing about the visitor.
+    @Sendable
+    static func getAppPage(_ req: Request) async throws -> Response {
         let ctx = req.ctx
-        let state = try await PhoneLinkService(db: req.db, ctx: ctx).view(token: req.parameters.get("token") ?? "", kind: kind)
-        switch state {
-        case .valid: return page(title: title, body: body, ctx: ctx)
-        case .expired, .used:
-            return page(title: "Link expired", body: "<p>This link has expired or was already used. Text Viadere to get a new one.</p>", status: .gone, ctx: ctx)
-        case .unknown:
-            return page(title: "Link not found", body: "<p>This link isn't valid. Text Viadere to get a new one.</p>", status: .notFound, ctx: ctx)
+        var head = ""
+        var body = "<p>Viadere is a trusted way to connect with verified businesses. Get the app to message businesses, approve requests and keep your account private.</p>"
+        if let storeID = ctx.config.appStoreID, storeID.allSatisfy(\.isNumber) {
+            head = "<meta name=\"apple-itunes-app\" content=\"app-id=\(storeID)\">"
+            body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
         }
+        body += "<p class=\"muted\">Viadere never sends you a code or a sign-in link by text.</p>"
+        return page(title: "Get Viadere", head: head, body: body, ctx: ctx)
     }
 
     static func escape(_ text: String) -> String {

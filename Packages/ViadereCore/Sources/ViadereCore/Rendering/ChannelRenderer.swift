@@ -125,13 +125,13 @@ public enum ChannelRenderer {
 
     // MARK: SMS
 
-    /// Renders for SMS. `handoffURL` is a short-lived secure link (app universal link or web) for
-    /// interactions that cannot be completed by text. `page` pages long `choose` lists.
-    public static func sms(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?, page: Int = 0) -> SMSRendering {
+    /// Renders for SMS. Interactions that cannot be completed by text say "Open the Viadere app": no link, no code and no token ever
+    /// appears in a rendering (decision 9, ADR-0027). `page` pages long `choose` lists.
+    public static func sms(_ interaction: Interaction, business: BusinessSummary, page: Int = 0) -> SMSRendering {
         let name = SMSEncoding.field(business.displayName, maxLength: 40)
         let prefix = "[\(name)]: "
         if !AssurancePolicy.canPresentInline(interaction, on: .sms) {
-            return finish(prefix + secureHandoffText(interaction, url: handoffURL), choices: [], handoff: true)
+            return finish(prefix + secureHandoffText(interaction), choices: [], handoff: true)
         }
         switch interaction.payload {
         case .confirm(let p):
@@ -159,16 +159,15 @@ public enum ChannelRenderer {
         case .reward(let p):
             var text = prefix + SMSEncoding.field(p.title, maxLength: 80)
             if let details = p.details { text += ". " + SMSEncoding.field(details, maxLength: 160) }
-            text += handoffURL.map { " Redeem in Viadere: \($0.absoluteString)" } ?? " Redeem in the Viadere app."
+            text += " Redeem in the Viadere app."
             return finish(text, choices: [], handoff: false)
         case .ticket(let p):
-            let text = prefix + SMSEncoding.field(p.title, maxLength: 80)
-                + (handoffURL.map { ". View your ticket: \($0.absoluteString)" } ?? ". View your ticket in the Viadere app.")
+            let text = prefix + SMSEncoding.field(p.title, maxLength: 80) + ". View your ticket in the Viadere app."
             return finish(text, choices: [], handoff: false)
         case .message(let p):
             return finish(prefix + SMSEncoding.businessLine(p.text), choices: [], handoff: false)
         case .authenticate, .authorize, .unknown:
-            return finish(prefix + secureHandoffText(interaction, url: handoffURL), choices: [], handoff: true)
+            return finish(prefix + secureHandoffText(interaction), choices: [], handoff: true)
         }
     }
 
@@ -193,15 +192,14 @@ public enum ChannelRenderer {
         return choices
     }
 
-    static func secureHandoffText(_ interaction: Interaction, url: URL?) -> String {
+    static func secureHandoffText(_ interaction: Interaction) -> String {
         let what: String
         switch interaction.kind {
         case .authenticate: what = "A sign-in request needs your review."
         case .authorize: what = "An approval request needs your review."
         default: what = "A secure request needs your review."
         }
-        let where_ = url.map { " Review it securely: \($0.absoluteString)" } ?? " Open the Viadere app to review it."
-        return what + where_ + " Viadere never asks you to approve by text."
+        return what + " Open the Viadere app to review it. Viadere never asks you to approve by text."
     }
 
     private static func finish(_ body: String, choices: [SMSChoice], handoff: Bool) -> SMSRendering {
@@ -211,17 +209,16 @@ public enum ChannelRenderer {
     // MARK: RCS
 
     /// Renders for an RCS-like channel with suggested replies.
-    public static func rcs(_ interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> RCSRendering {
+    public static func rcs(_ interaction: Interaction, business: BusinessSummary) -> RCSRendering {
         let name = SMSEncoding.field(business.displayName, maxLength: 40)
         func postback(_ target: String) -> String { "viadere:\(interaction.id):\(target)" }
         func reply(_ text: String, _ target: String) -> RCSSuggestion {
             RCSSuggestion(kind: .reply, text: SMSEncoding.field(text, maxLength: 25), postbackData: postback(target), url: nil)
         }
         if !AssurancePolicy.canPresentInline(interaction, on: .rcs) {
-            let suggestions = handoffURL.map { [RCSSuggestion(kind: .openURL, text: "Review securely", postbackData: nil, url: $0)] } ?? []
-            return RCSRendering(text: "[\(name)]: " + secureHandoffText(interaction, url: nil), suggestions: suggestions, isSecureHandoff: true)
+            return RCSRendering(text: "[\(name)]: " + secureHandoffText(interaction), suggestions: [], isSecureHandoff: true)
         }
-        let sms = sms(interaction, business: business, handoffURL: handoffURL)
+        let sms = sms(interaction, business: business)
         var suggestions: [RCSSuggestion] = []
         switch interaction.payload {
         case .confirm:

@@ -205,20 +205,16 @@ struct OnboardingTests {
         #expect(model.step == .phone)
         #expect(services.preferences.bool(.protectionPromptShown))
 
-        model.setPhone("4805550123")
-        #expect(model.phoneRaw == "(480) 555-0123")
-        #expect(model.canSendCode)
-        await model.sendCode()
-        #expect(model.phoneStage == .verify)
-        model.setOTP("12a3-45")
-        #expect(model.otp == "12345")
-        #expect(!model.canVerify)
-        model.setOTP("000000")
-        await model.verifyCode()
-        #expect(model.errorMessage != nil)
-        model.setOTP("123456")
-        await model.verifyCode()
-        if case .linked = model.phoneStage {} else { Issue.record("expected linked") }
+        model.phoneLink.setPhone("4805550123")
+        #expect(model.phoneLink.raw == "(480) 555-0123")
+        #expect(model.phoneLink.canBegin)
+        await model.phoneLink.begin()
+        guard case .waiting(let challenge) = model.phoneLink.stage else { Issue.record("expected a challenge"); return }
+        #expect(challenge.prefill.hasPrefix("Link my number to my Viadere app VDR-"))
+        // The server binds the number when the person's text arrives; the app only polls.
+        await api.sentText(for: challenge.phoneLinkId)
+        await model.phoneLink.waitForText()
+        if case .linked = model.phoneLink.stage {} else { Issue.record("expected linked") }
 
         var finished = false
         model.onFinished = { finished = true }
@@ -461,27 +457,24 @@ struct DetailStoreTests {
         #expect(!model2.appLockEnabled)
     }
 
-    @Test func addingAndRedeemingPhones() async throws {
-        let services = await ViadereServices.mock()
+    @Test func linkingAPhoneByTextNeverTextsThePhoneAndWaitsForTheServer() async throws {
+        let api = MockViadereAPI(seed: false)
+        let services = await ViadereServices.mock(api: api)
         let model = SecuritySettingsViewModel(services: services)
-        await model.startAddPhone("123")
-        if case .failed = model.addPhoneStage {} else { Issue.record("expected failure for a short number") }
-        await model.startAddPhone("(480) 555-0123")
-        #expect(model.addPhoneStage == .awaitingCode)
-        await model.verifyAddPhone(code: "000000")
-        if case .failed = model.addPhoneStage {} else { Issue.record("expected failure for a wrong code") }
-        await model.startAddPhone("(480) 555-0123")
-        await model.verifyAddPhone(code: "123456")
-        #expect(model.addPhoneStage == .idle)
+        model.addPhone.setPhone("123")
+        #expect(!model.addPhone.canBegin, "a short number cannot begin")
+        model.addPhone.setPhone("(480) 555-0123")
+        await model.addPhone.begin()
+        guard case .waiting(let challenge) = model.addPhone.stage else { Issue.record("expected waiting"); return }
+        #expect(model.addPhone.composeRequest == PhoneLinkViewModel.ComposeRequest(recipient: MockViadereAPI.mockSendTo, body: challenge.prefill))
+        #expect(model.addPhone.statusText?.hasPrefix("Waiting for your text from") == true)
+        #expect(model.phones.isEmpty)
+        await model.addPhone.poll()
+        if case .waiting = model.addPhone.stage {} else { Issue.record("still waiting until the text arrives") }
+        await api.sentText(for: challenge.phoneLinkId)
+        await model.addPhone.poll()
         #expect(model.phones.count == 1)
-        let token = String(repeating: "A", count: 43)
-        // The link needs a preview and an explicit "This is my phone" before anything is linked.
-        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: true)))
-        await model.loadAccountLinkPreview(token: token)
-        #expect(!(await model.redeemAccountLink(token: token, confirmedOwnPhone: false)))
-        #expect(model.phones.count == 1)
-        #expect(await model.redeemAccountLink(token: token, confirmedOwnPhone: true))
-        #expect(model.phones.count == 2)
+        #expect(model.phones.first?.assurance == "phone_control_mo")
     }
 
     @Test func settingsListsDevicesAndConsentHistory() async throws {

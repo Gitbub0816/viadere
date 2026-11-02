@@ -4,6 +4,7 @@ import Foundation
 public enum GatewayState: String, Codable, Sendable, CaseIterable {
     case new = "NEW"
     case unlinked = "UNLINKED"
+    /// Retired (ADR-0027): decodes from threads saved by older builds and is treated as `unlinked`.
     case linkPending = "LINK_PENDING"
     case idleMenu = "IDLE_MENU"
     case recentMenu = "RECENT_MENU"
@@ -138,6 +139,19 @@ public struct ConversationContext: Codable, Sendable, Hashable {
     public var isLinked: Bool { consumerId != nil }
 }
 
+/// What the provider says about whether the `From` number of an inbound message can be trusted (ADR-0027 §1.3). Only
+/// `.verified` (and `.unsupported`, unless the deployment requires an indicator) can bind a phone number to an account.
+public enum InboundSenderIndicator: String, Codable, Sendable {
+    /// The provider vouches for the sender (for example a passing caller-ID attestation).
+    case verified
+    /// The provider flags the sender as spoofed or unverified.
+    case suspectedSpoof
+    /// The provider offers an indicator but omitted it for this message.
+    case notProvided
+    /// The provider offers no indicator at all.
+    case unsupported
+}
+
 /// An inbound SMS from the provider webhook (after webhook authenticity is verified).
 public struct InboundSMS: Codable, Sendable, Hashable {
     public var providerMessageId: String
@@ -145,23 +159,32 @@ public struct InboundSMS: Codable, Sendable, Hashable {
     public var text: String
     /// Provider receive timestamp.
     public var receivedAt: Date
+    public var senderIndicator: InboundSenderIndicator
 
-    public init(providerMessageId: String, from: PhoneNumber, text: String, receivedAt: Date) {
+    public init(providerMessageId: String, from: PhoneNumber, text: String, receivedAt: Date,
+                senderIndicator: InboundSenderIndicator = .unsupported) {
         self.providerMessageId = providerMessageId
         self.from = from
         self.text = text
         self.receivedAt = receivedAt
+        self.senderIndicator = senderIndicator
+    }
+
+    enum CodingKeys: String, CodingKey { case providerMessageId, from, text, receivedAt, senderIndicator }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        providerMessageId = try c.decode(String.self, forKey: .providerMessageId)
+        from = try c.decode(PhoneNumber.self, forKey: .from)
+        text = try c.decode(String.self, forKey: .text)
+        receivedAt = try c.decode(Date.self, forKey: .receivedAt)
+        senderIndicator = try c.decodeIfPresent(InboundSenderIndicator.self, forKey: .senderIndicator) ?? .unsupported
     }
 }
 
 /// Why a session closed.
 public enum SessionCloseReason: String, Codable, Sendable {
     case switched, endedByUser, expired, optedOut, businessUnavailable
-}
-
-/// Purpose of a secure handoff link.
-public enum HandoffPurpose: String, Codable, Sendable {
-    case accountHelp, manageBusinesses, interaction
 }
 
 /// Redacted audit record emitted by the engine (never contains message text).
@@ -182,11 +205,6 @@ public enum GatewayEffect: Codable, Sendable, Hashable {
     case forwardToBusiness(businessId: BusinessID, sessionId: SessionID, text: String, providerMessageId: String)
     case openSession(businessId: BusinessID, sessionId: SessionID)
     case closeSession(businessId: BusinessID, sessionId: SessionID, reason: SessionCloseReason)
-    /// Create a single-use, short-TTL account-link token bound to this phone + conversation revision,
-    /// and send `GatewayCopy.accountLink(url:ttlMinutes:)`.
-    case sendAccountLink
-    /// Create a short-lived secure handoff link and send `GatewayCopy.secureHandoff(url:ttlMinutes:)`.
-    case sendSecureHandoff(HandoffPurpose)
     /// Persist an SMS consent change (opt-out / opt-in) with the keyword used.
     case recordConsent(optedOut: Bool, keyword: String, at: Date)
     /// A business message that must not be shown in the current thread context; store in history only.
@@ -221,7 +239,8 @@ public protocol DirectoryLookup: Sendable {
 public struct GatewayConfiguration: Sendable, Hashable {
     public var menuTTL: TimeInterval
     public var sessionIdleTTL: TimeInterval
-    public var linkTTL: TimeInterval
+    /// The static "get Viadere" page named in on-ramp texts (UX_COPY SMS-01). Never carries a token.
+    public var getAppURL: String
     /// When true (default), unlinked numbers may browse but not route messages to businesses.
     public var requireLinkForRouting: Bool
     /// Max provider message ids remembered for idempotency.
@@ -232,13 +251,13 @@ public struct GatewayConfiguration: Sendable, Hashable {
     /// (the menu is shown again). `0` disables the guard.
     public var menuRaceWindow: TimeInterval
 
-    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, linkTTL: TimeInterval = 15 * 60,
+    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, getAppURL: String = "https://viadere.com/get",
                 requireLinkForRouting: Bool = true, dedupMemory: Int = 50, maxForwardLength: Int = 1600,
                 menuRaceWindow: TimeInterval = 0) {
         self.menuRaceWindow = menuRaceWindow
         self.menuTTL = menuTTL
         self.sessionIdleTTL = sessionIdleTTL
-        self.linkTTL = linkTTL
+        self.getAppURL = getAppURL
         self.requireLinkForRouting = requireLinkForRouting
         self.dedupMemory = dedupMemory
         self.maxForwardLength = maxForwardLength

@@ -24,14 +24,6 @@ public struct ConsumerSession: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-extension SMSLinkPreview {
-    /// The last four digits shown in `maskedPhone`, or `nil` if the server's mask doesn't end in four digits.
-    public var last4: String? {
-        let digits = maskedPhone.filter { $0.isASCII && $0.isNumber }
-        return digits.count >= 4 ? String(digits.suffix(4)) : nil
-    }
-}
-
 /// Everything the UI and the extensions need from the server, as typed async calls.
 /// `LiveViadereAPI` talks HTTP; `MockViadereAPI` is an in-memory server for previews, tests and demos.
 public protocol ViadereAPI: Sendable {
@@ -84,12 +76,12 @@ public protocol ViadereAPI: Sendable {
     func regenerateRecoveryCodes(_ request: RecoveryCodesRegenerateRequest) async throws -> RecoveryCodeSet
 
     // MARK: Phones & sessions
-    func startPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkStartResponse
-    func verifyPhoneLink(id: PhoneLinkID, code: String) async throws -> PhoneLink
-    /// Read-only preview of what a `/l/{token}` link would link (`GET /v1/sms/link-tokens/{token}/preview`). Does not consume the token.
-    func previewPhoneLink(token: String) async throws -> SMSLinkPreview
-    /// Redeems the token after the person confirmed the previewed number: sends the last four digits and the exact masked number.
-    func redeemSMSLink(_ request: SMSLinkRedeemRequest) async throws -> PhoneLink
+    /// `POST /v1/phone-links/mo/begin`: a nonce the person sends **from their phone** to the Viadere number (ADR-0027). Nothing is texted to them.
+    func beginPhoneLink(phone: PhoneNumber) async throws -> PhoneLinkMOBeginResponse
+    /// `GET /v1/phone-links/{id}`: `pending`, `verified` (with the link) or `expired`.
+    func phoneLinkStatus(_ id: PhoneLinkID) async throws -> PhoneLinkMOStatus
+    /// `POST /v1/phone-links/{id}/keep`: refuses a pending transfer of this account's number to another account ("Keep my number").
+    func keepPhoneNumber(_ id: PhoneLinkID) async throws
     func phoneLinks() async throws -> [PhoneLink]
     func removePhoneLink(_ id: PhoneLinkID) async throws
     /// `POST /v1/phone-links/{id}/confirm`: makes a newly linked phone usable now (`ConfirmationProof`, subject `phoneLink`).
@@ -118,8 +110,6 @@ public protocol ViadereAPI: Sendable {
     func interactions(status: InteractionStatus?, cursor: String?) async throws -> Page<InteractionEnvelope>
     func interaction(_ id: InteractionID) async throws -> InteractionEnvelope
     func decide(_ id: InteractionID, _ request: DecideInteractionRequest) async throws -> InteractionOutcome
-    /// Redeems a `/h/{token}` secure-handoff link inside the app (`POST /v1/handoff/redeem`).
-    func redeemHandoff(token: String) async throws -> HandoffRedeemResponse
 
     // MARK: Conversations
     func conversations() async throws -> [ConversationSummary]

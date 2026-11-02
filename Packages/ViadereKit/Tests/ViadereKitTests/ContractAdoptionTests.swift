@@ -535,54 +535,48 @@ struct ConfirmationTests {
         #expect(try await api.devices().first { $0.id == target.id }?.approvalsLockedUntil != nil)
     }
 
-    @Test func linkFlowSendsBothConfirmationsAndShowsWhenThePhoneStartsWorking() async throws {
+    @Test func aNumberLinkedByTextWaitsItsPeriodAndCannotBeConfirmedEarly() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)
         let settings = SecuritySettingsViewModel(services: services)
         await settings.load()
-        await settings.loadAccountLinkPreview(token: "tok_abcdefghijklmnop")
-        guard case .ready(let preview) = settings.accountLinkPhase else { Issue.record("no preview"); return }
-        #expect(preview.maskedPhone == "+1 ••• ••• 0123" && preview.last4 == "0123")
-        #expect(await settings.redeemAccountLink(token: "tok_abcdefghijklmnop", confirmedOwnPhone: false) == false)
-        #expect(await settings.redeemAccountLink(token: "tok_abcdefghijklmnop", confirmedOwnPhone: true))
-
-        let request = try #require(await api.redeemRequests.first)
-        #expect(request.token == "tok_abcdefghijklmnop" && request.confirmPhoneLast4 == "0123" && request.confirmMaskedPhone == preview.maskedPhone)
+        settings.addPhone.setPhone("4805550123")
+        await settings.addPhone.begin()
+        guard case .waiting(let challenge) = settings.addPhone.stage else { Issue.record("expected a challenge"); return }
+        // The person sends the pre-filled text from the phone; the app learns it from the server.
+        await api.sentText(for: challenge.phoneLinkId)
+        await settings.addPhone.poll()
         let phone = try #require(settings.lastLinkedPhone)
+        #expect(phone.id == challenge.phoneLinkId && phone.assurance == "phone_control_mo")
         let usableFrom = try #require(phone.usableFrom)
-        #expect(usableFrom.timeIntervalSinceNow > 23 * 3_600)
-        #expect(settings.accountLinkResultMessage?.contains("starts working") == true)
-        #expect(settings.coolDownNote(for: phone)?.hasPrefix("Messages start working") == true)
-
-        // The only device is trusted, so it can confirm the phone now.
-        #expect(settings.canConfirm(phone))
+        #expect(usableFrom.timeIntervalSinceNow > 71 * 3_600)
+        #expect(settings.coolDownNote(for: phone)?.hasPrefix("Businesses can reach you by text there from") == true)
+        // ADR-0027: a trusted-device confirmation does not shorten the wait for a number linked by text.
+        #expect(!settings.canConfirm(phone))
         await settings.confirm(phone)
-        #expect(settings.errorMessage == nil)
-        #expect(settings.phones.first { $0.id == phone.id }?.usableFrom == nil)
-        #expect(await api.confirmationLog.map(\.subject) == [.phoneLink])
+        #expect(await api.confirmationLog.isEmpty)
     }
 
-    @Test func aWrongConfirmationIsRefusedByTheLinkRedemption() async throws {
-        let api = MockViadereAPI(seed: false)
-        _ = await ViadereServices.mock(api: api)
-        do {
-            _ = try await api.redeemSMSLink(SMSLinkRedeemRequest(token: "tok_abcdefghijklmnop", confirmPhoneLast4: "9999", confirmMaskedPhone: "+1 ••• ••• 0123"))
-            Issue.record("accepted a wrong confirmation")
-        } catch let error as APIError { #expect(error.code == .forbidden) }
-        #expect(await api.redeemRequests.isEmpty)
-    }
-
-    @Test func linkPreviewUsesCoresRouteAndDto() async throws {
+    @Test func phoneLinkingUsesCoresRoutesAndDtos() async throws {
         let env = try await ClientEnv()
-        let transport = FakeTransport { _, _ in
-            json(#"{"maskedPhone":"+1 ••• ••• 4821","expiresAt":"2027-01-15T08:00:00.000Z"}"#)
+        let id = PhoneLinkID()
+        let transport = FakeTransport { request, _ in
+            if request.method == .POST {
+                return json(#"{"phoneLinkId":"\#(id)","nonce":"VDR-7K3M9Q2X","sendTo":"+15550001111","expiresAt":"2027-01-15T08:10:00.000Z"}"#)
+            }
+            return json(#"{"state":"pending"}"#)
         }
         let (client, _) = env.client(transport: transport)
         let live = LiveViadereAPI(client: client)
-        let preview = try await live.previewPhoneLink(token: "tok_abcdefghijklmnop")
-        #expect(preview.last4 == "4821")
-        let request = try #require(transport.requests.first)
-        #expect(request.method == .GET && pathAndQuery(request.url) == "/v1/sms/link-tokens/tok_abcdefghijklmnop/preview")
+        let begun = try await live.beginPhoneLink(phone: PhoneNumber("+14805550123")!)
+        #expect(begun.prefill == "Link my number to my Viadere app VDR-7K3M9Q2X")
+        #expect(try await live.phoneLinkStatus(id).state == .pending)
+        try await live.keepPhoneNumber(id)
+        let requests = transport.requests
+        #expect(requests.count == 3)
+        #expect(requests[0].method == .POST && pathAndQuery(requests[0].url) == "/v1/phone-links/mo/begin")
+        #expect(requests[1].method == .GET && pathAndQuery(requests[1].url) == "/v1/phone-links/\(id)")
+        #expect(requests[2].method == .POST && pathAndQuery(requests[2].url) == "/v1/phone-links/\(id)/keep")
     }
 }
 

@@ -80,6 +80,13 @@ Role: **Pr** = Viadere as processor for the business; **Co** = Viadere as contro
 
 Account deletion (SECURITY §2.20) additionally: deletes P, T and E-routine auth rows for the account, deletes OIDC consents, appends `account_deleted` to the authority key log (revoking every key), and keeps E-high rows that contain no free text for their period (they hold keys, ids and signatures, needed to prove what a device signed; the legal basis under applicable US state law, e.g. security-and-integrity and legal-claims exceptions, is for counsel). The privacy notice says which evidence survives deletion, for how long and why. The consumer export (SECURITY §2.78) lists, by category with counts, businesses and times (never secrets or signatures): auth deliveries, `approval_results`, authority grants, OIDC consents, key-log entries (devices and dates), pause and fatigue state, reports, phone-link records. Consent list and revoke are in the app (ADR-0024 §8). Each new table has a deletion test (ST-PRIV-06).
 
+## Implementation notes (clean-up round, 2026-11-02)
+
+- Classes added to `RetentionClass`: `auth_secrets` (P; daily backstop of the minute sweep), `auth_delivery_metadata` (T; 30 days, 7-90, tenant may shorten, holdable) and `auth_evidence_routine` (E-routine; 30 days; reserved until those stores exist). Stores that exist today: `phone_link_mo_challenges` (P), `approve_requests`, `approve_deliveries`, `approve_freeze_events` (T), signed results (E-high), `link_tokens` (emptied; the 7-day class stays until the table is dropped). Tables of the delivery API and the authority attach to these classes when they are built.
+- **`approval_results` is realised as the evidence subset of the `approve_requests` row** (id, decision, key id, `result_ref`, `result_jws`, timestamps) instead of a new table: after 30 days the displayed details, challenge and device policy are erased and the row waits for the `signed_decisions` period (default 730 days, bounds 365-2555) in `RetentionClass.signedDecisions`. Moving it into a dedicated table later changes where the rows live, not the periods.
+- One-time purge: migration `AuthRetention.v1` (skipped while a legal hold is active; the sweep applies holds per scope afterwards). The old 400-day deletion in `ApproveRequestService.expireDue` is removed.
+- Tests: `AuthRetentionTests` (each store's period at 29/31 days, tenant shortening, holds, the migration, the P-class sweep).
+
 ## Consequences
 
 - `approve_requests` purge moves from 400 to 30 days; dispute evidence survives in `approval_results`.

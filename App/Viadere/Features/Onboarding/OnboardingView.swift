@@ -314,49 +314,30 @@ private struct PhoneStep: View {
             index: 3, title: stageTitle, message: stageMessage
         ) {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
-                switch vm.phoneStage {
-                case .entry:
-                    ViadereTextField("Mobile number", text: Binding(get: { vm.phoneRaw }, set: { vm.setPhone($0) }),
-                                     prompt: "(480) 555-0123", message: "We'll text a six-digit code.")
-                        .keyboardType(.phonePad)
-                        .textContentType(.telephoneNumber)
-                case .verify:
-                    ViadereOTPField(code: Binding(get: { vm.otp }, set: { vm.setOTP($0) }), isError: vm.errorMessage != nil)
-                    Button("Use a different number") { vm.editPhone() }
-                        .buttonStyle(.viadere(.quiet, fullWidth: false))
-                case .linked(let masked):
-                    ViadereNotice("\(masked) is linked. Texts from this number can now reach your verified businesses.", kind: .info)
-                }
+                // One text sent from the phone, never a code sent to it (ADR-0027).
+                PhoneLinkFlowView(vm: vm.phoneLink)
                 ErrorLine(message: vm.errorMessage)
             }
         } actions: {
-            switch vm.phoneStage {
-            case .entry:
-                Button(vm.isWorking ? "Sending…" : "Send code") { Task { await vm.sendCode() } }
-                    .buttonStyle(.viadere(.primary))
-                    .disabled(!vm.canSendCode)
-                Button("Skip for now") { vm.finish() }
-                    .buttonStyle(.viadere(.quiet))
-            case .verify:
-                Button(vm.isWorking ? "Verifying…" : "Verify") { Task { await vm.verifyCode() } }
-                    .buttonStyle(.viadere(.primary))
-                    .disabled(!vm.canVerify)
+            switch vm.phoneLink.stage {
             case .linked:
                 Button("Done") { vm.finish() }
                     .buttonStyle(.viadere(.primary))
+            case .entry, .waiting, .notReceived:
+                Button("Skip for now") { vm.finish() }
+                    .buttonStyle(.viadere(.quiet))
             }
         }
     }
 
     private var stageTitle: String {
-        if case .linked = vm.phoneStage { return "Phone linked" }
+        if case .linked = vm.phoneLink.stage { return "Phone linked" }
         return "Link your phone"
     }
 
     private var stageMessage: String {
-        switch vm.phoneStage {
-        case .entry: return "Optional. Link your number so businesses can reach you by text, and so you can text Viadere to find them. Approvals never happen by text."
-        case .verify: return "Enter the code we just texted you."
+        switch vm.phoneLink.stage {
+        case .entry, .waiting, .notReceived: return "Optional. Link your number so businesses can reach you by text, and so you can text Viadere to find them. Approvals never happen by text."
         case .linked: return "You can manage linked numbers any time in Settings."
         }
     }
