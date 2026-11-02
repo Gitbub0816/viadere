@@ -86,7 +86,11 @@ public struct NotificationActionHandler: Sendable {
             switch target {
             case .approveRequest(let id)?: pushTarget = .approveRequest(id)
             case .authDelivery(let id)?: pushTarget = .delivery(id)
-            default: return .openRequests
+            default:
+                // Nothing usable to refuse. Deny runs in the background (the app is not brought forward), so the person must be told that
+                // nothing was sent (N-09) rather than left believing the request was denied.
+                await notices.postDenyNotSent()
+                return .openRequests
             }
             do {
                 try await authDelivery.reduce(pushTarget, action: reduce)
