@@ -132,7 +132,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .devices: ["iphone", "ipad", "watch", "remove device", "trusted", "new device"]
         case .authenticator: ["passkeys", "passwords", "otp", "totp", "2fa", "codes", "autofill"]
         case .recovery: ["lost phone", "recover", "backup codes", "passkey", "account recovery"]
-        case .notifications: ["alerts", "sounds", "focus", "interrupt", "quiet", "mute"]
+        case .notifications: ["alerts", "sounds", "focus", "interrupt", "quiet", "mute", "quiet hours", "night", "sleep", "default level", "all businesses"]
         case .lockScreenDetails: ["preview", "amount", "lock screen", "privacy", "rich notifications"]
         case .businessNotifications: ["mute", "quiet", "silence", "offers", "per business"]
         case .loops: ["loops", "built by", "forms", "business requests"]

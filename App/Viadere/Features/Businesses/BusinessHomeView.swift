@@ -144,12 +144,12 @@ struct BusinessHomeView: View {
     private var connection: some View {
         let preferences = model.businesses.entry(business.id)?.preferences ?? entry.preferences
         let now = model.services.clock()
-        let preset = InterruptionPreset(preferences.effectiveMute(at: now))
+        let accountDefault = model.notificationSettings.settings.defaultLevel
         return VStack(alignment: .leading, spacing: 0) {
             ViadereSectionHeader("Your connection")
             ViadereRowGroup {
                 Button { showingSettings = true } label: {
-                    ViadereRow("Notifications", subtitle: preset.summary(until: preferences.muteUntil, now: now)) {
+                    ViadereRow("Notifications", subtitle: preferences.levelSummary(accountDefault: accountDefault, at: now)) {
                         ViadereIconTile(systemName: "bell")
                     }
                 }

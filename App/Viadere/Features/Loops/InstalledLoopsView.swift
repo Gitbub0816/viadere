@@ -55,6 +55,7 @@ struct InstalledLoopsList: View {
         } else {
             ViadereRowGroup {
                 ForEach(Array(library.loops.enumerated()), id: \.element.loopId) { index, loop in
+                    VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: ViadereSpace.xs) {
                         NavigationLink {
                             LoopDetailView(model: model, loopId: loop.loopId, source: .directory, backTitle: "Your Loops")
@@ -72,6 +73,21 @@ struct InstalledLoopsList: View {
                             .buttonStyle(.viadere(.secondary, fullWidth: false))
                             .accessibilityLabel(Text("\(loop.openInstances.isEmpty ? "Open" : "Resume") \(LoopLibraryViewModel.title(loop))"))
                         }
+                    }
+                    // This Loop's own alerts in Alerts (F-4): one chip per Loop, off unless the customer turned it on. Never the business's
+                    // other alerts, offers or messages.
+                    HStack {
+                        ViadereToggleChip("Alerts", isOn: loop.alertsEnabled, hint: LoopAlertsCopy.detail(business: loop.business.safeName)) {
+                            Task { await library.setAlerts(loop.loopId, enabled: !loop.alertsEnabled) }
+                        }
+                        Text(LoopAlertsCopy.state(enabled: loop.alertsEnabled))
+                            .font(ViadereType.footnote)
+                            .foregroundStyle(ViadereColor.textTertiary)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 54)
+                    .padding(.bottom, ViadereSpace.xs)
                     }
                     if index < library.loops.count - 1 { ViadereHairline(inset: 54) }
                 }

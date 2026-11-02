@@ -164,6 +164,20 @@ struct NotificationSettingsKitTests {
         #expect(InterruptionPreset.balanced.followingSummary() == "Following your default: Balanced")
     }
 
+    @Test func businessSummariesSayWhetherTheyFollowTheDefault() {
+        let id = BusinessID()
+        let inheriting = BusinessPreferences(businessId: id)
+        #expect(inheriting.followsDefault(at: start))
+        #expect(inheriting.levelSummary(accountDefault: .promotional, at: start) == "Following your default: Balanced")
+        #expect(inheriting.preset(accountDefault: .allNonEssential, at: start) == .essentials)
+        let own = BusinessPreferences(businessId: id, muteLevel: MuteLevel.none, hasOwnLevel: true)
+        #expect(!own.followsDefault(at: start))
+        #expect(own.levelSummary(accountDefault: .allNonEssential, at: start) == "Everything")
+        let ended = BusinessPreferences(businessId: id, muteLevel: .allNonEssential, muteUntil: start.addingTimeInterval(-5), hasOwnLevel: true)
+        #expect(ended.followsDefault(at: start))
+        #expect(ended.preset(accountDefault: .promotional, at: start) == .balanced)
+    }
+
     // MARK: Alerts from an installed Loop (F-4)
 
     @Test func theInstallSheetOffersAlertsOffAndSendsTheChoice() async throws {

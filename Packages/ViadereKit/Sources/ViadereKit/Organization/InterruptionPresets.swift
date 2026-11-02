@@ -111,3 +111,19 @@ extension PermissionCopy {
         }
     }
 }
+
+extension BusinessPreferences {
+    /// The named level in force for this business: its own, else the account-wide default.
+    public func preset(accountDefault: MuteLevel, at now: Date) -> InterruptionPreset {
+        InterruptionPreset(effectiveLevel(accountDefault: accountDefault, at: now))
+    }
+
+    /// Whether the business follows the account-wide default now (no level of its own, or a timed level that ended).
+    public func followsDefault(at now: Date) -> Bool { !hasOwnLevel || (muteUntil.map { $0 <= now } ?? false) }
+
+    /// The business's state in one phrase: "Balanced until 6 PM" for a level it has, "Following your default: Balanced" otherwise.
+    public func levelSummary(accountDefault: MuteLevel, at now: Date, calendar: Calendar = .current) -> String {
+        let preset = preset(accountDefault: accountDefault, at: now)
+        return followsDefault(at: now) ? preset.followingSummary() : preset.summary(until: muteUntil, now: now, calendar: calendar)
+    }
+}

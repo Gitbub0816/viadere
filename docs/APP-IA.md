@@ -95,6 +95,9 @@ a compatibility accessor that selects You.
 | Answer a request | Notification → sheet; or Alerts → Needs you → sheet (unchanged) |
 | Message a business | Business page → Message, or Messages |
 | Quiet a business | Business page → Your connection → Notifications; or You → Notifications → Business by business (one tap opens the level) |
+| Quiet everything at night | You → Notifications → Quiet hours (From / Until; only security interrupts inside the window) |
+| One level for every business | You → Notifications → For all businesses (Everything / Balanced / Only what matters); a business with its own level keeps it, "Follow my default level" returns it |
+| Alerts from a Loop I added without connecting | Install sheet → "Alerts from this Loop"; later Your Loops → the Alerts chip, or the Loop's page (this Loop's requests only) |
 | Stop offers from a business | Business settings → tap the Offers chip |
 | Freeze everything | You → Security summary / Approvals → Freeze approvals |
 | Something looks wrong | You badge → banner → Review → Trusted devices |
@@ -147,7 +150,8 @@ Added with existing APIs:
 
 Needs server or partner work:
 
-* A **global** notification preference (e.g. one default level for every business, or quiet hours). Today levels are per business only.
+* ~~A **global** notification preference.~~ Done: an account-wide default level (inherited by businesses without their own level) and optional
+  quiet hours, stored and enforced on the server (SECURITY.md §2.96 "Notification level and quiet hours"; `NotificationSettingsViewModel`).
 * Server-side list of **ended** connections in the mock/test fixtures (the live server returns them; the mock drops them on reload).
 * Activity export / richer history per business (only the last 10 interactions are fetched client-side).
 * Appearance and the Loop directory / Your Loops: reserved destinations, wired by their own work (§8).

@@ -237,9 +237,11 @@ struct SettingsView: View {
             return count == 1 ? "1 active" : "\(count) active"
         case .recovery: return vm.recoveryStatusLine
         case .notifications:
-            let quieted = model.businesses.quietedCount(at: model.services.clock())
+            let now = model.services.clock()
+            let quieted = model.businesses.quietedCount(at: now, accountDefault: model.notificationSettings.settings.defaultLevel)
             let lock = vm.richPreviewsEnabled ? "Full details on the lock screen" : "Name only on the lock screen"
-            return quieted == 0 ? lock : "\(lock) · \(quieted) quieted"
+            let base = quieted == 0 ? lock : "\(lock) · \(quieted) quieted"
+            return model.notificationSettings.quietHoursEnabled ? "\(base) · Quiet hours" : base
         case .loops: return model.loopConsent.isEnabled ? "On" : "Off"
         default: return destination.detail
         }
@@ -352,6 +354,8 @@ struct NotificationSettingsView: View {
                                              symbol: "text.viewfinder"),
                                    ])
             }
+            accountLevel
+            quietHours
             businessLevels
             VStack(alignment: .leading, spacing: 0) {
                 ViadereSectionHeader("More")
@@ -383,6 +387,61 @@ struct NotificationSettingsView: View {
         }
     }
 
+    /// The level every business without its own setting follows: the same three named levels as a business, in one card.
+    @ViewBuilder private var accountLevel: some View {
+        let settings = model.notificationSettings
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("For all businesses")
+            ViadereCard(padding: ViadereSpace.m) {
+                ViadereLevelPicker("Default level for all businesses",
+                                   selection: Binding(get: { settings.preset }, set: { value in Task { await settings.setPreset(value) } }),
+                                   levels: InterruptionPreset.levels,
+                                   caption: settings.levelCaption)
+                    .disabled(settings.isSaving)
+            }
+            if let error = settings.errorMessage { ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.s) }
+        }
+    }
+
+    /// Quiet hours: two named choices (not a switch), then the two times. Only security interrupts inside the window.
+    @ViewBuilder private var quietHours: some View {
+        let settings = model.notificationSettings
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Quiet hours")
+            ViadereChoiceCards("Quiet hours",
+                               selection: Binding(get: { settings.quietHoursEnabled }, set: { value in Task { await settings.setQuietHours(enabled: value) } }),
+                               options: [
+                                   .init(false, "Off", detail: "Notifications follow your levels at every hour.", symbol: "sun.max"),
+                                   .init(true, "Every day", detail: "Between two times only security interrupts you.", symbol: "moon"),
+                               ])
+                .disabled(settings.isSaving)
+            if settings.quietHoursEnabled {
+                ViadereCard(padding: ViadereSpace.m) {
+                    VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+                        DatePicker("From", selection: Binding(get: { NotificationSettingsViewModel.date(minute: settings.startMinute) },
+                                                              set: { value in Task { await settings.setQuietHours(startMinute: NotificationSettingsViewModel.minute(of: value), endMinute: settings.endMinute) } }),
+                                   displayedComponents: .hourAndMinute)
+                            .font(ViadereType.body)
+                            .foregroundStyle(ViadereColor.textPrimary)
+                        ViadereHairline()
+                        DatePicker("Until", selection: Binding(get: { NotificationSettingsViewModel.date(minute: settings.endMinute) },
+                                                               set: { value in Task { await settings.setQuietHours(startMinute: settings.startMinute, endMinute: NotificationSettingsViewModel.minute(of: value)) } }),
+                                   displayedComponents: .hourAndMinute)
+                            .font(ViadereType.body)
+                            .foregroundStyle(ViadereColor.textPrimary)
+                    }
+                    .disabled(settings.isSaving)
+                }
+                .padding(.top, ViadereSpace.xs)
+            }
+            Text(settings.quietHoursCaption + " " + NotificationSettingsViewModel.securityNote)
+                .font(ViadereType.footnote)
+                .foregroundStyle(ViadereColor.textTertiary)
+                .padding(.top, ViadereSpace.s)
+        }
+        .task { await settings.syncTimeZone() }
+    }
+
     /// Every connected business with its level; tapping one opens its level picker in place (one at a time).
     @ViewBuilder private var businessLevels: some View {
         let entries = model.businesses.active
@@ -408,13 +467,14 @@ struct NotificationSettingsView: View {
 
     @ViewBuilder private func businessRow(_ entry: ConnectedBusiness) -> some View {
         let now = model.services.clock()
-        let preset = InterruptionPreset(entry.preferences.effectiveMute(at: now))
+        let accountDefault = model.notificationSettings.settings.defaultLevel
+        let preset = entry.preferences.preset(accountDefault: accountDefault, at: now)
         let isOpen = expanded == entry.business.id
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
             Button {
                 withAnimation(ViadereMotion.standard) { expanded = isOpen ? nil : entry.business.id }
             } label: {
-                ViadereRow(entry.business.safeName, subtitle: preset.summary(until: entry.preferences.muteUntil, now: now)) {
+                ViadereRow(entry.business.safeName, subtitle: entry.preferences.levelSummary(accountDefault: accountDefault, at: now)) {
                     ViadereAvatar(name: entry.business.safeName, size: 36, isVerified: entry.business.isVerified)
                 } trailing: {
                     HStack(spacing: ViadereSpace.xs) {
@@ -437,6 +497,11 @@ struct NotificationSettingsView: View {
                                    customizeTitle: "More for \(entry.business.safeName)") { openBusiness(entry.business.id) }
                     .padding(.bottom, ViadereSpace.s)
                     .transition(.opacity)
+                if !entry.preferences.followsDefault(at: now) {
+                    Button("Follow my default level") { Task { await model.businesses.followDefault(entry.business.id) } }
+                        .buttonStyle(.viadere(.quiet))
+                        .accessibilityHint(Text("Uses \(InterruptionPreset(accountDefault).title) for \(entry.business.safeName), like every business without its own setting"))
+                }
             }
         }
     }

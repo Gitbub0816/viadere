@@ -90,6 +90,7 @@ struct LoopDetailView: View {
             installedActions(entry)
         } else {
             choice(entry)
+            alertsChoice
             installButton(entry)
         }
         if let error = detail.errorMessage { ViadereNotice(error, kind: .warning) }
@@ -129,6 +130,18 @@ struct LoopDetailView: View {
             }
         } else {
             ViadereNotice("You're connected to \(entry.business.safeName). Removing this Loop later doesn't change that.", kind: .info)
+        }
+    }
+
+    /// "Alerts from this Loop" on the install sheet: two named choices, off first (nothing is subscribed unless the customer picks it). It
+    /// covers this Loop's own requests only, never the business's offers, messages or other alerts.
+    private var alertsChoice: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader(detail.alertsTitle)
+            ViadereChoiceCards(detail.alertsTitle, selection: Binding(get: { detail.alertsEnabled }, set: { detail.alertsEnabled = $0 }), options: [
+                .init(false, "Don't show in Alerts", detail: "Open this Loop's requests from Your Loops.", symbol: "bell.slash"),
+                .init(true, "Show in Alerts", detail: detail.alertsDetail, symbol: "bell"),
+            ])
         }
     }
 
@@ -191,11 +204,24 @@ struct LoopDetailView: View {
 
     @ViewBuilder private func installedActions(_ entry: LoopDirectoryEntry) -> some View {
         ViadereBadge("In Your Loops", kind: .success)
-        if let installed = justInstalled ?? model.loopLibrary.loops.first(where: { $0.loopId == entry.loopId }), installed.isStartable {
+        let installed = model.loopLibrary.loops.first(where: { $0.loopId == entry.loopId }) ?? justInstalled
+        if let installed, installed.isStartable {
             Button("Open") {
                 Task { await AppEnvironment.shared.loops.startInstalled(installed, model: model) }
             }
             .buttonStyle(.viadere(.primary))
+        }
+        if let installed {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader(detail.alertsTitle)
+                ViadereChoiceCards(detail.alertsTitle,
+                                   selection: Binding(get: { installed.alertsEnabled },
+                                                      set: { value in Task { await model.loopLibrary.setAlerts(installed.loopId, enabled: value) } }),
+                                   options: [
+                                       .init(false, "Don't show in Alerts", detail: "Open this Loop's requests from Your Loops.", symbol: "bell.slash"),
+                                       .init(true, "Show in Alerts", detail: LoopAlertsCopy.detail(business: entry.business.safeName), symbol: "bell"),
+                                   ])
+            }
         }
         Button("Remove Loop") { confirmingRemove = true }
             .buttonStyle(.viadere(.quiet))
