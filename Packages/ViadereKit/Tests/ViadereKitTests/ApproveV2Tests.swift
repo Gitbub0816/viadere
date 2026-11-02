@@ -390,12 +390,12 @@ struct ApproveRequestDeviceTests {
         let (_, jws) = try #require(await relay.submitted.first)
         let enrolled = EnrolledApprovalKey(kid: key.kid, publicKey: try ApprovalEnrollmentStatement.verify(key.statement).publicKey, subject: key.subject, assurance: .biometric)
         let expectation = ApprovalExpectation(audience: key.businessId, subject: key.subject, requestId: prompt.content.requestId, challenge: prompt.content.challenge,
-                                              subjectDetails: FakeRelay.details, requestExpiresAt: prompt.content.expiresAtDate, minimumAMR: .biometric)
+                                              subjectDetails: FakeRelay.details, numberMatch: .notRequested, requestExpiresAt: prompt.content.expiresAtDate, minimumAMR: .biometric)
         let verified = try ApprovalResultVerifier.verify(jws, expecting: expectation, keys: [enrolled], now: relay.now)
         #expect(verified.claims.decision == .approve)
         // Another amount is not what was signed.
         let other = ApprovalExpectation(audience: key.businessId, subject: key.subject, requestId: prompt.content.requestId, challenge: prompt.content.challenge,
-                                        subjectDetails: .transaction(TransactionDetails(currency: "USD", amountMinor: 1, payeeDisplay: "Example Merchant", transactionReference: "bank_tx_123")),
+                                        subjectDetails: .transaction(TransactionDetails(currency: "USD", amountMinor: 1, payeeDisplay: "Example Merchant", transactionReference: "bank_tx_123")), numberMatch: .notRequested,
                                         requestExpiresAt: prompt.content.expiresAtDate, minimumAMR: .biometric)
         #expect(throws: ApprovalVerificationError.self) { try ApprovalResultVerifier.verify(jws, expecting: other, keys: [enrolled], now: relay.now) }
     }
@@ -442,7 +442,7 @@ struct ApproveRequestDeviceTests {
         let (_, jws) = try #require(await relay.submitted.last)
         let enrolled = EnrolledApprovalKey(kid: key.kid, publicKey: try ApprovalEnrollmentStatement.verify(key.statement).publicKey, subject: key.subject, assurance: .biometric)
         let expectation = ApprovalExpectation(audience: key.businessId, subject: key.subject, requestId: prompt.content.requestId, challenge: prompt.content.challenge,
-                                              subjectDetails: FakeRelay.details, requestExpiresAt: prompt.content.expiresAtDate, minimumAMR: .biometric)
+                                              subjectDetails: FakeRelay.details, numberMatch: .notRequested, requestExpiresAt: prompt.content.expiresAtDate, minimumAMR: .biometric)
         let verified = try ApprovalResultVerifier.verify(jws, expecting: expectation, keys: [enrolled], now: relay.now)
         #expect(verified.claims.decision == .report)
         #expect(try await phone.store.load().decisions.last?.decision == .report)

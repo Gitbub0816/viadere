@@ -1,4 +1,5 @@
 import Foundation
+import ViadereCore
 
 /// Feature switches for authentication delivery on the device. Everything that depends on a server or authority piece that does not
 /// exist yet ships **off** and fails closed; the switches are read where a screen would be presented, never by the security checks.
@@ -18,8 +19,16 @@ public struct AuthDeliveryFlags: Sendable, Equatable {
         self.notificationDeny = notificationDeny
     }
 
-    /// What ships today.
+    /// What ships today (production builds).
     public static let shipping = AuthDeliveryFlags()
+    /// Staging and local builds: the `viadere.approve` Deny action is shown. The server now sends `req` in Approve v2 pushes and accepts a request-key
+    /// reduce-only deny (`POST /v1/approve/requests/{id}/deny`, Stage 5), which closes R4-03. Production stays off until the pilot.
+    public static let staging = AuthDeliveryFlags(notificationDeny: true)
+
+    /// The flags for a build: staging diagnostics or a local build get `.staging`, everything else `.shipping`.
+    public static func forConfiguration(_ configuration: ViadereConfiguration) -> AuthDeliveryFlags {
+        configuration.stagingDiagnostics || configuration.mode == .local ? .staging : .shipping
+    }
 }
 
 /// An auth-delivery item reduced to what the device may show (ADR-0020 §6: the push carries only the delivery id; the display is fetched).
@@ -82,6 +91,43 @@ public protocol AuthDeliveryAPI: Sendable {
     func openLink(deliveryId: UUID) async throws -> URL
     /// Device-signed, reduce-only. For a link this is the "This wasn't me" action (`report: true`).
     func reduce(_ target: AuthPushTarget, action: ReduceAction) async throws
+}
+
+/// The live client: the reduce-only answers go to the server over the device-signed `APIClient` (the device `request` key; no approval key, no Face ID).
+/// Link display and open stay unavailable (fail closed) until destination verification lands (Stage 6).
+public struct LiveAuthDeliveryAPI: AuthDeliveryAPI {
+    let client: APIClient
+    public init(client: APIClient) { self.client = client }
+
+    public func linkDisplay(deliveryId: UUID) async throws -> AuthLinkDisplay { throw AuthDeliveryError.unavailable }
+    public func openLink(deliveryId: UUID) async throws -> URL { throw AuthDeliveryError.unavailable }
+
+    public func reduce(_ target: AuthPushTarget, action: ReduceAction) async throws {
+        do {
+            switch target {
+            case .approveRequest(let id):
+                // `req` is this device's delivery id (a lowercase UUID); anything else is not sent.
+                guard let uuid = UUID(uuidString: id), action != .denyDestinationUnverified else { throw AuthDeliveryError.notActive }
+                let _: SubmitApprovalResultResponse = try await client.call(APIRoutes.approveRequestDeny, params: ["approvalId": uuid.uuidString.lowercased()],
+                                                                             body: ApproveDenyRequest(report: action == .report ? true : nil))
+            case .delivery(let id):
+                let body = AuthDeliveryDenyRequest(report: action == .report ? true : nil, reason: action == .denyDestinationUnverified ? "destination_unverified" : nil)
+                let _: AuthDeliveryView = try await client.call(APIRoutes.authDeliveryDeny, params: ["deliveryId": AuthDeliveryID(id).description], body: body)
+            }
+        } catch let error as AuthDeliveryError {
+            throw error
+        } catch let error as APIError {
+            if case .transport = error { throw AuthDeliveryError.offline }
+            switch error.code {
+            case .gone?, .expired?: throw AuthDeliveryError.expired
+            case .conflict?, .replayDetected?: throw AuthDeliveryError.alreadyUsed
+            case .notFound?: throw AuthDeliveryError.notActive
+            default: throw AuthDeliveryError.failed
+            }
+        } catch {
+            throw AuthDeliveryError.offline
+        }
+    }
 }
 
 /// The default until the live client exists: every call fails closed.

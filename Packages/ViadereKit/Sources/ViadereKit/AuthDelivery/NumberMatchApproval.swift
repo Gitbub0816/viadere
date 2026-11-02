@@ -26,6 +26,29 @@ public protocol ApprovalAnswering: Sendable {
     func answer(_ answer: AuthAnswer, requestIds: [String]) async throws
 }
 
+/// Where the wrong-entry count of a request lives (Stage 4 review R4-02): the approval store, per request id, so a dismissal or a relaunch does not
+/// give three fresh tries.
+public protocol NumberMatchAttemptRecording: Sendable {
+    func wrongEntries(requestIds: [String]) async -> Int
+    @discardableResult func recordWrongEntry(requestIds: [String]) async -> Int
+}
+
+public enum NumberMatchAttemptLimit {
+    public static let max = 3
+}
+
+/// An in-memory recorder for tests and previews.
+public actor InMemoryNumberMatchAttempts: NumberMatchAttemptRecording {
+    private var counts: [String: Int] = [:]
+    public init() {}
+    public func wrongEntries(requestIds: [String]) -> Int { requestIds.map { counts[$0] ?? 0 }.max() ?? 0 }
+    public func recordWrongEntry(requestIds: [String]) -> Int {
+        let next = min(wrongEntries(requestIds: requestIds) + 1, NumberMatchAttemptLimit.max)
+        for id in requestIds { counts[id] = next }
+        return next
+    }
+}
+
 public enum NumberMatchKind: Sendable, Equatable {
     case signIn
     /// Payment step-up: 3 digits, payee shown, and the device must be trusted for payments (D1, ADR-0022 §4).
@@ -112,14 +135,28 @@ public final class NumberMatchApprovalViewModel {
     private let answering: any ApprovalAnswering
     private let pauser: (@Sendable () async -> Bool)?
     private let clock: @Sendable () -> Date
+    private let attempts: (any NumberMatchAttemptRecording)?
 
+    /// - Parameters:
+    ///   - initialWrongEntries: the persisted count for this group (R4-02); load it with `NumberMatchAttemptRecording.wrongEntries` before presenting.
+    ///   - attempts: where each wrong entry is recorded.
     public init(context: NumberMatchApprovalContext, answering: any ApprovalAnswering, pauser: (@Sendable () async -> Bool)? = nil,
-                clock: @escaping @Sendable () -> Date = { Date() }) {
+                clock: @escaping @Sendable () -> Date = { Date() }, initialWrongEntries: Int = 0, attempts: (any NumberMatchAttemptRecording)? = nil) {
         self.context = context
         self.answering = answering
         self.pauser = pauser
         self.clock = clock
+        self.attempts = attempts
+        wrongEntries = min(max(initialWrongEntries, 0), Self.maxWrongEntries)
     }
+
+    /// Seeds the persisted count when the screen opens (R4-02). Only ever raises the count.
+    public func restoreWrongEntries(_ stored: Int) {
+        wrongEntries = max(wrongEntries, min(max(stored, 0), Self.maxWrongEntries))
+    }
+
+    /// True once a wrong number was typed: the App then asks "Leave this request?" before any dismissal, the swipe included (R4-02).
+    public var confirmsBeforeLeaving: Bool { wrongEntries > 0 && (phase == .entering || phase == .submitting) }
 
     // MARK: Copy
 
@@ -245,6 +282,10 @@ public final class NumberMatchApprovalViewModel {
         case .noMatch:
             wrongEntries += 1
             entry = ""
+            if let attempts {
+                let stored = await attempts.recordWrongEntry(requestIds: context.groupRequestIds)
+                wrongEntries = max(wrongEntries, stored)
+            }
             if wrongEntries >= Self.maxWrongEntries {
                 await submit(.deny(reason: .numberMismatch), requestIds: context.groupRequestIds, success: .autoDenied)
             } else {
@@ -282,6 +323,29 @@ extension NumberMatchApprovalContext {
     /// ADR-0022 §3) lands with the Core and server work. Until then the screen is built the same way but Approve needs no number
     /// (`requiresNumber: false`); the moment a prompt carries a requirement, Approve is disabled until the number is typed and matches.
     public init(prompt: ApprovalPrompt, numberMatch: NumberMatchRequirement? = nil, deviceCanApprove: Bool = true) {
+        self.init(group: [prompt], numberMatch: numberMatch, deviceCanApprove: deviceCanApprove)
+    }
+
+    /// Whether a verified prompt must be answered with a typed number (R4-04): from **signed or digest-bound policy**, never from whether the relay happened to
+    /// send a code: every payment (ADR-0022 §2.1, §4), every request whose business-signed content carries `number_match`, and every authentication whose
+    /// details (inside `txn_digest`) name `match_digits`.
+    public static func requiresNumber(_ prompt: ApprovalPrompt) -> Bool {
+        if prompt.content.numberMatch != nil { return true }
+        switch prompt.content.details {
+        case .transaction: return true
+        case .authentication(let a): return a.matchDigits != nil
+        }
+    }
+
+    /// The screen for one business's open requests (ADR-0022 §5.2 item 2): the typed number is compared with every request's code.
+    public init(group prompts: [ApprovalPrompt], numberMatch: NumberMatchRequirement? = nil, deviceCanApprove: Bool = true) {
+        let prompt = prompts[0]
+        var requirement = numberMatch
+        if requirement == nil {
+            let candidates = prompts.compactMap { p in p.content.numberMatch.map { NumberMatchRequirement.Candidate(requestId: p.request.requestId, code: $0.code) } }
+            if !candidates.isEmpty { requirement = NumberMatchRequirement(digits: prompts.compactMap { $0.content.numberMatch?.digits }.max() ?? 2, candidates: candidates) }
+        }
+        let required = numberMatch != nil || prompts.contains(where: Self.requiresNumber)
         let business = UntrustedText.name(prompt.business.displayName, max: 40, attribution: nil).text
         let kind: NumberMatchKind
         let action: String?
@@ -294,23 +358,40 @@ extension NumberMatchApprovalContext {
             action = UntrustedText.optionalLine(a.actionDisplay, max: 60)
         }
         self.init(business: business, kind: kind, action: action, requestedAt: prompt.request.createdAt, expiresAt: prompt.content.expiresAtDate,
-                  requirement: numberMatch, requiresNumber: numberMatch != nil, openRequestCount: numberMatch?.candidates.count ?? 1,
-                  requestsInWindow: prompt.requestsInWindow, showFatigueWarning: prompt.showFatigueWarning,
-                  relayAsserted: prompt.assurance == .relayAsserted, deviceCanApprove: deviceCanApprove,
-                  groupRequestIds: [prompt.request.requestId], singleRequestId: prompt.request.requestId)
+                  requirement: requirement, requiresNumber: required, openRequestCount: max(prompts.count, requirement?.candidates.count ?? 1),
+                  requestsInWindow: prompts.map(\.requestsInWindow).max() ?? 1, showFatigueWarning: prompts.contains(where: \.showFatigueWarning),
+                  relayAsserted: prompts.contains { $0.assurance == .relayAsserted }, deviceCanApprove: deviceCanApprove,
+                  groupRequestIds: prompts.map(\.request.requestId), singleRequestId: prompts.count == 1 ? prompt.request.requestId : nil)
     }
 }
 
-/// Answers through `ApproveController` (the existing signed path). The typed `match` is not part of the signed result until `ApprovalResult` v2
-/// exists in Core; the screen has already compared it on the device by then, and nothing is queued.
+/// Answers through `ApproveController` (the existing signed path). For a number-matched request the signed result is `ApprovalResult` v2 (ADR-0022 §3):
+/// the typed `match` **inside the signature**, `deny_reason` (`number_mismatch`, `not_me`) and the persisted wrong-entry count. Nothing is queued.
 @MainActor
 public final class ApproveControllerAnswering: ApprovalAnswering {
     private let controller: ApproveController
-    private let prompt: ApprovalPrompt
+    private let prompts: [ApprovalPrompt]
+    private let attempts: (any NumberMatchAttemptRecording)?
 
-    public init(controller: ApproveController, prompt: ApprovalPrompt) {
+    public convenience init(controller: ApproveController, prompt: ApprovalPrompt, attempts: (any NumberMatchAttemptRecording)? = nil) {
+        self.init(controller: controller, group: [prompt], attempts: attempts)
+    }
+
+    public init(controller: ApproveController, group: [ApprovalPrompt], attempts: (any NumberMatchAttemptRecording)? = nil) {
         self.controller = controller
-        self.prompt = prompt
+        prompts = group
+        self.attempts = attempts
+    }
+
+    /// The v2 members for this answer, or `nil` for a request without number matching (a v1 result, unchanged).
+    static func numberMatchAnswer(_ answer: AuthAnswer, prompt: ApprovalPrompt, wrongEntries: Int) -> ApprovalNumberMatchAnswer? {
+        guard NumberMatchApprovalContext.requiresNumber(prompt) else { return nil }
+        let attempts = min(max(wrongEntries, 0), NumberMatchAttemptLimit.max)
+        switch answer {
+        case .approve(let match): return ApprovalNumberMatchAnswer(match: match, denyReason: nil, invalidMatchAttempts: attempts)
+        case .deny(let reason): return ApprovalNumberMatchAnswer(match: nil, denyReason: reason == .numberMismatch ? .numberMismatch : nil, invalidMatchAttempts: attempts)
+        case .report: return ApprovalNumberMatchAnswer(match: nil, denyReason: .notMe, invalidMatchAttempts: attempts)
+        }
     }
 
     public func answer(_ answer: AuthAnswer, requestIds: [String]) async throws {
@@ -320,7 +401,13 @@ public final class ApproveControllerAnswering: ApprovalAnswering {
         case .deny: decision = .deny
         case .report: decision = .report
         }
-        // `ApproveController.answer` returns only after the relay accepted the signed result.
-        guard await controller.answer(prompt, decision, dismissOnSuccess: false) else { throw AuthDeliveryError.failed }
+        let targets = prompts.filter { requestIds.contains($0.request.requestId) }
+        guard !targets.isEmpty else { throw AuthDeliveryError.notActive }
+        let wrong = await attempts?.wrongEntries(requestIds: requestIds) ?? 0
+        for prompt in targets {
+            // `ApproveController.answer` returns only after the relay accepted the signed result.
+            guard await controller.answer(prompt, decision, dismissOnSuccess: false,
+                                          numberMatch: Self.numberMatchAnswer(answer, prompt: prompt, wrongEntries: wrong)) else { throw AuthDeliveryError.failed }
+        }
     }
 }
