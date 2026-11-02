@@ -83,6 +83,8 @@ public final class APNSwiftSender: APNsSender, Sendable {
     struct Custom: Encodable, Sendable {
         var iid: String?
         var loopInstanceId: String?
+        /// Auth delivery id (`adl`): the only custom member of an auth push.
+        var adl: String?
     }
 
     /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
@@ -98,7 +100,7 @@ public final class APNSwiftSender: APNsSender, Sendable {
             alert: .init(title: .raw(message.title), body: .raw(message.body)),
             expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
             priority: message.highPriority ? .immediately : .consideringDevicePower,
-            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId), threadID: message.threadID,
+            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId, adl: message.authDeliveryId), threadID: message.threadID,
             category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
     }
 }

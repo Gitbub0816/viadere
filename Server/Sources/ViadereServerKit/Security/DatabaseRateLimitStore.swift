@@ -29,6 +29,8 @@ public struct DatabaseRateLimitStore: RateLimitStore {
     public static let defaultFailClosed: [String] = [
         "phonelink", "link-", "phone-confirm", "household-invite", "enroll", "device-confirm", "dashboard-", "auth-", "otp", "recovery",
         "redemption-consume", "reward-redeem", "wallet-auth-fail", "wallet-scan", "wallet-update",
+        // Authentication delivery (ADR-0020 section 8): the tenant flood limit, the per-subject budgets, open and deny per device, link redemption, request-signature nonces.
+        "authdl-", "authlink-", "bizsig-", "authority-",
     ]
 
     let database: @Sendable () -> (any Database)?

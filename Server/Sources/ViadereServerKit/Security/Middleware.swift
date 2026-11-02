@@ -98,18 +98,23 @@ public struct RequestLoggingMiddleware: AsyncMiddleware {
         let start = Date()
         let id = request.requestID
         let response: Response
+        // Auth-delivery routes log only the allow-listed fields, with the route template (never a delivery id, a query string or a body).
+        let authRoute = AuthLogAllowList.isAuthPath(request.url.path)
+        let path = authRoute ? AuthLogAllowList.routeTemplate(request.url.path) : Self.safePath(request.url.path)
         do {
             response = try await next.respond(to: request)
         } catch {
-            request.logger.info("request", metadata: ["method": "\(request.method.rawValue)", "path": "\(Self.safePath(request.url.path))",
-                                                      "status": "500", "requestId": "\(id)"])
+            Self.log(request, ["method": request.method.rawValue, "path": path, "status": "500", "requestId": id], authRoute: authRoute)
             throw error
         }
-        request.logger.info("request", metadata: [
-            "method": "\(request.method.rawValue)", "path": "\(Self.safePath(request.url.path))", "status": "\(response.status.code)",
-            "ms": "\(Int(Date().timeIntervalSince(start) * 1000))", "requestId": "\(id)",
-        ])
+        Self.log(request, ["method": request.method.rawValue, "path": path, "status": "\(response.status.code)",
+                           "ms": "\(Int(Date().timeIntervalSince(start) * 1000))", "requestId": id], authRoute: authRoute)
         return response
+    }
+
+    static func log(_ request: Request, _ fields: [String: String], authRoute: Bool) {
+        let kept = authRoute ? AuthLogAllowList.filter(fields) : fields
+        request.logger.info("request", metadata: kept.mapValues { .string($0) })
     }
 
     static func safePath(_ path: String) -> String {

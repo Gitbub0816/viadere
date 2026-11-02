@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/contracts/schemas/auth-delivery-event-v1.schema.json",
+  "title": "Auth delivery event (opaque webhook envelope, version 2026-10-27)",
+  "description": "What a business receives for an auth.delivery.* event. Opaque by design (ADR-0025 section 5): ids, type, version, tenant and time. Never a magic link, code, TOTP seed, token, subject reference, variable or personal data. The business fetches the state with GET /v1/business/auth-deliveries/{request_id}. Signed with Viadere-Signature v2 only (never a v1= entry).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "version", "tenant_id", "request_id", "occurred_at"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^evt_[A-Za-z0-9_-]{1,64}$", "description": "Stable across retries; also the Viadere-Event-Id header and the receiver's dedup key." },
+    "type": {
+      "type": "string",
+      "enum": [
+        "auth.delivery.created",
+        "auth.delivery.sent",
+        "auth.delivery.delivered",
+        "auth.delivery.opened",
+        "auth.delivery.completed",
+        "auth.delivery.failed",
+        "auth.delivery.denied",
+        "auth.delivery.cancelled",
+        "auth.delivery.expired"
+      ]
+    },
+    "version": { "const": "2026-10-27" },
+    "tenant_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Must equal the receiver's own tenant id (the Viadere-Tenant header)." },
+    "request_id": { "type": "string", "pattern": "^adl_[A-Za-z0-9_-]{22}$", "description": "The delivery id." },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "result_ref": { "type": "null", "description": "Always absent for auth deliveries: no result is fetched, the business verifies its own link or code." }
+  }
+}

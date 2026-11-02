@@ -28,6 +28,7 @@ api_min_replicas = 0 # first apply only (no replica starts before secrets and da
 app_env = {
   ASSET_DOMAIN                             = "viadere-assets.cksites.dev" # Brand Kits asset host: its own tunnel hostname (AZURE-SETUP.md 9.1, Infra/cloudflare/add_asset_host.py)
   APPROVE_V2_ENABLED                       = "false"
+  AUTH_DELIVERY_ENABLED                    = "false" # ADR-0019: off until the pilot gate; AUTH_SECRET_KEY is a secret, AUTH_LIVE_KEY_ASSURANCE defaults to mtls
   APP_ATTEST_ASSERTION_MODE                = "report" # WP-C2; `require` once the shipping app attests (`off` is refused in staging/production)
   KEY_DIRECTORY_LOG_ID                     = "viadere.key-directory.v1"
   VERIFY_ENABLED                           = "true" # owner decision F-6 (2026-11-03): Verify on staging with Didit

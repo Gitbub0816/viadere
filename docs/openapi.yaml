@@ -11,6 +11,10 @@ info:
     Hand-written from the route catalog (`Packages/ViadereCore/Sources/ViadereCore/API/APIRoutes.swift`) and the DTOs in
     `ViadereCore`; wire formats are normative in `docs/SECURITY.md`. See `docs/BUSINESS-INTEGRATION.md` for a quickstart.
 
+    ## Authentication delivery
+    Magic-link, one-time-code and security-notice delivery (`/v1/business/auth-deliveries`, `/v1/auth-deliveries`) and the webhook signature `v2` upgrade are specified in
+    `contracts/openapi/auth-delivery-v1.yaml` (OpenAPI 3.1, ADR-0020) with JSON Schemas in `contracts/schemas/`. They answer `404` while `AUTH_DELIVERY_ENABLED` is off.
+
     ## Authentication
     `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (sandbox only). Keys are created in the
     business dashboard, are scoped, revocable, and shown once. Suspended or unverified businesses receive `403`.

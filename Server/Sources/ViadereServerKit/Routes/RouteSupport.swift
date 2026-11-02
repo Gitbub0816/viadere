@@ -65,6 +65,7 @@ enum Routes {
         VerificationSessionRoutes.register(api)
         VerifyButtonRoutes.register(app)
         ApproveRoutes.register(api)
+        AuthDeliveryRoutes.register(api)
         LinkRoutes.register(api)
         KeyDirectoryRoutes.register(api)
         MetricsRoutes.register(app)

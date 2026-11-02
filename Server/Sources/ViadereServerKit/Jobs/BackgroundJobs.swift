@@ -77,6 +77,8 @@ struct BackgroundJobs {
         try await HouseholdService(db: db, ctx: ctx).recordExpired()
         // Approve v2: overdue requests end with one opaque event each; stale enrollments expire.
         if ctx.config.approve.enabled { try await ApproveRequestService(db: db, ctx: ctx).expireDue() }
+        // Auth deliveries: expire, delete pending secrets of ended deliveries (P class, within a minute) and purge metadata after 30 days.
+        if ctx.config.authDelivery.enabled { _ = try await AuthDeliveryService(db: db, ctx: ctx).sweep() }
         try await IdentityMaintenance(db: db, ctx: ctx).run()
         await guarded("loop-sweep") { try await LoopMaintenance(db: db, ctx: ctx).sweep() }
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.

@@ -153,6 +153,24 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case requestLocked = "request_locked"
     /// The request addressed the customer by `relationshipId` after its sunset (`400`, WP-C2): use `subjectRef` (or `connectionId`).
     case relationshipIdSunset = "relationship_id_sunset"
+    /// `404` on auth deliveries: unknown subject, no eligible device, paused and frozen are indistinguishable (ADR-0020 section 4).
+    case notDeliverable = "not_deliverable"
+    /// `422`: the destination is not on a host the tenant verified for auth links (ADR-0021).
+    case destinationNotAllowed = "destination_not_allowed"
+    /// `422`: a business-mode link needs a valid `viadere-destination+jws` and an active tenant destination key (ADR-0031).
+    case destinationSignatureRequired = "destination_signature_required"
+    /// `401`: a live key needs a request signature or mutual TLS on auth routes (ADR-0020 section 3).
+    case signatureRequired = "signature_required"
+    /// `409`: the secret was already shown once.
+    case alreadyOpened = "already_opened"
+    /// `422`: `auth.*` events exist only on signature version `v2`.
+    case signatureVersionRequired = "signature_version_required"
+    /// `409` on `auth-approvals` (ADR-0020 section 2a): the match code collides with, or is a prefix of (or prefixed by), an open request's code. Redraw.
+    case matchCodeInUse = "match_code_in_use"
+    /// `409` (`details.digits = 3`): the person has 30 or more open requests; use a 3-digit code.
+    case matchDigitsRequired = "match_digits_required"
+    /// `409`: no free code can exist for this person. Critical operator alert.
+    case matchCodeSpaceExhausted = "match_code_space_exhausted"
     case unknown
 
     public init(from decoder: any Decoder) throws {

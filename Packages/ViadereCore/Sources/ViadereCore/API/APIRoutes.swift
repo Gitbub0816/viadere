@@ -486,7 +486,7 @@ public enum APIRoutes {
         businessApproveSettingsGet.descriptor, businessApproveSettingsPut.descriptor,
         businessLinkSessionCreate.descriptor, businessLinkSessionGet.descriptor, businessLinkSessionConfirm.descriptor, businessLinkSessionCancel.descriptor,
         linkSessionLookup.descriptor, linkSessionComplete.descriptor, linkSessionGet.descriptor,
-    ] + verifyEndpoints + organizationEndpoints + profileEndpoints + loopEndpoints + brandKitEndpoints + loopInstallEndpoints + notificationSettingsEndpoints
+    ] + verifyEndpoints + organizationEndpoints + profileEndpoints + loopEndpoints + brandKitEndpoints + loopInstallEndpoints + notificationSettingsEndpoints + authDeliveryEndpoints
 
     /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.com` in production).
     public enum Web {

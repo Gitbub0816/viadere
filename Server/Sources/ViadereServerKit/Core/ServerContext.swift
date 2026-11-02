@@ -51,6 +51,8 @@ public final class ServerContext: Sendable {
     public let integrity: any DeviceIntegrityVerifier
     /// Transactional email (dashboard verification codes and invitations).
     public let email: any EmailSender
+    /// The authority-published destination keys of tenants (ADR-0031). Until the authority exists (Stage 6) the default knows none, so business-mode links fail closed.
+    let tenantDestinationKeys: any TenantDestinationKeyDirectory
     /// Security alerts (budget exhaustion, ...) that operators should be able to alert on.
     public let logger = Logger(label: "viadere.security")
 
@@ -62,7 +64,7 @@ public final class ServerContext: Sendable {
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
                 email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil,
                 kms: (any KeyManagementService)? = nil, auditObjectStore: (any ObjectStore)? = nil, accessTokens: (any AccessTokenSource)? = nil,
-                queueTransport: (any QueueTransport)? = nil) {
+                queueTransport: (any QueueTransport)? = nil, tenantDestinationKeys: (any TenantDestinationKeyDirectory)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
@@ -87,6 +89,7 @@ public final class ServerContext: Sendable {
         self.auditObjectStore = auditObjectStore
         self.accessTokens = accessTokens
         queue = QueueRuntime(transport: queueTransport)
+        self.tenantDestinationKeys = tenantDestinationKeys ?? UnavailableTenantDestinationKeys()
     }
 
     public var now: Date { clock.now() }

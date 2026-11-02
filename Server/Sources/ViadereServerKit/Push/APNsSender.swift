@@ -21,10 +21,13 @@ public struct PushMessage: Sendable, Equatable {
     /// Opaque Loop instance id (`loopInstanceId` at the top level of a `viadere.loop` payload, SECURITY.md §2.98): a lowercase UUID the app
     /// uses to fetch the instance over the authenticated API. Never a business name or any content.
     public var loopInstanceId: String?
+    /// Opaque auth-delivery id (`adl` at the top level of the payload, ADR-0020 section 6.2). Never a URL, code or business name.
+    public var authDeliveryId: String?
 
     public init(deviceToken: String, environment: APNsTokenRegistration.Environment, topic: String, title: String, body: String,
                 category: String, threadID: String, interruptionLevel: String, mutableContent: Bool = true,
-                interactionId: String?, highPriority: Bool, collapseID: String? = nil, loopInstanceId: String? = nil) {
+                interactionId: String?, highPriority: Bool, collapseID: String? = nil, loopInstanceId: String? = nil, authDeliveryId: String? = nil) {
+        self.authDeliveryId = authDeliveryId
         self.deviceToken = deviceToken
         self.environment = environment
         self.topic = topic

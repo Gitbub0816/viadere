@@ -8,15 +8,15 @@ struct WebhookService {
     let ctx: ServerContext
 
     static let maxSubscriptionsPerBusiness = 10
-    static let maxAttempts = 8
-    /// Delay before retry N (seconds): 30 s, 2 min, 10 min, 1 h, 6 h, 12 h, 24 h.
-    static let backoff: [TimeInterval] = [30, 120, 600, 3600, 6 * 3600, 12 * 3600, 24 * 3600]
+    static let maxAttempts = WebhookRetrySchedule.maxAttempts
+    /// Delay before retry N (seconds): 30 s, 2 min, 10 min, 1 h, 6 h, 12 h, 24 h. One table in Core: the receivers' dedup horizon is derived from it (ADR-0025).
+    static let backoff: [TimeInterval] = WebhookRetrySchedule.backoff
     static let knownEvents: [WebhookEventType] = [
         .interactionDecided, .interactionExpired, .interactionCancelled, .messageReceived, .relationshipConnected,
         .relationshipDisconnected, .consentUpdated, .rewardRedeemed, .verificationCompleted,
         .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
         .linkCompleted, .linkExpired, .profileAccessGranted, .profileAccessRevoked, .profileRequestExpired,
-    ]
+    ] + WebhookEventType.authEvents
     static let rotationOverlap: TimeInterval = 24 * 3600
 
     // MARK: Subscriptions
@@ -26,7 +26,8 @@ struct WebhookService {
         return WebhookSubscription(id: WebhookSubscriptionID(id), url: url,
                                    events: record.events.split(separator: ",").map { WebhookEventType(rawValue: String($0)) },
                                    active: record.active, createdAt: record.createdAt, envelopeVersion: record.envelopeVersion,
-                                   secretVersion: record.secretVersion, verifiedAt: record.verifiedAt, pausedAt: record.pausedAt)
+                                   secretVersion: record.secretVersion, verifiedAt: record.verifiedAt, pausedAt: record.pausedAt,
+                                   signatureVersion: WebhookSignatureVersion(rawValue: record.signatureVersion) ?? .v1)
     }
 
     func list(businessId: BusinessID) async throws -> [WebhookSubscription] {
@@ -51,6 +52,14 @@ struct WebhookService {
                 throw APIError.validation("The opaque envelope supports only approval and interaction events.", details: ["events": "invalid"])
             }
         }
+        // `auth.*` events exist only with signature v2 and the opaque envelope (ADR-0025 section 3): they never carry a `v1=` entry and have no v1 body.
+        let signatureVersion = request.signatureVersion ?? .v1
+        if events.contains(where: { $0.hasPrefix("auth.") }) {
+            guard signatureVersion == .v2, request.envelopeVersion == WebhookEnvelopeV2.version else {
+                throw APIError(.unprocessableEntity, .signatureVersionRequired, "auth.* events need signature_version v2 and the opaque envelope (envelopeVersion 2026-10-27).",
+                               details: ["events": "signature_version_required"])
+            }
+        }
         let existing = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
             .filter(\.$active == true).count()
         guard existing < Self.maxSubscriptionsPerBusiness else { throw APIError.conflict("Webhook limit reached.") }
@@ -62,6 +71,7 @@ struct WebhookService {
         record.events = events.sorted().joined(separator: ",")
         record.secretCiphertext = try ctx.cipher.seal(secret, context: "webhook_subscriptions.secret", rowId: record.id!)
         record.envelopeVersion = request.envelopeVersion
+        record.signatureVersion = signatureVersion.rawValue
         record.secretVersion = 1
         record.active = true
         record.createdAt = ctx.now
@@ -113,6 +123,8 @@ struct WebhookService {
         let subscriptions = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
             .filter(\.$active == true).all().filter { onlySubscription == nil || $0.id == onlySubscription }
             .filter { $0.events.split(separator: ",").contains { Substring(type.rawValue) == $0 } }
+            // `auth.*` events go only to v2-signed endpoints that use the opaque envelope, even if a row somehow names them (ST-WH-03).
+            .filter { !type.isAuthEvent || ($0.signatureVersion == WebhookSignatureVersion.v2.rawValue && $0.envelopeVersion == WebhookEnvelopeV2.version) }
             // Ownership of the endpoint must be proven before it receives events (SEC-API-006); the check cannot be switched off in production.
             .filter { !ctx.config.operations.webhookOwnershipVerification || $0.verifiedAt != nil }
         guard !subscriptions.isEmpty else { return }
@@ -256,12 +268,16 @@ struct WebhookService {
             return
         }
         var secrets: [String] = []
+        var keyed: [(kid: String, secret: String)] = []
+        let prefix = "whk_" + String((subscription.id?.uuidString.lowercased() ?? "").prefix(8))
         if let current = try? ctx.cipher.openString(subscription.secretCiphertext, context: "webhook_subscriptions.secret", rowId: subscription.id!) {
             secrets.append(current)
+            keyed.append((Self.keyId(subscription: subscription), current))
         }
         if let previous = subscription.previousSecretCiphertext, let expires = subscription.previousSecretExpiresAt, expires > now,
            let value = try? ctx.cipher.openString(previous, context: "webhook_subscriptions.secret", rowId: subscription.id!) {
             secrets.append(value)
+            keyed.append(("\(prefix)_v\(max(subscription.secretVersion - 1, 0))", value))
         }
         let started = Date()
         var statusCode: Int?
@@ -269,7 +285,7 @@ struct WebhookService {
         if secrets.isEmpty {
             errorText = "secret_unavailable"
         } else {
-            let request = WebhookHTTPRequest(url: url, headers: [
+            var headers: [String: String] = [
                 "Content-Type": "application/json",
                 "User-Agent": "Viadere-Webhooks/1",
                 ViadereHeader.signature: WebhookSignature.header(secrets: secrets, body: body, now: now),
@@ -278,11 +294,35 @@ struct WebhookService {
                 ViadereHeader.deliveryId: id.uuidString.lowercased(),
                 ViadereHeader.keyId: Self.keyId(subscription: subscription),
                 ViadereHeader.webhookVersion: subscription.envelopeVersion ?? "v1",
-            ], body: body)
-            do {
-                statusCode = try await ctx.webhookTransport.send(request).statusCode
-            } catch {
-                errorText = (error as? WebhookTransportError) == .blockedDestination ? "blocked_destination" : "network_error"
+            ]
+            var signable = true
+            if subscription.signatureVersion == WebhookSignatureVersion.v2.rawValue {
+                // Signature v2 (ADR-0025): method, host, path, timestamp, event id, tenant, key id and body digest. Event id and tenant travel as headers and are signed.
+                let tenant = tenantId(of: BusinessID(delivery.businessId))
+                let eventId = "evt_" + id.uuidString.lowercased()
+                // `auth.*` events never carry a `v1=` entry; other events do for 30 days after the switch, so receivers can deploy the new verifier first.
+                let dual = !delivery.eventType.hasPrefix("auth.") && (subscription.v2DualUntil.map { $0 > now } ?? false)
+                if let context = WebhookSignatureV2.Context(endpoint: url, eventId: eventId, tenantId: tenant),
+                   let header = WebhookSignatureV2.header(secrets: keyed, context: context, body: body, now: now, legacySecret: dual ? secrets.first : nil) {
+                    headers[ViadereHeader.signature] = header
+                    headers[ViadereHeader.eventId] = eventId
+                    headers[ViadereHeader.tenant] = tenant
+                    headers[ViadereHeader.contentDigest] = WebhookSignatureV2.contentDigest(body)
+                } else {
+                    signable = false
+                }
+            } else if delivery.eventType.hasPrefix("auth.") {
+                // Defense in depth: a v1 subscription never receives an `auth.*` event.
+                signable = false
+            }
+            if signable {
+                do {
+                    statusCode = try await ctx.webhookTransport.send(WebhookHTTPRequest(url: url, headers: headers, body: body)).statusCode
+                } catch {
+                    errorText = (error as? WebhookTransportError) == .blockedDestination ? "blocked_destination" : "network_error"
+                }
+            } else {
+                errorText = "signature_unavailable"
             }
         }
         let duration = Int(Date().timeIntervalSince(started) * 1000)
@@ -298,7 +338,7 @@ struct WebhookService {
             }
         } else {
             delivery.lastError = errorText ?? "http_\(statusCode ?? 0)"
-            if errorText == "blocked_destination" || delivery.attempts >= Self.maxAttempts {
+            if errorText == "blocked_destination" || errorText == "signature_unavailable" || delivery.attempts >= Self.maxAttempts {
                 delivery.status = "dead" // dead-letter: kept for inspection, never retried automatically
             } else {
                 delivery.status = "pending"
@@ -321,6 +361,55 @@ struct WebhookService {
                 actor: AuditActor(kind: .system), businessId: BusinessID(delivery.businessId), subjectType: "webhook_delivery",
                 subjectId: id.uuidString.lowercased(), metadata: ["event_type": delivery.eventType, "attempts_made": String(delivery.attempts)])
         }
+    }
+}
+
+extension WebhookService {
+    /// `PATCH /v1/business/webhooks/{id}` (ADR-0025 M1): moves an endpoint to signature `v2`. There is no way back. For 30 days the pre-existing event types are
+    /// signed with both `v2=` and `v1=` so the receiver can deploy the new verifier first; `auth.*` events are v2-only from the start.
+    func moveToV2(businessId: BusinessID, id: WebhookSubscriptionID) async throws -> WebhookSubscription {
+        guard let record = try await WebhookSubscriptionRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$businessId == businessId.uuid)
+            .filter(\.$active == true).first() else { throw APIError.notFound }
+        if record.signatureVersion != WebhookSignatureVersion.v2.rawValue {
+            record.signatureVersion = WebhookSignatureVersion.v2.rawValue
+            record.v2DualUntil = ctx.now.addingTimeInterval(30 * 86_400)
+            try await record.update(on: db)
+            _ = try await AuditService(db: db, ctx: ctx).record("webhook.signature_v2", actor: AuditActor(kind: .business, id: businessId.description),
+                                                               businessId: businessId, subjectType: "webhook", subjectId: id.description)
+        }
+        guard let subscription = dto(record) else { throw APIError.internalError }
+        return subscription
+    }
+
+    /// `POST /v1/business/webhooks/test` (test keys only): a signed sample `auth.delivery.*` event with fixed sample ids, sent to one of the business's own v2
+    /// endpoints through the ordinary delivery path (same signature, headers and retry rules).
+    func enqueueAuthSample(businessId: BusinessID, subscriptionId: WebhookSubscriptionID, type: WebhookEventType) async throws -> String {
+        guard type.isAuthEvent, WebhookEventType.authEvents.contains(type),
+              let subscription = try await WebhookSubscriptionRecord.query(on: db).filter(\.$id == subscriptionId.uuid).filter(\.$businessId == businessId.uuid)
+                  .filter(\.$active == true).first(),
+              subscription.signatureVersion == WebhookSignatureVersion.v2.rawValue, subscription.envelopeVersion == WebhookEnvelopeV2.version else {
+            throw APIError.notFound
+        }
+        let delivery = WebhookDeliveryRecord()
+        delivery.id = UUID()
+        let eventId = "evt_" + delivery.id!.uuidString.lowercased()
+        // Fixed sample ids: the all-zero delivery id.
+        let body = try ViadereJSON.encode(WebhookEnvelopeV2(id: eventId, type: type.rawValue, tenantId: tenantId(of: businessId),
+                                                            requestId: AuthDeliveryID(UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))).description,
+                                                            occurredAt: ctx.now, resultRef: nil))
+        delivery.subscriptionId = subscription.id!
+        delivery.businessId = businessId.uuid
+        delivery.eventType = type.rawValue
+        delivery.body = try ctx.cipher.seal(body, context: "webhook_deliveries.body", rowId: delivery.id!)
+        delivery.status = "pending"
+        delivery.attempts = 0
+        delivery.nextAttemptAt = ctx.now
+        delivery.createdAt = ctx.now
+        try await db.transaction { [ctx] tx in
+            try await delivery.create(on: tx)
+            try await Outbox.enqueue(QueueHandlers.webhookDeliver, ref: delivery.id!, tenant: delivery.businessId, on: tx, ctx: ctx)
+        }
+        return eventId
     }
 }
 

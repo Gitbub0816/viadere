@@ -21,6 +21,10 @@ public enum ViadereHeader {
     public static let keyId = "Viadere-Key-Id"
     /// Webhook body format: absent or `v1` for `WebhookEvent`, `2026-10-27` for the opaque `WebhookEnvelopeV2`.
     public static let webhookVersion = "Viadere-Webhook-Version"
+    /// Webhook signature v2 (ADR-0025): the tenant the delivery belongs to (`ten_…`); signed, and equal to the receiver's own tenant id.
+    public static let tenant = "Viadere-Tenant"
+    /// Webhook signature v2: `sha-256=:<base64>:` (RFC 9530) of the exact body bytes.
+    public static let contentDigest = "Content-Digest"
     /// Idempotency key for business API POSTs (1–128 chars). Business API keys travel in
     /// `Authorization: Bearer vk_…`.
     public static let idempotencyKey = "Idempotency-Key"

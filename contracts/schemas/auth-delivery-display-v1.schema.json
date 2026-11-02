@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/contracts/schemas/auth-delivery-display-v1.schema.json",
+  "title": "Auth delivery display object",
+  "description": "GET /v1/auth-deliveries and /{id} (device-signed). Display data only: the URL and the code are never in it; they come once from POST /open.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "method", "purpose", "template", "status", "business_id", "business_name", "expires_at", "created_at", "request_id", "silent"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^adl_[A-Za-z0-9_-]{22}$" },
+    "method": { "enum": ["magic_link", "otp", "notice"] },
+    "purpose": { "enum": ["sign_in", "step_up", "verify_contact", "account_notice"] },
+    "template": { "type": "string" },
+    "status": { "enum": ["created", "validated", "queued", "sent", "delivered", "opened", "completed", "expired", "cancelled", "denied", "failed"] },
+    "business_id": { "type": "string", "format": "uuid" },
+    "business_name": { "type": "string" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "request_id": { "type": "string" },
+    "destination_host": { "type": "string" },
+    "destination_statement": { "type": "string", "description": "Compact viadere-destination+jws the device verifies before Continue is enabled (ADR-0031 section 4)." },
+    "code_kind": { "enum": ["otp", "totp"] },
+    "variables": { "type": "object", "additionalProperties": { "type": "string" } },
+    "silent": { "type": "boolean" }
+  }
+}
