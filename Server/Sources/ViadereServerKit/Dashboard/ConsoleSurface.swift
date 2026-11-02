@@ -55,21 +55,21 @@ enum ConsoleSurface {
             let disabled = canManage ? "" : " disabled"
             return """
             <tr><td><label class="ck"><input type="checkbox" name="show_\(module.id)" value="1"\(checked)\(disabled)> \(DashboardUI.esc(module.accessibility.headingLabel))</label></td>\
-            <td><label class="vh" for="o-\(module.id)">Position of \(DashboardUI.esc(module.accessibility.headingLabel))</label>\
+            <td class="num"><label class="vh" for="o-\(module.id)">Position of \(DashboardUI.esc(module.accessibility.headingLabel))</label>\
             <input id="o-\(module.id)" name="order_\(module.id)" type="number" min="1" max="\(PageTemplate.businessHome.maxModules)" value="\(order)"\(disabled)></td></tr>
             """
         }.joined()
         let preview = layout.modules.enumerated().map { i, placement in
-            "<li>\(i + 1). \(DashboardUI.esc(ModuleRegistry.v1.module(placement.module)?.accessibility.headingLabel ?? placement.module))</li>"
+            "<li><span class=\"dot\" aria-hidden=\"true\">\(i + 1)</span><div><p class=\"ct\">\(DashboardUI.esc(ModuleRegistry.v1.module(placement.module)?.accessibility.headingLabel ?? placement.module))</p>\(i == 0 ? "<p class=\"cd\">Always first</p>" : "")</div></li>"
         }.joined()
-        let body = """
-        <div class="card"><h2>What customers see</h2><p class="mu sm">\(version == 0 ? "Viadere's standard page (you have not published your own yet)." : "Version \(version).") \
-        Your verified profile always comes first. Viadere draws every module, its wording and its security checks; you choose which standard modules appear and in what order.</p>\
-        <ol class="plain">\(preview)</ol></div>\
-        <div class="card"><h2>Choose modules</h2>\
-        <form method="post" action="\(path)">\(DashboardUI.csrf(p))<table><caption class="vh">Modules on your page</caption><thead><tr><th scope="col">Module</th><th scope="col">Position</th></tr></thead><tbody>\(rows)</tbody></table>\
-        \(canManage ? "<p><button class=\"btn\" type=\"submit\">Publish page</button></p>" : "<p class=\"mu sm\">Only an Owner or an Organization Admin can change this page.</p>")</form></div>
-        """
+        let current = ConsoleUI.card("What customers see", description: version == 0 ? "Viadere's standard page: you have not published your own yet." : "Published version \(version).",
+                                     "<ol class=\"checklist\" aria-label=\"Modules on your page, in order\">\(preview)</ol>")
+        let chooser = ConsoleUI.card("Choose modules", description: "Viadere draws every module, its wording and its security checks; you choose which standard modules appear and in what order. Your verified profile always comes first.",
+            ConsoleUI.form(path, csrf: DashboardUI.csrf(p), """
+            <div class="tw"><table><caption class="vh">Modules on your page</caption><thead><tr><th scope="col">Module</th><th scope="col" class="num">Position</th></tr></thead><tbody>\(rows)</tbody></table></div>\
+            \(canManage ? ConsoleUI.formActions(ConsoleUI.button("Publish page") + "<span class=\"mu sm\">Customers see the new order the next time they open your page.</span>") : ConsoleUI.callout(.neutral, "<p class=\"sm\">Only an Owner or an Organization Admin can change this page.</p>"))
+            """))
+        let body = "<div class=\"split\"><div>\(chooser)</div><div>\(current)</div></div>"
         return DashboardUI.businessPage(p, title: "Your Viadere page", active: path, subtitle: "The standard business home customers open in the Viadere app.",
                                         flash: DashboardFormat.flash(req), body: body)
     }

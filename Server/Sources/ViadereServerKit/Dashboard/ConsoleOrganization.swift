@@ -76,90 +76,108 @@ enum ConsoleOrganization {
         let row = try await service.row(businessId)
         let application = try await BusinessApplicationRecord.query(on: req.db).filter(\.$businessId == businessId).first()
         let canManage = p.can(.manageOrganization)
+        let csrf = DashboardUI.csrf(p)
 
-        var profile = "<div class=\"card\"><h2>\(DashboardUI.esc(business.displayName)) \(DashboardFormat.statusBadge(business.status))</h2>"
+        // Profile: who customers see, and where the application stands.
+        var profileBody = ""
         if business.isVerified {
             let summary = try await DirectoryService(db: req.db).summary(for: business)
-            profile += "<p>Handle: <strong>\(DashboardUI.esc(summary?.handle?.display ?? "none"))</strong> · Code: <strong>\(DashboardUI.esc(summary?.code.display ?? ""))</strong></p>"
-            profile += "<p class=\"mu sm\">Verified \(DashboardFormat.optional(business.verifiedAt)). Your permanent code is never reassigned. Your public display name and your legal entity are kept separate: the legal entity is reviewed below and is not shown to customers.</p>"
+            profileBody += ConsoleUI.keyValues([
+                ("Display name", DashboardUI.esc(business.displayName)),
+                ("Handle", "<strong>\(DashboardUI.esc(summary?.handle?.display ?? "none"))</strong>"),
+                ("Code", "<strong class=\"mono\">\(DashboardUI.esc(summary?.code.display ?? ""))</strong>"),
+                ("Verified", DashboardFormat.optional(business.verifiedAt)),
+            ])
+            profileBody += "<p class=\"mu sm\">Your permanent code is never reassigned. Your public display name and your legal entity are kept separate: the legal entity is reviewed by Viadere and is not shown to customers.</p>"
         } else if let application {
             switch application.state {
-            case "pending": profile += "<p>Your application was submitted \(DashboardFormat.date(application.submittedAt)) and is awaiting review. Handles and codes are issued only after verification.</p>"
+            case "pending":
+                profileBody += ConsoleUI.callout(.accent, title: "Application under review", "<p>Submitted \(DashboardFormat.date(application.submittedAt)). Handles and codes are issued only after verification; you can keep setting up in the meantime.</p>")
             case "rejected":
-                profile += "<div class=\"notice dg\" role=\"alert\">Your application was declined\(application.decisionNote.map { ": " + DashboardUI.esc($0) } ?? ".")</div>"
+                profileBody += ConsoleUI.callout(.danger, title: "Application declined", urgent: true, "<p>\(application.decisionNote.map { DashboardUI.esc($0) } ?? "Viadere declined the application.") Correct the details below and apply again, or <a href=\"/dashboard/support/appeals\">appeal the decision</a>.</p>")
                 if canManage {
-                    profile += """
-                    <form method="post" action="/dashboard/organization">\(DashboardUI.csrf(p))\
-                    <label for="legalName">Legal name</label><input id="legalName" name="legalName" type="text" maxlength="120" value="\(DashboardUI.esc(application.legalName ?? ""))">\
-                    <label for="website">Website (https)</label><input id="website" name="website" type="url" maxlength="200" value="\(DashboardUI.esc(application.website ?? ""))">\
-                    <label for="requestedHandle">Requested handle</label><input id="requestedHandle" name="requestedHandle" type="text" maxlength="30" value="\(DashboardUI.esc(application.requestedHandle ?? ""))">\
-                    <label for="description">What will you use Viadere for?</label><textarea id="description" name="description" maxlength="500">\(DashboardUI.esc(application.detail ?? ""))</textarea>\
-                    <p><button class="btn" type="submit">Apply again</button></p></form>
-                    """
+                    profileBody += ConsoleUI.form("/dashboard/organization", csrf: csrf,
+                        "<div class=\"cols\">"
+                        + ConsoleUI.input("legalName", label: "Legal name", id: "legalName", value: application.legalName ?? "", attrs: ["maxlength": "120"])
+                        + ConsoleUI.input("website", label: "Website", id: "website", type: "url", value: application.website ?? "", placeholder: "https://", attrs: ["maxlength": "200"])
+                        + ConsoleUI.input("requestedHandle", label: "Requested handle", id: "requestedHandle", value: application.requestedHandle ?? "", attrs: ["maxlength": "30"])
+                        + "</div>"
+                        + ConsoleUI.textarea("description", label: "What will you use Viadere for?", id: "description", value: application.detail ?? "", attrs: ["maxlength": "500"])
+                        + ConsoleUI.formActions(ConsoleUI.button("Apply again")))
                 }
-            default: profile += "<p>Status: \(DashboardUI.esc(application.state)).</p>"
+            default:
+                profileBody += "<p>Status: \(DashboardUI.esc(application.state)).</p>"
             }
         } else {
-            profile += "<p>This organization is \(DashboardUI.esc(business.verificationStatus)).</p>"
+            profileBody += "<p>This organization is \(DashboardUI.esc(business.verificationStatus)).</p>"
         }
-        profile += "</div>"
+        let profile = ConsoleUI.card(business.displayName, actions: DashboardFormat.statusBadge(business.status), profileBody)
 
         // The checklist: one row per stage, with what is open and where to do it.
-        func item(_ done: Bool, _ title: String, _ detail: String) -> String {
-            "<li class=\"\(done ? "done" : "")\"><span aria-hidden=\"true\">\(done ? "✓" : "○")</span><div><strong>\(DashboardUI.esc(title))</strong> <span class=\"vh\">\(done ? "done" : "to do")</span><br><span class=\"mu sm\">\(detail)</span></div></li>"
-        }
         let outstanding = try await ContractService(db: req.db, ctx: req.ctx).outstanding(businessId: businessId)
-        var steps = "<ol class=\"steps\">"
-        steps += item(true, "1. Workspace", "Your account is verified by email and protected by a passkey.")
-        steps += item(state.domainVerified, "2a. Domain control", state.domainVerified ? "Verified: \(DashboardUI.esc(row.controlDomain ?? "")) (\(DashboardUI.esc(row.controlMethod ?? ""))). Unlocks the sandbox." : "Publish a DNS record to prove you control your domain. <a href=\"/dashboard/organization/domains\">Verify a domain</a>")
-        steps += item(state.legalEntity == .approved, "2b. Legal entity", legalEntityDetail(row: row, state: state))
-        if state.enhanced != .notRequired {
-            steps += item(state.enhanced == .approved, "2c. Additional review", state.enhanced == .approved ? "Approved." : (state.enhanced == .rejected ? "The additional review for your category was not approved. Contact Viadere support." : "Your category needs an additional review by Viadere. We will contact you."))
-        }
-        steps += item(state.identityVerified, "3. Public identity", state.identityVerified ? "Handle and code issued." : "Issued when Viadere approves your application.")
-        steps += item(state.contractsCurrent, "4. Agreements", state.contractsCurrent ? "All required agreements are accepted at their current version." : "\(outstanding.count) to accept. <a href=\"/dashboard/compliance\">Open Compliance &gt; Agreements</a>")
-        steps += item(state.integrationComplete, "5. Integration", "Sandbox key \(state.sandboxKey ? "✓" : "○"), test customer \(state.testCustomer ? "✓" : "○"), test event \(state.testEvent ? "✓" : "○"). <a href=\"/dashboard/developers/sandbox\">Open the sandbox</a>")
         let profileAllowed = try await EntitlementService(db: req.db, ctx: req.ctx).snapshot(businessId: businessId).profileCategories
         let profilePending = try await ProfileCategoryRequestRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$status == "pending").count()
-        steps += item(!profileAllowed.isEmpty, "Customer profile access", ProfileConsole.checklistDetail(allowed: profileAllowed, pending: profilePending))
-        steps += item(state.securityContact, "Security contact", state.securityContact ? "Set." : "Add an operational security contact. <a href=\"/dashboard/security/alerts\">Security &gt; Alerts and contacts</a>")
-        steps += item(state.goLive == .approved, "6. Go-live review", goLiveDetail(row: row, state: state))
-        steps += item(state.goLive == .approved && !state.suspended, "7. Ongoing assurance", assuranceDetail(row: row, state: state, grace: req.ctx.config.operations.assuranceGrace))
-        steps += "</ol>"
-        let onboarding = "<div class=\"card\"><h2>Onboarding</h2><p class=\"mu\">Stage: <strong>\(DashboardUI.esc(state.stage.rawValue))</strong></p>\(steps)</div>"
+        func mark(_ done: Bool) -> String { done ? "done" : "to do" }
+        var steps: [ConsoleUI.Step] = [
+            ConsoleUI.Step(true, "Workspace", "Your account is verified by email and protected by a passkey."),
+            ConsoleUI.Step(state.domainVerified, "Domain control", state.domainVerified
+                ? "Verified: \(DashboardUI.esc(row.controlDomain ?? "")) (\(DashboardUI.esc(row.controlMethod ?? ""))). Unlocks the sandbox."
+                : "Publish a DNS record to prove you control your domain. <a href=\"/dashboard/organization/domains\">Verify a domain</a>"),
+            ConsoleUI.Step(state.legalEntity == .approved, "Legal entity", legalEntityDetail(row: row, state: state)),
+        ]
+        if state.enhanced != .notRequired {
+            steps.append(ConsoleUI.Step(state.enhanced == .approved, "Additional review", state.enhanced == .approved ? "Approved."
+                : (state.enhanced == .rejected ? "The additional review for your category was not approved. Contact Viadere support." : "Your category needs an additional review by Viadere. We will contact you.")))
+        }
+        steps += [
+            ConsoleUI.Step(state.identityVerified, "Public identity", state.identityVerified ? "Handle and code issued." : "Issued when Viadere approves your application."),
+            ConsoleUI.Step(state.contractsCurrent, "Agreements", state.contractsCurrent ? "All required agreements are accepted at their current version."
+                : "\(outstanding.count) to accept. <a href=\"/dashboard/compliance\">Open Compliance &gt; Agreements</a>"),
+            ConsoleUI.Step(state.integrationComplete, "Integration", "Sandbox key: \(mark(state.sandboxKey)) · test customer: \(mark(state.testCustomer)) · test event: \(mark(state.testEvent)). <a href=\"/dashboard/developers/sandbox\">Open the sandbox</a>"),
+            ConsoleUI.Step(!profileAllowed.isEmpty, "Customer profile access", ProfileConsole.checklistDetail(allowed: profileAllowed, pending: profilePending)),
+            ConsoleUI.Step(state.securityContact, "Security contact", state.securityContact ? "Set." : "Add an operational security contact. <a href=\"/dashboard/security/alerts\">Security &gt; Alerts and contacts</a>"),
+            ConsoleUI.Step(state.goLive == .approved, "Go-live review", goLiveDetail(row: row, state: state)),
+            ConsoleUI.Step(state.goLive == .approved && !state.suspended, "Ongoing assurance", assuranceDetail(row: row, state: state, grace: req.ctx.config.operations.assuranceGrace)),
+        ]
+        let onboarding = ConsoleUI.card("Onboarding", description: "The path from sign-up to production. Each step links to where it is done.",
+                                        actions: ConsoleUI.pill("Stage: \(state.stage.rawValue)", state.goLive == .approved ? .success : .accent),
+                                        ConsoleUI.checklist(steps, label: "Onboarding steps"))
 
+        // The next action, where it is taken.
         var forms = ""
         if canManage, state.domainVerified, state.legalEntity == .none || state.legalEntity == .rejected {
-            forms += """
-            <div class="card"><h2>Legal entity</h2><p class="mu sm">A Viadere reviewer checks these details against the public registry. Give references to your evidence (a registry URL or record id). Do not upload documents here.</p>\
-            <form method="post" action="/dashboard/organization/legal-entity">\(DashboardUI.csrf(p))\
-            <div class="cols"><div><label for="registryName">Registered name</label><input id="registryName" name="registryName" type="text" maxlength="120" required value="\(DashboardUI.esc(row.legalRegistryName ?? business.legalName ?? ""))"></div>\
-            <div><label for="registryNumber">Registry number</label><input id="registryNumber" name="registryNumber" type="text" maxlength="64" required value="\(DashboardUI.esc(row.legalRegistryNumber ?? ""))"></div>\
-            <div><label for="jurisdiction">Jurisdiction (ISO region)</label><input id="jurisdiction" name="jurisdiction" type="text" maxlength="6" required placeholder="US-DE" value="\(DashboardUI.esc(row.legalJurisdiction ?? ""))"></div></div>\
-            <label for="evidence">Evidence references (one per line, up to five)</label><textarea id="evidence" name="evidence" maxlength="800" required>\(DashboardUI.esc(row.evidenceReferences.joined(separator: "\n")))</textarea>\
-            <p><button class="btn" type="submit">Submit for review</button></p></form></div>
-            """
+            forms += ConsoleUI.card("Legal entity", description: "A Viadere reviewer checks these details against the public registry. Give references to your evidence (a registry URL or record id); do not upload documents here.",
+                ConsoleUI.form("/dashboard/organization/legal-entity", csrf: csrf,
+                    "<div class=\"cols\">"
+                    + ConsoleUI.input("registryName", label: "Registered name", id: "registryName", value: row.legalRegistryName ?? business.legalName ?? "", required: true, attrs: ["maxlength": "120"])
+                    + ConsoleUI.input("registryNumber", label: "Registry number", id: "registryNumber", value: row.legalRegistryNumber ?? "", required: true, attrs: ["maxlength": "64", "spellcheck": "false"])
+                    + ConsoleUI.input("jurisdiction", label: "Jurisdiction", id: "jurisdiction", value: row.legalJurisdiction ?? "", placeholder: "US-DE", help: "ISO region code, for example US-DE.", required: true,
+                                      attrs: ["maxlength": "6", "autocapitalize": "characters"])
+                    + "</div>"
+                    + ConsoleUI.textarea("evidence", label: "Evidence references", id: "evidence", value: row.evidenceReferences.joined(separator: "\n"), help: "One per line, up to five.", required: true, attrs: ["maxlength": "800"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Submit for review"))))
         }
         if canManage, state.goLive == .none || state.goLive == .rejected {
             let blockers = state.requestBlockers
             if blockers.isEmpty {
-                forms += """
-                <div class="card"><h2>Request production access</h2><p class="mu sm">Describe what you will send, to whom, and how much. An operator reviews the request; you confirm with your passkey.</p>\
-                <form method="post" action="/dashboard/organization/go-live">\(DashboardUI.csrf(p))\
-                <label for="useCase">Use case</label><textarea id="useCase" name="useCase" minlength="20" maxlength="1000" required></textarea>\
-                <label for="volume">Expected volume</label><input id="volume" name="volume" type="text" maxlength="120" required placeholder="About 50,000 messages a month">\
-                <p><button class="btn" type="submit">Request production access</button></p></form></div>
-                """
+                forms += ConsoleUI.card("Request production access", description: "Describe what you will send, to whom, and how much. A Viadere operator reviews the request.",
+                    ConsoleUI.form("/dashboard/organization/go-live", csrf: csrf,
+                        ConsoleUI.textarea("useCase", label: "Use case", id: "useCase", help: "At least 20 characters: the messages, the audience and why customers expect them.", required: true,
+                                           attrs: ["minlength": "20", "maxlength": "1000"])
+                        + ConsoleUI.input("volume", label: "Expected volume", id: "volume", placeholder: "About 50,000 messages a month", required: true, attrs: ["maxlength": "120"])
+                        + ConsoleUI.formActions(ConsoleUI.button("Request production access", passkey: true) + ConsoleUI.passkeyNote())))
             } else {
-                forms += "<div class=\"card\"><h2>Request production access</h2><p>Complete these first:</p><ul>\(blockers.map { "<li>\(DashboardUI.esc($0.title))</li>" }.joined())</ul></div>"
+                forms += ConsoleUI.card("Request production access", description: "Available once these are done.",
+                                        "<ul>\(blockers.map { "<li>\(DashboardUI.esc($0.title))</li>" }.joined())</ul>")
             }
         }
-        return DashboardUI.businessPage(p, title: "Organization", active: "/dashboard/organization", subtitle: "Your profile and the path to production.", flash: DashboardFormat.flash(req), body: profile + onboarding + forms)
+        let body = profile + (forms.isEmpty ? "" : ConsoleUI.sectionTitle("Your next step") + forms) + onboarding
+        return DashboardUI.businessPage(p, title: "Organization", active: "/dashboard/organization", subtitle: "Your profile and the path to production.", flash: DashboardFormat.flash(req), body: body)
     }
 
     private static func legalEntityDetail(row: BusinessOnboardingRecord, state: OnboardingState) -> String {
         switch state.legalEntity {
-        case .none: return state.domainVerified ? "Submit your registration details below." : "Verify a domain first."
+        case .none: return state.domainVerified ? "Submit your registration details in the form above." : "Verify a domain first."
         case .submitted: return "Submitted \(DashboardFormat.optional(row.legalSubmittedAt)); waiting for a Viadere reviewer."
         case .approved: return "Approved \(DashboardFormat.optional(row.legalReviewedAt)) (\(DashboardUI.esc(row.legalJurisdiction ?? ""))). Your registry details are not shown to customers."
         case .rejected: return "Not approved\(row.legalNote.map { ": " + DashboardUI.esc($0) } ?? ".") Correct the details and submit again."
@@ -168,7 +186,7 @@ enum ConsoleOrganization {
 
     private static func goLiveDetail(row: BusinessOnboardingRecord, state: OnboardingState) -> String {
         switch state.goLive {
-        case .none: return state.requestBlockers.isEmpty ? "Ready: request production access below." : "Finish the steps above first."
+        case .none: return state.requestBlockers.isEmpty ? "Ready: request production access above." : "Finish the steps above first."
         case .requested: return "Requested \(DashboardFormat.optional(row.goLiveRequestedAt)); an operator is reviewing it."
         case .approved: return "Approved \(DashboardFormat.optional(row.goLiveDecidedAt)). Live keys can be created."
         case .rejected: return "Not approved\(row.goLiveNote.map { ": " + DashboardUI.esc($0) } ?? ".") Address the points and request again."
@@ -193,30 +211,40 @@ enum ConsoleOrganization {
         let canManage = p.can(.manageOrganization)
         let cards = domains.map { d -> String in
             let id = d.id?.uuidString.lowercased() ?? ""
-            let status = d.status == "verified" ? DashboardFormat.badge("Verified", "ok") : (d.status == "failed" ? DashboardFormat.badge("Re-check failed", "dg") : DashboardFormat.badge("Not verified", ""))
-            var out = "<div class=\"card\"><h2>\(DashboardUI.esc(d.domain)) \(status)</h2>"
+            let status = d.status == "verified" ? DashboardFormat.badge("Verified", "ok") : (d.status == "failed" ? DashboardFormat.badge("Re-check failed", "dg") : DashboardFormat.badge("Not verified", "wa"))
+            var out = ""
             if d.status != "verified" {
                 out += """
-                <p>Publish <strong>one</strong> of these:</p>\
-                <h3>DNS TXT record</h3><pre>Name:  \(DashboardUI.esc(DomainControl.recordName(for: d.domain)))\nType:  TXT\nValue: \(DashboardUI.esc(DomainControl.expectedValue(token: d.token)))</pre>\
-                <h3>Or a file</h3><pre>https://\(DashboardUI.esc(d.domain))\(DomainControl.wellKnownPath)\nContent: \(DashboardUI.esc(DomainControl.expectedValue(token: d.token)))</pre>
+                <p>Publish <strong>one</strong> of these, then choose <em>Check now</em>. DNS changes can take a while to spread.</p><div class="cols">\
+                <div><h3>Option 1: DNS TXT record</h3><pre>Name:  \(DashboardUI.esc(DomainControl.recordName(for: d.domain)))\nType:  TXT\nValue: \(DashboardUI.esc(DomainControl.expectedValue(token: d.token)))</pre></div>\
+                <div><h3>Option 2: a file on your site</h3><pre>https://\(DashboardUI.esc(d.domain))\(DomainControl.wellKnownPath)\nContent: \(DashboardUI.esc(DomainControl.expectedValue(token: d.token)))</pre></div></div>
                 """
             } else {
-                out += "<p class=\"mu sm\">Verified \(DashboardFormat.optional(d.verifiedAt)) by \(DashboardUI.esc(d.method ?? "")). Next re-check \(DashboardFormat.optional(d.nextCheckAt)). Keep the record in place: it is re-checked periodically.</p>"
+                out += ConsoleUI.keyValues([("Verified", "\(DashboardFormat.optional(d.verifiedAt)) by \(DashboardUI.esc(d.method ?? ""))"), ("Next re-check", DashboardFormat.optional(d.nextCheckAt))])
+                out += "<p class=\"mu sm\">Keep the record in place: it is re-checked periodically.</p>"
             }
             if let error = d.lastError { out += "<p class=\"mu sm\">Last check: \(DashboardUI.esc(error.replacingOccurrences(of: "_", with: " "))).</p>" }
+            var actions = ""
             if canManage {
-                out += "<div class=\"row\"><form method=\"post\" action=\"/dashboard/organization/domains/\(id)/check\">\(DashboardUI.csrf(p))<button class=\"btn\" type=\"submit\">Check now</button></form>"
-                    + "<form method=\"post\" action=\"/dashboard/organization/domains/\(id)/remove\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\" aria-label=\"Remove \(DashboardUI.esc(d.domain))\">Remove</button></form></div>"
+                actions = ConsoleUI.form("/dashboard/organization/domains/\(id)/check", csrf: DashboardUI.csrf(p), ConsoleUI.button("Check now", d.status == "verified" ? .secondary : .primary, small: true, ariaLabel: "Check \(d.domain) now"))
+                    + ConsoleUI.confirm("Remove", ariaLabel: "Remove \(d.domain)", ConsoleUI.form("/dashboard/organization/domains/\(id)/remove", csrf: DashboardUI.csrf(p),
+                        "<p>Removing \(DashboardUI.esc(d.domain)) may lock the sandbox and keys again if it is your only verified domain.</p>"
+                        + ConsoleUI.button("Remove domain", .dangerSolid, small: true, ariaLabel: "Remove \(d.domain)", passkey: true) + ConsoleUI.passkeyNote()))
             }
-            return out + "</div>"
+            return ConsoleUI.card(d.domain, actions: status, out + (actions.isEmpty ? "" : "<div class=\"row\">\(actions)</div>"))
         }.joined()
         var add = ""
         if canManage {
-            add = "<div class=\"card\"><h2>Add a domain</h2><form method=\"post\" action=\"/dashboard/organization/domains\">\(DashboardUI.csrf(p))<label for=\"domain\">Domain you control</label><input id=\"domain\" name=\"domain\" type=\"text\" maxlength=\"253\" required placeholder=\"example.com\"><p class=\"mu sm\">Verified domains are re-checked periodically. A domain can be verified by only one organization.</p><button class=\"btn\" type=\"submit\">Add domain</button></form></div>"
+            add = ConsoleUI.card("Add a domain", id: "add", description: "Verified domains are re-checked periodically. A domain can be verified by only one organization.",
+                ConsoleUI.form("/dashboard/organization/domains", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("domain", label: "Domain you control", id: "domain", placeholder: "example.com", help: "No https:// and no path; just the domain.", required: true,
+                                    attrs: ["maxlength": "253", "autocapitalize": "none", "spellcheck": "false"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Add domain"))))
         }
-        let note = notice.map { "<div class=\"notice dg\" role=\"alert\">\(DashboardUI.esc($0))</div>" } ?? ""
+        let note = notice.map { ConsoleUI.callout(.danger, title: "Not verified yet", urgent: true, "<p>\(DashboardUI.esc($0))</p>") } ?? ""
+        let list = cards.isEmpty ? ConsoleUI.empty("No domains yet", "Prove you control your domain to unlock the sandbox and API keys.", icon: .building,
+                                                   action: canManage ? ConsoleUI.linkButton("Add a domain", href: "#add", .primary, small: true) : "") : cards
         return DashboardUI.businessPage(p, title: "Domains", active: "/dashboard/organization/domains", subtitle: "Prove that your organization controls its domain.", flash: DashboardFormat.flash(req),
-                                        body: note + (cards.isEmpty ? "<p class=\"mu\">No domains yet.</p>" : cards) + add)
+                                        body: note + list + add)
     }
 }

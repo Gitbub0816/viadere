@@ -107,35 +107,38 @@ enum ConsoleLoopStudio {
         guard let business = try await BusinessRecord.find(businessId, on: req.db) else { throw APIError.notFound }
         let flashText = req.query[String.self, at: "sm"].flatMap { flash[$0] }
         if let refusal = LoopStudioService.refusal(business) {
-            return DashboardUI.businessPage(p, title: "Loop Studio", active: path, body: "<div class=\"notice dg\" role=\"status\">\(DashboardUI.esc(refusal))</div>")
+            return DashboardUI.businessPage(p, title: "Loop Studio", active: path, body: ConsoleUI.callout(.danger, "<p>\(DashboardUI.esc(refusal))</p>"))
         }
         let canEdit = p.can(.submitLoops)
         let csrf = DashboardUI.csrf(p)
         let drafts = try await LoopStudioService(db: req.db, ctx: req.ctx).drafts(businessId: businessId)
-        var body = """
-        <div class="card"><h2>How Loop Studio works</h2><p class="sm">Start from a template, adjust the wording, fields and buttons, and check the preview. \
-        When the automated checks pass, submit the Loop for Viadere review: a Viadere reviewer (two for high-risk actions) approves it before it is \
-        signed and customers can see it. You can't publish a Loop yourself, and every change is a new revision that is reviewed again.</p>\
-        <p class="mu sm">Loops can't collect health information, passwords, card or bank details or government ids, and can't link anywhere.</p></div>
-        """
+        var body = ConsoleUI.callout(.accent, title: "How Loop Studio works", """
+        <p class="sm">Start from a template, adjust the wording, fields and buttons, and check the preview. When the automated checks pass, submit the Loop for Viadere review: \
+        a Viadere reviewer (two for high-risk actions) approves it before it is signed and customers can see it. You can't publish a Loop yourself, and every change is a new revision that is reviewed again. \
+        Loops can't collect health information, passwords, card or bank details or government ids, and can't link anywhere.</p>
+        """)
+        var rows: [[ConsoleUI.Cell]] = []
+        for draft in drafts {
+            let definition = LoopStudioService.definition(draft)
+            let latest = try await LoopStudioService(db: req.db, ctx: req.ctx).revisions(businessId: businessId, loopKey: draft.loopKey, limit: 1).first
+            let title = definition?.title.isEmpty == false ? definition!.title : draft.loopKey
+            rows.append([ConsoleUI.Cell(html: "<a href=\"\(path)/drafts/\(draft.id!.uuidString.lowercased())\">\(DashboardUI.esc(title))</a>", sort: .text(title)),
+                         ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(draft.loopKey))</code>"), .text(draft.templateKey.flatMap { LoopTemplateCatalog.template($0)?.name } ?? "—"),
+                         ConsoleUI.Cell(html: latest.map { DashboardFormat.badge("Revision \($0.revision): \(stateLabel($0.stateValue))", $0.stateValue == .published ? "ok" : "mu") } ?? DashboardFormat.badge("Not submitted", "mu")),
+                         .date(draft.updatedAt)])
+        }
+        body += ConsoleUI.card("Drafts", ConsoleUI.table([ConsoleUI.Column("Loop", key: "loop"), ConsoleUI.Column("Identifier"), ConsoleUI.Column("Template"), ConsoleUI.Column("Review"),
+                                                         ConsoleUI.Column("Last saved", key: "saved")], rows, caption: "Loop drafts", state: ConsoleUI.TableState(req, id: "d", defaultSort: "saved", defaultAscending: false),
+                                                        empty: "No drafts yet", emptyMessage: canEdit ? "Start from one of the templates below." : nil))
         let templates = LoopTemplateCatalog.v1.map { template -> String in
             let steps = template.definition.steps.count
             let start = canEdit ? """
             <form method="post" action="\(path)/drafts">\(csrf)<input type="hidden" name="template" value="\(DashboardUI.esc(template.key))">\
             <button class="btn s sm" type="submit" aria-label="Start a draft from the \(DashboardUI.esc(template.name)) template">Start from this template</button></form>
             """ : ""
-            return "<li><div><strong>\(DashboardUI.esc(template.name))</strong><p class=\"sm\">\(DashboardUI.esc(template.summary))</p><p class=\"mu sm\">\(steps) steps</p>\(start)</div></li>"
+            return ConsoleUI.card(template.name, description: "\(steps) steps", "<p class=\"sm\">\(DashboardUI.esc(template.summary))</p>\(start)")
         }.joined()
-        body += "<div class=\"card\"><h2>Templates</h2><ul class=\"steps\" aria-label=\"Templates\">\(templates)</ul></div>"
-        var rows: [[String]] = []
-        for draft in drafts {
-            let definition = LoopStudioService.definition(draft)
-            let latest = try await LoopStudioService(db: req.db, ctx: req.ctx).revisions(businessId: businessId, loopKey: draft.loopKey, limit: 1).first
-            rows.append(["<a href=\"\(path)/drafts/\(draft.id!.uuidString.lowercased())\">\(DashboardUI.esc(definition?.title.isEmpty == false ? definition!.title : draft.loopKey))</a>",
-                         "<code>\(DashboardUI.esc(draft.loopKey))</code>", DashboardUI.esc(draft.templateKey.flatMap { LoopTemplateCatalog.template($0)?.name } ?? "—"),
-                         latest.map { "Revision \($0.revision): \(stateLabel($0.stateValue))" }.map(DashboardUI.esc) ?? "Not submitted", DashboardFormat.date(draft.updatedAt)])
-        }
-        body += "<div class=\"card\"><h2>Drafts</h2>\(DashboardFormat.table(["Loop", "Identifier", "Template", "Review", "Last saved"], rows, empty: "No drafts yet.", caption: "Loop drafts"))</div>"
+        body += ConsoleUI.sectionTitle("Templates", description: "Locked starting points with a reviewed structure. You edit a copy.") + "<div class=\"cols\">\(templates)</div>"
         return DashboardUI.businessPage(p, title: "Loop Studio", active: path, subtitle: "Build a Loop from a template and send it to Viadere for review.",
                                         flash: flashText, body: body)
     }
@@ -157,30 +160,28 @@ enum ConsoleLoopStudio {
         let id = record.id!.uuidString.lowercased()
         let draftPath = "\(path)/drafts/\(id)"
         var body = ""
-        if let refusal { body += "<div class=\"notice dg\" role=\"status\">\(DashboardUI.esc(refusal))</div>" }
-        if !p.can(.submitLoops) { body += "<div class=\"notice\" role=\"status\">You can read this draft. Editing and submitting need a role with the submitLoops permission.</div>" }
+        if let refusal { body += ConsoleUI.callout(.danger, "<p>\(DashboardUI.esc(refusal))</p>") }
+        if !p.can(.submitLoops) { body += ConsoleUI.callout(.neutral, "<p>You can read this draft. Editing and submitting need a role with the submitLoops permission.</p>") }
         let template = LoopTemplateCatalog.matching(definition, startedFrom: record.templateKey)
-        body += "<p class=\"sm\">Loop <code>\(DashboardUI.esc(record.loopKey))</code> · draft version \(record.version)"
+        body += "<p class=\"sm mu\">Loop <code>\(DashboardUI.esc(record.loopKey))</code> · draft version \(record.version)"
             + (record.templateKey.flatMap { LoopTemplateCatalog.template($0)?.name }.map { " · started from \(DashboardUI.esc($0))" } ?? "")
             + (template != nil ? " · " + DashboardFormat.badge("Template structure", "mu") : "") + "</p>"
-        body += reportCard(report)
-        body += "<div class=\"cols\"><div>\(editorForm(definition, record: record, kits: kits, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath))</div>"
-        body += """
-        <div><div class="card"><h2 id="preview">Preview</h2><p class="mu sm">\(DashboardUI.esc(LoopWebRenderer.previewLabel)). It updates when you save.</p>\
-        <iframe title="Preview of \(DashboardUI.esc(definition.title)), not exactly what customers see" src="\(draftPath)/preview?v=\(record.version)" sandbox="" \
-        referrerpolicy="no-referrer" width="380" height="860" loading="lazy"></iframe></div></div></div>
+        let preview = """
+        <section class="card"><header class="card-h"><div><h2 id="preview">Preview</h2><p class="d">\(DashboardUI.esc(LoopWebRenderer.previewLabel)). It updates when you save.</p></div></header>\
+        \(ConsoleUI.preview(src: "\(draftPath)/preview?v=\(record.version)", title: "Preview of \(definition.title), not exactly what customers see", width: 380, height: 860))</section>
         """
-        body += submitCard(report: report, record: record, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath)
+        body += "<div class=\"split wa\"><div>\(editorForm(definition, record: record, kits: kits, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath))</div>"
+        body += "<div>" + reportCard(report) + submitCard(report: report, record: record, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath) + preview + "</div></div>"
         body += try await tracker(req, revisions: revisions, p: p)
         if canEdit {
-            body += """
-            <div class="card"><h2>Delete draft</h2><p class="mu sm">Deleting the draft does not withdraw or unpublish submitted revisions.</p>\
-            <form method="post" action="\(draftPath)/delete">\(DashboardUI.csrf(p))<button class="btn d sm" type="submit">Delete draft</button></form></div>
-            """
+            body += ConsoleUI.dangerZone("Delete draft", description: "Deleting the draft does not withdraw or unpublish submitted revisions.",
+                ConsoleUI.confirm("Delete draft", "<form method=\"post\" action=\"\(draftPath)/delete\">\(DashboardUI.csrf(p))<p>The draft is removed for everyone in your organization.</p><button class=\"btn dd sm\" type=\"submit\">Delete draft</button></form>"))
         }
         let flashText = req.query[String.self, at: "sm"].flatMap { flash[$0] }
         return DashboardUI.businessPage(p, title: definition.title.isEmpty ? "Loop draft" : "Loop: \(definition.title)", active: path,
-                                        subtitle: "Loop Studio draft", flash: flashText, body: body, frames: true)
+                                        subtitle: "Loop Studio draft. Save as you go; submit when the automated checks pass.", flash: flashText,
+                                        breadcrumbs: [ConsoleUI.Crumb("Dashboard", "/dashboard"), ConsoleUI.Crumb("Loops", "/dashboard/loops"), ConsoleUI.Crumb("Loop Studio", path),
+                                                      ConsoleUI.Crumb(definition.title.isEmpty ? record.loopKey : definition.title, nil)], body: body, frames: true)
     }
 
     // MARK: Validation report
@@ -188,7 +189,7 @@ enum ConsoleLoopStudio {
     static func reportCard(_ report: LoopValidationReport) -> String {
         let hard = report.hardGateHits
         let flags = report.reviewFlags
-        var html = "<div class=\"card\" id=\"report\"><h2>Automated checks</h2>"
+        var html = "<section class=\"card\(report.gate.passed ? "" : " t-danger")\" id=\"report\"><h2>Automated checks</h2>"
         if report.gate.passed {
             html += "<p role=\"status\">\(DashboardFormat.badge("Ready to submit", "ok")) All automated checks pass.</p>"
         } else {
@@ -199,7 +200,7 @@ enum ConsoleLoopStudio {
             html += "<p class=\"sm\">Needs a second Viadere reviewer:</p><ul class=\"sm\">"
                 + flags.map { "<li><strong>\(DashboardUI.esc(location($0.path)))</strong>: \(DashboardUI.esc(message($0)))</li>" }.joined() + "</ul>"
         }
-        html += "<p class=\"mu sm\">Risk: \(DashboardUI.esc(report.derivedRiskClass.rawValue)) · review by \(report.requiredReview == .twoPerson ? "two Viadere reviewers" : "one Viadere reviewer") · rule set \(report.ruleSetVersion)</p></div>"
+        html += "<p class=\"mu sm\">Risk: \(DashboardUI.esc(report.derivedRiskClass.rawValue)) · review by \(report.requiredReview == .twoPerson ? "two Viadere reviewers" : "one Viadere reviewer") · rule set \(report.ruleSetVersion)</p></section>"
         return html
     }
 
@@ -284,21 +285,21 @@ enum ConsoleLoopStudio {
             canEdit ? "<button class=\"btn \(style)\" type=\"submit\" name=\"op\" value=\"\(esc(op))\"\(accessible.map { " aria-label=\"\(esc($0))\"" } ?? "")>\(esc(label))</button>" : ""
         }
         func input(_ name: String, _ label: String, _ value: String?, max: Int, hint: String? = nil) -> String {
-            "<label for=\"\(name)\">\(esc(label))</label><input id=\"\(name)\" name=\"\(name)\" type=\"text\" maxlength=\"\(max)\" value=\"\(esc(value ?? ""))\"\(dis)\(hint.map { _ in " aria-describedby=\"\(name)-h\"" } ?? "")>"
-                + (hint.map { "<p class=\"mu sm\" id=\"\(name)-h\">\(esc($0))</p>" } ?? "")
+            "<div class=\"field\"><label for=\"\(name)\">\(esc(label))</label><input id=\"\(name)\" name=\"\(name)\" type=\"text\" maxlength=\"\(max)\" value=\"\(esc(value ?? ""))\"\(dis)\(hint.map { _ in " aria-describedby=\"\(name)-h\"" } ?? "")>"
+                + (hint.map { "<p class=\"help\" id=\"\(name)-h\">\(esc($0))</p>" } ?? "") + "</div>"
         }
         func checkbox(_ name: String, _ label: String, _ on: Bool) -> String {
             "<label class=\"ck\"><input type=\"checkbox\" name=\"\(name)\" value=\"1\"\(on ? " checked" : "")\(dis)> \(esc(label))</label>"
         }
         func select(_ name: String, _ label: String, _ options: [(String, String)], selected: String?) -> String {
-            "<label for=\"\(name)\">\(esc(label))</label><select id=\"\(name)\" name=\"\(name)\"\(dis)>"
-                + options.map { "<option value=\"\(esc($0.0))\"\($0.0 == selected ? " selected" : "")>\(esc($0.1))</option>" }.joined() + "</select>"
+            "<div class=\"field\"><label for=\"\(name)\">\(esc(label))</label><select id=\"\(name)\" name=\"\(name)\"\(dis)>"
+                + options.map { "<option value=\"\(esc($0.0))\"\($0.0 == selected ? " selected" : "")>\(esc($0.1))</option>" }.joined() + "</select></div>"
         }
 
-        var html = "<form method=\"post\" action=\"\(action)\" class=\"card\" aria-label=\"Loop editor\">\(csrf)<input type=\"hidden\" name=\"version\" value=\"\(record.version)\">"
-        html += "<h2>Editor</h2>"
+        var html = "<form method=\"post\" action=\"\(action)\" class=\"card loop-editor\" aria-label=\"Loop editor\">\(csrf)<input type=\"hidden\" name=\"version\" value=\"\(record.version)\">"
         // The first submit button is the one Enter triggers: a plain save.
-        if canEdit { html += "<p>\(button("save", "Save draft", style: ""))</p>" }
+        html += "<header class=\"card-h\"><div><h2>Editor</h2><p class=\"d\">Wording, fields and buttons, step by step. Structure changes save the draft too.</p></div>"
+            + (canEdit ? "<div class=\"a\">\(button("save", "Save draft", style: ""))</div>" : "") + "</header>"
         html += "<fieldset><legend>Loop</legend>"
         html += input("title", "Title", d.title, max: LoopLimits.titleLength)
         html += input("description", "Description (optional)", d.description, max: LoopLimits.descriptionLength)
@@ -311,8 +312,8 @@ enum ConsoleLoopStudio {
         }
         appearance += kits.map { ($0.kitKey, "Brand Kit: \($0.name)") }
         html += select("appearance", "Appearance", appearance, selected: selectedAppearance)
-        html += "<p class=\"mu sm\">Only your Brand Kits that Viadere approved are listed. The \"Built by\" line, confirmations and outcomes always use Viadere's style.</p>"
-        html += "<label for=\"expires_hours\">Customers can finish it within (hours, 1 to 720)</label><input id=\"expires_hours\" name=\"expires_hours\" type=\"number\" min=\"1\" max=\"720\" value=\"\(max(1, d.limits.expiresInSeconds / 3600))\"\(dis)>"
+        html += "<p class=\"help\">Only your Brand Kits that Viadere approved are listed. The \"Built by\" line, confirmations and outcomes always use Viadere's style.</p>"
+        html += "<div class=\"field\"><label for=\"expires_hours\">Customers can finish it within (hours, 1 to 720)</label><input id=\"expires_hours\" name=\"expires_hours\" type=\"number\" min=\"1\" max=\"720\" value=\"\(max(1, d.limits.expiresInSeconds / 3600))\"\(dis)></div>"
         html += "</fieldset>"
 
         let stepTargets = d.steps.enumerated().map { ($0.element.id, "Step \($0.offset + 1): \($0.element.title ?? stepName($0.element.type))") }
@@ -320,7 +321,7 @@ enum ConsoleLoopStudio {
             let sp = "s\(i)"
             html += "<fieldset id=\"step-\(i)\"><legend>Step \(i + 1): \(esc(stepName(step.type)))\(i == 0 ? " (first)" : "")</legend>"
             html += input("\(sp)_title", "Step title (optional)", step.title, max: LoopLimits.stepTitleLength)
-            html += "<label for=\"\(sp)_body\">Text (optional)</label><textarea id=\"\(sp)_body\" name=\"\(sp)_body\" maxlength=\"\(LoopLimits.bodyLength)\"\(dis)>\(esc(step.body ?? ""))</textarea>"
+            html += "<div class=\"field\"><label for=\"\(sp)_body\">Text (optional)</label><textarea id=\"\(sp)_body\" name=\"\(sp)_body\" maxlength=\"\(LoopLimits.bodyLength)\"\(dis)>\(esc(step.body ?? ""))</textarea></div>"
             if step.type == .result { html += checkbox("\(sp)_show_outcome", "Show the customer your answer (confirmed, declined, waiting)", step.showOutcome == true) }
             if step.type == .form {
                 for (j, field) in step.fields.enumerated() {
@@ -330,12 +331,12 @@ enum ConsoleLoopStudio {
                     html += checkbox("\(fp)_required", "Required", field.required == true)
                     if field.type == .shortText {
                         html += "<label for=\"\(fp)_max\">Maximum length (1 to \(LoopLimits.maxShortTextLength))</label><input id=\"\(fp)_max\" name=\"\(fp)_max\" type=\"number\" min=\"1\" max=\"\(LoopLimits.maxShortTextLength)\" value=\"\(field.maxLength.map(String.init) ?? "")\"\(dis)>"
-                        html += "<p class=\"mu sm\">Customers see \"Don't share health details here.\" next to short text fields.</p>"
+                        html += "<p class=\"help\">Customers see \"Don't share health details here.\" next to short text fields.</p>"
                     }
                     if let options = field.options {
                         html += "<fieldset><legend>Options</legend>"
                         for (k, option) in options.enumerated() {
-                            html += "<div class=\"row\">\(input("\(fp)_o\(k)", "Option \(k + 1)", option.label, max: LoopLimits.optionLabelLength))"
+                            html += "<div class=\"inline\">\(input("\(fp)_o\(k)", "Option \(k + 1)", option.label, max: LoopLimits.optionLabelLength))"
                                 + button("remove_option:\(i):\(j):\(k)", "Remove", "Remove option \(k + 1) of field \(j + 1) in step \(i + 1)") + "</div>"
                         }
                         if options.count < LoopLimits.maxOptions { html += button("add_option:\(i):\(j)", "Add option", "Add an option to field \(j + 1) in step \(i + 1)") }
@@ -344,7 +345,7 @@ enum ConsoleLoopStudio {
                     html += "<p>" + button("remove_field:\(i):\(j)", "Remove field", "Remove field \(j + 1) of step \(i + 1)") + "</p></fieldset>"
                 }
                 if canEdit && step.fields.count < LoopLimits.maxFieldsPerStep {
-                    html += "<div class=\"row\">" + select("\(sp)_new_field", "New field type", fieldTypeNames.map { ($0.0.rawValue, $0.1) }, selected: nil)
+                    html += "<div class=\"inline\">" + select("\(sp)_new_field", "New field type", fieldTypeNames.map { ($0.0.rawValue, $0.1) }, selected: nil)
                         + button("add_field:\(i)", "Add field", "Add a field to step \(i + 1)") + "</div>"
                 }
             }
@@ -384,9 +385,9 @@ enum ConsoleLoopStudio {
                 + button("remove_step:\(i)", "Remove step", "Remove step \(i + 1)") + "</p></fieldset>"
         }
         if canEdit && d.steps.count < LoopLimits.maxSteps {
-            html += "<div class=\"row\">" + select("new_step_type", "New step type", stepTypeNames.map { ($0.0.rawValue, $0.1) }, selected: nil) + button("add_step", "Add step") + "</div>"
+            html += "<div class=\"inline\">" + select("new_step_type", "New step type", stepTypeNames.map { ($0.0.rawValue, $0.1) }, selected: nil) + button("add_step", "Add step") + "</div>"
         }
-        if canEdit { html += "<p>\(button("save", "Save draft", style: ""))</p>" }
+        if canEdit { html += ConsoleUI.formActions(button("save", "Save draft", style: ""), sep: true) }
         html += "</form>"
         return html
     }
@@ -397,12 +398,12 @@ enum ConsoleLoopStudio {
         guard canEdit else { return "" }
         let ready = report.gate.passed
         return """
-        <div class="card"><h2>Submit for Viadere review</h2><p class="sm">Submitting creates a new revision of <code>\(DashboardUI.esc(record.loopKey))</code>. \
+        <section class="card\(ready ? "" : " t-warning")"><h2>Submit for Viadere review</h2><p class="sm">Submitting creates a new revision of <code>\(DashboardUI.esc(record.loopKey))</code>. \
         Viadere runs the automated checks again, then \(report.requiredReview == .twoPerson ? "two different Viadere reviewers check" : "a Viadere reviewer checks") the wording, \
         the data collected and the preview. Only an approved revision is signed and shown to customers; the revision live today keeps serving until then.</p>\
         \(ready ? "" : "<p class=\"err sm\" role=\"status\">Fix the problems in the automated checks first.</p>")\
         <form method="post" action="\(action)/submit">\(csrf)<input type="hidden" name="version" value="\(record.version)">\
-        <button class="btn" type="submit"\(ready ? "" : " disabled aria-disabled=\"true\"")>Submit for Viadere review</button></form></div>
+        <div class="form-actions"><button class="btn" type="submit"\(ready ? "" : " disabled aria-disabled=\"true\"")>Submit for Viadere review</button></div></form></section>
         """
     }
 
@@ -422,8 +423,8 @@ enum ConsoleLoopStudio {
 
     /// The four review stages (plan 4.12) for each revision of the draft's Loop, with reviewer messages.
     static func tracker(_ req: Request, revisions: [LoopRevisionRecord], p: DashboardPrincipal) async throws -> String {
-        var html = "<div class=\"card\" id=\"status\"><h2>Review status</h2>"
-        guard !revisions.isEmpty else { return html + "<p class=\"mu\">Not submitted yet.</p></div>" }
+        var html = "<section class=\"card\" id=\"status\"><h2>Review status</h2>"
+        guard !revisions.isEmpty else { return html + ConsoleUI.empty("Not submitted yet", "Each submission appears here with its four review stages.", icon: .clock) + "</section>" }
         for revision in revisions {
             let reviews = try await LoopReviewRecord.query(on: req.db).filter(\.$revisionId == revision.id!).filter(\.$businessId == revision.businessId).sort(\.$at, .ascending).all()
             let automated = reviews.first { $0.stage == LoopPublicationService.ReviewStage.automated.rawValue }
@@ -455,17 +456,17 @@ enum ConsoleLoopStudio {
                 }
             }
             func stage(_ n: Int, _ name: String, _ value: (String, Bool)) -> String {
-                "<li\(value.1 ? " class=\"done\"" : "")><strong>\(n). \(DashboardUI.esc(name))</strong> <span>\(DashboardUI.esc(value.0))</span></li>"
+                "<li\(value.1 ? " class=\"done\"" : "")><span class=\"dot\" aria-hidden=\"true\">\(value.1 ? ConsoleUI.icon(.check) : String(n))</span><div><p class=\"ct\">\(n). \(DashboardUI.esc(name))</p><p class=\"cd\">\(DashboardUI.esc(value.0))</p></div></li>"
             }
             html += "<section aria-label=\"Revision \(revision.revision)\"><h3>Revision \(revision.revision) · \(DashboardUI.esc(stateLabel(state))) · \(DashboardFormat.date(revision.createdAt))</h3>"
-            html += "<ol class=\"steps\">\(stage(1, "Automated checks", checks))\(stage(2, "Viadere review", reviewer1))\(stage(3, "Second Viadere reviewer", reviewer2))\(stage(4, "Signed publication", published))</ol>"
+            html += "<ol class=\"checklist\">\(stage(1, "Automated checks", checks))\(stage(2, "Viadere review", reviewer1))\(stage(3, "Second Viadere reviewer", reviewer2))\(stage(4, "Signed publication", published))</ol>"
             if !messages.isEmpty { html += "<ul class=\"sm\">" + messages.prefix(10).map { "<li>\(DashboardUI.esc($0))</li>" }.joined() + "</ul>" }
             if state == .inReview && p.can(.submitLoops) {
                 html += "<form method=\"post\" action=\"\(ConsoleInbox.loopsPath)/revisions/\(revision.id!.uuidString.lowercased())/withdraw\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Withdraw revision \(revision.revision)</button></form>"
             }
             html += "</section>"
         }
-        return html + "</div>"
+        return html + "</section>"
     }
 }
 

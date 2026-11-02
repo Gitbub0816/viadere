@@ -68,7 +68,7 @@ enum ConsoleEnrollmentRoutes {
             return DashboardUI.authPage(title: "Console enrollment", body: """
             <h1>Set up your passkey</h1><p class="mu">Register a passkey for your organization's console. You'll use it to sign in at /dashboard/login.</p>\
             <form data-passkey="register" data-begin="\(beginPath)" data-finish="\(finishPath)" data-next="/dashboard">\
-            <input type="hidden" name="token" value="\(DashboardUI.esc(token))"><button class="btn" type="submit">Create passkey</button></form>\
+            <input type="hidden" name="token" value="\(DashboardUI.esc(token))"><div class="form-actions"><button class="btn wide" type="submit">\(ConsoleUI.icon(.key))Create passkey</button></div></form>\
             <p id="pk-msg" class="sm err" role="alert"></p>
             """)
         }

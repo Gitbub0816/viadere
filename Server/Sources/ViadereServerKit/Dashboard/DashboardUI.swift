@@ -9,51 +9,8 @@ import ViadereCore
 enum DashboardUI {
     // MARK: Assets
 
-    static let css = """
-    :root{color-scheme:light dark;--bg:#F5F2EC;--sf:#FCFBF8;--sr:#FFFFFF;--fg:#1F1E1C;--mu:#625D55;--ac:#745E3F;--acs:rgba(194,174,142,.16);--hl:rgba(31,30,28,.10);--dg:#A3412E;--ok:#3F6149;--pf:#1F1E1C;--op:#F5F2EC}
-    @media(prefers-color-scheme:dark){:root{--bg:#121211;--sf:#1C1B1A;--sr:#262523;--fg:#F3F0EA;--mu:#A29D94;--ac:#CDB993;--acs:rgba(205,185,147,.14);--hl:rgba(243,240,234,.12);--dg:#E08068;--ok:#8DBB98;--pf:#F3F0EA;--op:#1F1E1C}}
-    *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-    body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-    a{color:var(--ac)}a:hover{text-decoration-thickness:2px}
-    h1{font-size:1.65rem;font-weight:300;letter-spacing:-.01em;margin:0 0 .25rem}h2{font-size:1.05rem;font-weight:600;margin:0 0 .75rem}h3{font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:0 0 .5rem}
-    p{margin:.4rem 0 .9rem}.mu{color:var(--mu)}.sm{font-size:.86rem}.mono,code,pre{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.84rem}
-    .shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
-    .side{padding:1.5rem 1.1rem;border-right:1px solid var(--hl);background:var(--sf);position:sticky;top:0;align-self:start;height:100vh;display:flex;flex-direction:column;gap:1.25rem}
-    .brand{display:flex;align-items:center;gap:.6rem;color:var(--fg);font-size:1.25rem;letter-spacing:-.008em}.brand svg{width:34px;height:auto}.brand b{font-weight:600}.brand span{font-weight:300}
-    .org{padding:.7rem .8rem;border:1px solid var(--hl);border-radius:12px;background:var(--bg)}.org strong{display:block;font-weight:600}
-    nav{display:flex;flex-direction:column;gap:2px}nav a{padding:.5rem .7rem;border-radius:10px;color:var(--fg);font-size:.93rem}nav a:hover{background:var(--acs);text-decoration:none}nav a[aria-current=page]{background:var(--acs);color:var(--ac);font-weight:600}
-    .side .foot{margin-top:auto}
-    main{padding:2.25rem clamp(1rem,4vw,3rem) 4rem;max-width:1100px;width:100%}
-    .head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
-    .card{background:var(--sf);border:1px solid var(--hl);border-radius:16px;padding:1.25rem 1.4rem;margin-bottom:1.1rem}
-    .grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-bottom:1.1rem}
-    .stat{background:var(--sf);border:1px solid var(--hl);border-radius:16px;padding:1.1rem 1.25rem}.stat .n{font-size:1.9rem;font-weight:300;letter-spacing:-.02em;line-height:1.1}.stat .l{font-size:.8rem;color:var(--mu);margin-top:.25rem}
-    table{width:100%;border-collapse:collapse;font-size:.9rem}th{font-size:.74rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);text-align:left;padding:.55rem .6rem;border-bottom:1px solid var(--hl)}td{padding:.65rem .6rem;border-bottom:1px solid var(--hl);vertical-align:top}tr:last-child td{border-bottom:0}.tw{overflow-x:auto}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:1px solid transparent;border-radius:999px;padding:.55rem 1.15rem;font:inherit;font-weight:600;font-size:.9rem;cursor:pointer;background:var(--pf);color:var(--op);text-decoration:none}.btn:hover{opacity:.9;text-decoration:none}.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
-    .btn.s{background:transparent;color:var(--fg);border-color:var(--hl)}.btn.s:hover{background:var(--acs)}.btn.d{background:transparent;color:var(--dg);border-color:var(--dg)}.btn.sm{padding:.3rem .8rem;font-size:.82rem}
-    label{display:block;font-size:.82rem;font-weight:600;margin:.8rem 0 .3rem}input[type=text],input[type=email],input[type=url],input[type=number],select,textarea{width:100%;padding:.6rem .8rem;border-radius:10px;border:1px solid var(--hl);background:var(--sr);color:var(--fg);font:inherit}textarea{min-height:5rem}
-    .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}.row.end{justify-content:flex-end}.cols{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
-    .ck{display:flex;align-items:center;gap:.5rem;font-weight:400;margin:.3rem 0}.ck input{width:auto}
-    .badge{display:inline-block;padding:.12rem .6rem;border-radius:999px;font-size:.74rem;font-weight:600;background:var(--acs);color:var(--ac)}.badge.ok{color:var(--ok);background:rgba(76,116,88,.14)}.badge.dg{color:var(--dg);background:rgba(163,65,46,.12)}.badge.mu{color:var(--mu);background:var(--hl)}
-    .notice{border:1px solid var(--hl);border-left:3px solid var(--ac);background:var(--sf);border-radius:12px;padding:.8rem 1rem;margin-bottom:1.1rem}.notice.dg{border-left-color:var(--dg)}.notice.ok{border-left-color:var(--ok)}
-    pre{background:var(--sr);border:1px solid var(--hl);border-radius:12px;padding:.9rem 1rem;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:.5rem 0}
-    .secret{font-size:.95rem;padding:.9rem 1rem;border:1px dashed var(--ac);border-radius:12px;background:var(--acs);word-break:break-all;user-select:all}
-    .qr{width:224px;height:224px;background:#fff;border-radius:12px;padding:8px;display:block}.qr svg{width:100%;height:100%;display:block}
-    .bars rect.b{fill:var(--ac)}.bars rect.t{fill:var(--hl)}.bars text{fill:var(--mu);font:11px -apple-system,system-ui,sans-serif}
-    .err{color:var(--dg)}.auth{max-width:30rem;margin:8vh auto;padding:0 1rem}.auth .card{padding:1.75rem}.auth .brand{margin-bottom:1.5rem;justify-content:center}
-    .vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-    .skip{position:absolute;left:.5rem;top:-3rem;z-index:10;background:var(--pf);color:var(--op);padding:.6rem 1rem;border-radius:999px;font-weight:600}.skip:focus{top:.5rem}
-    main:focus{outline:none}
-    .tabs{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 1.25rem;padding:0;border-bottom:1px solid var(--hl)}.tabs a{display:inline-flex;align-items:center;min-height:2rem;padding:.35rem .8rem;border-radius:10px 10px 0 0;color:var(--fg)}.tabs a[aria-current=page]{background:var(--acs);color:var(--ac);font-weight:600}
-    table caption{caption-side:top;text-align:left;font-weight:600;padding:.25rem .6rem .5rem}
-    .btn{min-height:2rem}.btn.sm{min-height:1.75rem}
-    input[type=text],input[type=email],input[type=url],input[type=number],select,textarea{min-height:2.25rem}
-    .ck{min-height:1.75rem}.ck input{width:1.25rem;height:1.25rem}
-    .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}.steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.6rem .8rem;border:1px solid var(--hl);border-radius:12px;background:var(--bg)}
-    .steps .done{border-color:var(--ok)}
-    a{text-decoration:underline;text-underline-offset:2px}nav a,.btn,.tabs a,.brand{text-decoration:none}
-    @media(max-width:820px){.shell{grid-template-columns:1fr}.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.75rem;border-right:0;border-bottom:1px solid var(--hl)}.side nav{flex-direction:row;flex-wrap:wrap}.org{display:none}.side .foot{margin-top:0}main{padding-top:1.25rem}}
-    """
+    /// The console stylesheet (the design system lives in `ConsoleDesignSystem.swift`).
+    static var css: String { ConsoleUI.css }
 
     static let script = """
     (function(){'use strict';
@@ -75,12 +32,16 @@ enum DashboardUI {
 
     static func sha256Base64(_ text: String) -> String { Data(SHA256.hash(data: Data(text.utf8))).base64EncodedString() }
 
+    /// The pinned hashes, computed once (the stylesheet and the script are constants).
+    static let styleHash = sha256Base64(ConsoleUI.css)
+    static let scriptHash = sha256Base64(script)
+
     /// CSP for HTML pages. Scripts are allowed only where a page declares `needsScript` (passkey ceremonies).
     /// `frames`: the page embeds same-origin sandboxed previews (Brand Kit Studio WP-2.5, Loop Studio WP-3.7, operator Loop review).
     static func csp(script: Bool, frames: Bool = false) -> String {
-        var parts = ["default-src 'none'", "style-src 'sha256-\(sha256Base64(css))'", "img-src 'self' data:", "font-src 'none'",
+        var parts = ["default-src 'none'", "style-src 'sha256-\(styleHash)'", "img-src 'self' data:", "font-src 'none'",
                      "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'"]
-        if script { parts.append("script-src 'sha256-\(sha256Base64(Self.script))'"); parts.append("connect-src 'self'") }
+        if script { parts.append("script-src 'sha256-\(scriptHash)'"); parts.append("connect-src 'self'") }
         if frames { parts.append("frame-src 'self'") }
         return parts.joined(separator: "; ")
     }
@@ -93,11 +54,16 @@ enum DashboardUI {
 
     static var brand: String { "<div class=\"brand\">\(markSVG)<div><b>via</b><span>dere</span></div></div>" }
 
+    /// The brand as the home link of a signed-in shell, with the realm tag.
+    static func brandLink(home: String, realm: String) -> String {
+        "<a class=\"brand\" href=\"\(home)\">\(markSVG)<div><b>via</b><span>dere</span></div><span class=\"realm pill t-neutral\">\(esc(realm))</span></a>"
+    }
+
     // MARK: Escaping
 
     static func esc(_ text: String) -> String { WebRoutes.escape(text) }
 
-    // MARK: Pages
+    // MARK: Navigation
 
     struct NavItem {
         var title: String
@@ -116,6 +82,9 @@ enum DashboardUI {
         var children: [NavItem]
         /// Paths that belong to the section besides its landing page and children.
         var prefixes: [String] = []
+        /// The sidebar group the section is listed under (nil: ungrouped, at the top).
+        var group: String? = nil
+        var icon: ConsoleUI.Icon = .home
 
         func visible(to p: DashboardPrincipal) -> Bool { permissions.isEmpty || permissions.contains(where: p.can) }
         func contains(_ path: String) -> Bool {
@@ -123,34 +92,36 @@ enum DashboardUI {
         }
     }
 
+    /// Spec §9.1 order; groups only add headings in the sidebar, the order stays the spec's.
     static let sections: [NavSection] = [
-        NavSection(title: "Dashboard", path: "/dashboard", permissions: [.viewOverview], children: []),
+        NavSection(title: "Dashboard", path: "/dashboard", permissions: [.viewOverview], children: [], icon: .home),
         NavSection(title: "Organization", path: "/dashboard/organization", permissions: [.viewOrganization, .viewTeam, .manageOrganization, .manageBrandKits], children: [
             NavItem(title: "Profile and onboarding", path: "/dashboard/organization", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Domains", path: "/dashboard/organization/domains", permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Your Viadere page", path: "/dashboard/organization/page", permissions: [.viewOrganization, .manageOrganization]),
+            NavItem(title: "Customer profile access", path: ProfileConsole.path, permissions: [.viewOrganization, .manageOrganization]),
             NavItem(title: "Brand Kits", path: "/dashboard/brand", permissions: [.viewOrganization, .manageBrandKits]),
             NavItem(title: "Team", path: "/dashboard/team", permissions: [.viewTeam]),
-        ]),
+        ], group: "Set up", icon: .building),
         NavSection(title: "Developers", path: "/dashboard/developers", permissions: [.viewAPIKeys, .viewWebhooks, .viewTemplates], children: [
             NavItem(title: "Overview", path: "/dashboard/developers", permissions: []),
             NavItem(title: "API keys", path: "/dashboard/api-keys", permissions: [.viewAPIKeys]),
             NavItem(title: "Webhooks", path: "/dashboard/webhooks", permissions: [.viewWebhooks]),
             NavItem(title: "Sandbox", path: "/dashboard/developers/sandbox", permissions: [.viewWebhooks, .manageWebhooks]),
             NavItem(title: "Templates", path: "/dashboard/templates", permissions: [.viewTemplates]),
-        ]),
+        ], group: "Set up", icon: .code),
         NavSection(title: "Messaging", path: "/dashboard/messaging", permissions: [.viewMessaging, .viewConsent, .manageCampaigns], children: [
             NavItem(title: "Overview", path: "/dashboard/messaging", permissions: []),
             NavItem(title: "Campaigns", path: "/dashboard/campaigns", permissions: [.manageCampaigns]),
             NavItem(title: "Consent", path: "/dashboard/consent", permissions: [.viewConsent]),
-        ]),
-        NavSection(title: "Inbox", path: "/dashboard/inbox", permissions: [.viewInbox], children: []),
+        ], group: "Customers", icon: .chat),
+        NavSection(title: "Inbox", path: "/dashboard/inbox", permissions: [.viewInbox], children: [], group: "Customers", icon: .inbox),
         NavSection(title: "Loops", path: "/dashboard/loops", permissions: [.submitLoops, .viewLoops], children: [
             NavItem(title: "Your Loops", path: "/dashboard/loops", permissions: []),
             NavItem(title: "Loop Studio", path: "/dashboard/loops/studio", permissions: []),
-        ]),
-        NavSection(title: "Verify", path: "/dashboard/verification", permissions: [.viewVerify], children: []),
-        NavSection(title: "Approve", path: "/dashboard/approve", permissions: [.viewApprove], children: []),
+        ], group: "Customers", icon: .loop),
+        NavSection(title: "Verify", path: "/dashboard/verification", permissions: [.viewVerify], children: [], group: "Trust services", icon: .verify),
+        NavSection(title: "Approve", path: "/dashboard/approve", permissions: [.viewApprove], children: [], group: "Trust services", icon: .approve),
         NavSection(title: "Security", path: "/dashboard/security", permissions: [.viewSecurity], children: [
             NavItem(title: "Overview", path: "/dashboard/security", permissions: []),
             NavItem(title: "Sessions", path: "/dashboard/security/sessions", permissions: []),
@@ -159,29 +130,56 @@ enum DashboardUI {
             NavItem(title: "Alerts and contacts", path: "/dashboard/security/alerts", permissions: []),
             NavItem(title: "Approvals", path: "/dashboard/security/approvals", permissions: []),
             NavItem(title: "Audit log", path: "/dashboard/audit", permissions: [.viewAudit]),
-        ]),
+        ], group: "Governance", icon: .lock),
         NavSection(title: "Compliance", path: "/dashboard/compliance", permissions: [.viewCompliance], children: [
             NavItem(title: "Agreements", path: "/dashboard/compliance", permissions: []),
             NavItem(title: "Retention", path: "/dashboard/compliance/retention", permissions: []),
             NavItem(title: "Data requests", path: "/dashboard/compliance/requests", permissions: []),
-        ]),
-        NavSection(title: "Billing", path: "/dashboard/billing", permissions: [.viewBilling], children: []),
+        ], group: "Governance", icon: .document),
+        NavSection(title: "Billing", path: "/dashboard/billing", permissions: [.viewBilling], children: [], group: "Governance", icon: .card),
         NavSection(title: "Support", path: "/dashboard/support", permissions: [.viewSupport], children: [
             NavItem(title: "Help and tickets", path: "/dashboard/support", permissions: []),
             NavItem(title: "Integration health", path: "/dashboard/support/health", permissions: []),
             NavItem(title: "Notices", path: "/dashboard/support/notices", permissions: []),
             NavItem(title: "Appeals", path: "/dashboard/support/appeals", permissions: []),
-        ]),
+        ], group: "Help", icon: .help),
     ]
 
     static func section(for path: String) -> NavSection? {
         sections.first { $0.contains(path) && $0.path != "/dashboard" } ?? (path == "/dashboard" ? sections.first : nil)
     }
 
-    static let operatorNav: [(String, String)] = [
-        ("Applications", "/operator"), ("Businesses", "/operator/businesses"), ("Abuse signals", "/operator/abuse"), ("Capability policy", "/operator/policy"),
-        ("Brand review", "/operator/brand"), ("Platform switches", "/operator/switches"), ("Consumer accounts", "/operator/consumers"), ("Notices", "/operator/notices"), ("Data and retention", "/operator/retention"), ("Support", "/operator/support"), ("Loops", "/operator/loops"),
+    struct OperatorNavItem {
+        var title: String
+        var path: String
+        var group: String
+        var icon: ConsoleUI.Icon
+    }
+
+    /// The operator console, grouped by job: what waits for a decision, the accounts, the safety controls, communication, data.
+    static let operatorSections: [OperatorNavItem] = [
+        OperatorNavItem(title: "Applications", path: "/operator", group: "Review", icon: .queue),
+        OperatorNavItem(title: "Brand review", path: "/operator/brand", group: "Review", icon: .palette),
+        OperatorNavItem(title: "Loops", path: "/operator/loops", group: "Review", icon: .loop),
+        OperatorNavItem(title: "Businesses", path: "/operator/businesses", group: "Accounts", icon: .store),
+        OperatorNavItem(title: "Consumer accounts", path: "/operator/consumers", group: "Accounts", icon: .users),
+        OperatorNavItem(title: "Abuse signals", path: "/operator/abuse", group: "Trust and safety", icon: .alert),
+        OperatorNavItem(title: "Capability policy", path: "/operator/policy", group: "Trust and safety", icon: .sliders),
+        OperatorNavItem(title: "Platform switches", path: "/operator/switches", group: "Trust and safety", icon: .toggle),
+        OperatorNavItem(title: "Notices", path: "/operator/notices", group: "Communication", icon: .megaphone),
+        OperatorNavItem(title: "Support", path: "/operator/support", group: "Communication", icon: .help),
+        OperatorNavItem(title: "Data and retention", path: "/operator/retention", group: "Data", icon: .archive),
     ]
+
+    /// Title and path pairs (kept for callers that only need the list).
+    static var operatorNav: [(String, String)] { operatorSections.map { ($0.title, $0.path) } }
+
+    static func operatorItem(for path: String) -> OperatorNavItem? {
+        operatorSections.first { $0.path == path || ($0.path != "/operator" && path.hasPrefix($0.path + "/")) }
+            ?? (path.hasPrefix("/operator/applications/") ? operatorSections.first : nil)
+    }
+
+    // MARK: Responses
 
     static func response(_ html: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
         let response = Response(status: status, body: .init(string: html))
@@ -198,22 +196,66 @@ enum DashboardUI {
     private static func document(title: String, body: String, script: Bool) -> String {
         """
         <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">\
-        <meta name="referrer" content="same-origin"><meta name="robots" content="noindex"><title>\(esc(title)) · Viadere</title>\
+        <meta name="referrer" content="same-origin"><meta name="robots" content="noindex"><meta name="color-scheme" content="light dark"><title>\(esc(title)) · Viadere</title>\
         <style>\(css)</style></head><body>\(body)\(script ? "<script>\(Self.script)</script>" : "")</body></html>
         """
     }
 
-    /// Unauthenticated page (sign-in, sign-up, invitations).
-    static func authPage(title: String, body: String, script: Bool = true, status: HTTPStatus = .ok) -> Response {
-        response(document(title: title, body: "<main id=\"main\" class=\"auth\">\(brand)<div class=\"card\">\(body)</div></main>", script: script), status: status, script: script)
+    /// Unauthenticated page (sign-in, sign-up, invitations). `footer` is markup shown under the card (links to the other flows).
+    static func authPage(title: String, body: String, script: Bool = true, status: HTTPStatus = .ok, footer: String = "") -> Response {
+        response(document(title: title, body: "<main id=\"main\" class=\"auth\">\(brand)<div class=\"card\">\(body)</div>\(footer.isEmpty ? "" : "<div class=\"foot\">\(footer)</div>")</main>", script: script),
+                 status: status, script: script)
     }
 
-    /// Signed-in business page. Landmarks: skip link, `aside` with the console navigation, `header` with the page heading, `main`.
+    // MARK: Page chrome
+
+    private static func breadcrumbs(_ crumbs: [ConsoleUI.Crumb]) -> String {
+        let items = crumbs.enumerated().map { index, crumb -> String in
+            let last = index == crumbs.count - 1
+            guard !last, let href = crumb.href else { return "<li\(last ? " aria-current=\"page\"" : "")>\(esc(crumb.title))</li>" }
+            return "<li><a href=\"\(esc(href))\">\(esc(crumb.title))</a></li>"
+        }.joined()
+        return "<nav class=\"crumbs\" aria-label=\"Breadcrumb\"><ol>\(items)</ol></nav>"
+    }
+
+    private static func pageHeader(title: String, subtitle: String?, actions: String) -> String {
+        "<header class=\"ph\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"sub\">\(esc($0))</p>" } ?? "")</div>\(actions.isEmpty ? "" : "<div class=\"acts\">\(actions)</div>")</header>"
+    }
+
+    /// Default trail for a business page: Dashboard › section › tab › page (repeats collapsed).
+    static func businessCrumbs(active: String, title: String) -> [ConsoleUI.Crumb] {
+        var crumbs = [ConsoleUI.Crumb("Dashboard", "/dashboard")]
+        if let section = section(for: active), section.path != "/dashboard" {
+            crumbs.append(ConsoleUI.Crumb(section.title, section.path))
+            if let child = section.children.first(where: { $0.path == active }), child.path != section.path { crumbs.append(ConsoleUI.Crumb(child.title, child.path)) }
+        }
+        if crumbs.last?.title != title { crumbs.append(ConsoleUI.Crumb(title, nil)) }
+        return crumbs
+    }
+
+    /// Default trail for an operator page: Operator › nav item › page.
+    static func operatorCrumbs(active: String, title: String) -> [ConsoleUI.Crumb] {
+        var crumbs = [ConsoleUI.Crumb("Operator", "/operator")]
+        if let item = operatorItem(for: active), item.path != "/operator" || title != item.title { crumbs.append(ConsoleUI.Crumb(item.title, item.path)) }
+        if crumbs.last?.title != title { crumbs.append(ConsoleUI.Crumb(title, nil)) }
+        return crumbs
+    }
+
+    /// Signed-in business page. Landmarks: skip link, `aside` with the console navigation, a top bar with the breadcrumb trail and the
+    /// signed-in person, then `main` with the page header (h1, subtitle, primary actions), the section's tabs, banners, the flash and the body.
     static func businessPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, actions: String = "",
-                             flash: String? = nil, body: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
+                             flash: String? = nil, flashTone: ConsoleUI.Tone = .success, breadcrumbs crumbs: [ConsoleUI.Crumb]? = nil,
+                             body: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
         let current = section(for: active)
-        let items = sections.filter { $0.visible(to: p) }
-            .map { "<a href=\"\($0.path)\"\($0.path == current?.path ? " aria-current=\"page\"" : "")>\(esc($0.title))</a>" }.joined()
+        var nav = ""
+        var group: String? = "\u{0}"
+        for section in sections where section.visible(to: p) {
+            if section.group != group {
+                if let heading = section.group { nav += "<p class=\"nav-g\" aria-hidden=\"true\">\(esc(heading))</p>" }
+                group = section.group
+            }
+            nav += "<a href=\"\(section.path)\"\(section.path == current?.path ? " aria-current=\"page\"" : "")>\(ConsoleUI.icon(section.icon))\(esc(section.title))</a>"
+        }
         var tabs = ""
         if let current, current.children.count > 1 {
             let links = current.children.filter { $0.visible(to: p) }
@@ -222,42 +264,73 @@ enum DashboardUI {
         }
         var banner = ""
         if let business = p.business, business.status != .verified {
-            let text: String
             switch business.status {
-            case .pending: text = "Your organization is <strong>awaiting verification</strong>. Verify a domain to unlock the sandbox; production keys unlock when Viadere approves your application and your go-live review. You can invite your team in the meantime."
-            case .suspended: text = "This organization is <strong>suspended</strong>. API keys and interactions are blocked. Contact Viadere support."
-            default: text = "This organization is <strong>not active</strong>."
+            case .pending:
+                banner = ConsoleUI.callout(.accent, title: "Your organization is awaiting verification", """
+                <p>Verify a domain to unlock the sandbox; production keys unlock when Viadere approves your application and your go-live review. \
+                You can invite your team in the meantime. <a href="/dashboard/organization">See what's left</a></p>
+                """)
+            case .suspended:
+                banner = ConsoleUI.callout(.danger, title: "This organization is suspended",
+                                           "<p>API keys and interactions are blocked. Contact Viadere support, or <a href=\"/dashboard/support/appeals\">appeal the decision</a>.</p>")
+            default:
+                banner = ConsoleUI.callout(.danger, title: "This organization is not active", "<p>Contact Viadere support.</p>")
             }
-            banner = "<div class=\"notice\(business.status == .pending ? "" : " dg")\" role=\"status\">\(text)</div>"
         }
-        let flashHTML = flash.map { "<div class=\"notice ok\" role=\"status\">\(esc($0))</div>" } ?? ""
+        let orgName = p.business?.displayName ?? ""
+        let role = p.role?.title ?? ""
         let side = """
-        <aside class="side">\(brand)<div class="org"><span class="mu sm">Organization</span><strong>\(esc(p.business?.displayName ?? ""))</strong>\
-        <span class="badge mu">\(esc(p.role?.title ?? ""))</span></div><nav aria-label="Console">\(items)</nav>\
-        <div class="foot"><p class="sm"><a href="/dashboard/security/sessions">Your sessions</a></p><form method="post" action="/dashboard/logout"><input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn s sm" type="submit">Sign out</button></form></div></aside>
+        <aside class="side">\(brandLink(home: "/dashboard", realm: "Business"))<div class="org"><span class="k">Organization</span><strong>\(esc(orgName))</strong>\
+        \(role.isEmpty ? "" : ConsoleUI.pill(role, .neutral))</div><nav aria-label="Console">\(nav)</nav>\
+        <div class="side-foot"><a href="/dashboard/security/sessions">Your sessions</a><a href="/dashboard/support">Help and status</a></div></aside>
         """
-        let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div><div class=\"row\">\(actions)</div></header>"
-        return response(document(title: title, body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(tabs)\(banner)\(flashHTML)\(body)</main></div>", script: script),
+        let top = """
+        <div class="top">\(breadcrumbs(crumbs ?? businessCrumbs(active: active, title: title)))<div class="who"><span class="nm"><strong>\(esc(p.user.displayName))</strong> · \(esc(orgName))</span>\
+        <form method="post" action="/dashboard/logout"><input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn g sm" type="submit">\(ConsoleUI.icon(.signout))Sign out</button></form></div></div>
+        """
+        let toast = flash.map { ConsoleUI.toast($0, tone: flashTone) } ?? ""
+        let main = "<main id=\"main\" tabindex=\"-1\">\(pageHeader(title: title, subtitle: subtitle, actions: actions))\(tabs)\(banner)\(toast)\(body)</main>"
+        return response(document(title: title, body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<div class=\"frame\">\(top)\(main)</div></div>", script: script),
                         status: status, script: script, frames: frames)
     }
 
-    /// Signed-in operator page.
-    static func operatorPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, flash: String? = nil,
+    /// Signed-in operator page: the same shell with an inverted (charcoal) sidebar, so staff always see which console they are in.
+    static func operatorPage(_ p: DashboardPrincipal, title: String, active: String, subtitle: String? = nil, actions: String = "", flash: String? = nil,
+                             flashTone: ConsoleUI.Tone = .success, breadcrumbs crumbs: [ConsoleUI.Crumb]? = nil,
                              body: String, status: HTTPStatus = .ok, script: Bool = false, frames: Bool = false) -> Response {
-        let items = operatorNav.map { "<a href=\"\($0.1)\"\($0.1 == active || (active.hasPrefix($0.1 + "/") && $0.1 != "/operator") ? " aria-current=\"page\"" : "")>\(esc($0.0))</a>" }.joined()
+        let current = operatorItem(for: active)
+        var nav = ""
+        var group = ""
+        for item in operatorSections {
+            if item.group != group { nav += "<p class=\"nav-g\" aria-hidden=\"true\">\(esc(item.group))</p>"; group = item.group }
+            nav += "<a href=\"\(item.path)\"\(item.path == current?.path ? " aria-current=\"page\"" : "")>\(ConsoleUI.icon(item.icon))\(esc(item.title))</a>"
+        }
         let side = """
-        <aside class="side">\(brand)<div class="org"><span class="mu sm">Operator console</span><strong>\(esc(p.user.displayName))</strong></div>\
-        <nav aria-label="Operator">\(items)</nav><form class="foot" method="post" action="/operator/logout">\
-        <input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn s sm" type="submit">Sign out</button></form></aside>
+        <aside class="side">\(brandLink(home: "/operator", realm: "Operator"))<div class="org"><span class="k">Operator console</span><strong>\(esc(p.user.displayName))</strong>\
+        \(ConsoleUI.pill("Viadere staff", .neutral))</div><nav aria-label="Operator">\(nav)</nav>\
+        <div class="side-foot"><span>Every change needs your passkey, a reason, and is audited.</span></div></aside>
         """
-        let flashHTML = flash.map { "<div class=\"notice ok\" role=\"status\">\(esc($0))</div>" } ?? ""
-        let head = "<header class=\"head\"><div><h1>\(esc(title))</h1>\(subtitle.map { "<p class=\"mu\">\(esc($0))</p>" } ?? "")</div></header>"
-        return response(document(title: title + " · Operator", body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell\">\(side)<main id=\"main\" tabindex=\"-1\">\(head)\(flashHTML)\(body)</main></div>", script: script), status: status, script: script, frames: frames)
+        let top = """
+        <div class="top">\(breadcrumbs(crumbs ?? operatorCrumbs(active: active, title: title)))<div class="who"><span class="nm"><strong>\(esc(p.user.displayName))</strong> · Operator</span>\
+        <form method="post" action="/operator/logout"><input type="hidden" name="_csrf" value="\(esc(p.csrf))"><button class="btn g sm" type="submit">\(ConsoleUI.icon(.signout))Sign out</button></form></div></div>
+        """
+        let toast = flash.map { ConsoleUI.toast($0, tone: flashTone) } ?? ""
+        let main = "<main id=\"main\" tabindex=\"-1\">\(pageHeader(title: title, subtitle: subtitle, actions: actions))\(toast)\(body)</main>"
+        return response(document(title: title + " · Operator", body: "<a class=\"skip\" href=\"#main\">Skip to content</a><div class=\"shell op\">\(side)<div class=\"frame\">\(top)\(main)</div></div>", script: script),
+                        status: status, script: script, frames: frames)
     }
 
-    /// Error page inside the signed-in shell.
-    static func errorPage(_ p: DashboardPrincipal?, status: HTTPStatus, title: String, message: String) -> Response {
-        let body = "<div class=\"notice dg\" role=\"alert\">\(esc(message))</div><p><a href=\"\(p?.realm.home ?? "/dashboard")\">Back to the dashboard</a></p>"
+    /// Error page inside the signed-in shell: what happened in plain words, which fields to check, and a way back (`back` is a validated
+    /// same-console path from `ConsoleUI.backPath`).
+    static func errorPage(_ p: DashboardPrincipal?, status: HTTPStatus, title: String, message: String, fields: [String] = [], back: String? = nil) -> Response {
+        let home = p?.realm.home ?? "/dashboard"
+        var detail = "<p>\(esc(message))</p>"
+        if !fields.isEmpty { detail += "<p class=\"sm\">Check: \(fields.map { "<strong>\(esc($0))</strong>" }.joined(separator: ", ")).</p>" }
+        let tone: ConsoleUI.Tone = status == .forbidden || status == .notFound || status == .tooManyRequests ? .warning : .danger
+        var actions = ""
+        if let back { actions += ConsoleUI.linkButton("Go back and fix it", href: back, .primary) }
+        actions += ConsoleUI.linkButton("Back to the dashboard", href: home, back == nil ? .primary : .secondary)
+        let body = ConsoleUI.callout(tone, title: "\(status.code) · \(status.reasonPhrase)", urgent: true, detail) + "<div class=\"row\">\(actions)</div>"
         if let p, p.realm == .business { return businessPage(p, title: title, active: "", body: body, status: status) }
         if let p { return operatorPage(p, title: title, active: "", body: body, status: status) }
         return authPage(title: title, body: "<h1>\(esc(title))</h1><p>\(esc(message))</p>", script: false, status: status)
@@ -268,14 +341,24 @@ enum DashboardUI {
 
     static func reauthPage(_ p: DashboardPrincipal, next: String, minutes: Int) -> Response {
         let realmPath = p.realm == .business ? "/dashboard" : "/operator"
-        let body = """
-        <div class="notice">For your security, confirm it's you with your passkey before continuing. This unlocks sensitive actions for \
-        \(minutes) minutes.</div>\
-        <p><button class="btn" type="button" data-passkey="reauth" data-begin="\(realmPath)/auth/reauth/begin" data-finish="\(realmPath)/auth/reauth/finish" \
-        data-csrf="\(esc(p.csrf))" data-next="\(esc(next))">Confirm with passkey</button></p><p id="pk-msg" class="sm err" role="alert"></p>
-        """
+        let body = ConsoleUI.card("Confirm with your passkey", description: "This action is protected. Use the passkey on this device or on your phone.", """
+        <p>For your security, confirm it's you before continuing. Confirming unlocks sensitive actions for <strong>\(minutes) minutes</strong>; \
+        after that, or after a period without activity, you are asked again.</p>\
+        <div class="form-actions"><button class="btn" type="button" data-passkey="reauth" data-begin="\(realmPath)/auth/reauth/begin" data-finish="\(realmPath)/auth/reauth/finish" \
+        data-csrf="\(esc(p.csrf))" data-next="\(esc(next))">\(ConsoleUI.icon(.key))Confirm with passkey</button>\(ConsoleUI.linkButton("Cancel", href: realmPath, .ghost))</div>\
+        <p id="pk-msg" class="sm err" role="alert"></p>
+        """)
         return p.realm == .business
             ? businessPage(p, title: "Confirm it's you", active: "", body: body, status: .forbidden, script: true)
             : operatorPage(p, title: "Confirm it's you", active: "", body: body, status: .forbidden, script: true)
+    }
+}
+
+extension ConsoleUI {
+    /// One step of a breadcrumb trail; the last one is the current page (no link).
+    struct Crumb: Sendable {
+        var title: String
+        var href: String?
+        init(_ title: String, _ href: String?) { self.title = title; self.href = href }
     }
 }

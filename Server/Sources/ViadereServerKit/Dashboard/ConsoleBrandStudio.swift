@@ -165,17 +165,17 @@ enum ConsoleBrandStudio {
 
     private static func reauthNotice(_ req: Request, _ p: DashboardPrincipal, next: String) -> (String, Bool) {
         guard p.can(.manageBrandKits), !p.hasFreshReauth(ctx: req.ctx) else { return ("", false) }
-        return ("""
-        <div class="notice" role="status">Changes need a fresh passkey confirmation. <button class="btn s sm" type="button" data-passkey="reauth" \
-        data-begin="/dashboard/auth/reauth/begin" data-finish="/dashboard/auth/reauth/finish" data-csrf="\(DashboardUI.esc(p.csrf))" \
-        data-next="\(DashboardUI.esc(next))">Confirm with passkey</button><span id="pk-msg" class="sm err" role="alert"></span></div>
-        """, true)
+        return (ConsoleUI.callout(.accent, title: "Changes need a fresh passkey confirmation", """
+        <p class="sm">Confirm once and you can save kits, images and the schedule for a few minutes.</p>\
+        <p><button class="btn s sm" type="button" data-passkey="reauth" data-begin="/dashboard/auth/reauth/begin" data-finish="/dashboard/auth/reauth/finish" data-csrf="\(DashboardUI.esc(p.csrf))" \
+        data-next="\(DashboardUI.esc(next))">\(ConsoleUI.icon(.key))Confirm with passkey</button></p><p id="pk-msg" class="sm err" role="alert"></p>
+        """), true)
     }
 
     private static func statusBadge(_ status: String, approved: Bool) -> String {
         switch status {
         case "approved": DashboardFormat.badge("Approved", "ok")
-        case "pending_review": DashboardFormat.badge(approved ? "Edit in review" : "In review")
+        case "pending_review": DashboardFormat.badge(approved ? "Edit in review" : "In review", "wa")
         case "rejected": DashboardFormat.badge(approved ? "Edit declined" : "Declined", "dg")
         case "taken_down": DashboardFormat.badge("Taken down", "dg")
         default: DashboardFormat.badge(status, "mu")
@@ -187,7 +187,7 @@ enum ConsoleBrandStudio {
         guard canView(p) else { throw APIError.forbidden }
         guard let business = try await BusinessRecord.find(businessId, on: req.db) else { throw APIError.notFound }
         if BrandKitService.isBanned(business) {
-            return DashboardUI.businessPage(p, title: "Brand Kits", active: path, body: "<div class=\"notice\">Brand Kits are not available for this business category.</div>")
+            return DashboardUI.businessPage(p, title: "Brand Kits", active: path, body: ConsoleUI.callout(.neutral, "<p>Brand Kits are not available for this business category.</p>"))
         }
         let service = BrandKitService(db: req.db, ctx: req.ctx)
         let kits = try await service.kits(businessId: businessId)
@@ -201,46 +201,49 @@ enum ConsoleBrandStudio {
         var body = reauth
 
         let live: String
-        if stopped { live = "Viadere has paused branding for your business. Customers see Viadere's neutral style." }
-        else if !req.ctx.config.brandKits.signingAvailable { live = "Branding is not available right now. Customers see Viadere's neutral style." }
-        else if let manifest, manifest.status == "active" { live = "Live: version \(manifest.version), published \(DashboardFormat.date(manifest.createdAt))." }
-        else { live = "Nothing is live yet. Customers see Viadere's neutral style until Viadere approves a kit." }
-        body += "<div class=\"card\"><h2>What customers see</h2><p>\(DashboardUI.esc(live))</p><p class=\"mu sm\">Kits change colors, images and an optional Viadere frame on your business page, messages, offers and activity. They never change approvals, sign-in, verification, button wording or your verified badge. Every kit and image is reviewed by Viadere before customers see it.</p></div>"
+        let liveTone: ConsoleUI.Tone
+        if stopped { live = "Viadere has paused branding for your business. Customers see Viadere's neutral style."; liveTone = .warning }
+        else if !req.ctx.config.brandKits.signingAvailable { live = "Branding is not available right now. Customers see Viadere's neutral style."; liveTone = .warning }
+        else if let manifest, manifest.status == "active" { live = "Live: version \(manifest.version), published \(DashboardFormat.date(manifest.createdAt))."; liveTone = .success }
+        else { live = "Nothing is live yet. Customers see Viadere's neutral style until Viadere approves a kit."; liveTone = .neutral }
+        body += ConsoleUI.callout(liveTone, title: "What customers see", "<p>\(DashboardUI.esc(live))</p><p class=\"sm\">Kits change colors, images and an optional Viadere frame on your business page, messages, offers and activity. They never change approvals, sign-in, verification, button wording or your verified badge. Every kit and image is reviewed by Viadere before customers see it.</p>")
 
-        let kitRows = kits.map { k -> [String] in
+        let kitRows = kits.map { k -> [ConsoleUI.Cell] in
             let approved = k.approvedJSON != nil
-            return ["<a href=\"\(path)/kits/\(k.id!.uuidString.lowercased())\">\(DashboardUI.esc(k.name))</a>", "<code>\(DashboardUI.esc(k.kitKey))</code>",
-                    String(k.version), statusBadge(k.status, approved: approved) + (k.reviewNote.map { " <span class=\"mu sm\">\(DashboardUI.esc($0))</span>" } ?? "")]
+            return [ConsoleUI.Cell(html: "<a href=\"\(path)/kits/\(k.id!.uuidString.lowercased())\">\(DashboardUI.esc(k.name))</a>", sort: .text(k.name)), ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(k.kitKey))</code>"),
+                    .number(k.version), ConsoleUI.Cell(html: statusBadge(k.status, approved: approved) + (k.reviewNote.map { "<br><span class=\"mu sm\">\(DashboardUI.esc($0))</span>" } ?? ""))]
         }
-        body += "<div class=\"card\"><h2>Kits</h2>\(DashboardFormat.table(["Name", "Identifier", "Version", "Status"], kitRows, empty: "No kits yet.", caption: "Brand Kits"))"
-        if canManage, kits.count < req.ctx.config.brandKits.maxKitsPerBusiness { body += "<p><a class=\"btn\" href=\"\(path)/kits/new\">New kit</a></p>" }
-        body += "</div>"
+        let canAdd = canManage && kits.count < req.ctx.config.brandKits.maxKitsPerBusiness
+        let newKit = canAdd ? ConsoleUI.linkButton("New kit", href: "\(path)/kits/new", .primary, small: true, icon: .plus) : ""
+        body += ConsoleUI.card("Kits", description: "Up to \(req.ctx.config.brandKits.maxKitsPerBusiness) kits. Customers keep seeing the last approved version of a kit while an edit is in review.", actions: newKit,
+                               ConsoleUI.table([ConsoleUI.Column("Name", key: "name"), ConsoleUI.Column("Identifier"), ConsoleUI.Column("Version", numeric: true), ConsoleUI.Column("Status")], kitRows,
+                                               caption: "Brand Kits", state: ConsoleUI.TableState(req, id: "k"), empty: "No kits yet", emptyMessage: "Create a kit with your colors, then add images."))
 
-        let assetRows = assets.map { a -> [String] in
+        let assetRows = assets.map { a -> [ConsoleUI.Cell] in
             let state: String
             switch a.state {
             case "ready": state = DashboardFormat.badge("Approved", "ok")
-            case "pending_review": state = DashboardFormat.badge("In review")
+            case "pending_review": state = DashboardFormat.badge("In review", "wa")
             case "rejected": state = DashboardFormat.badge("Declined", "dg")
             default: state = DashboardFormat.badge("Taken down", "dg")
             }
-            return ["<img src=\"\(path)/assets/\(a.id!.uuidString.lowercased())/image\" alt=\"\(DashboardUI.esc(a.slot)) image\" width=\"56\" height=\"56\">",
-                    DashboardUI.esc(a.slot), "\(a.width) × \(a.height)", "\(a.bytes / 1024) KB", state]
+            return [ConsoleUI.Cell(html: "<img src=\"\(path)/assets/\(a.id!.uuidString.lowercased())/image\" alt=\"\(DashboardUI.esc(a.slot)) image\" width=\"56\" height=\"56\">"),
+                    .text(a.slot.capitalized), ConsoleUI.Cell(html: "\(a.width) × \(a.height)"), ConsoleUI.Cell(html: "\(a.bytes / 1024) KB"), ConsoleUI.Cell(html: state)]
         }
-        body += "<div class=\"card\"><h2>Images</h2><p class=\"mu sm\">PNG or JPEG, up to 2 MB. Viadere re-encodes every image as a clean PNG (location, camera and color-profile data are removed) and resizes it to the slot: logo 512 px, mark 256 px, background and art 1600 px. SVG, animated and damaged files are refused.</p>"
-        body += DashboardFormat.table(["Image", "Slot", "Size", "Stored", "Status"], assetRows, empty: "No images yet.", caption: "Brand images")
+        var upload = ""
         if canManage {
-            let slots = BrandAssetSlot.allCases.map { "<option value=\"\($0.rawValue)\">\($0.rawValue.capitalized)</option>" }.joined()
-            body += """
-            <form method="post" action="\(uploadPath)" enctype="multipart/form-data">\(csrf)<div class="cols"><div><label for="slot">Slot</label><select id="slot" name="slot">\(slots)</select></div>\
-            <div><label for="file">Image file</label><input id="file" name="file" type="file" accept="image/png,image/jpeg" required></div></div>\
-            <p><button class="btn" type="submit">Upload</button></p></form>
-            """
+            let slots = BrandAssetSlot.allCases.map { ConsoleUI.Option($0.rawValue, $0.rawValue.capitalized) }
+            upload = ConsoleUI.form(uploadPath, csrf: csrf, multipart: true,
+                "<div class=\"inline\">" + ConsoleUI.select("slot", label: "Slot", id: "slot", options: slots)
+                + ConsoleUI.input("file", label: "Image file", id: "file", type: "file", help: "PNG or JPEG, up to 2 MB.", required: true, attrs: ["accept": "image/png,image/jpeg"])
+                + "</div>" + ConsoleUI.formActions(ConsoleUI.button("Upload")))
         }
-        body += "</div>"
+        body += ConsoleUI.card("Images", description: "Viadere re-encodes every image as a clean PNG (location, camera and color-profile data are removed) and resizes it to the slot: logo 512 px, mark 256 px, background and art 1600 px. SVG, animated and damaged files are refused.",
+                               upload + ConsoleUI.table([ConsoleUI.Column("Image"), ConsoleUI.Column("Slot"), ConsoleUI.Column("Size"), ConsoleUI.Column("Stored", numeric: true), ConsoleUI.Column("Status")], assetRows,
+                                                        caption: "Brand images", empty: "No images yet."))
         body += scheduleCard(kits: kits, schedule: schedule, csrf: csrf, canManage: canManage)
         let flash = req.query[String.self, at: "m"].flatMap { Self.flash[$0] }
-        return DashboardUI.businessPage(p, title: "Brand Kits", active: path, subtitle: "Your business's look on Viadere's pages and widgets.",
+        return DashboardUI.businessPage(p, title: "Brand Kits", active: path, subtitle: "Your business's look on Viadere's pages and widgets.", actions: canAdd ? ConsoleUI.linkButton("New kit", href: "\(path)/kits/new", .primary, icon: .plus) : "",
                                         flash: flash, body: body, script: script)
     }
 
@@ -261,22 +264,23 @@ enum ConsoleBrandStudio {
             <tr><td><label class="vh" for="w\(i)k">Window \(i + 1) kit</label><select id="w\(i)k" name="w\(i)_kit"\(disabled)>\(kitOptions(w?.kit, none: "Not used"))</select></td>\
             <td><label class="vh" for="w\(i)s">Window \(i + 1) start</label><input id="w\(i)s" name="w\(i)_start" type="datetime-local" value="\(w.map { $0.startsAt.description } ?? "")"\(disabled)></td>\
             <td><label class="vh" for="w\(i)e">Window \(i + 1) end (optional)</label><input id="w\(i)e" name="w\(i)_end" type="datetime-local" value="\(w?.endsAt.map { $0.description } ?? "")"\(disabled)></td>\
-            <td><label class="vh" for="w\(i)p">Window \(i + 1) priority</label><input id="w\(i)p" name="w\(i)_priority" type="number" min="0" max="1000" value="\(w?.priority ?? 0)"\(disabled)></td></tr>
+            <td class="num"><label class="vh" for="w\(i)p">Window \(i + 1) priority</label><input id="w\(i)p" name="w\(i)_priority" type="number" min="0" max="1000" value="\(w?.priority ?? 0)"\(disabled)></td></tr>
             """
         }
         let pool = kits.map { k -> String in
             let weight = schedule?.randomPool.first { $0.kit == k.kitKey }?.weight ?? 0
-            return "<div><label for=\"pool-\(DashboardUI.esc(k.kitKey))\">\(DashboardUI.esc(k.name)) weight (0 = not in the rotation)</label><input id=\"pool-\(DashboardUI.esc(k.kitKey))\" name=\"pool_\(DashboardUI.esc(k.kitKey))\" type=\"number\" min=\"0\" max=\"100\" value=\"\(weight)\"\(disabled)></div>"
+            return ConsoleUI.input("pool_\(k.kitKey)", label: "\(k.name) weight", id: "pool-\(k.kitKey)", type: "number", value: String(weight), help: "0 keeps it out of the rotation.",
+                                   disabled: !canManage, attrs: ["min": "0", "max": "100"])
         }.joined()
-        return """
-        <div class="card"><h2>Schedule</h2><p class="mu sm">Times are in your time zone. When windows overlap, the higher priority wins; two overlapping windows with the same priority are refused. Outside every window, an optional rotation picks one kit per customer per day; otherwise the default kit is used. Requests already in progress keep the kit they started with.</p>\
-        <form method="post" action="\(path)/schedule">\(csrf)<div class="cols"><div><label for="tz">Time zone (IANA name)</label><input id="tz" name="timezone" type="text" list="zones" maxlength="64" value="\(DashboardUI.esc(schedule?.timezone ?? "America/New_York"))" required\(disabled)>\
-        <datalist id="zones">\(zones.map { "<option value=\"\($0)\">" }.joined())</datalist></div>\
-        <div><label for="dk">Default kit</label><select id="dk" name="default_kit"\(disabled)>\(kitOptions(schedule?.defaultKit, none: "Viadere's neutral style"))</select></div></div>\
-        <table><caption>Windows</caption><thead><tr><th scope="col">Kit</th><th scope="col">Starts</th><th scope="col">Ends</th><th scope="col">Priority</th></tr></thead><tbody>\(rows)</tbody></table>\
-        <fieldset><legend>Daily rotation</legend><div class="cols">\(pool)</div></fieldset>\
-        \(canManage ? "<p><button class=\"btn\" type=\"submit\">Save schedule</button></p>" : "")</form></div>
-        """
+        let basics = "<div class=\"cols\"><div class=\"field\"><label for=\"tz\">Time zone</label><input id=\"tz\" name=\"timezone\" type=\"text\" list=\"zones\" maxlength=\"64\" value=\"\(DashboardUI.esc(schedule?.timezone ?? "America/New_York"))\" required aria-describedby=\"tz-h\"\(disabled)>"
+            + "<datalist id=\"zones\">\(zones.map { "<option value=\"\($0)\">" }.joined())</datalist><p class=\"help\" id=\"tz-h\">An IANA name; every time below is in this zone.</p></div>"
+            + ConsoleUI.selectHTML("default_kit", label: "Default kit", id: "dk", optionsHTML: kitOptions(schedule?.defaultKit, none: "Viadere's neutral style"), help: "Used outside every window and the rotation.", disabled: !canManage) + "</div>"
+        return ConsoleUI.card("Schedule", description: "When windows overlap, the higher priority wins; two overlapping windows with the same priority are refused. Outside every window, an optional rotation picks one kit per customer per day; otherwise the default kit is used. Requests already in progress keep the kit they started with.",
+            ConsoleUI.form("\(path)/schedule", csrf: csrf, basics + """
+            <fieldset><legend>Windows</legend><div class="tw"><table><caption class="vh">Windows</caption><thead><tr><th scope="col">Kit</th><th scope="col">Starts</th><th scope="col">Ends</th><th scope="col" class="num">Priority</th></tr></thead><tbody>\(rows)</tbody></table></div></fieldset>\
+            <fieldset><legend>Daily rotation</legend><div class="cols">\(pool)</div></fieldset>\
+            \(canManage ? ConsoleUI.formActions(ConsoleUI.button("Save schedule")) : "")
+            """))
     }
 
     static func kitPage(_ req: Request, kitId: UUID?) async throws -> Response {
@@ -294,60 +298,67 @@ enum ConsoleBrandStudio {
         let next = kitId.map { "\(path)/kits/\($0.uuidString.lowercased())" } ?? "\(path)/kits/new"
         let (reauth, script) = reauthNotice(req, p, next: next)
         var body = reauth
-        if let record { body += "<p>\(statusBadge(record.status, approved: record.approvedJSON != nil)) <span class=\"mu sm\">Version \(record.version)\(record.approvedVersion.map { ", version \($0) is live" } ?? "")</span></p>" }
         if let tokens {
             let warnings = BrandPreview.contrastWarnings(tokens)
             if !warnings.isEmpty {
-                body += "<div class=\"notice dg\" role=\"status\"><h2>Contrast warnings</h2><ul>\(warnings.map { "<li>\(DashboardUI.esc($0))</li>" }.joined())</ul></div>"
+                body += ConsoleUI.callout(.danger, title: "Contrast warnings", "<ul>\(warnings.map { "<li>\(DashboardUI.esc($0))</li>" }.joined())</ul><p class=\"sm\">A color that fails contrast is replaced by Viadere's where it would be unreadable.</p>")
             }
         }
         func colorField(_ key: String, _ label: String, _ value: BrandColor?, optional: Bool) -> String {
             let use = optional ? "<label class=\"ck\"><input type=\"checkbox\" name=\"use_\(key)\" value=\"1\"\(value != nil ? " checked" : "")\(disabled)> Set a \(label.lowercased())</label>" : ""
-            return "<div><label for=\"c-\(key)\">\(label)</label>\(use)<input id=\"c-\(key)\" name=\"\(key)\" type=\"color\" value=\"\((value?.hex ?? "#8C7550").lowercased())\"\(disabled)></div>"
+            return "<div class=\"field\"><label for=\"c-\(key)\">\(label)</label>\(use)<input id=\"c-\(key)\" name=\"\(key)\" type=\"color\" value=\"\((value?.hex ?? "#8C7550").lowercased())\"\(disabled)></div>"
         }
         func select<E: RawRepresentable & CaseIterable>(_ key: String, _ label: String, _ type: E.Type, _ value: E?) -> String where E.RawValue == String {
-            let options = "<option value=\"\">Viadere's default</option>" + E.allCases.map { "<option value=\"\($0.rawValue)\"\($0.rawValue == value?.rawValue ? " selected" : "")>\($0.rawValue.capitalized)</option>" }.joined()
-            return "<div><label for=\"s-\(key)\">\(label)</label><select id=\"s-\(key)\" name=\"\(key)\"\(disabled)>\(options)</select></div>"
+            ConsoleUI.select(key, label: label, id: "s-\(key)", options: [ConsoleUI.Option("", "Viadere's default")] + E.allCases.map { ConsoleUI.Option($0.rawValue, $0.rawValue.capitalized, selected: $0.rawValue == value?.rawValue) },
+                             disabled: !canManage)
         }
         let assets = try await BrandAssetRecord.query(on: req.db).filter(\.$businessId == businessId)
             .filter(\.$state ~~ [BrandKitService.AssetState.ready.rawValue, BrandKitService.AssetState.pendingReview.rawValue]).sort(\.$createdAt, .descending).all()
         let slotFields = BrandAssetSlot.allCases.map { slot -> String in
-            let options = "<option value=\"\">None</option>" + assets.filter { $0.slot == slot.rawValue }.map {
-                "<option value=\"\($0.id!.uuidString.lowercased())\"\($0.id == assetIds[slot] ? " selected" : "")>\($0.width) × \($0.height) · \($0.state == "ready" ? "approved" : "in review") · \(DashboardFormat.date($0.createdAt))</option>"
-            }.joined()
-            return "<div><label for=\"a-\(slot.rawValue)\">\(slot.rawValue.capitalized) image</label><select id=\"a-\(slot.rawValue)\" name=\"asset_\(slot.rawValue)\"\(disabled)>\(options)</select></div>"
+            let options = [ConsoleUI.Option("", "None")] + assets.filter { $0.slot == slot.rawValue }.map {
+                ConsoleUI.Option($0.id!.uuidString.lowercased(), "\($0.width) × \($0.height) · \($0.state == "ready" ? "approved" : "in review") · \(DashboardFormat.date($0.createdAt))", selected: $0.id == assetIds[slot])
+            }
+            return ConsoleUI.select("asset_\(slot.rawValue)", label: "\(slot.rawValue.capitalized) image", id: "a-\(slot.rawValue)", options: options, disabled: !canManage)
         }.joined()
-        let frames = "<option value=\"\">No frame</option>" + FrameRegistry.v1.frames.map { f -> String in
+        let frames = [ConsoleUI.Option("", "No frame")] + FrameRegistry.v1.frames.map { f in
             let window = f.availableFrom.map { "from \(DashboardFormat.date(Date(timeIntervalSince1970: TimeInterval($0))))" } ?? "always"
-            return "<option value=\"\(f.id)\"\(f.id == draft?.frameId ? " selected" : "")>\(DashboardUI.esc(f.id)) (\(DashboardUI.esc(window)))</option>"
-        }.joined()
+            return ConsoleUI.Option(f.id, "\(f.id) (\(window))", selected: f.id == draft?.frameId)
+        }
         let action = record.map { "\(path)/kits/\($0.id!.uuidString.lowercased())" } ?? "\(path)/kits"
         let keyField = record == nil
-            ? "<label for=\"kid\">Identifier (lowercase letters, digits, - and _; cannot change later)</label><input id=\"kid\" name=\"kit_id\" type=\"text\" maxlength=\"40\" pattern=\"[a-z0-9][a-z0-9_-]*\" required\(disabled)>"
+            ? ConsoleUI.input("kit_id", label: "Identifier", id: "kid", help: "Lowercase letters, digits, - and _. It cannot change later.", required: true, disabled: !canManage,
+                              attrs: ["maxlength": "40", "pattern": "[a-z0-9][a-z0-9_-]*", "autocapitalize": "none", "spellcheck": "false"])
             : ""
-        body += """
-        <div class="card"><h2>\(record == nil ? "New kit" : "Edit kit")</h2><form method="post" action="\(action)">\(DashboardUI.csrf(p))\(keyField)\
-        <label for="kname">Name (only you and Viadere see it)</label><input id="kname" name="name" type="text" maxlength="40" value="\(DashboardUI.esc(draft?.name ?? ""))" required\(disabled)>\
-        <fieldset><legend>Colors</legend><div class="cols">\(colorField("primary", "Primary", tokens?.primary, optional: false))\(colorField("secondary", "Secondary", tokens?.secondary, optional: true))\
-        \(colorField("accent", "Accent", tokens?.accent, optional: true))\(colorField("surface", "Background", tokens?.surface, optional: true))</div>\
-        <p class="mu sm">Text colors are chosen by Viadere for legibility. A color that fails contrast is listed above and replaced by Viadere's.</p></fieldset>\
-        <fieldset><legend>Shape and type</legend><div class="cols">\(select("radius", "Corner radius", BrandRadius.self, tokens?.radius))\(select("border", "Borders", BrandBorder.self, tokens?.border))\
-        \(select("type_scale", "Type size", BrandTypeScale.self, tokens?.typeScale))</div></fieldset>\
-        <fieldset><legend>Images and frame</legend><div class="cols">\(slotFields)<div><label for="frame">Viadere frame</label><select id="frame" name="frame_id"\(disabled)>\(frames)</select></div></div>\
-        <p class="mu sm">The background image keeps clear of the safe area shown with a dashed outline in the preview; frames never cover the verified badge or actions.</p></fieldset>\
-        \(canManage ? "<p><button class=\"btn\" type=\"submit\">Save and send for review</button></p>" : "")</form></div>
-        """
+        let form = ConsoleUI.form(action, csrf: DashboardUI.csrf(p),
+            "<div class=\"cols\">" + keyField
+            + ConsoleUI.input("name", label: "Name", id: "kname", value: draft?.name ?? "", help: "Only you and Viadere see it.", required: true, disabled: !canManage, attrs: ["maxlength": "40"]) + "</div>"
+            + "<fieldset><legend>Colors</legend><p class=\"help\">Text colors are chosen by Viadere for legibility. A color that fails contrast is listed above and replaced by Viadere's.</p><div class=\"cols\">"
+            + colorField("primary", "Primary", tokens?.primary, optional: false) + colorField("secondary", "Secondary", tokens?.secondary, optional: true)
+            + colorField("accent", "Accent", tokens?.accent, optional: true) + colorField("surface", "Background", tokens?.surface, optional: true) + "</div></fieldset>"
+            + "<fieldset><legend>Shape and type</legend><div class=\"cols\">" + select("radius", "Corner radius", BrandRadius.self, tokens?.radius) + select("border", "Borders", BrandBorder.self, tokens?.border)
+            + select("type_scale", "Type size", BrandTypeScale.self, tokens?.typeScale) + "</div></fieldset>"
+            + "<fieldset><legend>Images and frame</legend><p class=\"help\">The background image keeps clear of the safe area shown with a dashed outline in the preview; frames never cover the verified badge or actions.</p><div class=\"cols\">"
+            + slotFields + ConsoleUI.select("frame_id", label: "Viadere frame", id: "frame", options: frames, disabled: !canManage) + "</div></fieldset>"
+            + (canManage ? ConsoleUI.formActions(ConsoleUI.button("Save and send for review", passkey: true) + "<span class=\"mu sm\">Customers keep the approved version until Viadere approves this one.</span>", sep: true) : ""))
+        let status = record.map { r in statusBadge(r.status, approved: r.approvedJSON != nil) + " <span class=\"mu sm\">Version \(r.version)\(r.approvedVersion.map { ", version \($0) is live" } ?? "")</span>" } ?? ""
+        let editor = ConsoleUI.card(record == nil ? "New kit" : "Edit kit", actions: status, form)
         if let record {
-            body += """
-            <div class="card"><h2>Preview</h2><iframe title="Preview of \(DashboardUI.esc(record.name)), not exactly what customers see" src="\(path)/preview/\(record.id!.uuidString.lowercased())" sandbox="" \
-            referrerpolicy="no-referrer" width="680" height="640" loading="lazy"></iframe></div>
-            """
+            let preview = ConsoleUI.card("Preview", description: "Not exactly what customers see. It updates when you save.",
+                                         ConsoleUI.preview(src: "\(path)/preview/\(record.id!.uuidString.lowercased())", title: "Preview of \(record.name), not exactly what customers see", width: 680, height: 640))
+            body += "<div class=\"split\"><div>\(editor)</div><div>\(preview)</div></div>"
             if canManage {
-                body += "<div class=\"card\"><h2>Delete</h2><form method=\"post\" action=\"\(path)/kits/\(record.id!.uuidString.lowercased())/delete\">\(DashboardUI.csrf(p))<button class=\"btn d\" type=\"submit\">Delete this kit</button></form></div>"
+                body += ConsoleUI.dangerZone("Delete this kit", description: "Customers who see this kit fall back to your default kit or Viadere's neutral style.",
+                    ConsoleUI.confirm("Delete this kit", small: false, ConsoleUI.form("\(path)/kits/\(record.id!.uuidString.lowercased())/delete", csrf: DashboardUI.csrf(p),
+                        "<p>This cannot be undone.</p>" + ConsoleUI.button("Delete \(record.name)", .dangerSolid, small: true, passkey: true))))
             }
+        } else {
+            body += editor
         }
         let flash = req.query[String.self, at: "m"].flatMap { Self.flash[$0] }
-        return DashboardUI.businessPage(p, title: record.map { "Kit: \($0.name)" } ?? "New kit", active: path, flash: flash, body: body, script: script, frames: record != nil)
+        return DashboardUI.businessPage(p, title: record.map { "Kit: \($0.name)" } ?? "New kit", active: path, flash: flash,
+                                        breadcrumbs: [ConsoleUI.Crumb("Dashboard", "/dashboard"), ConsoleUI.Crumb("Organization", "/dashboard/organization"), ConsoleUI.Crumb("Brand Kits", path),
+                                                      ConsoleUI.Crumb(record?.name ?? "New kit", nil)],
+                                        body: body, script: script, frames: record != nil)
     }
 
     /// The sandboxed preview of a kit's **draft** (pending images included, inlined as `data:` URIs: the preview origin is opaque and loads

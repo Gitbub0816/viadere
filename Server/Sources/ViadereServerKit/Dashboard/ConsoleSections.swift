@@ -84,19 +84,28 @@ enum ConsoleSections {
         let (p, businessId) = try req.businessDashboard
         guard p.can(.viewMessaging) || p.can(.viewConsent) || p.can(.manageCampaigns) else { throw APIError.forbidden }
         let o = try await DashboardAnalytics(db: req.db, ctx: req.ctx).overview(businessId: businessId, days: 30)
-        let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(o.totalIssued), "Messages and interactions (30 days)"))\(DashboardFormat.stat(DashboardFormat.percent(o.channelSuccessRate), "SMS / RCS delivery success"))"
-            + "\(DashboardFormat.stat(String(o.optOuts), "Opt-outs"))\(DashboardFormat.stat(String(o.activeRelationships), "Connected customers"))</div>"
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(o.totalIssued), "Messages and interactions (30 days)"),
+            ConsoleUI.Stat(DashboardFormat.percent(o.channelSuccessRate), "SMS / RCS delivery success"),
+            ConsoleUI.Stat(String(o.optOuts), "Opt-outs", href: p.can(.viewConsent) ? "/dashboard/consent" : nil),
+            ConsoleUI.Stat(String(o.activeRelationships), "Connected customers", href: p.can(.viewConsent) ? "/dashboard/consent" : nil),
+        ])
         let config = req.ctx.config
-        let channels = """
-        <div class="card"><h2>Channels</h2><ul>\
-        <li>In-app and push: always on. Customers choose their channels per purpose.</li>\
-        <li>SMS fallback: \(config.twilio != nil || config.mailerSendSMS != nil ? "available" : "not configured on this deployment"); it is used only where the customer's consent allows it and never for approvals.</li>\
-        <li>RCS: \(config.rcs != nil ? "available" : "not configured on this deployment").</li>\
-        <li>Opt-outs (STOP) are honored for every channel and shown in Consent.</li></ul>\
-        <p class="mu sm">Templates for common interactions are under <a href="/dashboard/templates">Developers &gt; Templates</a>. Inbox and agent assignment are not offered yet.</p></div>
-        """
+        let sms = config.twilio != nil || config.mailerSendSMS != nil
+        func channel(_ name: String, _ on: Bool, _ state: String, _ detail: String) -> String {
+            "<li class=\"\(on ? "t-success" : "t-neutral")\"><div>\(ConsoleUI.icon(.chat))<div><strong>\(DashboardUI.esc(name))</strong> \(ConsoleUI.pill(state, on ? .success : .neutral))<br><span class=\"mu sm\">\(DashboardUI.esc(detail))</span></div></div></li>"
+        }
+        let channels = ConsoleUI.card("Channels", description: "Customers choose their channels per purpose. Opt-outs (STOP) are honored for every channel and shown in Consent.", "<ul class=\"attn\">"
+            + channel("In-app and push", true, "Always on", "The default for every message and the only channel for approvals.")
+            + channel("SMS fallback", sms, sms ? "Available" : "Not configured", "Used only where the customer's consent allows it, and never for approvals.")
+            + channel("RCS", config.rcs != nil, config.rcs != nil ? "Available" : "Not configured", "Rich messages where the carrier supports them.")
+            + "</ul>")
+        var shortcuts = ""
+        if p.can(.manageCampaigns) { shortcuts += ConsoleUI.linkButton("Create a campaign link", href: "/dashboard/campaigns", .primary, small: true) }
+        if p.can(.viewTemplates) { shortcuts += ConsoleUI.linkButton("Request templates", href: "/dashboard/templates", small: true) }
+        if p.can(.viewInbox) { shortcuts += ConsoleUI.linkButton("Open the inbox", href: "/dashboard/inbox", small: true) }
         let mine = await ConsoleCards.shared.html(for: .messaging, req: req, principal: p, businessId: businessId)
-        return DashboardUI.businessPage(p, title: "Messaging", active: "/dashboard/messaging", subtitle: "Delivery, consent and campaigns.", body: tiles + channels + mine)
+        return DashboardUI.businessPage(p, title: "Messaging", active: "/dashboard/messaging", subtitle: "Delivery, consent and campaigns.", actions: shortcuts, body: tiles + channels + mine)
     }
 
     // MARK: Verify and Approve (settings and metrics only)
@@ -117,11 +126,12 @@ enum ConsoleSections {
         let (p, businessId) = try req.businessDashboard
         try p.require(.viewVerify)
         let rows = try await capabilityRows(req, businessId: businessId) { $0.minimumTier == .v }
-        let enabled = "<div class=\"card\"><h2>Capabilities</h2>\(DashboardFormat.table(["Capability", "Tier", "State"], rows, empty: "No verification capabilities.", caption: "Verification capabilities"))"
-            + "<p class=\"mu sm\">Verification capabilities are granted by Viadere after a purpose review (Tier V). A result contains only what the capability defines, for example a yes or no for an age threshold; this page never shows names, birthdates, documents or other raw identity data.</p></div>"
+        let enabled = ConsoleUI.card("Capabilities", description: "Granted by Viadere after a purpose review (Tier V).",
+                                     DashboardFormat.table(["Capability", "Tier", "State"], rows, empty: "No verification capabilities.", caption: "Verification capabilities"))
+        let privacy = ConsoleUI.callout(.neutral, title: "Results, never identity data", "<p class=\"sm\">A result contains only what the capability defines, for example a yes or no for an age threshold. This page never shows names, birthdates, documents or other raw identity data.</p>")
         let metrics = try await VerifyDashboard.card(db: req.db, ctx: req.ctx, businessId: businessId, days: 30)
         let extra = await ConsoleCards.shared.html(for: .verify, req: req, principal: p, businessId: businessId)
-        return DashboardUI.businessPage(p, title: "Verify", active: "/dashboard/verification", subtitle: "Settings and aggregate results. No raw identity data.", body: enabled + metrics + extra)
+        return DashboardUI.businessPage(p, title: "Verify", active: "/dashboard/verification", subtitle: "Settings and aggregate results. No raw identity data.", body: privacy + enabled + metrics + extra)
     }
 
     private static func approve(_ req: Request) async throws -> Response {
@@ -133,17 +143,17 @@ enum ConsoleSections {
         let directoryKeys = keys.filter { $0.scopeSet.contains(BusinessAPIKeys.Scope.keyDirectoryManage) }.count
         let hooks = try await WebhookSubscriptionRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$active == true).all()
         let approveHooks = hooks.filter { $0.events.contains("approve.") }.count
-        let enabled = "<div class=\"card\"><h2>Capabilities</h2>\(DashboardFormat.table(["Capability", "Tier", "State"], rows, empty: "No approval capabilities.", caption: "Approval capabilities"))</div>"
-        let settings = """
-        <div class="card"><h2>Integration settings</h2><div class="grid">\(DashboardFormat.stat(String(approvalKeys), "Keys with approval scope"))\(DashboardFormat.stat(String(directoryKeys), "Keys that can publish to the key directory"))\
-        \(DashboardFormat.stat(String(approveHooks), "Endpoints subscribed to approval events"))</div>\
-        <p class="mu sm">Approvals are signed on the customer's device and verified by you with the enrolled public key; the relay's status alone is never proof. Transaction templates, challenge histories and suspicious-request reports appear here as aggregate counts only. \
-        Create approval keys under <a href="/dashboard/api-keys">API keys</a> (a Security Admin or Owner issues them).</p></div>
-        """
+        let enabled = ConsoleUI.card("Capabilities", DashboardFormat.table(["Capability", "Tier", "State"], rows, empty: "No approval capabilities.", caption: "Approval capabilities"))
+        let settings = ConsoleUI.card("Integration settings", description: "Approvals are signed on the customer's device and verified by you with the enrolled public key; the relay's status alone is never proof.", """
+        \(ConsoleUI.stats([ConsoleUI.Stat(String(approvalKeys), "Keys with approval scope"), ConsoleUI.Stat(String(directoryKeys), "Keys that can publish to the key directory"),
+                           ConsoleUI.Stat(String(approveHooks), "Endpoints subscribed to approval events")]))\
+        <p class="mu sm">Transaction templates, challenge histories and suspicious-request reports appear here as aggregate counts only. \
+        Create approval keys under <a href="/dashboard/api-keys">API keys</a> (a Security Admin or Owner issues them).</p>
+        """)
         let extra = await ConsoleCards.shared.html(for: .approve, req: req, principal: p, businessId: businessId)
         let root = try await rootKeyCard(req, principal: p, businessId: businessId)
         return DashboardUI.businessPage(p, title: "Approve", active: "/dashboard/approve", subtitle: "Settings and aggregate metrics. No payloads.", flash: DashboardFormat.flash(req),
-                                        body: enabled + settings + root + extra)
+                                        body: "<div class=\"split\"><div>\(enabled)\(settings)</div><div>\(root)</div></div>" + extra)
     }
 
     /// The root key card (condition 4): who may register or change it, and the passkey-gated authorization.
@@ -151,46 +161,54 @@ enum ConsoleSections {
         let service = RootAuthorization(db: req.db, ctx: req.ctx)
         let state = try await KeyLogService(db: req.db, ctx: req.ctx).state(for: businessId)
         let verified = try await service.hasVerifiedDomain(businessId: businessId)
-        let current = state.currentRoot.map { "<code>\(DashboardUI.esc($0.kid))</code>" } ?? "none registered"
-        var body = "<div class=\"card\"><h2>Root key</h2><p>Current root key: \(current)</p>"
+        let current = state.currentRoot.map { "<code>\(DashboardUI.esc($0.kid))</code>" } ?? "<span class=\"mu\">None registered</span>"
+        var body = ConsoleUI.keyValues([("Current root key", current)])
             + "<p class=\"mu sm\">Your root key signs every key your customers' phones trust you with. Registering or replacing it is never possible with an API key alone: a person with the Security Admin or Owner role authorizes the exact key id here with a passkey, then publishes the signed entry from your tooling within 15 minutes. Every customer's phone alerts its owner when the root changes.</p>"
         if !verified {
-            body += "<p>\(DashboardFormat.badge("Domain not verified", "dg")) Verify a domain you control under Organization before registering a root key.</p>"
+            body += ConsoleUI.callout(.warning, title: "Domain not verified", "<p>Verify a domain you control under <a href=\"/dashboard/organization/domains\">Organization</a> before registering a root key.</p>")
         } else if p.can(.manageSecurity) {
-            body += "<form method=\"post\" action=\"/dashboard/approve/root-authorizations\">\(DashboardUI.csrf(p))"
-                + "<label for=\"rk\">Key id of the \(state.currentRoot == nil ? "root key to register" : "new root key")</label><input id=\"rk\" name=\"rootKid\" type=\"text\" maxlength=\"64\" required spellcheck=\"false\" autocomplete=\"off\">"
-                + "<button class=\"btn\" type=\"submit\">Authorize with passkey</button></form>"
+            body += ConsoleUI.form("/dashboard/approve/root-authorizations", csrf: DashboardUI.csrf(p),
+                ConsoleUI.input("rootKid", label: "Key id of the \(state.currentRoot == nil ? "root key to register" : "new root key")", id: "rk", help: "Exactly as your tooling prints it.", required: true,
+                                attrs: ["maxlength": "64", "spellcheck": "false", "autocomplete": "off"])
+                + ConsoleUI.formActions(ConsoleUI.button("Authorize with passkey", passkey: true) + ConsoleUI.passkeyNote("Valid for 15 minutes after you confirm.")))
         } else {
-            body += "<p class=\"mu sm\">Ask a Security Admin or Owner to authorize a root key change.</p>"
+            body += ConsoleUI.callout(.neutral, "<p class=\"sm\">Ask a Security Admin or Owner to authorize a root key change.</p>")
         }
-        return body + "</div>"
+        return ConsoleUI.card("Root key", tone: state.currentRoot == nil ? .warning : nil, body)
     }
 
     // MARK: Support
+
+    private static func ticketRows(_ tickets: [SupportTicketRecord]) -> [[ConsoleUI.Cell]] {
+        tickets.map { [ConsoleUI.Cell(html: "<code>\(String($0.id?.uuidString.lowercased().prefix(8) ?? ""))</code>"), .text($0.subject),
+                       ConsoleUI.Cell(html: DashboardFormat.badge($0.status, $0.status == "open" ? "wa" : "ok")), .date($0.createdAt), .text($0.operatorNote ?? "—")] }
+    }
 
     private static func support(_ req: Request) async throws -> Response {
         let (p, businessId) = try req.businessDashboard
         try p.require(.viewSupport)
         let origin = req.ctx.config.relyingPartyOrigin
-        let docs = """
-        <div class="card"><h2>Documentation</h2><ul>\
-        <li><a href="\(origin)/developers/quickstart/" rel="noopener">Quickstart</a> · <a href="\(origin)/developers/authentication/" rel="noopener">Authentication and keys</a> · <a href="\(origin)/developers/webhooks/" rel="noopener">Webhooks</a></li>\
-        <li><a href="\(origin)/developers/errors/" rel="noopener">Errors</a> · <a href="\(origin)/developers/rate-limits/" rel="noopener">Rate limits</a> · <a href="\(origin)/developers/idempotency/" rel="noopener">Idempotency</a></li>\
-        <li><a href="\(origin)/status/" rel="noopener">Platform status</a> · <a href="\(origin)/security/" rel="noopener">Security</a> · <a href="\(origin)/legal/vulnerability-disclosure-policy/" rel="noopener">Report a vulnerability</a></li></ul></div>
-        """
+        let docs = ConsoleUI.card("Documentation", """
+        <h3>Build</h3><ul class="plain"><li><a href="\(origin)/developers/quickstart/" rel="noopener">Quickstart</a></li><li><a href="\(origin)/developers/authentication/" rel="noopener">Authentication and keys</a></li>\
+        <li><a href="\(origin)/developers/webhooks/" rel="noopener">Webhooks</a></li></ul>\
+        <h3>Troubleshoot</h3><ul class="plain"><li><a href="\(origin)/developers/errors/" rel="noopener">Errors</a></li><li><a href="\(origin)/developers/rate-limits/" rel="noopener">Rate limits</a></li>\
+        <li><a href="\(origin)/developers/idempotency/" rel="noopener">Idempotency</a></li></ul>\
+        <h3>Trust</h3><ul class="plain"><li><a href="\(origin)/status/" rel="noopener">Platform status</a></li><li><a href="\(origin)/security/" rel="noopener">Security</a></li>\
+        <li><a href="\(origin)/legal/vulnerability-disclosure-policy/" rel="noopener">Report a vulnerability</a></li></ul>
+        """)
         var form = ""
         if p.can(.manageSupport) {
-            form = """
-            <div class="card"><h2>Contact support</h2><form method="post" action="/dashboard/support/tickets">\(DashboardUI.csrf(p))\
-            <label for="subject">Subject</label><input id="subject" name="subject" type="text" maxlength="120" required>\
-            <label for="body">What happened?</label><textarea id="body" name="body" maxlength="4000" required></textarea>\
-            <p class="mu sm">Do not paste API keys, secrets or customers' personal data. We reply by email to the address on your account.</p><button class="btn" type="submit">Send</button></form></div>
-            """
+            form = ConsoleUI.card("Contact support", description: "We reply by email to the address on your account.",
+                ConsoleUI.form("/dashboard/support/tickets", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("subject", label: "Subject", id: "subject", required: true, attrs: ["maxlength": "120"])
+                    + ConsoleUI.textarea("body", label: "What happened?", id: "body", help: "Include what you expected, what happened and when. Do not paste API keys, secrets or customers' personal data.", required: true, attrs: ["maxlength": "4000"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Send"))))
         }
         let tickets = try await SupportDesk(db: req.db, ctx: req.ctx).list(businessId: businessId).filter { $0.kind == "ticket" }
-        let rows = tickets.map { [String($0.id?.uuidString.lowercased().prefix(8) ?? ""), DashboardUI.esc($0.subject), DashboardFormat.badge($0.status, $0.status == "open" ? "" : "ok"), DashboardFormat.date($0.createdAt), DashboardUI.esc($0.operatorNote ?? "—")] }
-        let list = "<div class=\"card\"><h2>Your tickets</h2>\(DashboardFormat.table(["Reference", "Subject", "Status", "Opened", "Reply"], rows, empty: "No tickets.", caption: "Support tickets"))</div>"
-        return DashboardUI.businessPage(p, title: "Support", active: "/dashboard/support", subtitle: "Help, status and appeals.", flash: DashboardFormat.flash(req), body: docs + form + list)
+        let list = ConsoleUI.card("Your tickets", ConsoleUI.table([ConsoleUI.Column("Reference"), ConsoleUI.Column("Subject"), ConsoleUI.Column("Status"), ConsoleUI.Column("Opened"), ConsoleUI.Column("Reply")],
+                                                                ticketRows(tickets), caption: "Support tickets", empty: "No tickets."))
+        return DashboardUI.businessPage(p, title: "Support", active: "/dashboard/support", subtitle: "Help, status and appeals.", flash: DashboardFormat.flash(req),
+                                        body: "<div class=\"split\"><div>\(form)\(list)</div><div>\(docs)</div></div>")
     }
 
     private static func health(_ req: Request) async throws -> Response {
@@ -211,45 +229,58 @@ enum ConsoleSections {
         let paused = await flags.webhooksPaused(businessId: businessId)
         let restricted = !(await flags.restrictions(businessId: businessId)).isEmpty
         let state = try await OnboardingService(db: req.db, ctx: req.ctx).state(businessId: businessId)
-        let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(delivered), "Webhook deliveries succeeded (24 h)"))\(DashboardFormat.stat(String(dead), "Dead-lettered deliveries"))\(DashboardFormat.stat(String(pending), "Deliveries waiting"))\(DashboardFormat.stat(String(rateLimited), "Rate-limit hits (7 days)"))</div>"
-        var findings: [String] = []
-        if hooks.contains(where: { $0.verifiedAt == nil }) && req.ctx.config.operations.webhookOwnershipVerification { findings.append("An endpoint is not verified, so it receives no events.") }
-        if hooks.contains(where: { $0.pausedAt != nil }) { findings.append("An endpoint is paused.") }
-        if dead > 0 { findings.append("\(dead) deliveries were dead-lettered. Replay them from the delivery log once the endpoint recovers.") }
-        if expiring > 0 { findings.append("\(expiring) API key(s) expire within 14 days. Rotate them with an overlap.") }
-        if !state.contractsCurrent { findings.append("An agreement needs your acceptance.") }
-        if let message = maintenance { findings.append("Viadere is in read-only maintenance: \(message)") }
-        if paused { findings.append("Webhook delivery is paused by Viadere for your organization.") }
-        if restricted { findings.append("Viadere restricted some outbound messaging for your organization.") }
-        let list = findings.isEmpty ? "<p>Everything looks healthy.</p>" : "<ul>\(findings.map { "<li>\(DashboardUI.esc($0))</li>" }.joined())</ul>"
-        return DashboardUI.businessPage(p, title: "Integration health", active: "/dashboard/support/health", subtitle: "What needs attention.", body: tiles + "<div class=\"card\"><h2>Findings</h2>\(list)</div>")
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(delivered), "Webhook deliveries succeeded (24 h)", tone: .success),
+            ConsoleUI.Stat(String(dead), "Dead-lettered deliveries", tone: dead > 0 ? .danger : nil, href: p.can(.viewWebhooks) ? "/dashboard/webhooks/deliveries" : nil),
+            ConsoleUI.Stat(String(pending), "Deliveries waiting"),
+            ConsoleUI.Stat(String(rateLimited), "Rate-limit hits (7 days)", tone: rateLimited > 0 ? .warning : nil),
+        ])
+        var findings: [(ConsoleUI.Tone, String, String?)] = []
+        if hooks.contains(where: { $0.verifiedAt == nil }) && req.ctx.config.operations.webhookOwnershipVerification { findings.append((.danger, "An endpoint is not verified, so it receives no events.", "/dashboard/webhooks")) }
+        if hooks.contains(where: { $0.pausedAt != nil }) { findings.append((.warning, "An endpoint is paused.", "/dashboard/webhooks")) }
+        if dead > 0 { findings.append((.danger, "\(dead) deliveries were dead-lettered. Replay them from the delivery log once the endpoint recovers.", "/dashboard/webhooks/deliveries")) }
+        if expiring > 0 { findings.append((.warning, "\(expiring) API key(s) expire within 14 days. Rotate them with an overlap.", "/dashboard/api-keys")) }
+        if !state.contractsCurrent { findings.append((.warning, "An agreement needs your acceptance.", "/dashboard/compliance")) }
+        if let message = maintenance { findings.append((.warning, "Viadere is in read-only maintenance: \(message)", nil)) }
+        if paused { findings.append((.warning, "Webhook delivery is paused by Viadere for your organization.", nil)) }
+        if restricted { findings.append((.warning, "Viadere restricted some outbound messaging for your organization.", nil)) }
+        let list = findings.isEmpty
+            ? ConsoleUI.empty("Everything looks healthy", "No open findings for your integration.", icon: .check)
+            : "<ul class=\"attn\">" + findings.map { tone, text, href in
+                "<li class=\"\(tone.cls)\"><div>\(ConsoleUI.icon(tone == .danger ? .error : .alert))<span>\(DashboardUI.esc(text))</span></div>\(href.map { ConsoleUI.linkButton("Fix", href: $0, small: true, ariaLabel: "Fix: \(text)") } ?? "")</li>"
+            }.joined() + "</ul>"
+        return DashboardUI.businessPage(p, title: "Integration health", active: "/dashboard/support/health", subtitle: "What needs attention, and where to fix it.",
+                                        body: tiles + ConsoleUI.card("Findings", description: findings.isEmpty ? nil : "\(findings.count) open.", list))
     }
 
     private static func notices(_ req: Request) async throws -> Response {
         let (p, businessId) = try req.businessDashboard
         try p.require(.viewSupport)
         let list = try await OperatorNotices(db: req.db, ctx: req.ctx).visibleToBusiness(businessId)
-        let cards = list.map { "<div class=\"card\"><h2>\(DashboardUI.esc($0.title)) \(DashboardFormat.badge($0.severity, $0.severity == "info" ? "mu" : "dg"))</h2><p class=\"mu sm\">\(DashboardFormat.date($0.createdAt))</p><p>\(DashboardUI.esc($0.body))</p></div>" }.joined()
-        let maintenance = await PlatformFlags(db: req.db, ctx: req.ctx).maintenance().map { "<div class=\"notice dg\" role=\"status\">Read-only maintenance: \(DashboardUI.esc($0))</div>" } ?? ""
-        return DashboardUI.businessPage(p, title: "Incident notices", active: "/dashboard/support/notices", subtitle: "Announcements from Viadere.", body: maintenance + (cards.isEmpty ? "<p class=\"mu\">No notices.</p>" : cards))
+        let cards = list.map {
+            ConsoleUI.card($0.title, description: DashboardFormat.date($0.createdAt), actions: DashboardFormat.badge($0.severity, $0.severity == "info" ? "mu" : ($0.severity == "critical" ? "dg" : "wa")),
+                           tone: $0.severity == "critical" ? .danger : nil, "<p>\(DashboardUI.esc($0.body))</p>")
+        }.joined()
+        let maintenance = await PlatformFlags(db: req.db, ctx: req.ctx).maintenance().map { ConsoleUI.callout(.warning, title: "Read-only maintenance", "<p>\(DashboardUI.esc($0))</p>") } ?? ""
+        return DashboardUI.businessPage(p, title: "Incident notices", active: "/dashboard/support/notices", subtitle: "Announcements from Viadere.",
+                                        body: maintenance + (cards.isEmpty ? ConsoleUI.empty("No notices", "Incident and maintenance announcements from Viadere appear here and are emailed to your admins.", icon: .megaphone) : cards))
     }
 
     private static func appeals(_ req: Request) async throws -> Response {
         let (p, businessId) = try req.businessDashboard
         try p.require(.viewSupport)
         let list = try await SupportDesk(db: req.db, ctx: req.ctx).list(businessId: businessId).filter { $0.kind == "appeal" }
-        let rows = list.map { [String($0.id?.uuidString.lowercased().prefix(8) ?? ""), DashboardUI.esc($0.subject), DashboardFormat.badge($0.status, $0.status == "open" ? "" : "ok"), DashboardFormat.date($0.createdAt), DashboardUI.esc($0.operatorNote ?? "—")] }
         var form = ""
         if p.can(.manageSupport) {
-            form = """
-            <div class="card"><h2>Appeal a decision</h2><form method="post" action="/dashboard/support/appeals">\(DashboardUI.csrf(p))\
-            <label for="subject">Which decision? (for example: suspension, declined application, throttle, declined production access)</label><input id="subject" name="subject" type="text" maxlength="120" required>\
-            <label for="body">Why should it be reviewed?</label><textarea id="body" name="body" maxlength="4000" required></textarea>\
-            <p class="mu sm">A person at Viadere who was not involved reviews every appeal.</p><button class="btn" type="submit">Submit appeal</button></form></div>
-            """
+            form = ConsoleUI.card("Appeal a decision", description: "A person at Viadere who was not involved reviews every appeal.",
+                ConsoleUI.form("/dashboard/support/appeals", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("subject", label: "Which decision?", id: "subject", help: "For example: suspension, declined application, throttle, declined production access.", required: true, attrs: ["maxlength": "120"])
+                    + ConsoleUI.textarea("body", label: "Why should it be reviewed?", id: "body", required: true, attrs: ["maxlength": "4000"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Submit appeal"))))
         }
         return DashboardUI.businessPage(p, title: "Appeals", active: "/dashboard/support/appeals", subtitle: "Ask for a decision to be reviewed.", flash: DashboardFormat.flash(req),
-                                        body: form + "<div class=\"card\"><h2>Your appeals</h2>\(DashboardFormat.table(["Reference", "Decision", "Status", "Submitted", "Reply"], rows, empty: "No appeals.", caption: "Appeals"))</div>")
+                                        body: form + ConsoleUI.card("Your appeals", ConsoleUI.table([ConsoleUI.Column("Reference"), ConsoleUI.Column("Decision"), ConsoleUI.Column("Status"), ConsoleUI.Column("Submitted"), ConsoleUI.Column("Reply")],
+                                                                                                     ticketRows(list), caption: "Appeals", empty: "No appeals.")))
     }
 }
 

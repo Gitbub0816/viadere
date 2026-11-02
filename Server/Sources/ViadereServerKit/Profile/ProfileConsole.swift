@@ -84,37 +84,37 @@ enum ProfileConsole {
         let pending = Set(requests.filter { $0.status == "pending" }.compactMap(\.categoryValue))
         let canManage = p.can(.manageOrganization)
         let csrf = DashboardUI.csrf(p)
-        let rows = ProfileCategory.allCases.map { category -> [String] in
+        let rows = ProfileCategory.allCases.map { category -> [ConsoleUI.Cell] in
             let state = allowed.contains(category) ? DashboardFormat.badge("Allowed", "ok") : (pending.contains(category) ? DashboardFormat.badge("Awaiting review", "wa") : DashboardFormat.badge("Not allowed", "mu"))
             let fields = ProfileCatalog.fields(in: category).map(\.title).joined(separator: ", ")
-            return ["<strong>\(DashboardUI.esc(category.title))</strong><br><span class=\"mu sm\">\(DashboardUI.esc(fields))</span>",
-                    category.requiresJustification ? "Written justification" : "Review only", state]
+            return [ConsoleUI.Cell(html: "<strong>\(DashboardUI.esc(category.title))</strong><br><span class=\"mu sm\">\(DashboardUI.esc(fields))</span>", sort: .text(category.title)),
+                    .text(category.requiresJustification ? "Written justification" : "Review only"), ConsoleUI.Cell(html: state)]
         }
-        var body = """
-        <div class="card"><h2>Customer profile access</h2>\
-        <p>Customers can keep a profile in Viadere and choose, field by field, what each business may see. You can only ask for fields in the categories Viadere allows your organization. Nothing is allowed by default; every customer still decides for themselves and can revoke at any time.</p>\
-        \(DashboardFormat.table(["Category", "Needs", "State"], rows, caption: "Profile categories"))</div>
-        """
+        var body = ConsoleUI.callout(.accent, title: "How profile access works", """
+        <p class="sm">Customers can keep a profile in Viadere and choose, field by field, what each business may see. You can only ask for fields in the categories Viadere allows your organization. \
+        Nothing is allowed by default; every customer still decides for themselves and can revoke at any time.</p>
+        """) + ConsoleUI.card("Categories", ConsoleUI.table([ConsoleUI.Column("Category"), ConsoleUI.Column("Needs"), ConsoleUI.Column("State")], rows, caption: "Profile categories"))
         let requestable = ProfileCategory.allCases.filter { !allowed.contains($0) && !pending.contains($0) }
         if canManage, !requestable.isEmpty {
             let boxes = requestable.map { category -> String in
                 let note = category.requiresJustification
-                    ? "<label for=\"j-\(category.rawValue)\">Why do you need \(DashboardUI.esc(category.title.lowercased()))? (required, 20+ characters)</label><textarea id=\"j-\(category.rawValue)\" name=\"\(category.rawValue)\" maxlength=\"1000\"></textarea>"
-                    : "<label for=\"j-\(category.rawValue)\">Purpose (optional)</label><textarea id=\"j-\(category.rawValue)\" name=\"\(category.rawValue)\" maxlength=\"1000\"></textarea>"
-                return "<fieldset><legend><label class=\"ck\"><input type=\"checkbox\" name=\"categories[]\" value=\"\(category.rawValue)\"> \(DashboardUI.esc(category.title))</label></legend><p class=\"mu sm\">\(DashboardUI.esc(category.summary))</p>\(note)</fieldset>"
+                    ? ConsoleUI.textarea(category.rawValue, label: "Why do you need \(category.title.lowercased())?", id: "j-\(category.rawValue)", help: "Required, at least 20 characters.", attrs: ["maxlength": "1000"])
+                    : ConsoleUI.textarea(category.rawValue, label: "Purpose", id: "j-\(category.rawValue)", optional: true, attrs: ["maxlength": "1000"])
+                return "<fieldset><legend><label class=\"ck\"><input type=\"checkbox\" name=\"categories[]\" value=\"\(category.rawValue)\"> \(DashboardUI.esc(category.title))</label></legend><p class=\"help\">\(DashboardUI.esc(category.summary))</p>\(note)</fieldset>"
             }.joined()
-            body += "<div class=\"card\"><h2>Ask for categories</h2><form method=\"post\" action=\"\(path)\">\(csrf)\(boxes)<p><button class=\"btn\" type=\"submit\">Send for review</button></p></form>"
-                + "<p class=\"mu sm\">Viadere reviews each category and may allow fewer than you ask for. Health, government ID, payment and other sensitive data can never be requested.</p></div>"
+            body += ConsoleUI.card("Ask for categories", description: "Tick the categories you need and say why. Viadere reviews each one and may allow fewer than you ask for. Health, government ID, payment and other sensitive data can never be requested.",
+                                   ConsoleUI.form(path, csrf: csrf, boxes + ConsoleUI.formActions(ConsoleUI.button("Send for review"))))
         }
-        let history = requests.map { row -> [String] in
+        let history = requests.map { row -> [ConsoleUI.Cell] in
             let action = canManage && row.status == "pending"
-                ? "<form method=\"post\" action=\"\(path)/\(row.id!.uuidString.lowercased())/withdraw\">\(csrf)<button class=\"btn s sm\" type=\"submit\">Withdraw</button></form>" : ""
-            return [DashboardUI.esc(row.categoryValue?.title ?? row.category), DashboardUI.esc(row.status), DashboardFormat.date(row.createdAt),
-                    DashboardUI.esc(row.decisionNote ?? ""), action]
+                ? ConsoleUI.form("\(path)/\(row.id!.uuidString.lowercased())/withdraw", csrf: csrf, ConsoleUI.button("Withdraw", .secondary, small: true, ariaLabel: "Withdraw the request for \(row.categoryValue?.title ?? row.category)")) : ""
+            return [.text(row.categoryValue?.title ?? row.category), ConsoleUI.Cell(html: DashboardFormat.badge(row.status.replacingOccurrences(of: "_", with: " "), row.status == "approved" ? "ok" : (row.status == "pending" ? "wa" : "mu"))),
+                    .date(row.createdAt), .text(row.decisionNote ?? ""), ConsoleUI.Cell(html: action)]
         }
-        body += "<div class=\"card\"><h2>Requests</h2>\(DashboardFormat.table(["Category", "Status", "Asked", "Viadere's note", ""], history, empty: "No requests yet.", caption: "Category requests"))</div>"
+        body += ConsoleUI.card("Requests", ConsoleUI.table([ConsoleUI.Column("Category"), ConsoleUI.Column("Status"), ConsoleUI.Column("Asked"), ConsoleUI.Column("Viadere's note"), ConsoleUI.Column("", actions: true)],
+                                                         history, caption: "Category requests", empty: "No requests yet."))
         let flash = ["requested": "Sent to Viadere for review.", "withdrawn": "Request withdrawn."][req.query[String.self, at: "m"] ?? ""]
-        return DashboardUI.businessPage(p, title: "Customer profile access", active: "/dashboard/organization", subtitle: "Which profile details you may ask customers for.",
+        return DashboardUI.businessPage(p, title: "Customer profile access", active: path, subtitle: "Which profile details you may ask customers for.",
                                         flash: flash, body: body)
     }
 }
@@ -163,30 +163,40 @@ enum ProfileOperatorRoutes {
         let requests = try await ProfileCategoryService(db: req.db, ctx: req.ctx).requests(businessId: id)
         let base = "/operator/businesses/\(id.uuidString.lowercased())/profile-categories"
         let csrf = DashboardUI.csrf(p)
-        let pendingRows = requests.filter { $0.status == "pending" }.map { row -> [String] in
+        let pending = requests.filter { $0.status == "pending" }
+        let reviews = pending.map { row -> String in
             let category = row.categoryValue
+            let rid = row.id!.uuidString.lowercased()
             let reference = category?.requiresReviewReference == true
-                ? "<label for=\"r-\(row.id!)\">Heightened review reference (required)</label><input id=\"r-\(row.id!)\" name=\"reviewReference\" type=\"text\" maxlength=\"120\">" : ""
-            let form = "<form method=\"post\" action=\"\(base)/\(row.id!.uuidString.lowercased())/decide\">\(csrf)"
-                + "<label for=\"j-\(row.id!)\">Your justification (approve: 20+ characters)</label><textarea id=\"j-\(row.id!)\" name=\"justification\" maxlength=\"1000\" required></textarea>\(reference)"
-                + "<button class=\"btn sm\" name=\"decision\" value=\"approve\" type=\"submit\">Allow</button> <button class=\"btn d sm\" name=\"decision\" value=\"deny\" type=\"submit\">Deny</button></form>"
-            return [DashboardUI.esc(category?.title ?? row.category), DashboardUI.esc(row.justification ?? "(none)"), DashboardFormat.date(row.createdAt), form]
+                ? ConsoleUI.input("reviewReference", label: "Heightened review reference", id: "r-\(rid)", help: "Required for this category.", attrs: ["maxlength": "120"]) : ""
+            let form = ConsoleUI.form("\(base)/\(rid)/decide", csrf: csrf,
+                ConsoleUI.textarea("justification", label: "Your justification", id: "j-\(rid)", help: "Recorded with your name. To allow, at least 20 characters.", required: true, attrs: ["maxlength": "1000"])
+                + reference
+                + ConsoleUI.formActions(ConsoleUI.button("Allow", name: "decision", value: "approve", passkey: true) + ConsoleUI.button("Deny", .danger, name: "decision", value: "deny") + ConsoleUI.passkeyNote()))
+            return ConsoleUI.card(category?.title ?? row.category, description: "Asked \(DashboardFormat.date(row.createdAt))", actions: DashboardFormat.badge("Awaiting review", "wa"),
+                                  "<div class=\"split\"><div><h3>Business justification</h3><p>\(DashboardUI.esc(row.justification ?? "(none)"))</p></div><div>\(form)</div></div>")
+        }.joined()
+        let allowedRows = allowed.sorted().map { category -> [ConsoleUI.Cell] in
+            [.text(category.title), ConsoleUI.Cell(html: ConsoleUI.confirm("Revoke", ariaLabel: "Revoke \(category.title)", ConsoleUI.form("\(base)/revoke", csrf: csrf,
+                ConsoleUI.hidden("category", category.rawValue)
+                + ConsoleUI.input("justification", label: "Why is it revoked?", id: "rv-\(category.rawValue)", help: "The business loses it on its next request.", required: true, attrs: ["maxlength": "300"])
+                + ConsoleUI.button("Revoke \(category.title.lowercased())", .dangerSolid, small: true, passkey: true))))]
         }
-        let allowedRows = allowed.sorted().map { category -> [String] in
-            [DashboardUI.esc(category.title), "<form method=\"post\" action=\"\(base)/revoke\">\(csrf)<input type=\"hidden\" name=\"category\" value=\"\(category.rawValue)\">"
-                + "<input name=\"justification\" type=\"text\" maxlength=\"300\" required placeholder=\"Why is it revoked?\" aria-label=\"Revocation reason\"><button class=\"btn d sm\" type=\"submit\">Revoke</button></form>"]
+        let decided = requests.filter { $0.status != "pending" }.map { row -> [ConsoleUI.Cell] in
+            [.text(row.categoryValue?.title ?? row.category), ConsoleUI.Cell(html: DashboardFormat.badge(row.status, row.status == "approved" ? "ok" : "mu")), .text(row.decidedBy ?? ""), .date(row.decidedAt),
+             .text(row.decisionNote ?? "")]
         }
-        let decided = requests.filter { $0.status != "pending" }.map { row -> [String] in
-            [DashboardUI.esc(row.categoryValue?.title ?? row.category), DashboardUI.esc(row.status), DashboardUI.esc(row.decidedBy ?? ""), DashboardFormat.optional(row.decidedAt),
-             DashboardUI.esc(row.decisionNote ?? "")]
-        }
-        let body = """
-        <div class="card"><h2>\(DashboardUI.esc(business.displayName))</h2><p class="mu sm">A business may ask customers only for profile fields in the categories allowed here, and reads only what each customer granted. Nothing is allowed by default. You can only decide categories the business asked for, and may allow fewer than it asked. Every change needs your passkey and is audited.</p></div>\
-        <div class="card"><h2>Awaiting review</h2>\(DashboardFormat.table(["Category", "Business justification", "Asked", ""], pendingRows, empty: "Nothing to review.", caption: "Pending category requests"))</div>\
-        <div class="card"><h2>Allowed</h2>\(DashboardFormat.table(["Category", ""], allowedRows, empty: "No category is allowed.", caption: "Allowed profile categories"))</div>\
-        <div class="card"><h2>Decided</h2>\(DashboardFormat.table(["Category", "Status", "By", "When", "Note"], decided, empty: "No decisions yet.", caption: "Decided category requests"))</div>
-        """
+        let body = ConsoleUI.callout(.accent, title: "What you decide", """
+        <p class="sm">A business may ask customers only for profile fields in the categories allowed here, and reads only what each customer granted. Nothing is allowed by default. \
+        You can only decide categories the business asked for, and may allow fewer than it asked. Every change needs your passkey and is audited.</p>
+        """)
+            + ConsoleUI.sectionTitle("Awaiting review (\(pending.count))") + (reviews.isEmpty ? ConsoleUI.empty("Nothing to review", "New requests from this business appear here.", icon: .check) : reviews)
+            + ConsoleUI.card("Allowed", ConsoleUI.table([ConsoleUI.Column("Category"), ConsoleUI.Column("", actions: true)], allowedRows, caption: "Allowed profile categories", empty: "No category is allowed."))
+            + ConsoleUI.card("Decided", ConsoleUI.table([ConsoleUI.Column("Category"), ConsoleUI.Column("Status"), ConsoleUI.Column("By"), ConsoleUI.Column("When"), ConsoleUI.Column("Note")], decided,
+                                                        caption: "Decided category requests", empty: "No decisions yet."))
         let flash = ["decided": "Decision recorded.", "revoked": "Category revoked. The business loses it on its next request."][req.query[String.self, at: "m"] ?? ""]
-        return DashboardUI.operatorPage(p, title: "Profile categories", active: "/operator/businesses", subtitle: "Customer profile access for this business.", flash: flash, body: body)
+        return DashboardUI.operatorPage(p, title: "Profile categories", active: "/operator/businesses", subtitle: "Customer profile access for \(business.displayName).", flash: flash,
+                                        breadcrumbs: [ConsoleUI.Crumb("Operator", "/operator"), ConsoleUI.Crumb("Businesses", "/operator/businesses"),
+                                                      ConsoleUI.Crumb(business.displayName, "/operator/businesses/\(id.uuidString.lowercased())"), ConsoleUI.Crumb("Profile categories", nil)], body: body)
     }
 }

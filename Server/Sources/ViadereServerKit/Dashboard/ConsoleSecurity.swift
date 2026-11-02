@@ -110,16 +110,28 @@ enum ConsoleSecurity {
         let unrestricted = keys.filter { ($0.ipAllowlist ?? "").isEmpty && !$0.requiresMTLS }.count
         let sessions = try await SessionSecurity(db: req.db, ctx: req.ctx).active(businessId: businessId, userId: nil, currentSession: p.session.id)
         let certs = try await MTLSCertificates(db: req.db, ctx: req.ctx).list(businessId: businessId).filter { $0.isActive(at: req.ctx.now) }
-        let tiles = "<div class=\"grid\">\(DashboardFormat.stat(String(sessions.count), "Active console sessions"))\(DashboardFormat.stat(String(unrestricted) + " / " + String(keys.count), "Keys without IP or certificate limits"))"
-            + "\(DashboardFormat.stat(settings.consoleIPAllowlist.isEmpty ? "Off" : "On", "Console IP allow-list"))\(DashboardFormat.stat(settings.twoPersonRequired ? "On" : "Off", "Two-person approval"))</div>"
-        let posture = """
-        <div class="card"><h2>Posture</h2><ul>\
-        <li>Sign-in: passkeys only, no passwords. Sensitive actions ask for your passkey again and stop working after \(settings.privilegedInactivitySeconds) s of inactivity. <a href="/dashboard/security/network">Change</a></li>\
-        <li>Client certificates (Enterprise tier): \(certs.count) active; \(settings.mtlsRequired ? "required for every key" : "optional per key"). <a href="/dashboard/security/certificates">Manage</a></li>\
-        <li>Alerts: <a href="/dashboard/security/alerts">sign-ins from new devices, key and role changes, webhook and assurance notices</a> are emailed to the people you choose.</li>\
-        <li>Single sign-on for the console is not offered yet; every administrator uses their own passkey.</li></ul></div>
-        """
-        return DashboardUI.businessPage(p, title: "Security", active: "/dashboard/security", subtitle: "Who can get in, from where, and what happens when something looks wrong.", flash: DashboardFormat.flash(req), body: tiles + posture)
+        let contacts = try await SecuritySettings(db: req.db, ctx: req.ctx).contacts(businessId: businessId)
+        let tiles = ConsoleUI.stats([
+            ConsoleUI.Stat(String(sessions.count), "Active console sessions", href: "/dashboard/security/sessions"),
+            ConsoleUI.Stat("\(unrestricted) / \(keys.count)", "Keys without IP or certificate limits", tone: unrestricted > 0 && keys.contains(where: \.livemode) ? .warning : nil),
+            ConsoleUI.Stat(settings.consoleIPAllowlist.isEmpty ? "Off" : "On", "Console IP allow-list", href: "/dashboard/security/network"),
+            ConsoleUI.Stat(settings.twoPersonRequired ? "On" : "Off", "Two-person approval", href: "/dashboard/security/approvals"),
+        ])
+        func item(_ tone: ConsoleUI.Tone, _ icon: ConsoleUI.Icon, _ title: String, _ state: String, _ detail: String, _ href: String?, _ action: String) -> String {
+            "<li class=\"\(tone.cls)\"><div>\(ConsoleUI.icon(icon))<div><strong>\(DashboardUI.esc(title))</strong> \(ConsoleUI.pill(state, tone))<br><span class=\"mu sm\">\(DashboardUI.esc(detail))</span></div></div>"
+                + (href.map { ConsoleUI.linkButton(action, href: $0, small: true, ariaLabel: "\(action): \(title)") } ?? "") + "</li>"
+        }
+        let posture = "<ul class=\"attn\">"
+            + item(.success, .key, "Sign-in", "Passkeys only", "No passwords. Every administrator uses their own passkey; single sign-on is not offered yet.", nil, "")
+            + item(.success, .clock, "Sensitive actions", "\(settings.privilegedInactivitySeconds) s", "They ask for your passkey again and stop working after this much inactivity.", "/dashboard/security/network", "Change")
+            + item(settings.consoleIPAllowlist.isEmpty ? .neutral : .success, .lock, "Console network", settings.consoleIPAllowlist.isEmpty ? "Anywhere" : "Allow-list", "Restrict the console to your networks.", "/dashboard/security/network", "Manage")
+            + item(certs.isEmpty ? .neutral : .success, .document, "Client certificates", settings.mtlsRequired ? "Required" : "\(certs.count) active", "Mutual TLS for enterprise API clients.", "/dashboard/security/certificates", "Manage")
+            + item(settings.twoPersonRequired ? .success : .neutral, .users, "Two-person approval", settings.twoPersonRequired ? "On" : "Off", "Keys and roles need a second person.", "/dashboard/security/approvals", "Manage")
+            + item(contacts.isEmpty ? .warning : .success, .megaphone, "Alerts and contacts", contacts.isEmpty ? "No contact" : "\(contacts.count) contact\(contacts.count == 1 ? "" : "s")",
+                   "New-device sign-ins, key and role changes, webhook and assurance notices by email.", "/dashboard/security/alerts", "Manage")
+            + "</ul>"
+        return DashboardUI.businessPage(p, title: "Security", active: "/dashboard/security", subtitle: "Who can get in, from where, and what happens when something looks wrong.", flash: DashboardFormat.flash(req),
+                                        body: tiles + ConsoleUI.card("Posture", description: "Each control and where to change it.", posture))
     }
 
     // MARK: Sessions
@@ -128,21 +140,24 @@ enum ConsoleSecurity {
         let (p, businessId) = try req.businessDashboard
         let all = req.query[String.self, at: "scope"] == "all" && p.can(.manageSecurity)
         let rows = try await SessionSecurity(db: req.db, ctx: req.ctx).active(businessId: businessId, userId: all ? nil : p.user.id, currentSession: p.session.id)
-        let table = rows.map { row -> [String] in
+        let table = rows.map { row -> [ConsoleUI.Cell] in
             let s = row.session
             let id = s.id?.uuidString.lowercased() ?? ""
             let label = "\(DashboardUI.esc(s.uaLabel ?? "Unknown device"))\(row.current ? " " + DashboardFormat.badge("This session", "ok") : "")"
             let button = "<form method=\"post\" action=\"/dashboard/security/sessions/\(id)/revoke\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\" aria-label=\"Sign out \(DashboardUI.esc(s.uaLabel ?? "session"))\">Sign out</button></form>"
-            return [DashboardUI.esc(row.userName), label, DashboardUI.esc(s.ipMasked ?? "—"), DashboardUI.esc(s.country ?? "—"), DashboardFormat.date(s.createdAt), DashboardFormat.date(s.lastSeenAt), button]
+            return [.text(row.userName), ConsoleUI.Cell(html: label, sort: .text(s.uaLabel ?? "")), .text(s.ipMasked ?? "—"), .text(s.country ?? "—"), .date(s.createdAt), .date(s.lastSeenAt), ConsoleUI.Cell(html: button)]
         }
-        var actions = ""
+        var scope = ""
         if p.can(.manageSecurity) {
-            actions += all ? "<a class=\"btn s sm\" href=\"/dashboard/security/sessions\">Only mine</a>" : "<a class=\"btn s sm\" href=\"/dashboard/security/sessions?scope=all\">Everyone's sessions</a>"
+            scope = ConsoleUI.segmented([("Only mine", "/dashboard/security/sessions", !all), ("Everyone's", "/dashboard/security/sessions?scope=all", all)], label: "Whose sessions")
         }
         let others = "<form method=\"post\" action=\"/dashboard/security/sessions/revoke-others\">\(DashboardUI.csrf(p))<button class=\"btn s\" type=\"submit\">Sign out all my other sessions</button></form>"
-        let body = "<div class=\"card\"><h2>\(all ? "All sessions of this organization" : "Your sessions")</h2>\(DashboardFormat.table(["Person", "Device", "Network", "Country", "Signed in", "Last active", ""], table, empty: "No active sessions.", caption: "Active console sessions"))"
-            + "<p class=\"mu sm\">Networks are shown without their last part. Sign out any session you do not recognize, then rotate credentials it could have seen. \(all ? "Ending someone else's session asks for your passkey." : "")</p>\(others)</div>"
-        return DashboardUI.businessPage(p, title: "Sessions", active: "/dashboard/security/sessions", subtitle: "Where the console is signed in.", actions: actions, flash: DashboardFormat.flash(req), body: body)
+        let body = ConsoleUI.card(all ? "All sessions of this organization" : "Your sessions", description: "Networks are shown without their last part.", actions: scope,
+                                  ConsoleUI.table([ConsoleUI.Column("Person", key: "person"), ConsoleUI.Column("Device"), ConsoleUI.Column("Network"), ConsoleUI.Column("Country"),
+                                                   ConsoleUI.Column("Signed in", key: "in"), ConsoleUI.Column("Last active", key: "seen"), ConsoleUI.Column("", actions: true)],
+                                                  table, caption: "Active console sessions", state: ConsoleUI.TableState(req, id: "s", defaultSort: "seen", defaultAscending: false), empty: "No active sessions."))
+            + ConsoleUI.callout(.neutral, title: "Something you don't recognize?", "<p class=\"sm\">Sign out the session, then rotate the credentials it could have seen. \(all ? "Ending someone else's session asks for your passkey." : "")</p>")
+        return DashboardUI.businessPage(p, title: "Sessions", active: "/dashboard/security/sessions", subtitle: "Where the console is signed in.", actions: others, flash: DashboardFormat.flash(req), body: body)
     }
 
     // MARK: Network
@@ -153,20 +168,20 @@ enum ConsoleSecurity {
         let settings = try await SecuritySettings(db: req.db, ctx: req.ctx).settings(businessId: businessId)
         let manage = p.can(.manageSecurity)
         let you = ClientIP.rawAddress(req, trustedProxies: req.ctx.config.trustedProxyCount)
-        var body = ""
-        body += """
-        <div class="card"><h2>Console IP allow-list</h2><p class="mu sm">When set, the console works only from these networks. Your current address (\(DashboardUI.esc(IPNetwork.masked(you))).x) must be included, so you cannot lock yourself out. Per-key allow-lists are set when a key is created.</p>\
-        <form method="post" action="/dashboard/security/network/allowlist">\(DashboardUI.csrf(p))<label for="allowlist">Allowed networks (comma separated; empty = anywhere)</label>\
-        <input id="allowlist" name="allowlist" type="text" maxlength="800" value="\(DashboardUI.esc(settings.consoleIPAllowlist))" \(manage ? "" : "disabled")>\
-        \(manage ? "<p><button class=\"btn\" type=\"submit\">Save</button></p>" : "")</form></div>
-        """
-        body += """
-        <div class="card"><h2>Inactivity limit for sensitive actions</h2><p class="mu sm">Creating keys, changing roles and similar actions need your passkey and a session that was active within this many seconds (60 to 900).</p>\
-        <form method="post" action="/dashboard/security/network/inactivity">\(DashboardUI.csrf(p))<label for="seconds">Seconds</label>\
-        <input id="seconds" name="seconds" type="number" min="60" max="900" value="\(settings.privilegedInactivitySeconds)" \(manage ? "" : "disabled")>\
-        \(manage ? "<p><button class=\"btn\" type=\"submit\">Save</button></p>" : "")</form></div>
-        """
-        return DashboardUI.businessPage(p, title: "Network and timeouts", active: "/dashboard/security/network", flash: DashboardFormat.flash(req), body: body)
+        let readOnly = manage ? "" : ConsoleUI.callout(.neutral, "<p class=\"sm\">Only a Security Admin or Owner can change these settings.</p>")
+        let allowlist = ConsoleUI.card("Console IP allow-list", description: "When set, the console works only from these networks. Per-key allow-lists are set when a key is created.",
+            ConsoleUI.form("/dashboard/security/network/allowlist", csrf: DashboardUI.csrf(p),
+                ConsoleUI.input("allowlist", label: "Allowed networks", id: "allowlist", value: settings.consoleIPAllowlist, placeholder: "198.51.100.0/24, 2001:db8::/48",
+                                help: "Comma separated; empty means anywhere. Your current address (\(IPNetwork.masked(you)).x) must be included, so you cannot lock yourself out.",
+                                disabled: !manage, attrs: ["maxlength": "800", "spellcheck": "false"])
+                + (manage ? ConsoleUI.formActions(ConsoleUI.button("Save", passkey: true) + ConsoleUI.passkeyNote()) : "")))
+        let inactivity = ConsoleUI.card("Inactivity limit for sensitive actions", description: "Creating keys, changing roles and similar actions need your passkey and a session that was active within this many seconds.",
+            ConsoleUI.form("/dashboard/security/network/inactivity", csrf: DashboardUI.csrf(p),
+                ConsoleUI.input("seconds", label: "Seconds", id: "seconds", type: "number", value: String(settings.privilegedInactivitySeconds), help: "From 60 to 900.",
+                                disabled: !manage, attrs: ["min": "60", "max": "900", "step": "1"])
+                + (manage ? ConsoleUI.formActions(ConsoleUI.button("Save", passkey: true) + ConsoleUI.passkeyNote()) : "")))
+        return DashboardUI.businessPage(p, title: "Network and timeouts", active: "/dashboard/security/network", subtitle: "Where the console works from, and how long a confirmation lasts.",
+                                        flash: DashboardFormat.flash(req), body: readOnly + "<div class=\"cols\">\(allowlist)\(inactivity)</div>")
     }
 
     // MARK: Certificates
@@ -179,32 +194,35 @@ enum ConsoleSecurity {
         let settings = try await SecuritySettings(db: req.db, ctx: req.ctx).settings(businessId: businessId)
         let certs = try await service.list(businessId: businessId)
         let manage = p.can(.manageSecurity)
-        let rows = certs.map { c -> [String] in
+        let rows = certs.map { c -> [ConsoleUI.Cell] in
             let status = c.revokedAt != nil ? DashboardFormat.badge("Removed", "mu") : (c.isActive(at: req.ctx.now) ? DashboardFormat.badge("Active", "ok") : DashboardFormat.badge("Expired", "dg"))
-            let remove = manage && c.revokedAt == nil ? "<form method=\"post\" action=\"/dashboard/security/certificates/\(c.id?.uuidString.lowercased() ?? "")/remove\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\" aria-label=\"Remove \(DashboardUI.esc(c.label))\">Remove</button></form>" : ""
-            return [DashboardUI.esc(c.label), c.kind == "leaf" ? "Certificate" : "Certificate authority", "<code>\(DashboardUI.esc(String(c.fingerprint.prefix(16))))…</code>", DashboardUI.esc(c.subject ?? "—"),
-                    c.notAfter.map(DashboardFormat.day) ?? "—", status, remove]
+            let remove = manage && c.revokedAt == nil
+                ? ConsoleUI.confirm("Remove", ariaLabel: "Remove \(c.label)", "<form method=\"post\" action=\"/dashboard/security/certificates/\(c.id?.uuidString.lowercased() ?? "")/remove\">\(DashboardUI.csrf(p))"
+                    + "<p>Keys bound to this certificate are refused once it is removed.</p><button class=\"btn dd sm\" type=\"submit\" aria-label=\"Remove \(DashboardUI.esc(c.label))\">\(ConsoleUI.icon(.key))Remove</button></form>") : ""
+            return [.text(c.label), .text(c.kind == "leaf" ? "Certificate" : "Certificate authority"), ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(String(c.fingerprint.prefix(16))))…</code>"), .text(c.subject ?? "—"),
+                    ConsoleUI.Cell(html: c.notAfter.map(DashboardFormat.day) ?? "—", sort: c.notAfter.map { .date($0) }), ConsoleUI.Cell(html: status), ConsoleUI.Cell(html: remove)]
         }
         var body = ""
         if !entitled {
-            body += "<div class=\"notice\">Mutual TLS is part of the Enterprise tier. Ask Viadere to enable it for your organization, then add your certificates here.</div>"
+            body += ConsoleUI.callout(.accent, title: "Part of the Enterprise tier", "<p>Ask Viadere to enable mutual TLS for your organization, then add your certificates here.</p>")
         }
-        body += "<div class=\"card\"><h2>Certificates</h2>\(DashboardFormat.table(["Label", "Type", "Fingerprint", "Subject", "Expires", "Status", ""], rows, empty: "No certificates yet.", caption: "Client certificates"))"
-            + "<p class=\"mu sm\">Viadere terminates mutual TLS at its edge (Cloudflare API Shield) and passes the verified certificate's fingerprint to the API. A key bound to certificates is refused without a matching one. Mutual TLS adds a factor; the API key and every authorization check still apply. Private networking never bypasses them.</p></div>"
+        body += ConsoleUI.card("Certificates", description: "Viadere terminates mutual TLS at its edge (Cloudflare API Shield) and passes the verified certificate's fingerprint to the API. A key bound to certificates is refused without a matching one; the API key and every authorization check still apply.",
+                               ConsoleUI.table([ConsoleUI.Column("Label", key: "label"), ConsoleUI.Column("Type"), ConsoleUI.Column("Fingerprint"), ConsoleUI.Column("Subject"),
+                                                ConsoleUI.Column("Expires", key: "expires"), ConsoleUI.Column("Status"), ConsoleUI.Column("", actions: true)],
+                                               rows, caption: "Client certificates", state: ConsoleUI.TableState(req, id: "c"), empty: "No certificates yet."))
         if entitled && manage {
-            body += """
-            <div class="card"><h2>Add a certificate</h2><form method="post" action="/dashboard/security/certificates">\(DashboardUI.csrf(p))\
-            <label for="label">Label</label><input id="label" name="label" type="text" maxlength="64" required>\
-            <fieldset><legend>What you are adding</legend><label class="ck"><input type="radio" name="kind" value="leaf" checked> A client certificate (bound by its fingerprint)</label>\
-            <label class="ck"><input type="radio" name="kind" value="ca"> A certificate authority (every certificate it issues to you)</label></fieldset>\
-            <label for="certificate">PEM certificate (public part only)</label><textarea id="certificate" name="certificate" maxlength="16000" placeholder="-----BEGIN CERTIFICATE-----"></textarea>\
-            <label for="fingerprint">Or the SHA-256 fingerprint of a client certificate</label><input id="fingerprint" name="fingerprint" type="text" maxlength="100" placeholder="AB:CD:…">\
-            <p class="mu sm">Never paste a private key. The certificate also has to be accepted at the edge: upload the same CA or certificate to the API Shield configuration your Viadere contact gives you.</p>\
-            <button class="btn" type="submit">Add certificate</button></form></div>\
-            <div class="card"><h2>Require a certificate for every key</h2><form method="post" action="/dashboard/security/certificates/require">\(DashboardUI.csrf(p))\
-            <label class="ck"><input type="checkbox" name="enabled" value="1"\(settings.mtlsRequired ? " checked" : "")> Refuse every API key of this organization unless the request carries a bound, verified client certificate</label>\
-            <p><button class="btn s" type="submit">Save</button></p></form></div>
-            """
+            body += "<div class=\"cols\">" + ConsoleUI.card("Add a certificate", description: "Never paste a private key. Also upload the same CA or certificate to the API Shield configuration your Viadere contact gives you.",
+                ConsoleUI.form("/dashboard/security/certificates", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("label", label: "Label", id: "label", required: true, attrs: ["maxlength": "64"])
+                    + ConsoleUI.choices("kind", legend: "What you are adding", [ConsoleUI.Choice("leaf", "A client certificate", help: "Bound by its fingerprint."),
+                                                                                 ConsoleUI.Choice("ca", "A certificate authority", help: "Every certificate it issues to you.")], selected: "leaf")
+                    + ConsoleUI.textarea("certificate", label: "PEM certificate (public part only)", id: "certificate", placeholder: "-----BEGIN CERTIFICATE-----", optional: true, attrs: ["maxlength": "16000", "spellcheck": "false"])
+                    + ConsoleUI.input("fingerprint", label: "Or the SHA-256 fingerprint of a client certificate", id: "fingerprint", placeholder: "AB:CD:…", optional: true, attrs: ["maxlength": "100", "spellcheck": "false"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Add certificate", passkey: true) + ConsoleUI.passkeyNote())))
+                + ConsoleUI.card("Require a certificate for every key", description: "Refuse every API key of this organization unless the request carries a bound, verified client certificate.",
+                    ConsoleUI.form("/dashboard/security/certificates/require", csrf: DashboardUI.csrf(p),
+                        ConsoleUI.checkbox("enabled", label: "Require a bound, verified client certificate for every API key", checked: settings.mtlsRequired)
+                        + ConsoleUI.formActions(ConsoleUI.button("Save", .secondary, passkey: true) + ConsoleUI.passkeyNote()))) + "</div>"
         }
         return DashboardUI.businessPage(p, title: "Client certificates", active: "/dashboard/security/certificates", subtitle: "Mutual TLS for enterprise API clients.", flash: DashboardFormat.flash(req), body: body)
     }
@@ -221,14 +239,14 @@ enum ConsoleSecurity {
         let boxes = SecurityAlertTopic.allCases.map { topic in
             "<label class=\"ck\"><input type=\"checkbox\" name=\"topics[]\" value=\"\(topic.rawValue)\"\(subscribed.contains(topic) ? " checked" : "")\(manage ? "" : " disabled")> \(DashboardUI.esc(topic.title))</label>"
         }.joined()
-        let body = """
-        <div class="card"><h2>Email alerts and security contacts</h2><form method="post" action="/dashboard/security/alerts">\(DashboardUI.csrf(p))\
-        <fieldset><legend>Send an email about</legend>\(boxes)</fieldset>\
-        <label for="contacts">Security contacts (one address per line, up to five)</label><textarea id="contacts" name="contacts" maxlength="1000" \(manage ? "" : "disabled")>\(DashboardUI.esc(contacts.joined(separator: "\n")))</textarea>\
-        <p class="mu sm">Owners, Security Admins and Organization Admins receive these alerts as well. A security contact is the person Viadere writes to in an incident, and is needed before production access. Alerts never contain a secret.</p>\
-        \(manage ? "<button class=\"btn\" type=\"submit\">Save</button>" : "")</form></div>
-        """
-        return DashboardUI.businessPage(p, title: "Alerts and contacts", active: "/dashboard/security/alerts", flash: DashboardFormat.flash(req), body: body)
+        let body = (contacts.isEmpty ? ConsoleUI.callout(.warning, title: "No security contact yet", "<p>Viadere writes to this person in an incident. One is needed before production access.</p>") : "")
+            + ConsoleUI.card("Email alerts and security contacts", description: "Owners, Security Admins and Organization Admins receive these alerts as well. Alerts never contain a secret.",
+                ConsoleUI.form("/dashboard/security/alerts", csrf: DashboardUI.csrf(p),
+                    "<fieldset><legend>Send an email about</legend><div class=\"cols\">\(boxes)</div></fieldset>"
+                    + ConsoleUI.textarea("contacts", label: "Security contacts", id: "contacts", value: contacts.joined(separator: "\n"), help: "One address per line, up to five.", disabled: !manage, attrs: ["maxlength": "1000"])
+                    + (manage ? ConsoleUI.formActions(ConsoleUI.button("Save", passkey: true) + ConsoleUI.passkeyNote()) : ConsoleUI.callout(.neutral, "<p class=\"sm\">Only a Security Admin or Owner can change these settings.</p>"))))
+        return DashboardUI.businessPage(p, title: "Alerts and contacts", active: "/dashboard/security/alerts", subtitle: "Who hears about security events, and who Viadere contacts in an incident.",
+                                        flash: DashboardFormat.flash(req), body: body)
     }
 
     // MARK: Approvals
@@ -240,7 +258,7 @@ enum ConsoleSecurity {
         let pending = try await PendingChanges(db: req.db, ctx: req.ctx).open(businessId: businessId)
         let users = try await DashboardUserRecord.query(on: req.db).filter(\.$id ~~ pending.map(\.requestedBy)).all()
         let names = Dictionary(users.compactMap { u in u.id.map { ($0, u.displayName) } }, uniquingKeysWith: { a, _ in a })
-        let rows = try pending.map { change -> [String] in
+        let rows = try pending.map { change -> [ConsoleUI.Cell] in
             let payload = try PendingChanges(db: req.db, ctx: req.ctx).payload(of: change)
             let what: String
             switch PendingChanges.Kind(rawValue: change.kind) {
@@ -263,22 +281,26 @@ enum ConsoleSecurity {
                     action = "<form method=\"post\" action=\"/dashboard/security/approvals/\(change.id?.uuidString.lowercased() ?? "")/cancel\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Cancel</button></form>"
                 } else if p.can(.approveChanges) {
                     let id = change.id?.uuidString.lowercased() ?? ""
-                    action = "<div class=\"row\"><form method=\"post\" action=\"/dashboard/security/approvals/\(id)/approve\">\(DashboardUI.csrf(p))<button class=\"btn sm\" type=\"submit\">Approve</button></form>"
-                        + "<form method=\"post\" action=\"/dashboard/security/approvals/\(id)/reject\">\(DashboardUI.csrf(p))<button class=\"btn d sm\" type=\"submit\">Reject</button></form></div>"
+                    action = "<div class=\"row\"><form method=\"post\" action=\"/dashboard/security/approvals/\(id)/approve\">\(DashboardUI.csrf(p))<button class=\"btn sm\" type=\"submit\">\(ConsoleUI.icon(.key))Approve</button></form>"
+                        + ConsoleUI.confirm("Reject", "<form method=\"post\" action=\"/dashboard/security/approvals/\(id)/reject\">\(DashboardUI.csrf(p))"
+                            + ConsoleUI.input("note", label: "Note to the requester", id: "rn-\(id)", optional: true, attrs: ["maxlength": "300"])
+                            + "<button class=\"btn dd sm\" type=\"submit\">\(ConsoleUI.icon(.key))Reject</button></form>") + "</div>"
                 }
             }
-            return [what, DashboardUI.esc(names[change.requestedBy] ?? "—"), DashboardFormat.date(change.requestedAt), DashboardFormat.badge(change.status, change.status == "pending" ? "" : "ok"), action]
+            let tone = change.status == "pending" ? "wa" : (change.status == "approved" ? "ok" : "mu")
+            return [ConsoleUI.Cell(html: what), .text(names[change.requestedBy] ?? "—"), .date(change.requestedAt), ConsoleUI.Cell(html: DashboardFormat.badge(change.status, tone)), ConsoleUI.Cell(html: action)]
         }
         var toggle = ""
         if p.can(.manageSecurity) {
-            toggle = """
-            <div class="card"><h2>Two-person approval</h2><form method="post" action="/dashboard/security/approvals/two-person">\(DashboardUI.csrf(p))\
-            <label class="ck"><input type="checkbox" name="enabled" value="1"\(settings.twoPersonRequired ? " checked" : "")> Creating or rotating an API key and granting a role need a second person's approval</label>\
-            <p class="mu sm">The approver is always someone other than the requester. For a key, the requester completes it after approval, so only they ever see the secret. Requests expire after 24 hours. Needs at least two people who can approve.</p>\
-            <button class="btn" type="submit">Save</button></form></div>
-            """
+            toggle = ConsoleUI.card("Two-person approval", description: "The approver is always someone other than the requester. For a key, the requester completes it after approval, so only they ever see the secret. Requests expire after 24 hours. Needs at least two people who can approve.",
+                ConsoleUI.form("/dashboard/security/approvals/two-person", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.checkbox("enabled", label: "Creating or rotating an API key and granting a role need a second person's approval", checked: settings.twoPersonRequired)
+                    + ConsoleUI.formActions(ConsoleUI.button("Save", passkey: true) + ConsoleUI.passkeyNote(settings.twoPersonRequired ? "Turning it off needs your passkey and a second person." : "You'll confirm with your passkey."))))
         }
-        let list = "<div class=\"card\"><h2>Requests</h2>\(DashboardFormat.table(["Request", "By", "When", "Status", ""], rows, empty: "Nothing is waiting.", caption: "Requests waiting for a second person"))</div>"
-        return DashboardUI.businessPage(p, title: "Approvals", active: "/dashboard/security/approvals", subtitle: "Separation of duties for credentials and roles.", flash: DashboardFormat.flash(req), body: toggle + list)
+        let waiting = pending.filter { $0.status == "pending" && $0.requestedBy != p.user.id }.count
+        let list = ConsoleUI.card("Requests", description: waiting > 0 && p.can(.approveChanges) ? "\(waiting) waiting for you. Approving or rejecting asks for your passkey." : nil,
+                                  ConsoleUI.table([ConsoleUI.Column("Request"), ConsoleUI.Column("By"), ConsoleUI.Column("When"), ConsoleUI.Column("Status"), ConsoleUI.Column("", actions: true)], rows,
+                                                  caption: "Requests waiting for a second person", empty: "Nothing is waiting", emptyMessage: "Requests that need a second person appear here."))
+        return DashboardUI.businessPage(p, title: "Approvals", active: "/dashboard/security/approvals", subtitle: "Separation of duties for credentials and roles.", flash: DashboardFormat.flash(req), body: list + toggle)
     }
 }
