@@ -202,15 +202,18 @@ extension View {
 
     /// Marks a security surface (approval, sign-in, payment, verification, profile request): no Brand Kit style reaches anything inside,
     /// whatever an enclosing business space set. The theme still applies (it is Viadere's own palette).
-    public func viadereProtectedSurface() -> some View { environment(\.brandStyle, .neutral) }
+    /// `nonisolated` (like SwiftUI's own modifiers) so widget and Live Activity builders, which are not main-actor isolated, can use it.
+    nonisolated public func viadereProtectedSurface() -> some View { environment(\.brandStyle, .neutral) }
 
     /// Draws the night side of the person's chosen theme whatever light/dark side they follow. For surfaces the system always paints
     /// dark (the Dynamic Island), where a light theme's dark text would vanish.
-    public func viadereNightSurface() -> some View { modifier(ViadereNightSurfaceModifier()) }
+    nonisolated public func viadereNightSurface() -> some View { modifier(ViadereNightSurfaceModifier()) }
 }
 
 /// See `View.viadereNightSurface()`.
 struct ViadereNightSurfaceModifier: ViewModifier {
+    nonisolated init() {}
+
     func body(content: Content) -> some View {
         let chosen = ViadereThemeRuntime.shared.current
         let night = AppearanceSelection(light: chosen.light, dark: chosen.dark, follow: .alwaysDark,
