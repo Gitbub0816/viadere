@@ -28,6 +28,9 @@ public struct LoopAccessInput: Sendable, Hashable {
     /// Current version of the consent text; a bump forces re-consent.
     public var currentConsentTextVersion: Int
     public var relationshipActive: Bool
+    /// The customer has this Loop installed (SECURITY.md §2.98 "Installed Loops"): an install stands in for the relationship for this
+    /// Loop only; every other check (verification, category, both consents, switches, publication, expiry) still applies.
+    public var installActive: Bool
     public var businessStatus: VerificationStatus
     public var businessCategory: BusinessCategory
     public var publicationStatus: LoopPublicationStatus
@@ -41,8 +44,9 @@ public struct LoopAccessInput: Sendable, Hashable {
 
     public init(consent: LoopConsentState, currentConsentTextVersion: Int, relationshipActive: Bool, businessStatus: VerificationStatus,
                 businessCategory: BusinessCategory, publicationStatus: LoopPublicationStatus, businessLoopsSwitchedOff: Bool = false,
-                platformLoopsOff: Bool = false, instanceExpired: Bool = false, instanceOwnedByCaller: Bool = true) {
+                platformLoopsOff: Bool = false, instanceExpired: Bool = false, instanceOwnedByCaller: Bool = true, installActive: Bool = false) {
         self.consent = consent
+        self.installActive = installActive
         self.currentConsentTextVersion = currentConsentTextVersion
         self.relationshipActive = relationshipActive
         self.businessStatus = businessStatus
@@ -81,12 +85,13 @@ public enum LoopAccessDecision: Sendable, Hashable {
 }
 
 /// Whether a Loop operation may proceed (plan section 4.5 step 2, in that order; every denial is audited by the caller). There is no
-/// input combination that reaches `.allowed` without both consents at the current text version (D3.T6 at model level).
+/// input combination that reaches `.allowed` without both consents at the current text version (D3.T6 at model level), and none without
+/// either an active relationship or an active install of the Loop.
 public enum LoopAccessPolicy {
     public static func evaluate(_ operation: LoopAccessOperation, _ input: LoopAccessInput) -> LoopAccessDecision {
         if operation != .createInstance && !input.instanceOwnedByCaller { return .denied(.notFound) }
         if input.platformLoopsOff { return .denied(.platformOff) }
-        guard input.relationshipActive else { return .denied(.relationshipInactive) }
+        guard input.relationshipActive || input.installActive else { return .denied(.relationshipInactive) }
         guard input.businessStatus == .verified else { return .denied(.businessNotVerified) }
         if case .refused = LoopCategoryPolicy.loops(input.businessCategory) { return .denied(.categoryRefused) }
         guard let global = input.consent.globalTextVersion, !input.consent.globalRevoked else { return .denied(.globalConsentMissing) }

@@ -15,6 +15,30 @@ public protocol LoopsAPI: Sendable {
     func submitAction(_ id: LoopInstanceID, _ request: LoopActionRequest) async throws -> LoopActionResult
     func report(_ id: LoopInstanceID, _ request: LoopReportRequest) async throws
     func publicationKeys() async throws -> LoopPublicationKeySet
+
+    // Installable Loops (SECURITY.md §2.98 "Installed Loops").
+    func directory(query: String?, category: LoopDirectoryCategory?, business: BusinessID?) async throws -> LoopDirectoryPage
+    func directoryDetail(_ loop: LoopDefinitionID) async throws -> LoopDirectoryDetail
+    func installedLoops() async throws -> [InstalledLoop]
+    func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult
+    func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop]
+}
+
+/// Defaults for test doubles written before installable Loops: the server answers `404` (nothing installable).
+extension LoopsAPI {
+    public func directory(query: String?, category: LoopDirectoryCategory?, business: BusinessID?) async throws -> LoopDirectoryPage {
+        LoopDirectoryPage(featured: [], entries: [], categories: [])
+    }
+    public func directoryDetail(_ loop: LoopDefinitionID) async throws -> LoopDirectoryDetail {
+        throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+    }
+    public func installedLoops() async throws -> [InstalledLoop] { [] }
+    public func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult {
+        throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+    }
+    public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {
+        throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+    }
 }
 
 /// `LoopsAPI` over HTTP through the app's signed `APIClient`.
@@ -59,6 +83,28 @@ public struct LiveLoopsAPI: LoopsAPI {
     }
 
     public func publicationKeys() async throws -> LoopPublicationKeySet { try await client.call(APIRoutes.loopKeys) }
+
+    public func directory(query: String?, category: LoopDirectoryCategory?, business: BusinessID?) async throws -> LoopDirectoryPage {
+        var items: [(String, String)] = []
+        if let query, !query.isEmpty { items.append(("q", query)) }
+        if let category { items.append(("category", category.rawValue)) }
+        if let business { items.append(("business_id", business.description)) }
+        return try await client.call(APIRoutes.loopDirectory, query: items)
+    }
+
+    public func directoryDetail(_ loop: LoopDefinitionID) async throws -> LoopDirectoryDetail {
+        try await client.call(APIRoutes.loopDirectoryDetail, params: ["loopId": loop.description])
+    }
+
+    public func installedLoops() async throws -> [InstalledLoop] { try await client.call(APIRoutes.loopsInstalled) }
+
+    public func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult {
+        try await client.call(APIRoutes.loopInstall, params: ["loopId": loop.description], body: request)
+    }
+
+    public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {
+        try await client.call(APIRoutes.loopUninstall, params: ["loopId": loop.description])
+    }
 }
 
 /// The verified publication keys the renderer uses: the build pins, narrowed by the server's current list once fetched

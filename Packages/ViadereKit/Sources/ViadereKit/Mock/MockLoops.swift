@@ -14,6 +14,16 @@ public actor MockLoopsAPI: LoopsAPI {
     struct Publication {
         var summary: LoopSummary
         var definition: LoopDefinition
+        var loopId: LoopDefinitionID
+        var category: LoopDirectoryCategory?
+        var listed: Bool
+        var featured: Bool
+    }
+
+    struct Install {
+        var mode: LoopInstallMode
+        var source: LoopInstallSource
+        var at: Date
     }
 
     struct Instance {
@@ -31,14 +41,18 @@ public actor MockLoopsAPI: LoopsAPI {
     private var publications: [Publication] = []
     private var instances: [LoopInstanceID: Instance] = [:]
     private var connected: Set<BusinessID>
+    private var installs: [LoopDefinitionID: Install] = [:]
+    private let businesses: [BusinessID: BusinessSummary]
+    public private(set) var installCalls = 0
     public private(set) var reports: [(LoopInstanceID, LoopReportReason)] = []
     public private(set) var actionCalls = 0
     public private(set) var startCalls = 0
     private var text: LoopConsentTextVersion
 
     public init(connected: [BusinessID] = PreviewData.allBusinesses.map(\.id), text: LoopConsentTextVersion = LoopConsentCatalog.current,
-                clock: @escaping @Sendable () -> Date = { Date() }) {
+                businesses: [BusinessSummary] = PreviewData.allBusinesses, clock: @escaping @Sendable () -> Date = { Date() }) {
         self.connected = Set(connected)
+        self.businesses = Dictionary(businesses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         self.text = text
         self.clock = clock
     }
@@ -50,13 +64,26 @@ public actor MockLoopsAPI: LoopsAPI {
     public func setConnected(_ businesses: [BusinessID]) { connected = Set(businesses) }
 
     /// Publishes `definition` for `business` (signed with the mock key) and returns its summary.
+    /// `category` lists it in the directory (the operator listing on the real server).
     @discardableResult
-    public func publish(_ definition: LoopDefinition, business: BusinessID, revision: Int64 = 1) -> LoopSummary {
+    public func publish(_ definition: LoopDefinition, business: BusinessID, revision: Int64 = 1, category: LoopDirectoryCategory? = nil,
+                        featured: Bool = false) -> LoopSummary {
+        let loopId = LoopDefinitionID()
         let summary = LoopSummary(publicationId: LoopPublicationID(), businessId: business, revision: revision, title: definition.title,
-                                  entryPoints: definition.entryPoints, authorized: false)
-        publications.append(Publication(summary: summary, definition: definition))
+                                  entryPoints: definition.entryPoints, authorized: false, loopId: loopId, installed: false)
+        publications.append(Publication(summary: summary, definition: definition, loopId: loopId, category: category, listed: category != nil,
+                                        featured: category != nil && featured))
         return summary
     }
+
+    public func isInstalled(_ loop: LoopDefinitionID) -> Bool { installs[loop] != nil }
+
+    private func installedBusinesses() -> Set<BusinessID> {
+        Set(publications.filter { installs[$0.loopId] != nil }.map(\.summary.businessId))
+    }
+
+    /// Like the server: a connection opens every Loop of the business, an install only that Loop.
+    private func mayStart(_ p: Publication) -> Bool { connected.contains(p.summary.businessId) || installs[p.loopId] != nil }
 
     /// Records an outcome for the latest delivering event of `instance` (the hosted inbox's accept/reject, or the timeout job).
     public func setOutcome(_ outcome: LoopActionOutcome, instance id: LoopInstanceID) {
@@ -100,7 +127,9 @@ public actor MockLoopsAPI: LoopsAPI {
     }
 
     public func authorizeBusiness(_ business: BusinessID, _ request: LoopBusinessConsentRequest) async throws -> LoopConsentStatus {
-        guard connected.contains(business) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+        guard connected.contains(business) || installedBusinesses().contains(business) else {
+            throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+        }
         guard let g = statusValue().global, g.current else { throw APIError.server(status: 409, code: .conflict, message: "Turn on Loops first.") }
         guard request.agree, request.textVersion == text.version, request.textDigest == text.digest else {
             throw APIError.server(status: 422, code: .validationFailed, message: "Consent refused.")
@@ -133,10 +162,13 @@ public actor MockLoopsAPI: LoopsAPI {
 
     public func availableLoops(business: BusinessID?) async throws -> [LoopSummary] {
         guard available, statusValue().enabled else { return [] }
-        if let business, !connected.contains(business) { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
-        return publications.filter { business == nil || $0.summary.businessId == business }.map { p in
+        if let business, !connected.contains(business), !installedBusinesses().contains(business) {
+            throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+        }
+        return publications.filter { (business == nil || $0.summary.businessId == business) && mayStart($0) }.map { p in
             var s = p.summary
             s.authorized = LoopConsentGate.decision(status: statusValue(), business: s.businessId) == .allowed
+            s.installed = installs[p.loopId] != nil
             return s
         }
     }
@@ -144,7 +176,7 @@ public actor MockLoopsAPI: LoopsAPI {
     public func startInstance(_ request: LoopInstanceCreateRequest) async throws -> LoopInstanceView {
         startCalls += 1
         guard let publication = publications.first(where: { $0.summary.publicationId == request.publicationId }),
-              connected.contains(publication.summary.businessId) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+              mayStart(publication) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
         try requireConsent(publication.summary.businessId)
         guard publication.definition.entryPoints.contains(request.entryPoint) else {
             throw APIError.server(status: 422, code: .validationFailed, message: "Entry point.")
@@ -213,6 +245,84 @@ public actor MockLoopsAPI: LoopsAPI {
 
     public func publicationKeys() async throws -> LoopPublicationKeySet {
         LoopPublicationKeySet(keys: [.init(kid: Self.kid, publicKey: Base64URL.encode(Self.signingKey.publicKey.x963))])
+    }
+
+    // MARK: Directory and installs
+
+    private func entry(_ p: Publication) -> LoopDirectoryEntry? {
+        guard let business = businesses[p.summary.businessId] else { return nil }
+        let kit: String? = if case .brandKit(let key) = p.definition.appearance { key } else { nil }
+        return LoopDirectoryEntry(loopId: p.loopId, publicationId: p.summary.publicationId, revision: p.summary.revision, business: business,
+                                  businessCategory: .retail, title: p.definition.title, summary: p.definition.description, category: p.category,
+                                  featured: p.featured, entryPoints: p.definition.entryPoints, installed: installs[p.loopId] != nil,
+                                  connected: connected.contains(p.summary.businessId), brandKitId: kit)
+    }
+
+    public func directory(query: String?, category: LoopDirectoryCategory?, business: BusinessID?) async throws -> LoopDirectoryPage {
+        guard available else { return LoopDirectoryPage(featured: [], entries: [], categories: []) }
+        let q = (query ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let pool = publications.filter { business == nil ? $0.listed : $0.summary.businessId == business }
+        let categories = LoopDirectoryCategory.known.filter { c in pool.contains { $0.listed && $0.category == c } }
+        let entries = pool.filter { p in
+            let text = "\(p.definition.title) \(p.definition.description ?? "") \(businesses[p.summary.businessId]?.displayName ?? "")".lowercased()
+            return (category == nil || p.category == category) && (q.isEmpty || text.contains(q))
+        }.compactMap(entry).sorted { $0.title < $1.title }
+        let featured = q.isEmpty && category == nil && business == nil ? entries.filter(\.featured) : []
+        return LoopDirectoryPage(featured: featured, entries: entries, categories: categories)
+    }
+
+    public func directoryDetail(_ loop: LoopDefinitionID) async throws -> LoopDirectoryDetail {
+        guard available, let p = publications.first(where: { $0.loopId == loop }), let entry = entry(p) else {
+            throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+        }
+        let manifest = try await Self.manifest(for: p.definition, publication: p.summary.publicationId, business: p.summary.businessId,
+                                               revision: p.summary.revision, now: clock())
+        return LoopDirectoryDetail(entry: entry, manifest: manifest, definition: p.definition.jsonValue)
+    }
+
+    private func installedList() -> [InstalledLoop] {
+        publications.compactMap { p -> InstalledLoop? in
+            guard let install = installs[p.loopId], let business = businesses[p.summary.businessId] else { return nil }
+            let open = instances.values.filter { $0.view.publicationId == p.summary.publicationId && $0.view.state.isOpen }
+                .sorted { $0.view.createdAt > $1.view.createdAt }.map(\.view.id)
+            return InstalledLoop(loopId: p.loopId, business: business, businessCategory: .retail, title: p.definition.title, mode: install.mode,
+                                 source: install.source, installedAt: install.at, connected: connected.contains(p.summary.businessId),
+                                 publicationId: available ? p.summary.publicationId : nil, entryPoints: p.definition.entryPoints, openInstances: open,
+                                 brandKitId: nil)
+        }.sorted { $0.title < $1.title }
+    }
+
+    public func installedLoops() async throws -> [InstalledLoop] { installedList() }
+
+    public func install(_ loop: LoopDefinitionID, _ request: LoopInstallRequest) async throws -> LoopInstallResult {
+        installCalls += 1
+        guard available, let p = publications.first(where: { $0.loopId == loop }) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+        guard request.agree, request.textVersion == text.version, request.textDigest == text.digest else {
+            throw APIError.server(status: 422, code: .validationFailed, message: "Consent refused.")
+        }
+        guard let g = statusValue().global, g.current else { throw APIError.server(status: 409, code: .conflict, message: "Turn on Loops first.") }
+        if request.mode == .installAndConnect { connected.insert(p.summary.businessId) }
+        installs[loop] = Install(mode: request.mode, source: request.source, at: installs[loop]?.at ?? clock())
+        if businessGrants[p.summary.businessId]?.current != true {
+            businessGrants[p.summary.businessId] = LoopConsentGrantView(businessId: p.summary.businessId, textVersion: text.version, textDigest: text.digest,
+                                                                       grantedAt: clock(), current: true)
+        }
+        guard let view = installedList().first(where: { $0.loopId == loop }) else { throw APIError.server(status: 404, code: .notFound, message: "Not found.") }
+        return LoopInstallResult(installed: view, consent: statusValue())
+    }
+
+    public func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop] {
+        guard installs[loop] != nil, let p = publications.first(where: { $0.loopId == loop }) else {
+            throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+        }
+        installs[loop] = nil
+        for (id, var instance) in instances where instance.view.publicationId == p.summary.publicationId && instance.view.state.isOpen {
+            instance.view.state = .cancelled
+            instances[id] = instance
+        }
+        let business = p.summary.businessId
+        if !connected.contains(business), !installedBusinesses().contains(business) { businessGrants[business] = nil }
+        return installedList()
     }
 
     static func manifest(for definition: LoopDefinition, publication: LoopPublicationID, business: BusinessID, revision: Int64, now: Date) async throws -> String {

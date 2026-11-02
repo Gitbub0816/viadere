@@ -16,6 +16,12 @@ private struct LoopRolloutForm: Content {
     var reason: String?
     var consumer: String?
 }
+private struct LoopListingForm: Content {
+    var category: String
+    var listed: String?
+    var featured: String?
+    var reason: String?
+}
 private struct LoopSwitchForm: Content {
     var state: String
     var reason: String?
@@ -77,6 +83,16 @@ enum OperatorLoops {
                 try await service.setRollout(publicationId: id, percent: percent, operatorId: p.user.id!, reason: form.reason)
             }
             return DashboardResponses.redirect("\(base)/publications/\(id.uuidString.lowercased())?lm=rollout")
+        }
+        // Directory listing (§2.98 "Installed Loops"): category, listed, featured. Name and description always come from the reviewed definition.
+        pages.post("operator", "loops", "publications", ":id", "listing") { req -> Response in
+            let p = try principal(req)
+            let id = try req.uuid("id")
+            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: "\(base)/publications/\(id.uuidString.lowercased())") }
+            let form = try req.content.decode(LoopListingForm.self)
+            try await LoopInstallService(db: req.db, ctx: req.ctx).setListing(publicationId: id, category: LoopDirectoryCategory(rawValue: form.category),
+                listed: form.listed == "on", featured: form.featured == "on", operatorId: p.user.id!, reason: form.reason)
+            return DashboardResponses.redirect("\(base)/publications/\(id.uuidString.lowercased())?lm=listing")
         }
         pages.post("operator", "loops", "businesses", ":id", "switch") { req -> Response in
             let p = try principal(req)
@@ -212,6 +228,19 @@ enum OperatorLoops {
         \(statusOptions.map { "<option value=\"\($0.rawValue)\">\($0 == .active ? "Resume" : $0 == .suspended ? "Suspend (kill switch)" : $0 == .revoked ? "Revoke (cancels open instances)" : "Retire (open instances may finish)")</option>" }.joined())</select>\
         <label for="sr">Reason</label><input id="sr" name="reason" type="text" maxlength="500" required><button class="btn d" type="submit">Apply</button></form>
         """
+        let listing = try await LoopDirectoryListingRecord.query(on: req.db).filter(\.$definitionId == publication.definitionId).first()
+        let installs = try await LoopInstallRecord.query(on: req.db).filter(\.$definitionId == publication.definitionId).filter(\.$uninstalledAt == nil).count()
+        let categoryOptions = LoopDirectoryCategory.known.map { c in
+            "<option value=\"\(c.rawValue)\"\(listing?.category == c.rawValue ? " selected" : "")>\(DashboardUI.esc(c.title))</option>"
+        }.joined()
+        let listingCard = """
+        <div class="card"><h2>Directory listing</h2><p class="sm">\(listing?.listed == true ? "Listed in the Loop directory" : "Not listed: customers reach it from the business page or an install link") · \
+        \(installs) active installs. The name and description shown are the reviewed definition's title and description; only these fields are set here.</p>\
+        <form method="post" action="\(base)/publications/\(id.uuidString.lowercased())/listing">\(csrf)<label for="lc">Category</label><select id="lc" name="category">\(categoryOptions)</select>\
+        <label><input type="checkbox" name="listed"\(listing?.listed == true ? " checked" : "")> Listed in the directory</label>\
+        <label><input type="checkbox" name="featured"\(listing?.featured == true ? " checked" : "")> Featured</label>\
+        <label for="lr">Reason</label><input id="lr" name="reason" type="text" maxlength="500" required><button class="btn s" type="submit">Save listing</button></form></div>
+        """
         let body = """
         <div class="card"><h2>\(DashboardUI.esc(business.displayName)) · revision \(publication.revision) <span class="badge">\(DashboardUI.esc(publication.status))</span></h2>\
         <p class="sm">Hash <code>\(DashboardUI.esc(publication.definitionHash))</code> · kid <code>\(DashboardUI.esc(publication.kid))</code> · valid until \(DashboardFormat.date(publication.notAfter))\
@@ -223,7 +252,8 @@ enum OperatorLoops {
         <form method="post" action="\(base)/publications/\(id.uuidString.lowercased())/rollout">\(csrf)<label for="pc">Percentage of connected customers</label><input id="pc" name="percent" type="number" min="0" max="100" value="\(publication.rolloutPercent)">\
         <label for="pr">Reason</label><input id="pr" name="reason" type="text" maxlength="500" required><button class="btn s" type="submit">Set rollout</button></form>\
         <form method="post" action="\(base)/publications/\(id.uuidString.lowercased())/rollout">\(csrf)<input type="hidden" name="percent" value="0"><label for="ac">Allow-list a customer account id</label><input id="ac" name="consumer" type="text" maxlength="36" required><button class="btn s" type="submit">Add</button></form></div></div>\
-        <div class="card"><h2>Reports</h2>\(DashboardFormat.table(["Reason", "Count"], reportRows, empty: "No reports.", caption: "Customer reports by reason"))</div>
+        <div class="card"><h2>Reports</h2>\(DashboardFormat.table(["Reason", "Count"], reportRows, empty: "No reports.", caption: "Customer reports by reason"))</div>\
+        \(listingCard)
         """
         return DashboardUI.operatorPage(p, title: "Published Loop", active: base, flash: flash(req), body: body)
     }

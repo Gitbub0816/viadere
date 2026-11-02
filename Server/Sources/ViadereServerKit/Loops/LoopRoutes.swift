@@ -50,6 +50,29 @@ enum LoopRoutes {
             try await LoopRuntimeService(db: req.db, ctx: req.ctx).report(principal: try req.consumer, instanceId: id.uuid, reason: body.reason)
             return try req.emptyOK()
         }
+        // Installable Loops (§2.98 "Installed Loops").
+        routes.api(APIRoutes.loopDirectory) { req in
+            let filter = try OrganizationRoutes.businessFilter(req)
+            let category = req.query[String.self, at: "category"].flatMap { $0.isEmpty ? nil : LoopDirectoryCategory(rawValue: $0) }
+            return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).directory(principal: try req.consumer, query: req.query[String.self, at: "q"],
+                                                                                                         category: category, business: filter))
+        }
+        routes.api(APIRoutes.loopDirectoryDetail) { req in
+            let id: LoopDefinitionID = try req.uuidParameter("loopId")
+            return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).detail(principal: try req.consumer, loopId: id))
+        }
+        routes.api(APIRoutes.loopsInstalled) { req in
+            try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).installed(consumer: try req.consumer.consumerId.uuid))
+        }
+        routes.api(APIRoutes.loopInstall) { req in
+            let id: LoopDefinitionID = try req.uuidParameter("loopId")
+            let body: LoopInstallRequest = try req.decodeBody()
+            return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).install(principal: try req.consumer, loopId: id, request: body))
+        }
+        routes.api(APIRoutes.loopUninstall) { req in
+            let id: LoopDefinitionID = try req.uuidParameter("loopId")
+            return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).uninstall(principal: try req.consumer, loopId: id))
+        }
         routes.api(APIRoutes.loopKeys) { req in
             _ = try req.consumer
             return try req.jsonResponse(try LoopPublicationService(db: req.db, ctx: req.ctx).keySet())

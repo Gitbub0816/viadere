@@ -336,6 +336,8 @@ enum LoopTenantData {
         try await LoopActionEventRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopReportRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopInstanceRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopInstallRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopDirectoryListingRecord.query(on: db).filter(\.$businessId == businessId).delete()
         let publications = try await LoopPublicationRecord.query(on: db).filter(\.$businessId == businessId).all().compactMap(\.id)
         if !publications.isEmpty { try await LoopRolloutAllowRecord.query(on: db).filter(\.$publicationId ~~ publications).delete() }
         try await LoopPublicationRecord.query(on: db).filter(\.$businessId == businessId).delete()

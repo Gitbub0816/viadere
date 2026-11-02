@@ -306,5 +306,70 @@ final class StagingDemoConsoleTests: XCTestCase {
             XCTAssertEqual(tree.origin, .business)
         }
     }
+
+    /// The seeded demo Loop carries directory metadata (§2.98 "Installed Loops"): once a reviewer publishes it, a customer who is not connected
+    /// to Atlas Demo finds it in the directory (Food and drink, featured), installs it without connecting, and the device renders it from the
+    /// directory's verified business record.
+    func testSeededLoopIsInTheDirectoryAndInstallsWithoutConnecting() async throws {
+        try await withHarness { h in
+            let demo = try StagingDemo(db: h.db, ctx: h.ctx, environment: .staging)
+            let atlas = try await demo.ensureBusiness().id!
+            let owner = try await demo.ensureConsoleOwner(businessId: atlas, email: Self.ownerEmail, displayName: nil).user
+            let loop = try await demo.seedLoop(businessId: atlas, authorId: owner.id!)
+            let revision = try XCTUnwrap(loop.submitted)
+            let listing = try await LoopDirectoryListingRecord.query(on: h.db).filter(\.$businessId == atlas).first()
+            XCTAssertEqual(listing?.category, StagingDemo.directoryCategory.rawValue)
+            XCTAssertEqual(listing?.listed, true)
+            XCTAssertEqual(listing?.featured, true)
+            // Seeding twice keeps one listing.
+            _ = try await demo.seedLoop(businessId: atlas, authorId: owner.id!)
+            try await eq(try await LoopDirectoryListingRecord.query(on: h.db).filter(\.$businessId == atlas).count(), 1)
+
+            // Nothing is in the directory before a reviewer approves it.
+            let consumer = try await h.readyConsumer()
+            try await eq(try await h.signed(consumer, .GET, "/v1/loops/directory").json(LoopDirectoryPage.self).entries.count, 0)
+            let (op, account) = try await h.makeOperator()
+            try await eq(try await h.dashReauth(op, account).status, .ok)
+            try await OperatorPermissions(db: h.db, ctx: h.ctx).set(email: "ops@viadere.test", permission: .loopReviewer, granted: true)
+            try await eq(try await h.formPost("/operator/loops/revisions/\(revision.id!.uuidString.lowercased())/decide", op,
+                                              [("decision", "approve"), ("reason", "Demo pickup Loop checked.")]).status, .seeOther)
+            let settled = try await demo.status(businessId: atlas)
+            let publication = try XCTUnwrap(settled.publication)
+            let reviewer = try await DashboardUserRecord.query(on: h.db).filter(\.$emailHash == DashboardAuthService(db: h.db, ctx: h.ctx).emailHash("ops@viadere.test")).first()!.id!
+            try await LoopPublicationService(db: h.db, ctx: h.ctx).setRollout(publicationId: publication.id!, percent: 100, operatorId: reviewer, reason: "Open to all customers.")
+
+            let page = try await h.signed(consumer, .GET, "/v1/loops/directory").json(LoopDirectoryPage.self)
+            let entry = try XCTUnwrap(page.featured.first)
+            XCTAssertEqual(entry.category, .foodAndDrink)
+            XCTAssertEqual(entry.title, "Choose a pickup time")
+            XCTAssertEqual(entry.business.id, BusinessID(atlas))
+            XCTAssertFalse(entry.connected)
+
+            let text = LoopConsentCatalog.current
+            var answers: [String: String] = [:]
+            for check in text.checks { answers[check.id] = check.correctOptionId }
+            try await eq(try await h.signed(consumer, .PUT, "/v1/loops/consent", body: try ViadereJSON.encode(
+                LoopGlobalConsentRequest(textVersion: text.version, textDigest: text.digest, answers: answers, agree: true))).status, .ok)
+            let installed = try await h.signed(consumer, .PUT, "/v1/loops/installed/\(entry.loopId)", body: try ViadereJSON.encode(
+                LoopInstallRequest(mode: .installOnly, source: .directory, textVersion: text.version, textDigest: text.digest, agree: true)))
+            XCTAssertEqual(installed.status, .ok, installed.text)
+            let started = try await h.signed(consumer, .POST, "/v1/loops/instances", body: try ViadereJSON.encode(
+                LoopInstanceCreateRequest(publicationId: entry.publicationId, entryPoint: .businessPage)))
+            XCTAssertEqual(started.status, .created, started.text)
+            let view = try started.json(LoopInstanceView.self)
+            try await eq(try await RelationshipRecord.query(on: h.db).filter(\.$consumerId == consumer.id.uuid).count(), 0)
+
+            // The device: pinned keys, the directory entry's verified record (no connection to read it from).
+            let pinned = try await h.signed(consumer, .GET, "/v1/loops/keys").json(LoopPublicationKeySet.self).keys.compactMap(\.pinned)
+            let definition = try XCTUnwrap(LoopDefinition.parse(view.definition).definition)
+            let record = VerifiedBusinessRecord(id: entry.business.id, displayName: entry.business.displayName,
+                                                verificationStatus: entry.business.verificationStatus, category: entry.businessCategory)
+            let context = LoopPresentationContext(manifest: view.manifest, pinnedKeys: pinned, definition: definition, instanceBusinessId: view.businessId,
+                                                  publisher: record, publicationStatus: view.publicationStatus, brand: nil, now: h.clock.now())
+            let tree = PresentationBuilder.build(context, phase: .step(view.currentStepId))
+            XCTAssertNil(tree.fallbackReason, "the device refuses the installed demo Loop: \(tree.fallbackReason ?? "")")
+            XCTAssertEqual(tree.origin, .business)
+        }
+    }
 }
 

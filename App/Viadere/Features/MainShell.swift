@@ -87,6 +87,7 @@ struct MainShell: View {
                     .presentationBackground(ViadereColor.background)
             }
         }
+        .loopInstallLinks(model: model)
         .sheet(isPresented: $model.addBusinessPresented, onDismiss: {
             Task { await model.businesses.load() }
         }) {

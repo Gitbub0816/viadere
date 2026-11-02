@@ -155,7 +155,15 @@ final class LoopInstanceRecord: Model, @unchecked Sendable {
     @Field(key: "updated_at") var updatedAt: Date
     /// The Brand Kit key pinned at creation (`LoopInstanceBrandPin.v1`); never changes for the life of the instance.
     @OptionalField(key: "brand_kit_pin") var brandKitPin: String?
+    /// The install the instance was started under when the customer has no relationship with the business (`LoopInstalls.v1`); `nil`
+    /// for instances started through a connection.
+    @OptionalField(key: "install_id") var installId: UUID?
     init() {}
+
+    /// `relationship_id` of an instance started under an install only (`LoopInstalls.v1`): the column predates installs and is NOT NULL,
+    /// so install-only instances store the nil UUID, which matches no relationship. Nothing reads `relationship_id` to grant access: access
+    /// is decided by `LoopRuntimeService.access` from the current relationship or install on every request.
+    static let noRelationship = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
     var stateValue: LoopInstanceState { LoopInstanceState(rawValue: state) ?? .cancelled }
 }

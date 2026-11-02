@@ -25,10 +25,8 @@ struct LoopDirectorySlot: View {
     let model: AppModel
 
     var body: some View {
-        SubScreen(title: "Loop directory", subtitle: "Requests and tools businesses build on Viadere", backTitle: "Businesses") {
-            // INTEGRATION SLOT (loops): replace with the Loop directory.
-            ViadereEmptyState("Coming soon", message: "Loops your businesses offer appear on their pages under Requests.")
-        }
+        // Wired: the Loop directory (browse, search, categories, featured; reviewed listings only).
+        LoopDirectoryView(model: model, backTitle: "Businesses")
     }
 }
 
@@ -38,9 +36,7 @@ struct YourLoopsSlot: View {
     let model: AppModel
 
     var body: some View {
-        SubScreen(title: "Your Loops", subtitle: "The Loops you've added", backTitle: "Businesses") {
-            // INTEGRATION SLOT (loops): replace with "Your Loops".
-            ViadereEmptyState("No Loops yet", message: "When you add a Loop from a business, it appears here.")
-        }
+        // Wired: the Loops this person installed, with their open requests and uninstall.
+        InstalledLoopsView(model: model, backTitle: "Businesses")
     }
 }

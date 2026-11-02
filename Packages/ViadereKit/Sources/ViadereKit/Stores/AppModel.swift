@@ -61,6 +61,8 @@ public final class AppModel {
     public var pendingLinkSession: PendingLinkSession?
     public var conversationToOpen: SessionID?
     public var businessToOpen: BusinessHandle?
+    /// A Loop install link (`/lp/{loopId}`) waiting for the shell to present its install sheet (`LoopDetailView`).
+    public var loopToInstall: LoopDefinitionID?
     public var toast: String?
     /// Set to open Settings → Trusted devices (the security notice banner's "Review"); Settings clears it once it has navigated.
     public var reviewDevicesRequested = false
@@ -90,6 +92,8 @@ public final class AppModel {
     public let loopConsent: LoopConsentViewModel
     /// The Loop publication keys the renderer verifies with (build pins, narrowed by the server's list).
     public let loopKeys: LoopKeyRing
+    /// Installed Loops (Your Loops, Settings) and the verified records of install-only businesses for the renderer.
+    public let loopLibrary: LoopLibraryViewModel
     private var queuedLink: DeepLink?
     /// Links and notification opens that arrived while the app was locked, replayed in order after unlock.
     private var lockedQueue: [DeepLink] = []
@@ -114,6 +118,8 @@ public final class AppModel {
         businesses = BusinessesViewModel(api: services.organizationAPI)
         loopConsent = LoopConsentViewModel(api: services.loopsAPI)
         loopKeys = LoopKeyRing(pinned: services.configuration.loopPublicationKeys, api: services.loopsAPI)
+        let consentModel = loopConsent
+        loopLibrary = LoopLibraryViewModel(api: services.loopsAPI, consent: { consentModel.status })
         businesses.onChange = { [weak self] directory in
             guard let self else { return }
             self.organization.update(directory: directory)
@@ -174,6 +180,7 @@ public final class AppModel {
         if services.loopsAPI != nil {
             await loopConsent.load()
             await loopKeys.refresh()
+            await loopLibrary.load()
         }
     }
 
@@ -190,10 +197,12 @@ public final class AppModel {
         let directory = Dictionary(businesses.directory.map { ($0.business.id, $0) }, uniquingKeysWith: { a, _ in a })
         let consent = loopConsent.status
         let keys = loopKeys
+        // Businesses the customer only installed a Loop of (no connection): the server's directory record from Your Loops.
+        let installed = loopLibrary.publisherRecords
         return LoopRenderContext(
             keys: { keys.keys },
             publisher: { id in
-                guard let entry = directory[id], entry.isActive else { return nil }
+                guard let entry = directory[id], entry.isActive else { return installed[id] }
                 return VerifiedBusinessRecord(id: entry.business.id, displayName: entry.business.displayName,
                                               verificationStatus: entry.business.verificationStatus, category: entry.category ?? .other)
             },
@@ -326,6 +335,9 @@ public final class AppModel {
             pendingLinkSession = PendingLinkSession(code: code, secret: secret)
             selectedTab = .businesses
             addBusinessPresented = true
+        case .loopInstall(let id):
+            // Opening an install link only shows the Loop's install sheet; nothing is installed without the customer's choice.
+            loopToInstall = id
         }
     }
 
@@ -434,6 +446,8 @@ public final class AppModel {
         benefits.reset()
         businesses.reset()
         loopConsent.clear()
+        loopLibrary.clear()
+        loopToInstall = nil
         services.brandKits?.removeAll()
         isLocked = false
         phase = .onboarding(.welcome)

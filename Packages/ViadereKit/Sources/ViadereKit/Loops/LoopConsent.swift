@@ -232,6 +232,9 @@ public final class LoopConsentViewModel {
         }
     }
 
+    /// A status returned by another call (installing a Loop records the business authorization and returns the new status).
+    public func adopt(_ new: LoopConsentStatus) { apply(new) }
+
     private func apply(_ new: LoopConsentStatus) {
         // A new text version invalidates an education in progress.
         if let old = status?.text, old.version != new.text.version || old.digest != new.text.digest { resetEducation() }

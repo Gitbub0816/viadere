@@ -92,6 +92,8 @@ struct AccountService {
             try await VerifyService.wipe(consumer: id, on: tx)
             // Organization rows (WP-1.1): per-business preferences, conversation archive/mute, alert seen marks.
             try await PreferenceService.wipe(consumer: id, on: tx)
+            // Installed Loops (§2.98 "Installed Loops"); open Loop instances are cancelled.
+            try await LoopInstallService.wipe(consumer: id, on: tx, now: now)
             // Customer profile (docs/PROFILES.md): values, custom public name, verified facts, requests; remaining grants end.
             try await ProfileService.wipe(consumer: id, on: tx, ctx: ctx)
             // Phone numbers: unlink, and overwrite the encrypted number and masked display. Everything that holds the same number

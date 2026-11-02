@@ -43,9 +43,10 @@ enum WebRoutes {
             let appID = "\(ctx.config.appleTeamID).\(ctx.config.appBundleID)"
             let clipID = "\(ctx.config.appleTeamID).\(ctx.config.appClipBundleID)"
             let json: [String: Any] = [
-                // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, account link, handoff, Approve enrollment and link sessions.
+                // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, account link, handoff, Approve enrollment, link sessions and
+                // Loop install links.
                 // Fragments (`#es=`) are never sent to a server; the matching rules ignore them.
-                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"]]]]],
+                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"]]]]],
                 "webcredentials": ["apps": [appID]],
                 "appclips": ["apps": [clipID]],
             ]
@@ -60,6 +61,7 @@ enum WebRoutes {
             try await tokenPage(req, kind: "accountLink", title: "Link your phone",
                 body: "<p>To finish linking this phone number, open the Viadere app, sign in with your passkey, and confirm the last four digits of your number when asked.</p><p class=\"muted\">Viadere will never ask you to approve a payment or sign-in by text message.</p>")
         }
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("lp", ":loopId", use: loopInstallPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("h", ":token") { req in
             try await tokenPage(req, kind: "handoff", title: "Continue in Viadere",
                 body: "<p>For your security, this step is completed in the Viadere app. Open the app to continue.</p><p class=\"muted\">Details are never shown on this page.</p>")
@@ -104,6 +106,27 @@ enum WebRoutes {
             body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
         }
         return page(title: "Connect with \(profile.displayName)", head: head, body: body, ctx: ctx)
+    }
+
+    /// `/lp/{loopId}` without the app (§2.98 "Installed Loops"): names the Loop and its business only for a fully launched publication (active,
+    /// rollout 100%, verified business in an allowed category, no switch); otherwise a generic page. Installing happens only in the app.
+    @Sendable
+    static func loopInstallPage(_ req: Request) async throws -> Response {
+        let ctx = req.ctx
+        guard let raw = req.parameters.get("loopId"), raw.count == 36, let id = UUID(uuidString: raw) else {
+            return page(title: "Not available", body: "<p>This Loop link isn't valid.</p>", status: .notFound, ctx: ctx)
+        }
+        var body: String
+        if let landing = try await LoopInstallService(db: req.db, ctx: ctx).publicLanding(definitionId: id) {
+            body = "<p><strong>\(escape(landing.title))</strong></p><p class=\"muted\">Built by \(escape(landing.business)), a verified business on Viadere</p>"
+        } else {
+            body = "<p>This Loop is shown in the Viadere app.</p>"
+        }
+        body += "<p>Open Viadere to see what this Loop can do and add it. You choose whether to connect with the business.</p>"
+        if let storeID = ctx.config.appStoreID, storeID.allSatisfy(\.isNumber) {
+            body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
+        }
+        return page(title: "Add a Loop", body: body, ctx: ctx)
     }
 
     static func tokenPage(_ req: Request, kind: String, title: String, body: String) async throws -> Response {

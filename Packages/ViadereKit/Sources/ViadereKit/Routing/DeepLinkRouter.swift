@@ -22,6 +22,9 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/k/{CODE}#es={secret}` (QR or button a business shows in its own signed-in session, right after it authenticated the
     /// customer): link this app to the business's customer record (WP-C1). The fragment never reaches a server; log nothing of this link.
     case linkSession(code: String, secret: LinkSessionSecret?)
+    /// `https://{link domain}/lp/{loopId}` or `viadere://lp/{loopId}`: a business's Loop install link. Opens the install sheet only
+    /// (SECURITY.md §2.98 "Installed Loops"); nothing is installed without the customer's choice.
+    case loopInstall(LoopDefinitionID)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -60,6 +63,9 @@ public enum DeepLinkRouter {
             guard components.user == nil, components.password == nil, components.port == nil || components.port == 443,
                   let parsed = ApprovalEnrollmentCode.parse(link: url, domain: domain) else { return nil }
             return .approveEnrollment(code: parsed.code, rootKid: parsed.rootKid, secret: parsed.secret)
+        }
+        if components.path.hasPrefix(APIRoutes.Web.loopInstallPrefix) {
+            return LoopInstallLink.parse(url, domain: domain).map { .loopInstall($0.loopId) }
         }
         if components.path.hasPrefix(APIRoutes.Web.linkSessionPrefix) {
             // Strict: the exact link domain, `/k/{CODE}`, no query, and a fragment that is exactly `es=` plus 43 characters (or none).
@@ -113,6 +119,9 @@ public enum DeepLinkRouter {
             return .handoff(token: arg)
         case "settings":
             return arg.isEmpty ? .settings : nil
+        case "lp":
+            // Harmless from any app: it only opens the install sheet, which needs the customer's explicit choice.
+            return LoopInstallLink.parse(path: APIRoutes.Web.loopInstallPrefix + arg).map { .loopInstall($0.loopId) }
         default:
             return nil
         }
