@@ -134,10 +134,18 @@ public struct ServerConfig: Sendable {
     /// makes business-facing customer references non-enumerable and unlinkable across businesses. Rotating it changes every
     /// `subject_ref` (see docs/SECURITY.md).
     public var subjectRefKey: SymmetricKey = SymmetricKey(data: Data(repeating: 0x55, count: 32))
-    /// Destination countries (ISO 3166 regions) for verification codes. Default US and CA.
-    public var otpAllowedCountries: [String] = ["US", "CA"]
-    /// Digits of the E.164 number (after `+`) that identify a destination prefix for the per-prefix OTP budget.
-    public var otpPrefixDigits = 5
+    /// Countries (ISO 3166 regions) whose numbers can be linked by customer-originated text (`PHONE_LINK_ALLOWED_COUNTRIES`, formerly
+    /// `OTP_ALLOWED_COUNTRIES`, which is still read). Default US and CA.
+    public var phoneLinkAllowedCountries: [String] = ["US", "CA"]
+    /// The Viadere number the customer texts to link their phone (ADR-0027). `PHONE_LINK_SEND_TO`, else the SMS provider's from number.
+    public var phoneLinkSendTo: PhoneNumber?
+    /// When true, an inbound link text from a provider that offers no sender-verification indicator is refused as well. A provider that
+    /// does offer one is always held to it: a spoof flag, or a missing flag, never binds a number (ADR-0027 §1.3).
+    public var phoneLinkRequireSenderIndicator = false
+    /// The number to text, or nil when this deployment has none (a messaging service without a number): linking is then unavailable.
+    public var phoneLinkNumber: PhoneNumber? {
+        phoneLinkSendTo ?? twilio.flatMap { PhoneNumber($0.fromNumber) } ?? mailerSendSMS.flatMap { PhoneNumber($0.fromNumber) }
+    }
     /// A digit reply this soon after a menu was issued is treated as a race with the menu change (SMS carries no
     /// timestamp): the menu is shown again instead of acting on the digit. `0` disables the guard.
     public var smsMenuRaceWindow: TimeInterval = 3
@@ -199,6 +207,7 @@ public struct ServerConfig: Sendable {
             freeDailyInteractionQuota: 1000, allowInsecureWebhookURLs: true, smsMenuRaceWindow: 0)
         // Existing suites subscribe endpoints that cannot answer a challenge; the verification suites switch this on.
         config.operations.webhookOwnershipVerification = false
+        config.phoneLinkSendTo = PhoneNumber("+15550001111")
         config.brandKits.manifestKey = SoftwareP256SigningKey()
         config.brandKits.selectionKey = SymmetricKey(size: .bits256)
         return config
@@ -334,13 +343,18 @@ public struct ServerConfig: Sendable {
                 }
             }
         }
-        if let raw = env["OTP_ALLOWED_COUNTRIES"], !raw.isEmpty {
+        if let raw = env["PHONE_LINK_ALLOWED_COUNTRIES"].flatMap({ $0.isEmpty ? nil : $0 }) ?? env["OTP_ALLOWED_COUNTRIES"], !raw.isEmpty {
             let countries = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).uppercased() }.filter { !$0.isEmpty }
             guard !countries.isEmpty, countries.allSatisfy({ PhoneRegions.callingCodes[$0] != nil }) else {
-                throw ServerConfigError.invalid("OTP_ALLOWED_COUNTRIES (comma-separated ISO regions Viadere knows: \(PhoneRegions.callingCodes.keys.sorted().joined(separator: ", ")))")
+                throw ServerConfigError.invalid("PHONE_LINK_ALLOWED_COUNTRIES (comma-separated ISO regions Viadere knows: \(PhoneRegions.callingCodes.keys.sorted().joined(separator: ", ")))")
             }
-            config.otpAllowedCountries = countries
+            config.phoneLinkAllowedCountries = countries
         }
+        if let raw = env["PHONE_LINK_SEND_TO"], !raw.isEmpty {
+            guard let number = PhoneNumber(raw) else { throw ServerConfigError.invalid("PHONE_LINK_SEND_TO (E.164)") }
+            config.phoneLinkSendTo = number
+        }
+        config.phoneLinkRequireSenderIndicator = ["1", "true", "yes"].contains((env["PHONE_LINK_REQUIRE_SENDER_INDICATOR"] ?? "").lowercased())
         if let raw = env["AUDIT_CHAIN_LEGACY_THROUGH_SEQ"], !raw.isEmpty {
             guard let seq = Int(raw), seq >= 0 else { throw ServerConfigError.invalid("AUDIT_CHAIN_LEGACY_THROUGH_SEQ") }
             config.auditLegacyThroughSeq = seq
@@ -387,17 +401,16 @@ public struct RateLimitSettings: Sendable {
     public var directory: RateRule
     public var device: RateRule
     public var business: RateRule
+    /// Begun phone links per account (3 a day, ADR-0027 §3.5) and per number (5 a day).
     public var phoneLinkStartPerConsumer: RateRule
     public var phoneLinkStartPerPhone: RateRule
-    public var phoneLinkVerify: RateRule
-    public var linkRedeem: RateRule
+    /// Polling of a begun phone link.
+    public var phoneLinkStatus: RateRule = .perMinute(60, burst: 30)
+    /// Inbound link texts per phone that the gateway looks at (more are dropped silently).
+    public var phoneLinkMOPerPhone: RateRule = .perHour(20, burst: 10)
     public var smsInboundPerPhone: RateRule
     public var smsInboundGlobal: RateRule
     public var providerIP: RateRule
-    /// Verification-code SMS across the whole platform (toll-fraud ceiling). Exceeding it is logged as an alert.
-    public var otpGlobal: RateRule = .perHour(600, burst: 100)
-    /// Verification-code SMS per destination prefix (country code plus the next digits), against pumping a premium range.
-    public var otpPerPrefix: RateRule = .perHour(60, burst: 20)
     /// Dashboard / operator state-changing actions per signed-in user.
     public var dashboardAction: RateRule = .perMinute(60, burst: 30)
     /// Dashboard sign-in and sign-up ceremonies per IP.
@@ -436,8 +449,7 @@ public struct RateLimitSettings: Sendable {
     public static let standard = RateLimitSettings(
         globalIP: .perMinute(300), authCeremony: .perMinute(20, burst: 10), refresh: .perMinute(30, burst: 10),
         directory: .perMinute(60, burst: 30), device: .perMinute(240, burst: 60), business: .perMinute(600, burst: 120),
-        phoneLinkStartPerConsumer: .perHour(5, burst: 5), phoneLinkStartPerPhone: .perHour(3, burst: 3),
-        phoneLinkVerify: .perMinute(10, burst: 5), linkRedeem: .perMinute(10, burst: 5),
+        phoneLinkStartPerConsumer: RateRule(capacity: 3, perMinute: 3.0 / 1440), phoneLinkStartPerPhone: RateRule(capacity: 5, perMinute: 5.0 / 1440),
         smsInboundPerPhone: .perMinute(20, burst: 10), smsInboundGlobal: .perMinute(3000, burst: 500),
         providerIP: .perMinute(1200, burst: 300))
 }

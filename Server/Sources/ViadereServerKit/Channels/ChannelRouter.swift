@@ -2,42 +2,15 @@ import Fluent
 import Foundation
 import ViadereCore
 
-/// Mints single-use `/h/{token}` secure-handoff links (kind `handoff`, bound to the consumer and interaction).
-struct HandoffTokens {
-    let ctx: ServerContext
-
-    static let ttl: TimeInterval = GatewayService.handoffTTL
-
-    func mint(consumerId: UUID, phone: PhoneNumber, interactionId: UUID, on db: any Database) async throws -> URL? {
-        let token = SecureToken.generate()
-        let record = LinkTokenRecord()
-        record.id = UUID()
-        record.kind = "handoff"
-        record.tokenHash = SecureToken.hash(token)
-        record.phoneHash = ctx.hasher.phoneHash(phone)
-        record.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "link_tokens.phone", rowId: record.id!)
-        record.phoneLast4 = String(phone.e164.suffix(4))
-        record.contextRevision = 0
-        record.consumerId = consumerId
-        record.purpose = HandoffPurpose.interaction.rawValue
-        record.interactionId = interactionId
-        record.attempts = 0
-        record.state = "open"
-        record.createdAt = ctx.now
-        record.expiresAt = ctx.now.addingTimeInterval(Self.ttl)
-        try await record.create(on: db)
-        return APIRoutes.Web.handoffURL(token: token, domain: ctx.config.linkDomain)
-    }
-}
-
 /// Chooses a channel for an issued interaction, delivers it from a durable outbox and falls back to SMS.
 ///
 /// Rules (spec §14):
 /// * RCS is used only if the business allowed it, the adapter is configured, and the phone is RCS-capable
 ///   (provider lookup, cached 24 h per phone). Otherwise — or when the provider errors out — the **same**
 ///   interaction goes out by SMS.
-/// * A sensitive interaction is never downgraded: both channels render a secure handoff link, and only the
-///   native app / secure web flow can satisfy it.
+/// * A sensitive interaction is never downgraded: both channels say "Open the Viadere app" (no link, no code: decision 9, ADR-0027), and
+///   only the native app can satisfy it. Over SMS every interaction becomes the one-line notice SMS-04: a number linked by text proves
+///   control of the number only (`phone_control_mo`), so it receives on-ramp text and that notice, never interaction content.
 /// * The phone must be the consumer's verified phone, must not have opted out (STOP applies to every text
 ///   channel), and non-essential purposes need a consent grant that covers text channels.
 struct ChannelRouter {
@@ -268,19 +241,15 @@ struct ChannelRouter {
             }
         }
 
-        // Render: sensitive (or not inline-presentable) → secure handoff via ChannelRenderer; answerable kinds the chips
-        // cannot express → a plain "open in Viadere" link; everything else → suggested replies.
+        // Render: sensitive (or not inline-presentable) → "open the Viadere app" via ChannelRenderer; answerable kinds the chips
+        // cannot express → the same plain pointer; everything else → suggested replies. No rendering carries a link.
         let inline = AssurancePolicy.canPresentInline(interaction, on: .rcs)
         let answerable = rcsCanAnswerInline(interaction)
-        var handoffURL: URL?
-        if !inline || !answerable || isLinkKind(interaction) {
-            handoffURL = try await HandoffTokens(ctx: ctx).mint(consumerId: row.consumerId, phone: phone, interactionId: row.interactionId, on: db)
-        }
         let rendering: ChannelRendering
         if inline && !answerable {
-            rendering = handoffOnlyRendering(interaction: interaction, summary: summary, url: handoffURL)
+            rendering = handoffOnlyRendering(summary: summary)
         } else {
-            rendering = adapter.render(interaction, business: summary, handoffURL: handoffURL)
+            rendering = adapter.render(interaction, business: summary)
         }
         var outbound = OutboundChannelMessage(text: rendering.text)
         let reference = row.id?.uuidString.lowercased() ?? ""
@@ -370,26 +339,9 @@ struct ChannelRouter {
         }
     }
 
-    private func requiresAnswer(_ interaction: Interaction) -> Bool {
-        switch interaction.payload {
-        case .confirm, .choose, .acknowledge, .reply: true
-        default: false
-        }
-    }
-
-    /// Kinds whose text rendering includes a link (reward, ticket) — they need a handoff URL even when inline.
-    private func isLinkKind(_ interaction: Interaction) -> Bool {
-        switch interaction.payload {
-        case .reward, .ticket: true
-        default: false
-        }
-    }
-
-    private func handoffOnlyRendering(interaction: Interaction, summary: BusinessSummary, url: URL?) -> ChannelRendering {
+    private func handoffOnlyRendering(summary: BusinessSummary) -> ChannelRendering {
         let name = SMSEncoding.field(summary.displayName, maxLength: 40)
-        var suggestions: [ChannelRendering.Suggestion] = []
-        if let url { suggestions.append(.init(text: "Open in Viadere", action: .openURL(url))) }
-        return ChannelRendering(text: "[\(name)]: A request needs your response in Viadere.", suggestions: suggestions, isSecureHandoff: false)
+        return ChannelRendering(text: "[\(name)]: A request needs your response in the Viadere app.", suggestions: [], isSecureHandoff: false)
     }
 
     private func requeue(_ row: ChannelOutboundRecord) async throws {
@@ -401,60 +353,20 @@ struct ChannelRouter {
 
     // MARK: SMS (also the fallback path)
 
-    /// SMS text for an interaction. Numbered replies for interactions are not wired into the gateway engine, so
-    /// anything that needs an answer is rendered as a secure handoff (the same rendering a sensitive interaction
-    /// gets); informational kinds are sent as-is.
-    static func smsRendering(for interaction: Interaction, business: BusinessSummary, handoffURL: URL?) -> ChannelRendering {
-        var effective = interaction
-        switch interaction.payload {
-        case .confirm, .choose, .acknowledge, .reply:
-            effective.sensitivity = max(interaction.sensitivity, .high)
-        default: break
-        }
-        let sms = ChannelRenderer.sms(effective, business: business, handoffURL: handoffURL)
-        return ChannelRendering(text: sms.body, suggestions: [], isSecureHandoff: sms.isSecureHandoff, smsSegments: sms.encoding.segments)
+    /// The only SMS an interaction ever produces (UX_COPY SMS-04): who sent something and that it needs the app. No content, no link, no code, and
+    /// no way to answer by text.
+    static func smsRendering(business: BusinessSummary) -> ChannelRendering {
+        let text = GatewayCopy.secureRequestNotice(business: business)
+        return ChannelRendering(text: text, suggestions: [], isSecureHandoff: true, smsSegments: SMSEncoding.analyze(text).segments)
     }
 
     private func sendSMS(_ row: ChannelOutboundRecord, interaction: Interaction, summary: BusinessSummary, phone: PhoneNumber,
                          audit: AuditService) async throws {
         let adapter = ctx.channels.sms
-        // The phone's SMS thread is shared by every business. While it is connected to another business, that business's reply
-        // handling would receive the person's answer to *this* text, so only a content-free notice is sent.
-        if let active = try await activeOtherBusiness(phoneHash: row.phoneHash, sender: row.businessId) {
-            let notice = GatewayCopy.newMessageNotice(from: summary, whileConnectedTo: active)
-            let environment = ChannelEnvironment(db: db, ctx: ctx, reference: row.id?.uuidString.lowercased() ?? "", sensitive: false,
-                                                 businessId: BusinessID(row.businessId))
-            do {
-                let result = try await adapter.send(OutboundChannelMessage(text: notice), to: phone, environment: environment)
-                row.channel = "sms"
-                row.providerMessageId = result.providerMessageId
-                row.sentAt = ctx.now
-                row.attempts += 1
-                row.status = "sent"
-                row.fallbackReason = "thread_connected_elsewhere"
-                try await row.update(on: db)
-                try await UsageMeter.record(.smsSegment, businessId: row.businessId, quantity: max(1, SMSEncoding.analyze(notice).segments), livemode: true,
-                                            ref: "sms:" + (row.id?.uuidString.lowercased() ?? ""), at: ctx.now, on: db)
-                _ = try await audit.record("channel.sms_notice_only", actor: AuditActor(kind: .gateway, id: phone.masked),
-                    consumerId: ConsumerID(row.consumerId), businessId: BusinessID(row.businessId), subjectType: "interaction",
-                    subjectId: row.interactionId.uuidString.lowercased(), metadata: ["reason": "thread_connected_elsewhere"])
-            } catch {
-                row.channel = "sms"
-                try await finish(row, status: "failed", error: "sms_enqueue_failed")
-            }
-            return
-        }
-        let preview = Self.smsRendering(for: interaction, business: summary, handoffURL: nil)
-        var url: URL?
-        let wantsLink = interaction.kind.isSecuritySensitive || interaction.requiredAssurance > .channelReply || isLinkKind(interaction)
-            || requiresAnswer(interaction) || preview.isSecureHandoff
-        if wantsLink {
-            url = try await HandoffTokens(ctx: ctx).mint(consumerId: row.consumerId, phone: phone, interactionId: row.interactionId, on: db)
-        }
-        let rendering = Self.smsRendering(for: interaction, business: summary, handoffURL: url)
+        let rendering = Self.smsRendering(business: summary)
         let reference = row.id?.uuidString.lowercased() ?? ""
         let now = ctx.now
-        let environment = ChannelEnvironment(db: db, ctx: ctx, reference: reference, sensitive: url != nil, businessId: BusinessID(row.businessId))
+        let environment = ChannelEnvironment(db: db, ctx: ctx, reference: reference, sensitive: false, businessId: BusinessID(row.businessId))
         do {
             let result = try await adapter.send(OutboundChannelMessage(text: rendering.text), to: phone, environment: environment)
             row.channel = "sms"
@@ -469,7 +381,7 @@ struct ChannelRouter {
             _ = try await audit.record("channel.sms_sent", actor: AuditActor(kind: .gateway, id: phone.masked),
                 consumerId: ConsumerID(row.consumerId), businessId: BusinessID(row.businessId), subjectType: "interaction",
                 subjectId: row.interactionId.uuidString.lowercased(),
-                metadata: ["handoff": rendering.isSecureHandoff ? "true" : "false", "fallback_reason": row.fallbackReason ?? ""])
+                metadata: ["handoff": "true", "fallback_reason": row.fallbackReason ?? ""])
         } catch {
             row.channel = "sms"
             try await finish(row, status: "failed", error: "sms_enqueue_failed")

@@ -614,6 +614,11 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     /// A business confirmed a link session with this account (`subjectId` = the relationship id), or one this account completed was never confirmed
     /// and Viadere ended it (WP-C1).
     case businessLinked, businessLinkUnconfirmed
+    /// Someone asked to link this account's phone number to another account by text (ADR-0027 §1.3; `action == .keepPhoneNumber`,
+    /// `subjectId` = this account's link). The number stays here unless the request outlasts its waiting period unopposed.
+    case phoneTransferRequested
+    /// The account's phone number was unlinked by a text (`UNLINK`) sent from that number.
+    case phoneUnlinked
     case unknown
 
     public init(from decoder: any Decoder) throws {
@@ -629,6 +634,8 @@ public enum SecurityNoticeAction: String, Codable, Sendable, Hashable {
     case cancelDeviceReplacement
     /// `POST /v1/vault/recovery-release/{subjectId}/cancel` (a vault device or a trusted device).
     case cancelVaultRecovery
+    /// `POST /v1/phone-links/{subjectId}/keep` (a trusted device): refuses a pending transfer of this number.
+    case keepPhoneNumber
     case unknown
 
     public init(from decoder: any Decoder) throws {

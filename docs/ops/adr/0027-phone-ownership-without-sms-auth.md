@@ -61,6 +61,15 @@ Tests: ST-PH-08 (spoofed or victim-induced MO against a linked number leaves the
 | `ChannelRenderer` SMS/RCS secure-handoff text | replaced by the no-link text; Core test asserts no outbound text contains a code, URL token or approval wording (ST-PH-05) |
 | SECURITY §2.8 | rewritten in the same change |
 
+## Implementation notes (clean-up round, 2026-11-02)
+
+- Code: `PhoneLinkMO` (Core: nonce, tolerant extraction, compose text, `phone_control_mo`), `PhoneLinkService` (begin, status, inbound handling, UNLINK, pending transfers, sweep), `GatewayService.handleInbound` (link text and UNLINK before the menu engine, per-number limit), `ChannelRouter` (SMS-04 only over SMS), Kit `PhoneLinkViewModel`. Tests: `PhoneLinkMOTests` (Core, Server), `PhoneLinkViewModelTests` (Kit).
+- The sender indicator is `InboundSMS.senderIndicator` (`verified`, `suspectedSpoof`, `notProvided`, `unsupported`). The shipped Twilio and MailerSend adapters report `unsupported` (neither documents such a flag for inbound SMS); `PHONE_LINK_REQUIRE_SENDER_INDICATOR=1` makes that a refusal. **Open (O-2):** the owner or provider must confirm a real indicator on the staging numbers before the linking feature flag is turned on.
+- "One number per account" is enforced at begin (accounts that already hold several numbers from older builds keep them).
+- `pending_transfer` (§1.3) is completed by the maintenance job after the new link's cool-down unless the current owner chose "Keep my number" (`POST /v1/phone-links/{id}/keep`); "Let it go" is dismissing the notice.
+- `phone_control_mo` numbers receive SMS-04 only over SMS. RCS is unchanged apart from losing every link (it still answers inline for non-sensitive interactions under the existing assurance rules): the ADR text says "over SMS"; a stricter RCS limit needs an owner decision.
+- Numbers linked by older builds (`source` `otp` or `sms_link`) stay verified; they also receive SMS-04 only, because the SMS rendering no longer depends on how the link was made.
+
 ## Consequences
 
 - Phone linking needs one extra user action (tap Send); no Viadere-sent message ever carries a secret.

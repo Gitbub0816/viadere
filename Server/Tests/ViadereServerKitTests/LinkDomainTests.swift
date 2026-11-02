@@ -37,10 +37,9 @@ final class LinkDomainServerTests: XCTestCase {
             let accepted = try await h.signedPost(consumer, APIRoutes.relationshipConnect.template,
                                                   ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.cksites.dev/c/\(code.canonical)"))
             XCTAssertTrue([.ok, .created].contains(accepted.status), accepted.text)
-            // Secure handoff links point at the link domain, not at the API host.
-            let url = try await HandoffTokens(ctx: h.ctx).mint(consumerId: consumer.id.uuid, phone: PhoneNumber("+14155550100")!, interactionId: UUID(), on: h.db)
-            XCTAssertEqual(url?.host, "viadere.cksites.dev")
-            XCTAssertTrue(url?.path.hasPrefix(APIRoutes.Web.handoffPrefix) == true)
+            // The on-ramp page named in texts is on the link domain, not at the API host, and carries no token.
+            XCTAssertEqual(h.ctx.config.linkDomain.host, "viadere.cksites.dev")
+            XCTAssertEqual(GatewayService(db: h.db, ctx: h.ctx).configuration.getAppURL, "https://viadere.cksites.dev/get")
         }
     }
 }

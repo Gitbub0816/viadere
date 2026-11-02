@@ -62,13 +62,25 @@ enum DeviceRoutes {
             try await AuthService(db: req.db, ctx: req.ctx).revoke(try req.consumer, deviceId: id)
             return try req.emptyOK()
         }
-        routes.api(APIRoutes.phoneLinkStart) { req in
-            let body: PhoneLinkStartRequest = try req.decodeBody()
-            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).start(principal: try req.consumer, request: body))
+        routes.api(APIRoutes.phoneLinkMOBegin) { req in
+            let body: PhoneLinkMOBeginRequest = try req.decodeBody()
+            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).begin(principal: try req.consumer, request: body))
         }
-        routes.api(APIRoutes.phoneLinkVerify) { req in
-            let body: PhoneLinkVerifyRequest = try req.decodeBody()
-            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).verify(principal: try req.consumer, request: body))
+        routes.api(APIRoutes.phoneLinkStatus) { req in
+            let id: PhoneLinkID = try req.uuidParameter("phoneLinkId")
+            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).status(principal: try req.consumer, id: id))
+        }
+        routes.api(APIRoutes.phoneLinkKeep) { req in
+            let id: PhoneLinkID = try req.uuidParameter("phoneLinkId")
+            try await PhoneLinkService(db: req.db, ctx: req.ctx).keep(principal: try req.consumer, id: id)
+            return try req.emptyOK()
+        }
+        // ADR-0027 §4: the SMS-code, link-token and hand-off routes are gone. Old app builds get `410 gone` and the app's own wording.
+        for (method, path) in [(HTTPMethod.POST, "v1/phone-links/start"), (.POST, "v1/phone-links/verify"), (.POST, "v1/sms/link-tokens/redeem"),
+                               (.GET, "v1/sms/link-tokens/:token/preview"), (.POST, "v1/handoff/redeem")] {
+            routes.on(method, path.split(separator: "/").map { PathComponent(stringLiteral: String($0)) }) { _ -> Response in
+                throw APIError.gone("Update Viadere to link your number.")
+            }
         }
         routes.api(APIRoutes.deviceConfirm) { req in
             let id: DeviceID = try req.uuidParameter("deviceId")
@@ -79,18 +91,6 @@ enum DeviceRoutes {
             let id: PhoneLinkID = try req.uuidParameter("phoneLinkId")
             let body: ConfirmationRequest = try req.decodeBody()
             return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).confirmLink(principal: try req.consumer, id: id, proof: body.proof))
-        }
-        routes.api(APIRoutes.smsLinkPreview) { req in
-            guard let token = req.parameters.get("token") else { throw APIError.notFound }
-            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).previewAccountLink(principal: try req.consumer, token: token))
-        }
-        routes.api(APIRoutes.smsLinkRedeem) { req in
-            let body: SMSLinkRedeemRequest = try req.decodeBody()
-            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).redeemAccountLink(principal: try req.consumer, request: body))
-        }
-        routes.api(APIRoutes.handoffRedeem) { req in
-            let body: HandoffRedeemRequest = try req.decodeBody()
-            return try req.jsonResponse(try await PhoneLinkService(db: req.db, ctx: req.ctx).redeemHandoff(principal: try req.consumer, token: body.token))
         }
         routes.api(APIRoutes.phoneLinksList) { req in
             try req.jsonResponse(try await AccountService(db: req.db, ctx: req.ctx).phoneLinks(for: try req.consumer.consumerId))

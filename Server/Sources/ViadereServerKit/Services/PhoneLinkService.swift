@@ -2,19 +2,31 @@ import Fluent
 import Foundation
 import ViadereCore
 
-/// Phone verification (OTP) and SMS link-token redemption.
+/// Phone-number ownership by a customer-originated text (ADR-0027, owner decisions 1 and 9).
+///
+/// Viadere sends no code and no link to a number. A trusted device asks for a challenge (`begin`); the person sends the nonce **from their phone**
+/// to the Viadere number; the gateway hands that inbound message to `handleInbound`, which binds the number to the account only when the message
+/// came from the claimed number, carries the live nonce, arrived within the TTL and passed the provider's sender check. The proof is control of the
+/// number at that moment: the link carries the label `phone_control_mo`, satisfies no assurance level, is never an authenticator and never shortens
+/// a waiting period. A number linked this way receives on-ramp texts and the "open Viadere" notice only (`ChannelRouter`).
 struct PhoneLinkService {
     let db: any Database
     let ctx: ServerContext
 
-    static let otpTTL: TimeInterval = 10 * 60
-    static let maxOTPAttempts = 5
-    static let maxLinksPerConsumer = 5
-    static let maxLinkConfirmAttempts = 5
-    /// A phone linked from an SMS link token is not used for delivery, replies or routing for this long unless a trusted device confirms it.
+    static let maxLinkedNumbersPerAccount = 1
+    /// A new link is not used for routing or delivery for this long. The proving device is the requester's own, so a trusted-device confirmation
+    /// does not shorten it for a number linked by text (ADR-0027 §2).
     static let newLinkCoolDown: TimeInterval = 24 * 3600
-    /// The same, when the account has no *other* trusted device that could confirm it (nobody to ask, so the delay is the defence).
+    /// The same, when the account has no *other* trusted device that could notice the link (nobody to ask, so the delay is the defence).
     static let soleDeviceLinkCoolDown: TimeInterval = 72 * 3600
+    /// Verified links per number: at most 2 in 7 days and 1 in a day (UNLINK/re-link churn, ADR-0027 §1.5).
+    static let maxLinksPerNumberPerWeek = 2
+    static let maxLinksPerNumberPerDay = 1
+    /// A challenge row never outlives its expiry by more than this (class P, ADR-0026: expiry + 2 minutes).
+    static let challengeGrace: TimeInterval = 2 * 60
+
+    static let sourceMO = "mo"
+    static let statePendingTransfer = "pending_transfer"
 
     /// Recovery took effect: every verified number goes back into cool-down (usable from `until`, or sooner when a trusted device
     /// confirms it with Face ID), because whoever recovered the account is not yet known to be its owner. Returns how many links changed.
@@ -29,204 +41,286 @@ struct PhoneLinkService {
         return links.count
     }
 
-    private func otpHash(linkId: UUID, code: String) -> String { ctx.hasher.hmacHex("otp", "\(linkId.uuidString.lowercased())|\(code)") }
+    private func nonceHash(linkId: UUID, nonce: String) -> String { ctx.hasher.hmacHex("phone-mo", "\(linkId.uuidString.lowercased())\n\(nonce)") }
 
-    private func randomOTP() -> String {
-        // Rejection sampling avoids modulo bias.
-        let limit = UInt32.max - (UInt32.max % 1_000_000)
-        while true {
-            let bytes = SecureToken.randomBytes(4)
-            let value = bytes.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-            if value < limit { return String(format: "%06d", value % 1_000_000) }
-        }
-    }
+    // MARK: Begin and status (device-signed, trusted device)
 
-    // MARK: OTP
-
-    func start(principal: ConsumerPrincipal, request: PhoneLinkStartRequest) async throws -> PhoneLinkStartResponse {
-        // Linking a phone by code is for a trusted device (not one enrolled in the last day, not an App Clip).
+    func begin(principal: ConsumerPrincipal, request: PhoneLinkMOBeginRequest) async throws -> PhoneLinkMOBeginResponse {
+        // A trusted device only (not one enrolled in the last day, not an App Clip): the nonce is a secret shown on its screen.
         try await DeviceTrust.require(principal, db: db, now: ctx.now)
         let limits = ctx.config.rateLimits
-        let phoneHash = ctx.hasher.phoneHash(request.phone)
-        // Toll-fraud defences: destination allowlist, a platform-wide ceiling, a per-prefix ceiling, and the attestation hook.
-        guard PhoneRegions.isAllowed(request.phone, regions: ctx.config.otpAllowedCountries) else {
+        guard PhoneRegions.isAllowed(request.phone, regions: ctx.config.phoneLinkAllowedCountries) else {
             _ = try? await AuditService(db: db, ctx: ctx).record("phone_link.destination_refused", outcome: .denied, principal: principal,
                                                                 metadata: ["prefix": PhoneRegions.budgetPrefix(of: request.phone, digits: 2)])
-            throw APIError.validation("We can't send verification codes to that country yet.", details: ["phone": "countryNotSupported"])
+            throw APIError.validation("We can't link numbers from that country yet.", details: ["phone": "countryNotSupported"])
         }
-        if let deviceId = principal.deviceId, await ctx.integrity.assessSensitiveRequest(deviceId: deviceId, purpose: "otp") == .failed {
+        guard let sendTo = ctx.config.phoneLinkNumber else { throw APIError.unavailable("Phone linking isn't available right now.") }
+        if let deviceId = principal.deviceId, await ctx.integrity.assessSensitiveRequest(deviceId: deviceId, purpose: "phone_link") == .failed {
             throw APIError(.forbidden, .forbidden, "This device could not be verified.")
         }
-        let prefix = PhoneRegions.budgetPrefix(of: request.phone, digits: ctx.config.otpPrefixDigits)
-        for (name, key, rule, scope) in [("otp-prefix", prefix, limits.otpPerPrefix, "prefix"), ("otp-global", "all", limits.otpGlobal, "global")] {
-            guard await ctx.limiter.allow(name, key: key, rule: rule) else {
-                // An alert-level signal: a budget this high being exhausted usually means SMS pumping.
-                ctx.logger.warning("otp budget exhausted", metadata: ["scope": "\(scope)", "prefix": "\(prefix)"])
-                _ = try? await AuditService(db: db, ctx: ctx).record("phone_link.budget_exhausted", outcome: .denied, principal: principal,
-                                                                    metadata: ["scope": scope, "prefix": prefix])
-                throw APIError.rateLimited(retryAfter: 600)
-            }
-        }
+        let phoneHash = ctx.hasher.phoneHash(request.phone)
         try await ctx.limiter.enforce("phonelink-consumer", key: principal.consumerId.description, rule: limits.phoneLinkStartPerConsumer)
         try await ctx.limiter.enforce("phonelink-phone", key: phoneHash, rule: limits.phoneLinkStartPerPhone)
-        if let context = try await SMSContextRecord.query(on: db).filter(\.$phoneHash == phoneHash).first(), context.optedOut {
-            throw APIError.conflict("This number has opted out of Viadere messages. Text START to resubscribe first.")
-        }
-        let existing = try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid)
-            .filter(\.$state != "revoked").count()
-        guard existing < Self.maxLinksPerConsumer else { throw APIError.conflict("Too many phone numbers are linked to this account.") }
+        // One number per account. The answer never depends on what other accounts or the number's opt-out state are (no enumeration).
+        let ownOther = try await PhoneLinkRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid)
+            .filter(\.$state ~~ ["verified", Self.statePendingTransfer]).filter(\.$phoneHash != phoneHash).count()
+        guard ownOther < Self.maxLinkedNumbersPerAccount else { throw APIError.conflict("Remove your current number before linking another.") }
         let now = ctx.now
-        let record = try PhoneLinkRecord(consumerId: principal.consumerId.uuid, phone: request.phone, hasher: ctx.hasher,
-                                         cipher: ctx.cipher, now: now)
-        let code = randomOTP()
-        record.otpHash = otpHash(linkId: record.id!, code: code)
-        record.otpExpiresAt = now.addingTimeInterval(Self.otpTTL)
+        let id = UUID()
+        let nonce = PhoneLinkMO.generateNonce()
+        let challenge = PhoneLinkMOChallengeRecord()
+        challenge.id = id
+        challenge.consumerId = principal.consumerId.uuid
+        challenge.deviceId = principal.deviceId?.uuid
+        challenge.nonceHash = nonceHash(linkId: id, nonce: nonce)
+        challenge.phoneHash = phoneHash
+        challenge.phoneCiphertext = try ctx.cipher.seal(request.phone.e164, context: "phone_link_mo_challenges.phone", rowId: id)
+        challenge.phoneMasked = request.phone.masked
+        challenge.phoneLast4 = String(request.phone.e164.suffix(4))
+        challenge.createdAt = now
+        challenge.expiresAt = now.addingTimeInterval(PhoneLinkMO.ttl)
         try await db.transaction { tx in
-            // Only the newest pending code for this number works.
-            try await PhoneLinkRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$phoneHash == phoneHash)
-                .filter(\.$state == "pending").set(\.$state, to: "revoked").update()
-            try await record.create(on: tx)
-            try await OutboundSMS(db: tx, ctx: ctx).enqueue(
-                to: request.phone, body: "Viadere: Your verification code is \(code). It expires in 10 minutes. Never share it.", sensitive: true)
-            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.started", principal: principal, subjectType: "phone_link",
-                                                               subjectId: record.id?.uuidString.lowercased(), metadata: ["phone": request.phone.masked])
+            // Only the newest begin per (account, number) is live.
+            try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$phoneHash == phoneHash).delete()
+            try await challenge.create(on: tx)
+            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.mo_begun", principal: principal, subjectType: "phone_link",
+                                                               subjectId: id.uuidString.lowercased(), metadata: ["phone": request.phone.masked])
         }
-        return PhoneLinkStartResponse(phoneLinkId: PhoneLinkID(record.id!), expiresAt: record.otpExpiresAt ?? now)
+        return PhoneLinkMOBeginResponse(phoneLinkId: PhoneLinkID(id), nonce: nonce, sendTo: sendTo.e164, expiresAt: challenge.expiresAt)
     }
 
-    func verify(principal: ConsumerPrincipal, request: PhoneLinkVerifyRequest) async throws -> PhoneLink {
-        try await DeviceTrust.require(principal, db: db, now: ctx.now)
-        try await ctx.limiter.enforce("phonelink-verify", key: principal.consumerId.description, rule: ctx.config.rateLimits.phoneLinkVerify)
-        guard request.code.count == 6, request.code.allSatisfy({ $0.isASCII && $0.isNumber }) else {
-            throw APIError.validation("The code must be 6 digits.", details: ["code": "invalid"])
-        }
-        guard let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == request.phoneLinkId.uuid)
-            .filter(\.$consumerId == principal.consumerId.uuid).first(), link.state == "pending",
-              let storedHash = link.otpHash, let expires = link.otpExpiresAt else { throw APIError.notFound }
+    func status(principal: ConsumerPrincipal, id: PhoneLinkID) async throws -> PhoneLinkMOStatus {
+        try await ctx.limiter.enforce("phonelink-status", key: principal.consumerId.description, rule: ctx.config.rateLimits.phoneLinkStatus)
         let now = ctx.now
-        guard expires > now else { throw APIError.gone("This code has expired. Request a new one.") }
-        guard link.otpAttempts < Self.maxOTPAttempts else {
-            link.state = "revoked"
-            try await link.update(on: db)
-            throw APIError(.forbidden, .forbidden, "Too many incorrect attempts. Request a new code.")
+        if let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
+            .filter(\.$state ~~ ["verified", Self.statePendingTransfer]).first() {
+            return PhoneLinkMOStatus(state: .verified, link: dto(link, now: now))
         }
-        guard ConstantTime.equals(otpHash(linkId: link.id!, code: request.code), storedHash) else {
-            _ = try await DB.swap(db, table: PhoneLinkRecord.schema, id: link.id!, column: "otp_attempts", expected: link.otpAttempts,
-                                  newValue: link.otpAttempts + 1)
-            _ = try? await AuditService(db: db, ctx: ctx).record("phone_link.verify_failed", outcome: .failure, principal: principal,
-                                                                subjectType: "phone_link", subjectId: link.id?.uuidString.lowercased())
-            throw APIError(.forbidden, .forbidden, "The code is not correct.")
+        if let challenge = try await PhoneLinkMOChallengeRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid).first(),
+           challenge.expiresAt > now {
+            return PhoneLinkMOStatus(state: .pending)
         }
-        // Single use: exactly one concurrent verification can flip pending → verified.
-        guard try await DB.swap(db, table: PhoneLinkRecord.schema, id: link.id!, column: "state", expected: "pending", newValue: "verified")
-        else { throw APIError.conflict("This code was already used.") }
-        guard let phone = PhoneNumber(try ctx.cipher.openString(link.phoneCiphertext, context: "phone_links.phone", rowId: link.id!)) else { throw APIError.internalError }
-        // Proving control of the number through a code sent to it is enough to use it now: the device doing so is trusted (checked above).
-        let verified = try await makeVerified(link: link, consumerId: principal.consumerId, phone: phone, now: now, source: "otp", usableFrom: nil)
-        try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
-        return PhoneLink(id: PhoneLinkID(verified.id!), maskedPhone: verified.phoneMasked, verifiedAt: now, usableFrom: nil)
+        // Unknown, someone else's, used up and expired all read the same.
+        return PhoneLinkMOStatus(state: .expired)
     }
 
-    /// Marks a link verified and makes it the only verified link for that number.
-    private func makeVerified(link: PhoneLinkRecord?, consumerId: ConsumerID, phone: PhoneNumber, now: Date, source: String,
-                              usableFrom: Date?) async throws -> PhoneLinkRecord {
-        let hash = ctx.hasher.phoneHash(phone)
-        return try await db.transaction { tx in
-            // A number is verified for one consumer at a time; proving control of it moves the link.
-            let others = try await PhoneLinkRecord.query(on: tx).filter(\.$verifiedPhoneHash == hash).all()
-            for other in others where other.id != link?.id {
-                other.state = "revoked"
-                other.verifiedPhoneHash = nil
-                try await other.update(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.revoked", actor: AuditActor(kind: .system),
-                    consumerId: ConsumerID(other.consumerId), subjectType: "phone_link", subjectId: other.id?.uuidString.lowercased(),
-                    metadata: ["reason": "claimed_by_another_account"])
-            }
-            let record = try link ?? PhoneLinkRecord(consumerId: consumerId.uuid, phone: phone, hasher: ctx.hasher, cipher: ctx.cipher, now: now)
+    func dto(_ link: PhoneLinkRecord, now: Date) -> PhoneLink {
+        PhoneLink(id: PhoneLinkID(link.id!), maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt,
+                  usableFrom: link.usableFrom.flatMap { $0 > now ? $0 : nil }, assurance: link.source == Self.sourceMO ? PhoneLinkMO.assuranceLabel : nil)
+    }
+
+    // MARK: Inbound (the gateway calls this inside its transaction, before the menu engine)
+
+    enum InboundHandling: Equatable {
+        /// An ordinary message: the menu engine handles it.
+        case ordinary
+        /// A link text or UNLINK: fully handled here. Nothing else may see the message (a nonce never reaches a business or a menu).
+        case handled
+    }
+
+    /// True when `sms` is one this service must see (a nonce or UNLINK), so the caller can rate-limit it before opening a transaction.
+    static func isLinkMessage(_ sms: InboundSMS) -> Bool {
+        GatewayKeyword.classify(sms.text) == .unlink || PhoneLinkMO.extractNonce(from: sms.text) != nil
+    }
+
+    func handleInbound(_ sms: InboundSMS, on tx: any Database) async throws -> InboundHandling {
+        if GatewayKeyword.classify(sms.text) == .unlink {
+            try await unlink(number: sms.from, on: tx)
+            return .handled
+        }
+        guard let nonce = PhoneLinkMO.extractNonce(from: sms.text) else { return .ordinary }
+        let now = ctx.now
+        let phoneHash = ctx.hasher.phoneHash(sms.from)
+        // Only challenges for the number the text came from are candidates: a nonce sent from any other number matches nothing.
+        let candidates = try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$phoneHash == phoneHash).limit(8).all()
+        let match = candidates.first { ConstantTime.equals(nonceHash(linkId: $0.id!, nonce: nonce), $0.nonceHash) }
+        guard let challenge = match else {
+            // No answer, no reply and no business ever sees the text: a wrong, reused, late or misdirected nonce looks like nothing (ST-PH-07).
+            if !candidates.isEmpty { try await audit("phone_link.mo_refused", reason: "nonce", number: sms.from, on: tx) }
+            return .handled
+        }
+        // Whatever happens next, the challenge is spent: one try per begin.
+        try await challenge.delete(on: tx)
+        guard challenge.expiresAt > now else {
+            try await audit("phone_link.mo_refused", reason: "expired", number: sms.from, consumer: challenge.consumerId, on: tx)
+            return .handled
+        }
+        guard senderAccepted(sms.senderIndicator) else {
+            try await audit("phone_link.mo_refused", reason: "sender_indicator", number: sms.from, consumer: challenge.consumerId, on: tx)
+            ctx.logger.warning("phone link text refused by the sender check", metadata: ["indicator": "\(sms.senderIndicator.rawValue)"])
+            return .handled
+        }
+        if let context = try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == phoneHash).first(), context.optedOut {
+            try await audit("phone_link.mo_refused", reason: "opted_out", number: sms.from, consumer: challenge.consumerId, on: tx)
+            return .handled
+        }
+        guard try await churnAllows(phoneHash: phoneHash, on: tx) else {
+            try await audit("phone_link.mo_refused", reason: "churn", number: sms.from, consumer: challenge.consumerId, on: tx)
+            ctx.logger.warning("phone link churn limit reached", metadata: ["phone": "\(sms.from.masked)"])
+            return .handled
+        }
+        guard let device = try await challenge.deviceId.asyncFlatMap({ try await DeviceRecord.find($0, on: tx) }), device.revokedAt == nil,
+              device.consumerId == challenge.consumerId, device.isTrusted(at: now),
+              let phone = PhoneNumber(try ctx.cipher.openString(challenge.phoneCiphertext, context: "phone_link_mo_challenges.phone", rowId: challenge.id!)),
+              phone == sms.from
+        else {
+            try await audit("phone_link.mo_refused", reason: "device", number: sms.from, consumer: challenge.consumerId, on: tx)
+            return .handled
+        }
+        try await bind(challenge: challenge, device: device, phone: phone, now: now, on: tx)
+        // SMS-02, for every valid text, before any waiting period ends: states the effect and offers UNLINK and STOP. No code, no link.
+        try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: phone, body: GatewayCopy.phoneLinkedNotice)
+        return .handled
+    }
+
+    private func senderAccepted(_ indicator: InboundSenderIndicator) -> Bool {
+        switch indicator {
+        case .verified: true
+        case .suspectedSpoof, .notProvided: false
+        case .unsupported: !ctx.config.phoneLinkRequireSenderIndicator
+        }
+    }
+
+    private func churnAllows(phoneHash: String, on tx: any Database) async throws -> Bool {
+        let now = ctx.now
+        let week = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == phoneHash).filter(\.$source == Self.sourceMO)
+            .filter(\.$createdAt > now.addingTimeInterval(-7 * 86_400)).count()
+        let day = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == phoneHash).filter(\.$source == Self.sourceMO)
+            .filter(\.$createdAt > now.addingTimeInterval(-86_400)).count()
+        return week < Self.maxLinksPerNumberPerWeek && day < Self.maxLinksPerNumberPerDay
+    }
+
+    private func bind(challenge: PhoneLinkMOChallengeRecord, device: DeviceRecord, phone: PhoneNumber, now: Date, on tx: any Database) async throws {
+        let consumerId = ConsumerID(challenge.consumerId)
+        let hash = challenge.phoneHash
+        let devices = try await DeviceRecord.query(on: tx).filter(\.$consumerId == challenge.consumerId).filter(\.$revokedAt == nil).all()
+        let otherTrusted = devices.contains { $0.id != device.id && $0.isTrusted(at: now) }
+        var usableFrom = now.addingTimeInterval(otherTrusted ? Self.newLinkCoolDown : Self.soleDeviceLinkCoolDown)
+        if let locked = device.approvalsLockedUntil { usableFrom = max(usableFrom, locked) }
+        let existing = try await PhoneLinkRecord.query(on: tx).filter(\.$verifiedPhoneHash == hash).filter(\.$state == "verified").first()
+        let auditService = AuditService(db: tx, ctx: ctx)
+        if let existing, existing.consumerId == challenge.consumerId {
+            // Already this account's number: nothing changes.
+            _ = try await auditService.record("phone_link.verified_mo", actor: AuditActor(kind: .consumer, id: consumerId.description), consumerId: consumerId,
+                subjectType: "phone_link", subjectId: existing.id?.uuidString.lowercased(), metadata: ["phone": phone.masked, "result": "already_linked"])
+            return
+        }
+        let record = try PhoneLinkRecord(consumerId: challenge.consumerId, phone: phone, hasher: ctx.hasher, cipher: ctx.cipher, now: now)
+        record.id = challenge.id
+        // The row id seeds the encryption context of the ciphertext, so seal again for the final id.
+        record.phoneCiphertext = try ctx.cipher.seal(phone.e164, context: "phone_links.phone", rowId: challenge.id!)
+        record.verifiedAt = now
+        record.usableFrom = usableFrom
+        record.source = Self.sourceMO
+        if let existing {
+            // No immediate displacement (S1-A2-7): the current owner keeps the number until this request's waiting period ends and they were
+            // told in the app and did not keep it. A spoofed or victim-induced text therefore never takes a linked number over at once.
+            record.state = Self.statePendingTransfer
+            record.verifiedPhoneHash = nil
+            try await record.create(on: tx)
+            _ = try await auditService.record("phone_link.transfer_requested", actor: AuditActor(kind: .consumer, id: consumerId.description),
+                consumerId: consumerId, subjectType: "phone_link", subjectId: record.id?.uuidString.lowercased(),
+                metadata: ["phone": phone.masked, "assurance": PhoneLinkMO.assuranceLabel])
+            try await SecurityNotices(db: tx, ctx: ctx).store(of: existing.consumerId, except: nil, notice: .phoneTransferRequested,
+                                                              subjectId: existing.id?.uuidString.lowercased())
+            await SecurityNotices(db: tx, ctx: ctx).push(to: existing.consumerId, except: nil, notice: .phoneTransferRequested)
+        } else {
             record.state = "verified"
             record.verifiedPhoneHash = hash
-            record.verifiedAt = now
-            record.usableFrom = usableFrom
-            record.source = source
-            record.otpHash = nil
-            record.otpExpiresAt = nil
-            try await record.save(on: tx)
-            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.verified", actor: AuditActor(kind: .consumer, id: consumerId.description),
-                consumerId: consumerId, subjectType: "phone_link", subjectId: record.id?.uuidString.lowercased(),
-                metadata: ["method": source, "phone": phone.masked, "cool_down": usableFrom == nil ? "false" : "true"])
-            return record
+            try await record.create(on: tx)
+            _ = try await auditService.record("phone_link.verified_mo", actor: AuditActor(kind: .consumer, id: consumerId.description), consumerId: consumerId,
+                subjectType: "phone_link", subjectId: record.id?.uuidString.lowercased(),
+                metadata: ["phone": phone.masked, "assurance": PhoneLinkMO.assuranceLabel, "cool_down": "true"])
         }
+        // The account's other devices are told; the proving device already knows.
+        try await SecurityNotices(db: tx, ctx: ctx).store(of: challenge.consumerId, except: device.id, notice: .newPhone, subjectId: record.id?.uuidString.lowercased())
+        await SecurityNotices(db: tx, ctx: ctx).push(to: challenge.consumerId, except: device.id, notice: .newPhone)
     }
 
-    // MARK: SMS account-link token
+    // MARK: UNLINK
 
-    /// The open account-link token and the live SMS thread it was minted for, or `gone`.
-    private func openAccountLink(_ rawToken: String, now: Date) async throws -> (token: LinkTokenRecord, phone: PhoneNumber) {
-        let gone = APIError.gone("This link is invalid or has expired. Text Viadere to get a new one.")
-        guard Base64URL.isValid(rawToken, minLength: 20, maxLength: 64),
-              let token = try await LinkTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(rawToken))
-                  .filter(\.$kind == "accountLink").first(), token.state == "open", token.expiresAt > now,
-              let phone = PhoneNumber((try? ctx.cipher.openString(token.phoneCiphertext, context: "link_tokens.phone", rowId: token.id!)) ?? "")
-        else { throw gone }
-        // The link must still belong to the live conversation it was texted into: that thread exists, has not been reset
-        // (its revision never goes backwards) and has not opted out.
-        let (thread, record) = try await GatewayService(db: db, ctx: ctx).loadContext(phone: phone, on: db)
-        guard record != nil, thread.revision >= token.contextRevision, !thread.consent.optedOut else { throw gone }
-        return (token, phone)
+    /// `UNLINK` from a number revokes every link of it at any time (ADR-0027 §1.5), tells each affected account in the app, and replies SMS-03.
+    func unlink(number: PhoneNumber, on tx: any Database) async throws {
+        let hash = ctx.hasher.phoneHash(number)
+        let links = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == hash).filter(\.$state ~~ ["verified", Self.statePendingTransfer]).all()
+        for link in links {
+            link.state = "revoked"
+            link.verifiedPhoneHash = nil
+            try await link.update(on: tx)
+            try await SecurityNotices(db: tx, ctx: ctx).store(of: link.consumerId, except: nil, notice: .phoneUnlinked, subjectId: link.id?.uuidString.lowercased())
+            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.unlinked_by_text", actor: AuditActor(kind: .gateway, id: number.masked),
+                consumerId: ConsumerID(link.consumerId), subjectType: "phone_link", subjectId: link.id?.uuidString.lowercased(), metadata: ["phone": number.masked])
+        }
+        try await PhoneLinkMOChallengeRecord.query(on: tx).filter(\.$phoneHash == hash).delete()
+        try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == hash).set(\.$consumerId, to: nil).update()
+        if links.isEmpty { _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.unlink_no_link", actor: AuditActor(kind: .gateway, id: number.masked), metadata: ["phone": number.masked]) }
+        try await OutboundSMS(db: tx, ctx: ctx).enqueue(to: number, body: GatewayCopy.unlinkDone)
+        for _ in links { ctx.logger.warning("phone number unlinked by text", metadata: ["phone": "\(number.masked)"]) }
     }
 
-    /// What a link token would link, without consuming it (device-signed and rate-limited, so it cannot be used to probe tokens).
-    func previewAccountLink(principal: ConsumerPrincipal, token rawToken: String) async throws -> SMSLinkPreview {
-        try await ctx.limiter.enforce("link-preview", key: principal.consumerId.description, rule: ctx.config.rateLimits.linkRedeem)
-        let (token, phone) = try await openAccountLink(rawToken, now: ctx.now)
-        return SMSLinkPreview(maskedPhone: phone.masked, expiresAt: token.expiresAt)
+    private func audit(_ action: String, reason: String, number: PhoneNumber, consumer: UUID? = nil, on tx: any Database) async throws {
+        _ = try await AuditService(db: tx, ctx: ctx).record(action, outcome: .denied, actor: AuditActor(kind: .gateway, id: number.masked),
+            consumerId: consumer.map { ConsumerID($0) }, subjectType: "phone_link", metadata: ["reason": reason, "phone": number.masked])
     }
 
-    func redeemAccountLink(principal: ConsumerPrincipal, request: SMSLinkRedeemRequest) async throws -> PhoneLink {
-        try await ctx.limiter.enforce("link-redeem", key: principal.consumerId.description, rule: ctx.config.rateLimits.linkRedeem)
-        let now = ctx.now
-        let (token, phone) = try await openAccountLink(request.token, now: now)
-        let id = token.id!
-        let gone = APIError.gone("This link is invalid or has expired. Text Viadere to get a new one.")
-        // Explicit confirmation of the number the person was shown: the last 4 digits, and (when sent) the whole masked number.
-        // A few wrong guesses burn the token.
-        let maskedOK = request.confirmMaskedPhone.map { ConstantTime.equals($0, phone.masked) } ?? true
-        guard request.confirmPhoneLast4.count == 4, ConstantTime.equals(request.confirmPhoneLast4, token.phoneLast4), maskedOK else {
-            let attempts = token.attempts + 1
-            if try await DB.swap(db, table: LinkTokenRecord.schema, id: id, column: "attempts", expected: token.attempts, newValue: attempts),
-               attempts >= Self.maxLinkConfirmAttempts {
-                try await LinkTokenRecord.query(on: db).filter(\.$id == id).set(\.$state, to: "revoked").update()
+    // MARK: Pending transfers
+
+    /// The current owner refuses a pending transfer of their number ("Keep my number").
+    func keep(principal: ConsumerPrincipal, id: PhoneLinkID) async throws {
+        try await DeviceTrust.require(principal, db: db, now: ctx.now)
+        guard let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
+            .filter(\.$state == "verified").first() else { throw APIError.notFound }
+        try await db.transaction { tx in
+            let pending = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == link.phoneHash).filter(\.$state == Self.statePendingTransfer).all()
+            for other in pending {
+                other.state = "revoked"
+                try await other.update(on: tx)
             }
-            _ = try? await AuditService(db: db, ctx: ctx).record("sms_link.confirm_failed", outcome: .failure, principal: principal)
-            throw APIError(.forbidden, .forbidden, "The phone confirmation did not match.")
+            _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.transfer_refused", principal: principal, subjectType: "phone_link",
+                                                               subjectId: id.description, metadata: ["pending": String(pending.count)])
         }
-        // Single use: only one redemption can flip open → consumed.
-        guard try await DB.swap(db, table: LinkTokenRecord.schema, id: id, column: "state", expected: "open", newValue: "consumed") else { throw gone }
-        try await LinkTokenRecord.query(on: db).filter(\.$id == id).set(\.$consumedAt, to: now).set(\.$consumerId, to: principal.consumerId.uuid).update()
-        let existing = try await PhoneLinkRecord.query(on: db).filter(\.$verifiedPhoneHash == token.phoneHash)
-            .filter(\.$consumerId == principal.consumerId.uuid).first()
-        let record: PhoneLinkRecord
-        if let existing { record = existing } else {
-            // A number linked this way is not an interaction target, a reply decider or an SMS routing identity until `usableFrom`, unless a
-            // trusted device confirms it. 24 h; 72 h when no other trusted device exists to confirm it; never before the redeeming device's own
-            // cool-down ends.
-            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).all()
-            let otherTrusted = devices.contains { $0.id != principal.deviceId?.uuid && $0.isTrusted(at: now) }
-            var usableFrom = now.addingTimeInterval(otherTrusted ? Self.newLinkCoolDown : Self.soleDeviceLinkCoolDown)
-            if let locked = devices.first(where: { $0.id == principal.deviceId?.uuid })?.approvalsLockedUntil { usableFrom = max(usableFrom, locked) }
-            record = try await makeVerified(link: nil, consumerId: principal.consumerId, phone: phone, now: now, source: "sms_link", usableFrom: usableFrom)
-            // The account is told even when it has no other device or push token: an in-app notice on its next open, plus the push.
-            await SecurityNotices(db: db, ctx: ctx).notifyOtherDevices(of: principal.consumerId.uuid, except: principal.deviceId?.uuid, notice: .newPhone,
-                                                                       subjectId: record.id?.uuidString.lowercased())
-        }
-        // While the link is cooling down the thread stays unlinked (the gateway treats the link as absent); it is attached on confirmation.
-        if record.usableFrom == nil || record.usableFrom! <= now {
-            try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
-        }
-        return PhoneLink(id: PhoneLinkID(record.id!), maskedPhone: record.phoneMasked, verifiedAt: record.verifiedAt ?? now, usableFrom: record.usableFrom)
     }
 
-    /// Makes a linked phone usable now. Signed by a trusted (not new, not App Clip) device with a user-verified approval key.
+    /// Moves a number to the account that asked for it once its waiting period ended and the current owner did not keep it. Run by the maintenance job.
+    @discardableResult
+    func completeTransfers() async throws -> Int {
+        let now = ctx.now
+        let due = try await PhoneLinkRecord.query(on: db).filter(\.$state == Self.statePendingTransfer).filter(\.$usableFrom <= now).all()
+        var moved = 0
+        for pending in due {
+            try await db.transaction { tx in
+                for old in try await PhoneLinkRecord.query(on: tx).filter(\.$verifiedPhoneHash == pending.phoneHash).filter(\.$state == "verified").all() {
+                    old.state = "revoked"
+                    old.verifiedPhoneHash = nil
+                    try await old.update(on: tx)
+                    _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.revoked", actor: AuditActor(kind: .system), consumerId: ConsumerID(old.consumerId),
+                        subjectType: "phone_link", subjectId: old.id?.uuidString.lowercased(), metadata: ["reason": "transferred_after_waiting_period"])
+                }
+                pending.state = "verified"
+                pending.verifiedPhoneHash = pending.phoneHash
+                pending.usableFrom = nil
+                try await pending.update(on: tx)
+                try await SMSContextRecord.query(on: tx).filter(\.$phoneHash == pending.phoneHash).set(\.$consumerId, to: nil).update()
+            }
+            moved += 1
+        }
+        return moved
+    }
+
+    // MARK: Sweep (class P: the challenge row never outlives expiry + 2 minutes)
+
+    @discardableResult
+    static func purgeChallenges(on db: any Database, now: Date) async throws -> Int {
+        let cutoff = now.addingTimeInterval(-challengeGrace)
+        let count = try await PhoneLinkMOChallengeRecord.query(on: db).filter(\.$expiresAt < cutoff).count()
+        if count > 0 { try await PhoneLinkMOChallengeRecord.query(on: db).filter(\.$expiresAt < cutoff).delete() }
+        return count
+    }
+
+    // MARK: Waiting period
+
+    /// Makes a linked phone usable now. Only for a link made by an older build (an SMS-code link): a number linked by text waits out its period,
+    /// because the device that would confirm it is the requester's own and adds no protection for the number's real owner (ADR-0027 §2).
     func confirmLink(principal: ConsumerPrincipal, id: PhoneLinkID, proof: ConfirmationProof) async throws -> PhoneLink {
         try await ctx.limiter.enforce("phone-confirm", key: principal.consumerId.description, rule: .perHour(30, burst: 10))
         let now = ctx.now
@@ -234,6 +328,9 @@ struct PhoneLinkService {
               let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.consumerId == principal.consumerId.uuid, device.isTrusted(at: now),
               let link = try await PhoneLinkRecord.query(on: db).filter(\.$id == id.uuid).filter(\.$consumerId == principal.consumerId.uuid)
                   .filter(\.$state == "verified").first() else { throw APIError.notFound }
+        if link.source == Self.sourceMO {
+            throw APIError(.forbidden, .forbidden, "A number linked by text becomes usable after its waiting period.")
+        }
         if link.usableFrom != nil {
             guard let purpose = proof.requiredKeyPurpose,
                   let keyRecord = try await DeviceKeyRecord.query(on: db).filter(\.$deviceId == deviceId.uuid).filter(\.$purpose == purpose.rawValue).first(),
@@ -261,36 +358,15 @@ struct PhoneLinkService {
                 try await GatewayService(db: db, ctx: ctx).accountLinked(consumerId: principal.consumerId, phone: phone)
             }
         }
-        return PhoneLink(id: id, maskedPhone: link.phoneMasked, verifiedAt: link.verifiedAt ?? link.createdAt, usableFrom: link.usableFrom)
+        return dto(link, now: now)
     }
+}
 
-    // MARK: Handoff token
-
-    enum TokenView: Equatable { case valid, expired, used, unknown }
-
-    /// Read-only state for the landing pages (never consumes the token).
-    func view(token: String, kind: String) async throws -> TokenView {
-        guard Base64URL.isValid(token, minLength: 20, maxLength: 64),
-              let record = try await LinkTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(token))
-                  .filter(\.$kind == kind).first() else { return .unknown }
-        if record.state == "consumed" { return .used }
-        if record.state != "open" { return .unknown }
-        return record.expiresAt > ctx.now ? .valid : .expired
-    }
-
-    /// The app redeems a handoff token (device-signed) to continue a secure flow. The token must have been
-    /// minted for this consumer's verified phone.
-    func redeemHandoff(principal: ConsumerPrincipal, token: String) async throws -> HandoffRedeemResponse {
-        let gone = APIError.gone("This link is invalid or has expired.")
-        guard Base64URL.isValid(token, minLength: 20, maxLength: 64),
-              let record = try await LinkTokenRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(token))
-                  .filter(\.$kind == "handoff").first(), let id = record.id,
-              record.state == "open", record.expiresAt > ctx.now else { throw gone }
-        guard record.consumerId == principal.consumerId.uuid else { throw APIError.forbidden }
-        guard try await DB.swap(db, table: LinkTokenRecord.schema, id: id, column: "state", expected: "open", newValue: "consumed") else { throw gone }
-        try await LinkTokenRecord.query(on: db).filter(\.$id == id).set(\.$consumedAt, to: ctx.now).update()
-        _ = try await AuditService(db: db, ctx: ctx).record("handoff.redeemed", principal: principal, subjectType: "handoff", subjectId: id.uuidString.lowercased())
-        return HandoffRedeemResponse(purpose: HandoffPurpose(rawValue: record.purpose ?? "") ?? .accountHelp,
-                                     interactionId: record.interactionId.map { InteractionID($0) })
+private extension Optional {
+    func asyncFlatMap<T>(_ transform: (Wrapped) async throws -> T?) async rethrows -> T? {
+        switch self {
+        case .some(let value): try await transform(value)
+        case .none: nil
+        }
     }
 }

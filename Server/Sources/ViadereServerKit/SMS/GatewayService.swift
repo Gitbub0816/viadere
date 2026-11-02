@@ -27,10 +27,12 @@ struct GatewayService {
     let ctx: ServerContext
 
     static let providerLabel = "sms"
-    static let handoffTTL: TimeInterval = 10 * 60
     static let maxConflictRetries = 6
 
-    var configuration: GatewayConfiguration { GatewayConfiguration(menuRaceWindow: ctx.config.smsMenuRaceWindow) }
+    var configuration: GatewayConfiguration {
+        GatewayConfiguration(getAppURL: APIRoutes.Web.getAppURL(domain: ctx.config.linkDomain)?.absoluteString ?? "https://viadere.com/get",
+                             menuRaceWindow: ctx.config.smsMenuRaceWindow)
+    }
 
     func engine(on db: any Database) -> SMSGatewayEngine {
         SMSGatewayEngine(configuration: configuration, directory: DBDirectoryLookup(db: db))
@@ -42,6 +44,11 @@ struct GatewayService {
     // MARK: Inbound
 
     func handleInbound(_ sms: InboundSMS, provider: String) async throws -> InboundResult {
+        // A link text or UNLINK (ADR-0027) is rate-limited per number before anything is opened; over the limit it is dropped without a reply.
+        if PhoneLinkService.isLinkMessage(sms),
+           !(await ctx.limiter.allow("phonelink-mo", key: ctx.hasher.phoneHash(sms.from), rule: ctx.config.rateLimits.phoneLinkMOPerPhone)) {
+            return .processed
+        }
         for _ in 0..<Self.maxConflictRetries {
             do {
                 try await db.transaction { tx in
@@ -52,6 +59,9 @@ struct GatewayService {
                         if error.isConstraintViolation { throw DuplicateInbound() }
                         throw error
                     }
+                    // The customer-originated link text and UNLINK are handled before the menu engine, and nothing else sees them: a nonce never
+                    // reaches a menu, a business or a log, and a failed one gets no reply that says which check failed.
+                    if try await PhoneLinkService(db: tx, ctx: ctx).handleInbound(sms, on: tx) == .handled { return }
                     let (context, record) = try await loadContext(phone: sms.from, on: tx)
                     let transition = await engine(on: tx).handle(sms, context: context, now: ctx.now)
                     try await persist(transition.context, previous: record, on: tx)
@@ -69,8 +79,8 @@ struct GatewayService {
 
     // MARK: Account linking
 
-    /// Called after a phone is verified for a consumer (link-token redemption or OTP). Moves an existing
-    /// SMS thread forward and sends the confirmation.
+    /// Called when a linked phone becomes usable for a consumer (a link made by an older build, confirmed from a trusted device). Moves an
+    /// existing SMS thread forward and sends the confirmation.
     func accountLinked(consumerId: ConsumerID, phone: PhoneNumber) async throws {
         for _ in 0..<Self.maxConflictRetries {
             do {
@@ -199,20 +209,6 @@ struct GatewayService {
                 try await forward(businessId: businessId, sessionId: sessionId, text: text, providerMessageId: providerMessageId,
                                   context: context, on: db)
 
-            case .sendAccountLink:
-                let token = try await mintToken(kind: "accountLink", context: context, consumerId: nil, purpose: nil,
-                                                ttl: configuration.linkTTL, on: db)
-                guard let url = APIRoutes.Web.accountLinkURL(token: token, domain: ctx.config.linkDomain) else { break }
-                try await queue.enqueue(to: phone, body: GatewayCopy.accountLink(url: url, ttlMinutes: Int(configuration.linkTTL / 60)),
-                                        sensitive: true)
-
-            case .sendSecureHandoff(let purpose):
-                let token = try await mintToken(kind: "handoff", context: context, consumerId: context.consumerId,
-                                                purpose: purpose.rawValue, ttl: Self.handoffTTL, on: db)
-                guard let url = APIRoutes.Web.handoffURL(token: token, domain: ctx.config.linkDomain) else { break }
-                try await queue.enqueue(to: phone, body: GatewayCopy.secureHandoff(url: url, ttlMinutes: Int(Self.handoffTTL / 60)),
-                                        sensitive: true)
-
             case .recordConsent(let optedOut, let keyword, let at):
                 try await SMSConsentEventRecord(phoneHash: phoneHash, optedOut: optedOut, keyword: keyword, at: at).create(on: db)
 
@@ -294,34 +290,5 @@ struct GatewayService {
             payload: MessageReceivedPayload(sessionId: sessionId, relationshipId: RelationshipID(relationship.id!),
                                             subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(relationship.businessId), consumerId: ConsumerID(relationship.consumerId)),
                                             messageId: MessageID(message.id!), text: text, channel: .sms, receivedAt: now))
-    }
-
-    // MARK: Tokens
-
-    /// Mints a 256-bit single-use token; only its SHA-256 is stored. Earlier open tokens of the same kind
-    /// for this phone are revoked, so only the newest link works.
-    private func mintToken(kind: String, context: ConversationContext, consumerId: ConsumerID?, purpose: String?, ttl: TimeInterval,
-                           on db: any Database) async throws -> String {
-        let token = SecureToken.generate()
-        let hash = ctx.hasher.phoneHash(context.phone)
-        try await LinkTokenRecord.query(on: db).filter(\.$phoneHash == hash).filter(\.$kind == kind).filter(\.$state == "open")
-            .set(\.$state, to: "revoked").update()
-        let now = ctx.now
-        let record = LinkTokenRecord()
-        record.id = UUID()
-        record.kind = kind
-        record.tokenHash = SecureToken.hash(token)
-        record.phoneHash = hash
-        record.phoneCiphertext = try ctx.cipher.seal(context.phone.e164, context: "link_tokens.phone", rowId: record.id!)
-        record.phoneLast4 = String(context.phone.e164.suffix(4))
-        record.contextRevision = context.revision
-        record.consumerId = consumerId?.uuid
-        record.purpose = purpose
-        record.attempts = 0
-        record.state = "open"
-        record.createdAt = now
-        record.expiresAt = now.addingTimeInterval(ttl)
-        try await record.create(on: db)
-        return token
     }
 }

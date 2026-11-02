@@ -89,6 +89,9 @@ public enum APIRoutes {
     /// Poll for the result of a begun link: `pending`, `verified` or `expired`.
     public static let phoneLinkStatus = Endpoint<EmptyBody, PhoneLinkMOStatus>(
         "phoneLinks.status", .GET, "/v1/phone-links/{phoneLinkId}", auth: .deviceSignedBearer)
+    /// The current owner of a number refuses a pending transfer of it to another account ("Keep my number", UX_COPY S-PH-07).
+    public static let phoneLinkKeep = Endpoint<EmptyBody, EmptyBody>(
+        "phoneLinks.keep", .POST, "/v1/phone-links/{phoneLinkId}/keep", auth: .deviceSignedBearer)
     public static let phoneLinksList = Endpoint<EmptyBody, [PhoneLink]>(
         "phoneLinks.list", .GET, "/v1/phone-links", auth: .deviceSignedBearer)
     public static let phoneLinkDelete = Endpoint<EmptyBody, EmptyBody>(
@@ -445,7 +448,7 @@ public enum APIRoutes {
         deviceReplacementCancel.descriptor,
         recoveryBegin.descriptor, recoveryFinish.descriptor, recoveryComplete.descriptor, recoveryCancel.descriptor, recoveryInfo.descriptor,
         recoveryCodesBegin.descriptor, recoveryCodesRegenerate.descriptor,
-        phoneLinkMOBegin.descriptor, phoneLinkStatus.descriptor,
+        phoneLinkMOBegin.descriptor, phoneLinkStatus.descriptor, phoneLinkKeep.descriptor,
         phoneLinkConfirm.descriptor,
         phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,

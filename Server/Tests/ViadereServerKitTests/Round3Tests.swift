@@ -62,23 +62,6 @@ final class Round3Tests: XCTestCase {
         return h.texts.sent.dropFirst(before).map(\.body)
     }
 
-    func requestLinkToken(_ h: TestHarness, from number: String) async throws -> String {
-        _ = try await say(h, "Hi", from: number)
-        _ = try await say(h, "Northwind", from: number)
-        let sms = try await say(h, "1", from: number)
-        let body = try XCTUnwrap(sms.first { $0.contains("/l/") })
-        let range = try XCTUnwrap(body.range(of: "https://viadere.com/l/"))
-        return String(body[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-    }
-
-    func redeem(_ h: TestHarness, _ consumer: TestConsumer, token: String, last4: String) async throws -> PhoneLink {
-        let preview = try await h.signed(consumer, .GET, "/v1/sms/link-tokens/\(token)/preview").json(SMSLinkPreview.self)
-        let ok = try await h.signedPost(consumer, APIRoutes.smsLinkRedeem.template,
-                                        SMSLinkRedeemRequest(token: token, confirmPhoneLast4: last4, confirmMaskedPhone: preview.maskedPhone))
-        XCTAssertEqual(ok.status, .ok, ok.text)
-        return try ok.json(PhoneLink.self)
-    }
-
     func gatewayConsumer(_ h: TestHarness, _ phone: String) async throws -> ConsumerID? {
         try await GatewayService(db: h.db, ctx: h.ctx).loadContext(phone: PhoneNumber(phone)!, on: h.db).0.consumerId
     }
@@ -90,21 +73,23 @@ final class Round3Tests: XCTestCase {
             let airline = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let victim = try await h.readyConsumer(name: "Victim")
             _ = try await h.connect(victim, to: airline)
-            // The attacker redeems their own link token from a device on the victim's account (stolen passkey / session).
+            // The attacker links their own phone from a device on the victim's account (stolen passkey / session).
             let attackerPhone = "+14805550199"
-            let token = try await requestLinkToken(h, from: attackerPhone)
-            let link = try await redeem(h, victim, token: token, last4: "0199")
+            let linked = try await h.linkPhoneByText(victim, phone: attackerPhone)
+            XCTAssertEqual(linked.status.state, .verified)
+            let link = try XCTUnwrap(linked.status.link)
             // No other trusted device exists to confirm it, so the delay is 72 h, not 24 h.
             XCTAssertEqual(link.usableFrom, h.clock.now().addingTimeInterval(72 * 3600))
-            let notices = try await PhoneLinkRecord.query(on: h.db).filter(\.$state == "verified").count()
-            XCTAssertEqual(notices, 1)
+            XCTAssertEqual(link.assurance, "phone_control_mo")
+            let verified = try await PhoneLinkRecord.query(on: h.db).filter(\.$state == "verified").count()
+            XCTAssertEqual(verified, 1)
 
             // The attacker's phone is not the victim's account on SMS: no consumer, no session, no forwarded text, no recents.
-            try await eq(try await gatewayConsumer(h, attackerPhone), nil)
+            try await eq(try await h.gatewayConsumer(attackerPhone), nil)
             _ = try await say(h, "Hi", from: attackerPhone)
             _ = try await say(h, "Northwind", from: attackerPhone)
             let reply = try await say(h, "1", from: attackerPhone)
-            XCTAssertTrue(reply.joined().contains("/l/") || reply.joined().contains("link your account"), reply.joined())
+            XCTAssertTrue(reply.joined().contains("https://viadere.com/get") || reply.joined().contains("link this number"), reply.joined())
             _ = try await say(h, "hello", from: attackerPhone)
             try await eq(try await ConversationSessionRecord.query(on: h.db).count(), 0)
             try await eq(try await ConversationMessageRecord.query(on: h.db).count(), 0)
@@ -116,21 +101,21 @@ final class Round3Tests: XCTestCase {
             let seen = try await h.signed(second, .GET, "/v1/security-notices")
             XCTAssertEqual(seen.status, .ok, seen.text)
             XCTAssertTrue(try seen.json([SecurityNotice].self).contains { $0.kind == .newPhone })
-            let audited = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.verified").all()
+            let audited = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.verified_mo").all()
             XCTAssertTrue(audited.contains { $0.metadataJSON.contains("\"cool_down\":\"true\"") })
             // The listing tells the app the link is pending.
             let listed = try await h.signed(victim, .GET, "/v1/phone-links").json([PhoneLink].self)
             XCTAssertNotNil(listed.first?.usableFrom)
 
-            // 24 h is not enough without a confirmation; 72 h is.
+            // 24 h is not enough; 72 h is.
             h.clock.advance(by: 24 * 3600 + 1)
-            try await eq(try await gatewayConsumer(h, attackerPhone), nil)
+            try await eq(try await h.gatewayConsumer(attackerPhone), nil)
             h.clock.advance(by: 48 * 3600)
-            try await eq(try await gatewayConsumer(h, attackerPhone), victim.id)
+            try await eq(try await h.gatewayConsumer(attackerPhone), victim.id)
         }
     }
 
-    func testAConfirmedLinkWorksAtOnceAndTheDelayIs24HoursWithAnotherTrustedDevice() async throws {
+    func testTheDelayIs24HoursWithAnotherTrustedDeviceAndATrustedDeviceCannotShortenAnMOLink() async throws {
         try await withHarness { h in
             _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let a = try await h.readyConsumer()
@@ -138,14 +123,17 @@ final class Round3Tests: XCTestCase {
             // Device B is trusted (approved by A): then the delay is the short one.
             try await eq(try await h.confirm(b, from: a).status, .ok)
             let phone = "+14805550123"
-            let token = try await requestLinkToken(h, from: phone)
-            let link = try await redeem(h, a, token: token, last4: "0123")
+            let linked = try await h.linkPhoneByText(a, phone: phone)
+            let link = try XCTUnwrap(linked.status.link)
             XCTAssertEqual(link.usableFrom, h.clock.now().addingTimeInterval(24 * 3600))
-            try await eq(try await gatewayConsumer(h, phone), nil)
+            try await eq(try await h.gatewayConsumer(phone), nil)
+            // ADR-0027 section 2: the proving device is the requester's own, so a confirmation does not shorten the wait.
             let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: link.id.description, deviceId: b.device!.id, assurance: .biometric,
                                                          key: b.device!.biometricKey, now: h.clock.now())
-            try await eq(try await h.signedPost(b, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: proof)).status, .ok)
-            try await eq(try await gatewayConsumer(h, phone), a.id)
+            try await eq(try await h.signedPost(b, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: proof)).status, .forbidden)
+            try await eq(try await h.gatewayConsumer(phone), nil)
+            h.clock.advance(by: 24 * 3600 + 1)
+            try await eq(try await h.gatewayConsumer(phone), a.id)
         }
     }
 
@@ -310,7 +298,7 @@ final class Round3Tests: XCTestCase {
                 XCTAssertEqual(result.errorCode, .deviceCoolDown, what)
             }
             refused(try await h.signed(b, .DELETE, "/v1/devices/\(a.device!.id)"), "revoke the owner's device")
-            refused(try await h.signedPost(b, "/v1/phone-links/start", PhoneLinkStartRequest(phone: PhoneNumber("+14805550123")!)), "phone link start")
+            refused(try await h.signedPost(b, APIRoutes.phoneLinkMOBegin.template, PhoneLinkMOBeginRequest(phone: PhoneNumber("+14805550123")!)), "phone link begin")
             refused(try await h.signed(b, .DELETE, "/v1/account"), "account deletion")
             refused(try await h.signed(b, .DELETE, "/v1/phone-links/\(PhoneLinkID())"), "remove a phone link")
             refused(try await h.signed(b, .DELETE, "/v1/delegations/\(DelegationID())"), "end a household grant")
@@ -334,7 +322,7 @@ final class Round3Tests: XCTestCase {
             let sessions = try await h.signed(b, .GET, "/v1/sessions").json([SessionInfo].self)
             let other = try XCTUnwrap(sessions.first { !$0.current })
             refused(try await h.signed(b, .DELETE, "/v1/sessions/\(other.id)"), "revoke another session")
-            refused(try await h.signedPost(b, "/v1/phone-links/start", PhoneLinkStartRequest(phone: PhoneNumber("+14805550123")!)), "phone link start")
+            refused(try await h.signedPost(b, APIRoutes.phoneLinkMOBegin.template, PhoneLinkMOBeginRequest(phone: PhoneNumber("+14805550123")!)), "phone link begin")
             refused(try await h.signed(b, .DELETE, "/v1/account"), "account deletion")
             let status = try await ConsumerRecord.find(a.id.uuid, on: h.db)?.status
             XCTAssertEqual(status, "active")

@@ -92,6 +92,9 @@ struct BackgroundJobs {
             await ctx.limiter.store.purgeExpired(now: ctx.now)
             // Published outbox rows and old idempotency markers.
             try await QueuePump.purge(on: db, now: ctx.now)
+            // Phone-link challenges are pending secrets (ADR-0026 class P): gone at expiry + 2 minutes, and transfers whose waiting period ended complete.
+            _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now)
+            await guarded("phone-link-transfers") { _ = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers() }
         }
         if await gate("retention-purge", gated) {
             try await RetentionService(db: db, ctx: ctx).purge()

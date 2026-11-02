@@ -89,7 +89,7 @@ Run points, status levels and redemption codes validated at the till. Eligibilit
 |---|---|---|
 | Viadere app (push, in-app) | Beta | Everything, including device-signed approvals |
 | RCS | Beta | Text and suggested replies, never an authenticated approval |
-| SMS | Beta | Text and secure handoff links. SMS fallback is not end-to-end encrypted. |
+| SMS | Beta | Text only; a request that needs the app says to open Viadere (no links or codes). SMS fallback is not end-to-end encrypted. |
 | Apple Messages for Business | Not available | Disabled until Apple approves multi-merchant brokerage in writing |
 :::
 

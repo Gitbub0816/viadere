@@ -52,7 +52,7 @@ Server/
   deliveries are rows. Races are decided by unique indexes or compare-and-swap (`UPDATE … WHERE col = expected RETURNING`),
   so any number of instances can run the background jobs safely.
 * **One transaction per inbound SMS.** dedup marker (unique insert) → context load → `SMSGatewayEngine` → CAS on
-  `revision` → effects (queue rows, webhook deliveries, link tokens, consent, audit). A lost CAS rolls back everything and
+  `revision` → effects (queue rows, webhook deliveries, consent, audit; a link text or `UNLINK` is handled first, ADR-0027). A lost CAS rolls back everything and
   retries; nothing is half-applied. External I/O (SMS send, webhook HTTP) happens afterwards from durable queues.
 * **Pluggable edges.** `APNsSender`, `PassSigner`, `PassPushSender`, `SMSProvider`, `PasskeyVerifier`, `WebhookTransport`, `RateLimitStore` and the clock are
   injected through `ServerContext`; tests replace them, production wires APNSwift, Twilio or MailerSend, and webauthn-swift.
@@ -109,7 +109,8 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
 | `APP_ATTEST_MODE` | `off` \| `report` \| `require`: what to do with an enrollment without a valid Apple App Attest attestation. Default `require` in production/staging (an unattested app **or** App Clip device is refused, `403 attestation_required`), `off` elsewhere. `report` accepts and flags it with a 72 h cool-down |
 | `APP_ATTEST_ENVIRONMENT` | `development` \| `production`: the App Attest AAGUID the app's builds attest with (default `production` in production, `development` elsewhere). TestFlight and App Store builds attest as `production` |
-| `OTP_ALLOWED_COUNTRIES` | ISO regions that may receive verification codes (default `US,CA`; Caribbean +1 regions such as `JM`, `DO` are separate) |
+| `PHONE_LINK_ALLOWED_COUNTRIES` (formerly `OTP_ALLOWED_COUNTRIES`, still read) | ISO regions whose numbers can be linked by a customer-originated text (default `US,CA`; Caribbean +1 regions such as `JM`, `DO` are separate) |
+| `PHONE_LINK_SEND_TO`, `PHONE_LINK_REQUIRE_SENDER_INDICATOR` | the Viadere number the customer texts to link a phone (default: the SMS provider's from number); `1` also refuses inbound link texts from a provider that offers no sender-verification indicator (a spoof or missing indicator is always refused) |
 | `SMS_MENU_RACE_SECONDS` | a menu digit this soon after a menu change re-shows the menu (default 3; 0 disables) |
 | `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS`, `LINK_TOKEN_RETENTION_DAYS` | retention for finished webhook deliveries (30), finished SMS/RCS outbound rows (30) and used/expired link tokens (7) |
 | `APPLE_TEAM_ID`, `APP_STORE_ID` | AASA file; Smart App Banner |
@@ -179,14 +180,13 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 | `POST /v1/devices/{id}/confirm` | device+bearer | a *trusted other* device lifts the new device's 24 h approval cool-down (`ConfirmationProof`, **biometric** key). `POST /v1/devices` accepts `replacesDeviceId` ("Set up again"): a revoked old device is replaced at once, a **live** one stays until the new device is confirmed or its cool-down ends |
 | `POST /v1/devices/{newDeviceId}/cancel-replacement` | device+bearer | "Not you? Cancel": a trusted device (normally the one being replaced) revokes the NEW device; the old one is untouched |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | device+bearer | list / revoke |
-| `POST /v1/phone-links/start` · `/verify` | device+bearer | SMS OTP (HMAC-hashed, 5 attempts, rate-limited) |
-| `GET /v1/sms/link-tokens/{token}/preview` | device+bearer | masked phone + expiry, rate-limited, does not consume |
-| `POST /v1/sms/link-tokens/redeem` | device+bearer | link token + confirmation of the previewed number; the new link is not a delivery target or reply decider for 24 h unless confirmed |
-| `POST /v1/phone-links/{id}/confirm` | device+bearer | a trusted device makes a new link usable now (`ConfirmationProof`) |
+| `POST /v1/phone-links/mo/begin` · `GET /v1/phone-links/{id}` | device+bearer | link a phone by sending one text **from it** (ADR-0027): a nonce for the trusted device's screen, then status `pending` / `verified` / `expired`; nothing is texted to the phone |
+| `POST /v1/phone-links/{id}/keep` | device+bearer | "Keep my number": the current owner refuses a pending transfer of the number |
+| `POST /v1/phone-links/start` · `/verify`, `/v1/sms/link-tokens/*`, `/v1/handoff/redeem` | any | **retired**: `410 gone` (decision 9) |
+| `POST /v1/phone-links/{id}/confirm` | device+bearer | a trusted device makes a link made by an older build usable now (`ConfirmationProof`); refused for a number linked by text |
 | `GET /v1/phone-links` · `DELETE /v1/phone-links/{id}` | device+bearer | list / unlink verified phones |
 | `GET /v1/sessions` · `DELETE /v1/sessions/{id}` | device+bearer | signed-in sessions (token families) |
 | `DELETE /v1/account` | device+bearer | revokes all devices/tokens, erases personal data, keeps pseudonymous audit |
-| `POST /v1/handoff/redeem` | device+bearer | redeem `/h/{token}` in the app (added to `APIRoutes`) |
 | `GET /v1/directory/search` · `/handles/{h}` · `/codes/{c}` · `POST /resolve` | none | verified businesses only |
 | `POST/GET /v1/relationships` · `DELETE /v1/relationships/{id}` | device+bearer | connect / list / disconnect |
 | `GET/PUT /v1/relationships/{id}/consents` | device+bearer | purpose-scoped, versioned; security/accountService not revocable |
@@ -274,8 +274,7 @@ atomically, so the next API call is refused, pending interactions are cancelled 
 `ChannelRenderer`, send, parse verified inbound events, report capability. When an interaction allows `rcs` or `sms` and the consumer has a
 verified, non-opted-out phone, the issue transaction writes a row to a durable **outbox** (`channel_outbound`); the worker checks RCS capability
 per phone (cached 24 h), sends, retries transient errors, and **falls back to SMS for the same interaction**. A sensitive interaction (or anything
-that needs an answer SMS cannot carry safely) is rendered as a secure handoff link (`/h/{token}`, single use, bound to the consumer and the
-interaction) on both channels, never as a yes/no. RCS suggestion taps carry an **opaque, signed, single-use token** (`vrp1.…`); the server
+that needs an answer SMS cannot carry safely) is rendered as "Open the Viadere app" (no link, no code: decision 9, ADR-0027; over SMS the one-line notice SMS-04) on both channels, never as a yes/no. RCS suggestion taps carry an **opaque, signed, single-use token** (`vrp1.…`); the server
 keeps the target. A postback is accepted only from the phone it was sent to, only while its menu is the phone's active version and unexpired
 (the SMS menu rules), and only if `AssurancePolicy` lets an unauthenticated channel reply satisfy that interaction (never `authenticate`,
 `authorize`, unknown kinds, or `high`/`critical`; never deny/report). Free text received over RCS joins the same gateway thread as SMS, so
@@ -421,7 +420,7 @@ Errors are always `{"error":{"code","message","requestId"}}` (`APIErrorResponse`
   (a test fails if it does). Complaint rate (“not me” reports ÷ interactions) and opt-out rate (consent revocations + disconnects ÷ relationships)
   are tracked per business; above the configured thresholds the business is throttled to a fraction of its quota and API rate until it recovers.
 * **Data at rest.** Phone numbers, message bodies, webhook secrets and SMS conversation state are AES-256-GCM encrypted with
-  column-bound AAD; phones are indexed by keyed HMAC. OTPs are keyed hashes. One-time SMS secrets are wiped after sending.
+  column-bound AAD; phones are indexed by keyed HMAC. No SMS carries a secret; phone-link nonces are stored only as keyed hashes and the row is deleted at use.
 * **Audit.** Append-only (DB triggers) and hash-chained; `AuditService.verifyChain` detects edits, deletions and reordering.
   Metadata is redacted (secrets dropped, phones masked, no message bodies).
 * **Edge.** HSTS, CSP, `nosniff`, `Referrer-Policy: no-referrer`, frame-ancestors none; JSON-only bodies; 64 KiB body cap;
@@ -455,7 +454,7 @@ Errors are always `{"error":{"code","message","requestId"}}` (`APIErrorResponse`
 
 Wallet pass signing (P3), Live Activity push, rewards and redemption, delegated access endpoints, a real Apple Messages for Business adapter
 (blocked on Apple's written policy approval), vendor-specific RCS adapters (the shipped one is a generic RBM-style REST + HMAC webhook contract;
-rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they fall back to a handoff link),
+rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they become the "Open the Viadere app" notice),
 DNS-pinned webhook connections (the destination is re-resolved and checked immediately before sending but is not pinned to the connection).
 WP6: `SERVER_PEPPER` rotation orphans the single-valued lookup hashes (docs/ops/KEY-ROTATION.md section 3); the Cloudflare to origin certificate leg (G-11) is open; the Terraform for the audit bucket and the mTLS hostname is not validated in CI yet; the consumer export has no web fallback (the app is required, by design).
 Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview

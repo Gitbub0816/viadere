@@ -1,6 +1,7 @@
 @preconcurrency import Crypto
 import Fluent
 import Foundation
+import NIOHTTP1
 import ViadereCore
 import struct ViadereCore.Page
 import XCTest
@@ -47,12 +48,6 @@ final class SMSGatewayTests: XCTestCase {
         try h.webhooks.received.filter { $0.url.path.hasSuffix(b.id.description) }.map {
             try ViadereJSON.decode(WebhookEvent.self, from: $0.body).decodeData(MessageReceivedPayload.self)
         }
-    }
-
-    func extractToken(in text: String, prefix: String) -> String? {
-        guard let range = text.range(of: "https://viadere.com/\(prefix)/") else { return nil }
-        let rest = text[range.upperBound...]
-        return String(rest.prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
     }
 
     // MARK: Provider adapter
@@ -290,72 +285,31 @@ final class SMSGatewayTests: XCTestCase {
         }
     }
 
-    func testUnlinkedNumberBrowsesButMustLinkBeforeRoutingThenLinkTokenFlow() async throws {
+    func testUnlinkedNumberBrowsesButMustLinkInTheAppBeforeRouting() async throws {
         try await withHarness { h in
             let airline = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             try await subscribeMessages(h, airline)
-            var consumer = try await h.registerConsumer()
-            consumer = try await h.enrollDevice(consumer)
+            let consumer = try await h.readyConsumer()
 
             _ = try await say(h, "Hi")
             _ = try await say(h, "Northwind")
             let linkPrompt = try await say(h, "1")
-            XCTAssertTrue(linkPrompt.joined().contains("link your account"), linkPrompt.joined())
-            let linkSMS = linkPrompt.first { $0.contains("/l/") }!
-            let token = extractToken(in: linkSMS, prefix: "l")!
-            XCTAssertEqual(token.count, 43)
+            // Nothing is texted to link the number: only a pointer at the app and the static page (decision 9).
+            XCTAssertTrue(linkPrompt.joined().contains("link this number in the Viadere app"), linkPrompt.joined())
+            XCTAssertTrue(linkPrompt.joined().contains("https://viadere.com/get"), linkPrompt.joined())
+            XCTAssertFalse(linkPrompt.joined().contains("/l/"))
             XCTAssertTrue(try forwarded(h, to: airline).isEmpty, "nothing is routed before linking")
-            // The token is stored hashed only.
-            let records = try await LinkTokenRecord.query(on: h.db).all()
-            XCTAssertEqual(records.count, 1)
-            XCTAssertEqual(records[0].tokenHash, SecureToken.hash(token))
-            XCTAssertNotEqual(records[0].tokenHash, token)
-            // The link SMS body is wiped after sending.
-            let outbound = try await SMSOutboundRecord.query(on: h.db).filter(\.$sensitive == true).all()
-            XCTAssertFalse(outbound.isEmpty)
-            for row in outbound { XCTAssertEqual(try h.ctx.cipher.openString(row.bodyCiphertext, context: "sms_outbound.body", rowId: row.id!), "[removed]") }
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0, "no token is minted for the text")
+            let sensitive = try await SMSOutboundRecord.query(on: h.db).filter(\.$sensitive == true).count()
+            XCTAssertEqual(sensitive, 0, "no Viadere text carries a secret")
 
-            // The landing page is minimal, strict-CSP, and does not consume the token.
-            let page = try await h.request(.GET, "/l/\(token)")
-            XCTAssertEqual(page.status, .ok)
-            let csp = page.headers.first(name: "Content-Security-Policy") ?? ""
-            XCTAssertTrue(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'") && csp.contains("'sha256-"), csp)
-            XCTAssertFalse(csp.contains("unsafe-inline") || csp.contains("script-src"))
-            XCTAssertEqual(page.headers.first(name: "Referrer-Policy"), "no-referrer")
-            XCTAssertEqual(page.headers.first(name: "Cache-Control"), "no-store")
-            XCTAssertFalse(page.text.contains("<script"))
-            XCTAssertFalse(page.text.contains(String(phone.suffix(4))), "the page does not reveal the phone number")
-            try await eq(try await h.request(.GET, "/l/\(token)").status, .ok)
-            try await eq(try await h.request(.GET, "/l/\(SecureToken.generate())").status, .notFound)
-
-            // Redemption needs the signed-in device AND explicit phone confirmation (the masked number from the preview).
-            let unauthenticated = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
-            XCTAssertEqual(unauthenticated.status, .unauthorized)
-            let bearerOnly = try await h.post("/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"), headers: ["Authorization": "Bearer \(consumer.token)"])
-            XCTAssertEqual(bearerOnly.status, .unauthorized, "a bearer token alone no longer links a phone")
-            let preview = try await h.signed(consumer, .GET, "/v1/sms/link-tokens/\(token)/preview").json(SMSLinkPreview.self)
-            let wrong = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "9999"))
-            XCTAssertEqual(wrong.status, .forbidden)
-            let redeemed = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123", confirmMaskedPhone: preview.maskedPhone))
-            XCTAssertEqual(redeemed.status, .ok, redeemed.text)
-            let link = try redeemed.json(PhoneLink.self)
-            XCTAssertFalse(link.maskedPhone.contains("48055501"), link.maskedPhone)
-            XCTAssertTrue(link.maskedPhone.hasSuffix("0123"))
-            let replay = try await h.signedPost(consumer, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
-            XCTAssertEqual(replay.status, .gone)
-            // The new link cools down (the gateway treats it as no link); the account's trusted device confirms it with a biometric proof.
-            XCTAssertNotNil(link.usableFrom)
-            let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: link.id.description, deviceId: consumer.device!.id, assurance: .biometric,
-                                                         key: consumer.device!.biometricKey, now: h.clock.now())
-            try await eq(try await h.signedPost(consumer, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: proof)).status, .ok)
-            let mallory = try await h.readyConsumer(name: "Mallory")
-            let stolen = try await h.signedPost(mallory, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
-            XCTAssertEqual(stolen.status, .gone)
-            try await h.runJobs()
-            let confirmation = h.texts.sent.map(\.body)
-            XCTAssertTrue(confirmation.contains { $0.contains("now linked") }, confirmation.joined(separator: "|"))
-            // The destination chosen before linking survives; confirming connects and routing works.
-            XCTAssertTrue(confirmation.last?.contains("Connect to Northwind Air") ?? false, confirmation.last ?? "")
+            // The person links the number in the app by sending the nonce from the phone; routing starts when the waiting period ends.
+            let linked = try await h.linkPhoneByText(consumer, phone: phone)
+            XCTAssertEqual(linked.status.state, .verified)
+            try await eq(try await h.gatewayConsumer(phone), nil)
+            h.clock.advance(by: 72 * 3600 + 1)
+            try await eq(try await h.gatewayConsumer(phone), consumer.id)
+            _ = try await say(h, "Northwind")
             _ = try await say(h, "1")
             _ = try await say(h, "hello after link")
             try await h.runJobs()
@@ -363,68 +317,45 @@ final class SMSGatewayTests: XCTestCase {
         }
     }
 
-    func testLinkTokenExpiresAndWrongConfirmationsBurnIt() async throws {
+    func testRetiredLinkRoutesAndPagesAnswerGoneAndNeverLookAtTheToken() async throws {
         try await withHarness { h in
-            _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
-            func requestLink(from number: String) async throws -> String {
-                _ = try await say(h, "Hi", from: number)
-                _ = try await say(h, "Northwind", from: number)
-                let sms = try await say(h, "1", from: number)
-                return extractToken(in: sms.first { $0.contains("/l/") }!, prefix: "l")!
+            let consumer = try await h.readyConsumer()
+            // Old app builds: 410 with the app's own wording, before and after sign-in.
+            for (method, path) in [(NIOHTTP1.HTTPMethod.POST, "/v1/phone-links/start"), (.POST, "/v1/phone-links/verify"), (.POST, "/v1/sms/link-tokens/redeem"),
+                                   (.GET, "/v1/sms/link-tokens/\(SecureToken.generate())/preview"), (.POST, "/v1/handoff/redeem")] {
+                let anonymous = try await h.request(method, path)
+                XCTAssertEqual(anonymous.status, .gone, "\(method) \(path): \(anonymous.text)")
+                XCTAssertTrue(anonymous.text.contains("Update Viadere to link your number"), anonymous.text)
+                let signedIn = try await h.signed(consumer, method, path)
+                XCTAssertEqual(signedIn.status, .gone, "\(method) \(path)")
             }
-            // Expiry (15 minutes), on the web page and at redemption.
-            let first = try await requestLink(from: "+14805550111")
-            h.clock.advance(by: 16 * 60)
-            try await eq(try await h.request(.GET, "/l/\(first)").status, .gone)
-            let fresh = try await h.readyConsumer(name: "Fresh")
-            let expired = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: first, confirmPhoneLast4: "0111"))
-            XCTAssertEqual(expired.status, .gone)
-            // Brute-forcing the last four digits burns the token after five wrong tries.
-            let second = try await requestLink(from: "+14805550222")
-            for guess in ["0000", "0001", "0002", "0003", "0004"] {
-                let wrong = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: guess))
-                XCTAssertTrue([403, 429].contains(wrong.status.code), "\(wrong.status)")
-                h.clock.advance(by: 10)
+            // Old texts: the pages say the link is no longer used, whatever the token, and are minimal.
+            for path in ["/l/\(SecureToken.generate())", "/h/\(SecureToken.generate())"] {
+                let page = try await h.request(.GET, path)
+                XCTAssertEqual(page.status, .gone)
+                XCTAssertTrue(page.text.contains("no longer used"))
+                let csp = page.headers.first(name: "Content-Security-Policy") ?? ""
+                XCTAssertTrue(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'"), csp)
+                XCTAssertEqual(page.headers.first(name: "Cache-Control"), "no-store")
+                XCTAssertFalse(page.text.contains("<script"))
             }
-            let right = try await h.signedPost(fresh, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: second, confirmPhoneLast4: "0222"))
-            XCTAssertEqual(right.status, .gone, "token is burned after repeated wrong confirmations")
-            // A new link text revokes the previous token.
-            let late = try await h.readyConsumer(name: "Late")
-            let a = try await requestLink(from: "+14805550333")
-            _ = try await say(h, "MENU", from: "+14805550333")
-            _ = try await say(h, "Northwind", from: "+14805550333")
-            let sms = try await say(h, "1", from: "+14805550333")
-            if let b = sms.first(where: { $0.contains("/l/") }).flatMap({ extractToken(in: $0, prefix: "l") }) {
-                XCTAssertNotEqual(a, b)
-                try await eq(try await h.signedPost(late, "/v1/sms/link-tokens/redeem", SMSLinkRedeemRequest(token: a, confirmPhoneLast4: "0333")).status, .gone)
-            }
+            // The on-ramp page is static: no token, no query, no personal data.
+            let get = try await h.request(.GET, "/get")
+            XCTAssertEqual(get.status, .ok)
+            XCTAssertTrue(get.text.contains("Get Viadere"))
+            XCTAssertFalse(get.text.contains("<script"))
         }
     }
 
-    func testSecureHandoffLinkIsSingleUseBoundToTheConsumerAndPageIsMinimal() async throws {
+    func testAccountHelpPointsAtTheAppAndMintsNoHandoffLink() async throws {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()
             try await linkPhone(h, consumer)
             _ = try await say(h, "Hi")
-            let handoff = try await say(h, "3")
-            let sms = handoff.first { $0.contains("/h/") }!
-            let token = extractToken(in: sms, prefix: "h")!
-            let page = try await h.request(.GET, "/h/\(token)")
-            XCTAssertEqual(page.status, .ok)
-            XCTAssertTrue(page.headers.first(name: "Content-Security-Policy")?.contains("default-src 'none'") ?? false)
-            // Only the consumer the phone belongs to can redeem it, once.
-            let other = try await h.readyConsumer(name: "Other")
-            try await eq(try await h.signedPost(other, "/v1/handoff/redeem", HandoffRedeemRequest(token: token)).status, .forbidden)
-            let ok = try await h.signedPost(consumer, "/v1/handoff/redeem", HandoffRedeemRequest(token: token))
-            XCTAssertEqual(ok.status, .ok, ok.text)
-            XCTAssertEqual(try ok.json(HandoffRedeemResponse.self).purpose, .accountHelp)
-            try await eq(try await h.signedPost(consumer, "/v1/handoff/redeem", HandoffRedeemRequest(token: token)).status, .gone)
-            try await eq(try await h.request(.GET, "/h/\(token)").status, .gone)
-            // 10-minute TTL.
-            let again = try await say(h, "3")
-            let second = extractToken(in: again.first { $0.contains("/h/") }!, prefix: "h")!
-            h.clock.advance(by: 11 * 60)
-            try await eq(try await h.signedPost(consumer, "/v1/handoff/redeem", HandoffRedeemRequest(token: second)).status, .gone)
+            let help = try await say(h, "3")
+            XCTAssertEqual(help.last, GatewayCopy.openAppForAccount)
+            XCTAssertFalse(help.joined().contains("/h/"))
+            try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0)
         }
     }
 
@@ -530,68 +461,6 @@ final class SMSGatewayTests: XCTestCase {
             let verification = try await AuditService.verifyChain(on: h.db, key: h.ctx.config.auditChainKey)
             XCTAssertTrue(verification.valid)
             _ = airline
-        }
-    }
-
-    func testPhoneOTPLinkFlowIsHashedAttemptLimitedAndRateLimited() async throws {
-        try await withHarness { h in
-            let consumer = try await h.readyConsumer()
-            let target = PhoneNumber("+14805550177")!
-            func start() async throws -> HTTPResult { try await h.signedPost(consumer, "/v1/phone-links/start", PhoneLinkStartRequest(phone: target)) }
-            func lastCode() -> String? {
-                h.texts.sent.last.flatMap { sms in sms.body.split(separator: " ").first { $0.count == 7 && $0.hasSuffix(".") ? true : $0.count == 6 && $0.allSatisfy(\.isNumber) } }
-                    .map { String($0.filter(\.isNumber)) }
-            }
-            let started = try await start()
-            XCTAssertEqual(started.status, .ok, started.text)
-            let linkId = try started.json(PhoneLinkStartResponse.self).phoneLinkId
-            try await h.runJobs()
-            let code = lastCode()!
-            XCTAssertEqual(code.count, 6)
-            // The code is stored only as a keyed hash; the SMS body is wiped after sending.
-            let row = try await PhoneLinkRecord.find(linkId.uuid, on: h.db)!
-            XCTAssertNotEqual(row.otpHash, code)
-            XCTAssertEqual(row.otpHash?.count, 64)
-            XCTAssertFalse(row.phoneCiphertext.contains("4805550177"))
-            let wiped = try await SMSOutboundRecord.query(on: h.db).first()!
-            XCTAssertEqual(try h.ctx.cipher.openString(wiped.bodyCiphertext, context: "sms_outbound.body", rowId: wiped.id!), "[removed]")
-            // Wrong codes are counted; the right one is refused once the attempt limit is hit.
-            let wrong = code == "000000" ? "111111" : "000000"
-            for _ in 0..<5 {
-                let response = try await h.signedPost(consumer, "/v1/phone-links/verify", PhoneLinkVerifyRequest(phoneLinkId: linkId, code: wrong))
-                XCTAssertEqual(response.status, .forbidden)
-                h.clock.advance(by: 10)
-            }
-            let locked = try await h.signedPost(consumer, "/v1/phone-links/verify", PhoneLinkVerifyRequest(phoneLinkId: linkId, code: code))
-            XCTAssertEqual(locked.status, .forbidden)
-            // A new code works once; another consumer cannot use it.
-            let second = try await start()
-            let secondId = try second.json(PhoneLinkStartResponse.self).phoneLinkId
-            try await h.runJobs()
-            let fresh = lastCode()!
-            let other = try await h.readyConsumer(name: "Other")
-            try await eq(try await h.signedPost(other, "/v1/phone-links/verify", PhoneLinkVerifyRequest(phoneLinkId: secondId, code: fresh)).status, .notFound)
-            let verified = try await h.signedPost(consumer, "/v1/phone-links/verify", PhoneLinkVerifyRequest(phoneLinkId: secondId, code: fresh))
-            XCTAssertEqual(verified.status, .ok, verified.text)
-            XCTAssertTrue(try verified.json(PhoneLink.self).maskedPhone.hasSuffix("0177"))
-            try await eq(try await h.signedPost(consumer, "/v1/phone-links/verify", PhoneLinkVerifyRequest(phoneLinkId: secondId, code: fresh)).status, .notFound)
-            // Texting from the verified number now reaches a linked account.
-            let hello = try await say(h, "Hi", from: "+14805550177")
-            XCTAssertFalse(hello.isEmpty)
-            let context = try await SMSContextRecord.query(on: h.db).first()!
-            XCTAssertEqual(context.consumerId, consumer.id.uuid)
-        }
-    }
-
-    func testOTPStartIsRateLimitedPerPhone() async throws {
-        try await withHarness { h in
-            let consumer = try await h.readyConsumer()
-            let target = PhoneNumber("+14805550166")!
-            var statuses: [UInt] = []
-            for _ in 0..<5 {
-                statuses.append(try await h.signedPost(consumer, "/v1/phone-links/start", PhoneLinkStartRequest(phone: target)).status.code)
-            }
-            XCTAssertEqual(statuses, [200, 200, 200, 429, 429])
         }
     }
 }

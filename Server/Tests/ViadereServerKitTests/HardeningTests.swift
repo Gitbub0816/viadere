@@ -473,7 +473,7 @@ final class HardeningTests: XCTestCase {
         }
     }
 
-    // MARK: channels #2 / A1 - account-link fixation
+    // MARK: channels #2 / A1 - account-link fixation (the SMS link token is gone: ADR-0027, see PhoneLinkMOTests)
 
     func say(_ h: TestHarness, _ text: String, from: String) async throws -> [String] {
         let before = h.texts.sent.count
@@ -481,112 +481,6 @@ final class HardeningTests: XCTestCase {
         XCTAssertEqual(response.status, .ok, response.text)
         try await h.runJobs()
         return h.texts.sent.dropFirst(before).map(\.body)
-    }
-
-    func requestLinkToken(_ h: TestHarness, from number: String) async throws -> String {
-        _ = try await say(h, "Hi", from: number)
-        _ = try await say(h, "Northwind", from: number)
-        let sms = try await say(h, "1", from: number)
-        let body = try XCTUnwrap(sms.first { $0.contains("/l/") })
-        let range = try XCTUnwrap(body.range(of: "https://viadere.com/l/"))
-        return String(body[range.upperBound...].prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-    }
-
-    func testAccountLinkRequiresAPreviewExplicitConfirmationAndStartsInACoolDown() async throws {
-        try await withHarness { h in
-            let airline = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
-            let victim = try await h.readyConsumer(name: "Victim")
-            let rel = try await h.connect(victim, to: airline)
-            try await registerPushToken(h, victim, token: String(repeating: "ef", count: 32))
-            // The attacker texts Viadere from *their* phone and gets a link, then lures the victim into opening it.
-            let attackerPhone = "+14805550199"
-            let token = try await requestLinkToken(h, from: attackerPhone)
-
-            // Bearer-only (the old web/login-CSRF route) no longer redeems.
-            let bearerOnly = try await h.post(APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0199"),
-                                              headers: ["Authorization": "Bearer \(victim.token)"])
-            XCTAssertEqual(bearerOnly.status, .unauthorized)
-            XCTAssertEqual(bearerOnly.errorCode, .signatureInvalid)
-
-            // Preview shows whose phone this is, without consuming the token.
-            let preview = try await h.signed(victim, .GET, "/v1/sms/link-tokens/\(token)/preview")
-            XCTAssertEqual(preview.status, .ok, preview.text)
-            let shown = try preview.json(SMSLinkPreview.self)
-            XCTAssertEqual(shown.maskedPhone, PhoneNumber(attackerPhone)!.masked)
-            XCTAssertTrue(shown.maskedPhone.hasSuffix("0199"))
-            XCTAssertFalse(preview.text.contains(attackerPhone))
-            try await eq(try await h.signed(victim, .GET, "/v1/sms/link-tokens/\(token)/preview").status, .ok)
-            try await eq(try await h.signed(victim, .GET, "/v1/sms/link-tokens/\(SecureToken.generate())/preview").status, .gone)
-            try await eq(try await h.request(.GET, "/v1/sms/link-tokens/\(token)/preview", headers: ["Authorization": "Bearer \(victim.token)"]).status, .unauthorized)
-
-            // A wrong masked-phone confirmation is refused.
-            let wrong = try await h.signedPost(victim, APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0199", confirmMaskedPhone: "+1•••••0000"))
-            XCTAssertEqual(wrong.status, .forbidden)
-            // The right one links it - but the new link starts in a cool-down and the victim's other devices are told.
-            let pushesBefore = h.push.sent.count
-            let ok = try await h.signedPost(victim, APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0199", confirmMaskedPhone: shown.maskedPhone))
-            XCTAssertEqual(ok.status, .ok, ok.text)
-            let link = try ok.json(PhoneLink.self)
-            XCTAssertEqual(link.usableFrom, h.clock.now().addingTimeInterval(72 * 3600), "no other trusted device exists to confirm it: 72 h")
-            XCTAssertEqual(h.push.sent.count, pushesBefore, "the redeeming device is not notified of its own action")
-            let second = try await h.enrollDevice(victim)
-            XCTAssertNotNil(second.device)
-
-            // Interactions are not delivered to the attacker's phone while it cools down.
-            let r = try await h.issue(airline, relationship: rel, payload: .confirm(ConfirmPayload(title: "Seat 14C")), purpose: .transactional, sensitivity: .low,
-                                      channels: [.nativePush, .sms])
-            XCTAssertEqual(r.status, .created, r.text)
-            try await h.runJobs()
-            XCTAssertFalse(h.texts.sent.contains { $0.to == attackerPhone && $0.body.contains("Seat 14C") }, "no delivery to a freshly linked phone")
-            try await eq(try await ChannelOutboundRecord.query(on: h.db).count(), 0, "nothing was even queued for the new phone")
-            let skipped = try await AuditEventRecord.query(on: h.db).filter(\.$action == "channel.skipped").all()
-            XCTAssertTrue(skipped.contains { $0.metadataJSON.contains("phone_link_cool_down") })
-
-            // A trusted device confirms with a user-verified proof: delivery works from then on.
-            let proof = try await ConfirmationProof.sign(subject: .phoneLink, subjectId: link.id.description, deviceId: victim.device!.id, assurance: .biometric,
-                                                         key: victim.device!.biometricKey, now: h.clock.now())
-            let confirmed = try await h.signedPost(victim, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: proof))
-            XCTAssertEqual(confirmed.status, .ok, confirmed.text)
-            XCTAssertNil(try confirmed.json(PhoneLink.self).usableFrom)
-            // A proof for a different subject or from a request key is refused.
-            let other = try await ConfirmationProof.sign(subject: .device, subjectId: link.id.description, deviceId: victim.device!.id, assurance: .biometric,
-                                                         key: victim.device!.biometricKey, now: h.clock.now())
-            try await eq(try await h.signedPost(victim, "/v1/phone-links/\(link.id)/confirm", ConfirmationRequest(proof: other)).status.code >= 200, true)
-        }
-    }
-
-    func testALinkCoolDownEndsOnItsOwn() async throws {
-        try await withHarness { h in
-            _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
-            let consumer = try await h.readyConsumer()
-            let token = try await requestLinkToken(h, from: "+14805550123")
-            let preview = try await h.signed(consumer, .GET, "/v1/sms/link-tokens/\(token)/preview").json(SMSLinkPreview.self)
-            let redeemed = try await h.signedPost(consumer, APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123", confirmMaskedPhone: preview.maskedPhone))
-            XCTAssertEqual(redeemed.status, .ok, redeemed.text)
-            let link = try await PhoneLinkRecord.query(on: h.db).filter(\.$state == "verified").first()!
-            XCTAssertEqual(link.source, "sms_link")
-            XCTAssertNotNil(link.usableFrom)
-            h.clock.advance(by: 72 * 3600 + 1)
-            XCTAssertLessThan(link.usableFrom!, h.clock.now())
-        }
-    }
-
-    func testTheLinkMustStillMatchTheLiveThread() async throws {
-        try await withHarness { h in
-            _ = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
-            let consumer = try await h.readyConsumer()
-            let token = try await requestLinkToken(h, from: "+14805550123")
-            // The thread was reset (older revision than the token's): the stale token is refused.
-            let thread = try await SMSContextRecord.query(on: h.db).first()!
-            var context = try ViadereJSON.decode(ConversationContext.self, from: try h.ctx.cipher.open(thread.contextCiphertext, context: "sms_contexts.context", rowId: thread.id!))
-            context.revision = 0
-            thread.contextCiphertext = try h.ctx.cipher.seal(try ViadereJSON.encode(context), context: "sms_contexts.context", rowId: thread.id!)
-            thread.revision = 0
-            try await thread.update(on: h.db)
-            try await eq(try await h.signed(consumer, .GET, "/v1/sms/link-tokens/\(token)/preview").status, .gone)
-            let redeem = try await h.signedPost(consumer, APIRoutes.smsLinkRedeem.template, SMSLinkRedeemRequest(token: token, confirmPhoneLast4: "0123"))
-            XCTAssertEqual(redeem.status, .gone)
-        }
     }
 
     // MARK: channels #1 - cross-business misrouting
@@ -613,7 +507,9 @@ final class HardeningTests: XCTestCase {
             XCTAssertEqual(sent.count, 1, "\(sent)")
             guard sent.count == 1 else { return }
             XCTAssertFalse(sent[0].contains("Room ready") || sent[0].contains("Floor 9"), "the other tenant's text is not shown in this thread: \(sent[0])")
-            XCTAssertTrue(sent[0].contains("Harbor Hotel") && sent[0].contains("Northwind Air") && sent[0].contains("Don't reply"), sent[0])
+            // Over SMS an interaction is only the SMS-04 pointer at the app: it names its own sender, invites no reply, and carries no content.
+            XCTAssertEqual(sent[0], "Viadere: Harbor Hotel sent you something that needs the Viadere app. Open Viadere to respond.")
+            XCTAssertFalse(sent[0].contains("Northwind Air"))
             // The reply a person would naturally send goes to the active business only, never to the hotel.
             _ = try await say(h, "Thanks!", from: RCSFixture.phone)
             let forwardedToHotel = try await ConversationMessageRecord.query(on: h.db).filter(\.$businessId == hotel.id.uuid)
@@ -1042,40 +938,32 @@ final class HardeningTests: XCTestCase {
         }
     }
 
-    // MARK: channels #5 - OTP toll fraud
+    // MARK: channels #5 - toll fraud (no code is sent any more; begin keeps the destination allowlist, budgets and the attestation hook)
 
-    func testOTPDestinationAllowlistBudgetsAndAttestationHook() async throws {
+    func testPhoneLinkDestinationAllowlistBudgetsAndAttestationHook() async throws {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()
-            func start(_ phone: String) async throws -> HTTPResult {
-                try await h.signedPost(consumer, APIRoutes.phoneLinkStart.template, PhoneLinkStartRequest(phone: PhoneNumber(phone)!))
-            }
-            // Pumping-prone destinations are refused before anything is sent: premium NANP islands, and other countries.
+            // Pumping-prone destinations are refused before anything is stored: premium NANP islands, and other countries.
             for blocked in ["+18765550123", "+18095550123", "+442071234567", "+233201234567", "+4915112345678"] {
-                let r = try await start(blocked)
+                let r = try await h.beginPhoneLink(consumer, phone: blocked)
                 XCTAssertTrue([400, 422].contains(r.status.code), "\(blocked): \(r.text)")
             }
+            try await eq(try await PhoneLinkMOChallengeRecord.query(on: h.db).count(), 0)
             XCTAssertTrue(h.texts.sent.isEmpty)
-            try await eq(try await SMSOutboundRecord.query(on: h.db).count(), 0)
             XCTAssertTrue(PhoneRegions.isAllowed(PhoneNumber("+14805550123")!, regions: ["US", "CA"]))
-            XCTAssertTrue(PhoneRegions.isAllowed(PhoneNumber("+14165550123")!, regions: ["US", "CA"]))
             XCTAssertFalse(PhoneRegions.isAllowed(PhoneNumber("+18765550123")!, regions: ["US", "CA"]))
-            XCTAssertTrue(PhoneRegions.isAllowed(PhoneNumber("+18765550123")!, regions: ["JM"]))
-            XCTAssertFalse(PhoneRegions.isAllowed(PhoneNumber("+14805550123")!, regions: ["JM"]))
             XCTAssertTrue(PhoneRegions.isAllowed(PhoneNumber("+442071234567")!, regions: ["GB"]))
-            XCTAssertEqual(PhoneRegions.budgetPrefix(of: PhoneNumber("+14805550123")!, digits: 5), "+14805")
-            try await eq(try await start("+14805550123").status, .ok)
+            try await eq(try await h.beginPhoneLink(consumer, phone: "+14805550123").status, .ok)
             try await isTrue(try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.destination_refused").count() >= 5)
         }
-        // The per-prefix budget (against a pumped range) and the platform-wide ceiling.
-        try await withHarness({ $0.rateLimits.otpPerPrefix = .perHour(2, burst: 2); $0.rateLimits.otpGlobal = .perHour(3, burst: 3); $0.rateLimits.phoneLinkStartPerConsumer = .perHour(100, burst: 100) }) { h in
+        // Per-account (3 a day) and per-number (5 a day) budgets.
+        try await withHarness { h in
             let consumer = try await h.readyConsumer()
             var results: [HTTPStatus] = []
-            for n in 0..<3 { results.append(try await h.signedPost(consumer, APIRoutes.phoneLinkStart.template, PhoneLinkStartRequest(phone: PhoneNumber("+1480555010\(n)")!)).status) }
-            XCTAssertEqual(results, [.ok, .ok, .tooManyRequests], "per-prefix budget of 2")
-            try await eq(try await h.signedPost(consumer, APIRoutes.phoneLinkStart.template, PhoneLinkStartRequest(phone: PhoneNumber("+12125550100")!)).status, .ok)
-            try await eq(try await h.signedPost(consumer, APIRoutes.phoneLinkStart.template, PhoneLinkStartRequest(phone: PhoneNumber("+13105550100")!)).status, .tooManyRequests, "global budget of 3")
-            try await isTrue(try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.budget_exhausted").count() >= 2)
+            for _ in 0..<4 { results.append(try await h.beginPhoneLink(consumer, phone: "+14805550100").status) }
+            XCTAssertEqual(results, [.ok, .ok, .ok, .tooManyRequests], "three begins a day per account")
+            let other = try await h.readyConsumer(name: "Other")
+            for _ in 0..<2 { try await eq(try await h.beginPhoneLink(other, phone: "+14805550101").status, .ok) }
         }
         // A failed attestation blocks the request; the stub (unverified) allows it.
         let verdict = StubIntegrity(verdict: .failed)

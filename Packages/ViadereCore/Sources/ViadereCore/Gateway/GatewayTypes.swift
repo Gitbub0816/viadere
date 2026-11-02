@@ -139,6 +139,19 @@ public struct ConversationContext: Codable, Sendable, Hashable {
     public var isLinked: Bool { consumerId != nil }
 }
 
+/// What the provider says about whether the `From` number of an inbound message can be trusted (ADR-0027 §1.3). Only
+/// `.verified` (and `.unsupported`, unless the deployment requires an indicator) can bind a phone number to an account.
+public enum InboundSenderIndicator: String, Codable, Sendable {
+    /// The provider vouches for the sender (for example a passing caller-ID attestation).
+    case verified
+    /// The provider flags the sender as spoofed or unverified.
+    case suspectedSpoof
+    /// The provider offers an indicator but omitted it for this message.
+    case notProvided
+    /// The provider offers no indicator at all.
+    case unsupported
+}
+
 /// An inbound SMS from the provider webhook (after webhook authenticity is verified).
 public struct InboundSMS: Codable, Sendable, Hashable {
     public var providerMessageId: String
@@ -146,12 +159,26 @@ public struct InboundSMS: Codable, Sendable, Hashable {
     public var text: String
     /// Provider receive timestamp.
     public var receivedAt: Date
+    public var senderIndicator: InboundSenderIndicator
 
-    public init(providerMessageId: String, from: PhoneNumber, text: String, receivedAt: Date) {
+    public init(providerMessageId: String, from: PhoneNumber, text: String, receivedAt: Date,
+                senderIndicator: InboundSenderIndicator = .unsupported) {
         self.providerMessageId = providerMessageId
         self.from = from
         self.text = text
         self.receivedAt = receivedAt
+        self.senderIndicator = senderIndicator
+    }
+
+    enum CodingKeys: String, CodingKey { case providerMessageId, from, text, receivedAt, senderIndicator }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        providerMessageId = try c.decode(String.self, forKey: .providerMessageId)
+        from = try c.decode(PhoneNumber.self, forKey: .from)
+        text = try c.decode(String.self, forKey: .text)
+        receivedAt = try c.decode(Date.self, forKey: .receivedAt)
+        senderIndicator = try c.decodeIfPresent(InboundSenderIndicator.self, forKey: .senderIndicator) ?? .unsupported
     }
 }
 
