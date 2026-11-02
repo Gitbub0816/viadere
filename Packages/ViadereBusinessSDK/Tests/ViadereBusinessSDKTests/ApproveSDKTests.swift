@@ -18,7 +18,7 @@ private enum Approve {
     }
 
     static func pending(requestId: String = "req_0123456789abcdef", challenge: String = BusinessChallenge.value, details: ApprovalSubject = Approve.details) -> PendingApproval {
-        PendingApproval(requestId: requestId, subject: subject, challenge: challenge, details: details, expiresAt: now.addingTimeInterval(120))
+        PendingApproval(requestId: requestId, subject: subject, challenge: challenge, details: details, numberMatch: .notRequested, expiresAt: now.addingTimeInterval(120))
     }
 
     static func result(_ phone: Phone, _ pending: PendingApproval, decision: ApprovalDecision = .approve, amr: ApprovalAMR = .biometric, shown: ApprovalSubject? = nil,
@@ -72,7 +72,7 @@ struct ApprovalVerifierTests {
         await #expect(throws: ApprovalVerificationError.wrongAudience) { _ = try await verifier.verify(result: try await Approve.result(phone, Approve.pending(), audience: BusinessID()), for: Approve.pending()) }
         await #expect(throws: ApprovalVerificationError.wrongRequest) { _ = try await verifier.verify(result: good, for: Approve.pending(requestId: "req_other_request_id_1")) }
         await #expect(throws: ApprovalVerificationError.challengeMismatch) { _ = try await verifier.verify(result: good, for: Approve.pending(challenge: Base64URL.encode(Data(repeating: 1, count: 32)))) }
-        let other = PendingApproval(requestId: "req_0123456789abcdef", subject: SubjectRef("sub_" + Base64URL.encode(Data(repeating: 1, count: 32)))!, challenge: BusinessChallenge.value, details: Approve.details, expiresAt: Approve.now.addingTimeInterval(120))
+        let other = PendingApproval(requestId: "req_0123456789abcdef", subject: SubjectRef("sub_" + Base64URL.encode(Data(repeating: 1, count: 32)))!, challenge: BusinessChallenge.value, details: Approve.details, numberMatch: .notRequested, expiresAt: Approve.now.addingTimeInterval(120))
         await #expect(throws: ApprovalVerificationError.unknownKey) { _ = try await verifier.verify(result: good, for: other) }
         let lateStore = InMemoryApprovalKeyStore()
         await lateStore.add(phone.enrolled)

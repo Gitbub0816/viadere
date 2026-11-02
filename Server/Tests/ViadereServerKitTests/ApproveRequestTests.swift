@@ -66,7 +66,7 @@ final class ApproveRequestTests: XCTestCase {
             XCTAssertEqual(submitted.status, .ok, submitted.text)
             let ref = try unwrap(try await h.requestView(f, body.requestId).resultRef)
             let fetched = try await h.business(f.business, .GET, "/v1/business/approve/results/\(ref)").json(ApprovalResultResponse.self)
-            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: body.challenge!, subjectDetails: .authentication(body.authentication!))
+            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: body.challenge!, subjectDetails: .authentication(body.authentication!), numberMatch: .notRequested)
             let enrolled = try await h.enrolledKeys(f)
             XCTAssertNoThrow(try ApprovalResultVerifier.verify(fetched.result, expecting: expectation, keys: enrolled, now: h.clock.now()))
         }
@@ -95,9 +95,9 @@ final class ApproveRequestTests: XCTestCase {
             // The same result cannot authorize a NEW request, even one with identical details (new request id, new challenge).
             let (second, body2) = try await h.createRequest(f)
             XCTAssertEqual(second.status, .created)
-            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body2.requestId, challenge: body2.challenge!, subjectDetails: .transaction(body2.transaction!))
+            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body2.requestId, challenge: body2.challenge!, subjectDetails: .transaction(body2.transaction!), numberMatch: .notRequested)
             XCTAssertThrowsError(try ApprovalResultVerifier.verify(jws, expecting: expectation, keys: keys, now: h.clock.now())) { XCTAssertEqual($0 as? ApprovalVerificationError, .wrongRequest) }
-            let sameChallenge = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: body2.challenge!, subjectDetails: .transaction(body.transaction!))
+            let sameChallenge = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: body2.challenge!, subjectDetails: .transaction(body.transaction!), numberMatch: .notRequested)
             XCTAssertThrowsError(try ApprovalResultVerifier.verify(jws, expecting: sameChallenge, keys: keys, now: h.clock.now())) { XCTAssertEqual($0 as? ApprovalVerificationError, .challengeMismatch) }
         }
     }

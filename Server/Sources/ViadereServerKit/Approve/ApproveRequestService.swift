@@ -16,6 +16,8 @@ struct ApproveRequestService {
     struct StoredDetails: Codable {
         var transaction: TransactionDetails?
         var authentication: AuthenticationDetails?
+        /// `auth-approvals`, server-visible only: the code the device compares the typed number with (sealed, deleted at the terminal state).
+        var numberMatchCode: String?
         var subject: ApprovalSubject? {
             if let transaction { return .transaction(transaction) }
             if let authentication { return .authentication(authentication) }
@@ -29,7 +31,7 @@ struct ApproveRequestService {
 
     // MARK: Business: create
 
-    func create(principal: BusinessPrincipal, body: CreateApprovalRequest) async throws -> (view: ApprovalRequestView, created: Bool) {
+    func create(principal: BusinessPrincipal, body: CreateApprovalRequest, authApproval: AuthApprovalExtras? = nil) async throws -> (view: ApprovalRequestView, created: Bool) {
         let settings = ctx.config.approve
         guard body.capability == .authChallenge || body.capability == .transactionApprove else {
             throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
@@ -78,7 +80,7 @@ struct ApproveRequestService {
         try await ctx.limiter.enforce("approve-request", key: principal.businessId.description, rule: settings.requestRate)
 
         // Idempotency on the business's request id.
-        let hash = SecureToken.sha256Hex(try ViadereJSON.encode(body))
+        let hash = try authApproval?.requestHash ?? SecureToken.sha256Hex(try ViadereJSON.encode(body))
         if let existing = try await ApproveRequestRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid).filter(\.$requestId == body.requestId).first() {
             guard ConstantTime.equals(existing.requestHash, hash) else {
                 throw APIError(.conflict, .idempotencyConflict, "This request_id was already used with a different request.")
@@ -110,7 +112,14 @@ struct ApproveRequestService {
         // pass a count that none of them has yet changed.
         let now = ctx.now
         let early = try await promptVerdict(relationshipId: relationship.id!, now: now)
-        if case .rateLimited(let retry) = early { throw Self.rateLimited(retry) }
+        // `auth-approvals` (ADR-0022 §5.1, S1-A2-6): per-customer budgets limit **alerting, not availability**. Over budget the request is still created and
+        // reachable from the app, but delivered silently (no push); only the per-tenant rate refuses. The legacy route keeps its `429`.
+        var silent = false
+        if case .rateLimited(let retry) = early { if authApproval == nil { throw Self.rateLimited(retry) } else { silent = true } }
+        // Number-match allocation (ADR-0020 §2a): refused with a `409` before anything is stored; repeated under the row lock inside the transaction.
+        if let authApproval {
+            try await AuthMatchGroups(db: db, ctx: ctx).check(businessId: principal.businessId.uuid, consumerId: relationship.consumerId, members: authApproval.tags)
+        }
 
         // Targets.
         var deliveries: [(key: ApproveKeyRecord, device: DeviceRecord, envelope: E2EEEnvelope?)] = []
@@ -146,15 +155,20 @@ struct ApproveRequestService {
         record.devicePolicy = devicePolicy.rawValue
         record.challenge = endToEnd ? nil : body.challenge
         if let details {
-            let stored = StoredDetails(transaction: body.transaction, authentication: body.authentication)
+            let stored = StoredDetails(transaction: body.transaction, authentication: body.authentication, numberMatchCode: authApproval?.code)
             _ = details
             record.detailsSealed = try ctx.cipher.seal(try ViadereJSON.encode(stored), context: Self.sealContext, rowId: record.id!)
         }
         record.createdAt = now
         record.expiresAt = now.addingTimeInterval(TimeInterval(lifetime))
+        record.matchDigits = authApproval?.digits
+        record.sessionHandle = authApproval?.sessionHandle
         let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
-        let targets = deliveries
+        // Delivery ids are drawn here so the push can carry each device's own id (`req`) after the transaction committed.
+        let targets = deliveries.map { (key: $0.key, device: $0.device, envelope: $0.envelope, id: UUID()) }
+        let deliveryRows = targets.map { (deviceId: $0.device.id!, deliveryId: $0.id) }
         let service = self
+        let isAuthApproval = authApproval != nil
         do {
             try await DB.retryingTransient { try await db.transaction { tx in
                 // Serialize requests per relationship (`SELECT ... FOR UPDATE` on PostgreSQL; SQLite serializes writers), then decide on the history
@@ -163,7 +177,7 @@ struct ApproveRequestService {
                 let verdict = try await ApproveRequestService(db: tx, ctx: service.ctx).promptVerdict(relationshipId: relationship.id!, now: now)
                 var denied = false
                 switch verdict {
-                case .rateLimited(let retry): throw Self.rateLimited(retry)
+                case .rateLimited(let retry): if !isAuthApproval { throw Self.rateLimited(retry) }
                 case .autoDeny: denied = true
                 case .allow: break
                 }
@@ -176,7 +190,7 @@ struct ApproveRequestService {
                 if !isAutoDenied {
                     for target in targets {
                         let row = ApproveDeliveryRecord()
-                        row.id = UUID()
+                        row.id = target.id
                         row.requestId = record.id!
                         row.kid = target.key.kid
                         row.deviceId = target.device.id!
@@ -184,6 +198,11 @@ struct ApproveRequestService {
                         row.envelope = try target.envelope.map { String(decoding: try $0.serialized(), as: UTF8.self) }
                         row.createdAt = now
                         try await row.create(on: tx)
+                    }
+                    if let authApproval {
+                        try await AuthMatchGroups(db: tx, ctx: service.ctx).reserve(businessId: record.businessId, consumerId: record.consumerId, refId: record.id!,
+                                                                                    members: authApproval.tags)
+                        try await AuthApprovalService(db: tx, ctx: service.ctx).supersede(new: record, handle: authApproval.sessionHandle)
                     }
                     // The expiry is a scheduled message at `expires_at` (the maintenance sweep remains the safety net).
                     try await Outbox.enqueue(QueueHandlers.approveExpire, ref: record.id!, notBefore: record.expiresAt, on: tx, ctx: ctx)
@@ -204,7 +223,8 @@ struct ApproveRequestService {
         if record.reason == "auto_denied" {
             await pauseNotice(relationship: relationship)
         } else {
-            await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: Array(Set(deliveries.compactMap(\.device.id))))
+            if !silent { await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: deliveryRows) }
+            if authApproval != nil { await AuthApprovalService(db: db, ctx: ctx).pressure(businessId: record.businessId, consumerId: record.consumerId) }
         }
         return (try view(record), true)
     }
@@ -274,6 +294,7 @@ struct ApproveRequestService {
         let swapped = try await DB.swap(db, table: ApproveRequestRecord.schema, id: record.id!, column: "status", expected: ApprovalRequestStatus.pending.rawValue,
                                         newValue: status.rawValue)
         guard swapped else { return false }
+        try await AuthMatchGroups(db: db, ctx: ctx).release(refId: record.id!)
         if let reason { try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$reason, to: reason).update() }
         // The relay keeps nothing it does not need: the displayed details and the nonce go as soon as the request is over.
         try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
@@ -336,7 +357,8 @@ struct ApproveRequestService {
         return ApproveDeviceRequest(id: delivery.id!, requestId: request.requestId, business: business, subjectRef: subject, capability: capability,
                                     kid: key.kid, protection: request.protectionValue, status: request.statusValue, createdAt: request.createdAt, expiresAt: request.expiresAt,
                                     envelope: envelope, challenge: request.challenge, transaction: stored?.transaction, authentication: stored?.authentication,
-                                    requestsInWindow: requests, showFatigueWarning: warn, alert: alert)
+                                    requestsInWindow: requests, showFatigueWarning: warn, alert: alert,
+                                    numberMatch: request.matchDigits.map { AuthApprovalNumberMatch(digits: $0, code: stored?.numberMatchCode) })
     }
 
     /// Pending requests for the calling device's active keys.
@@ -448,8 +470,19 @@ struct ApproveRequestService {
         }
         let capability = Capability(rawValue: request.capability)
         let required = ApprovalAMR.required(for: capability.definition?.sensitivity ?? .critical)
+        // Number matching (ADR-0022 §3): the relay checks the typed `match` against the code it holds (server-visible) or at least its presence and length
+        // (end to end). Defense in depth: the business verifies it against its own record.
+        var numberMatch = NumberMatchExpectation.notRequested
+        if let digits = request.matchDigits {
+            var code: String?
+            if let sealed = request.detailsSealed, request.protectionValue == .serverVisible {
+                code = try ViadereJSON.decode(StoredDetails.self, from: try ctx.cipher.open(sealed, context: Self.sealContext, rowId: request.id!)).numberMatchCode
+            }
+            numberMatch = code.map { .required(code: $0) } ?? .relayRequired(digits: digits)
+        }
         let expectation = ApprovalExpectation(relayAudience: BusinessID(request.businessId), subject: subject, requestId: request.requestId, capability: capability,
-                                              challenge: request.challenge, subjectDetails: details, requestExpiresAt: request.expiresAt, minimumAMR: required)
+                                              challenge: request.challenge, subjectDetails: details, numberMatch: numberMatch, requestExpiresAt: request.expiresAt,
+                                              minimumAMR: required)
         let verified: VerifiedApproval
         do {
             verified = try ApprovalResultVerifier.verify(body.result, expecting: expectation,
@@ -466,6 +499,12 @@ struct ApproveRequestService {
                 try await reject("insufficient_assurance", APIError(.forbidden, .insufficientAssurance, "This request needs stronger verification."))
             default: try await reject("binding_mismatch", .forbidden)
             }
+        }
+        // v2 `jti` (ADR-0023 §7): recorded once; the same signed result presented again anywhere is refused.
+        if let jti = verified.claims.jti {
+            let fresh = try await DatabaseReplayGuard(db: db).registerIfFresh(nonce: jti, scope: "approval-jti:\(request.businessId)",
+                                                                               expiresAt: verified.claims.expiresAtDate.addingTimeInterval(60), now: now)
+            guard fresh else { try await reject("replayed", APIError(.conflict, .replayDetected, "This result was already used.")) }
         }
         let decision = verified.decision
         // A frozen relationship or account accepts only refusals; a device in its new-device cool-down may not approve high-risk requests.
@@ -495,8 +534,11 @@ struct ApproveRequestService {
                                             newValue: status.rawValue, extra: [("decided_at", now), ("decided_kid", key.kid), ("decision", decision.rawValue),
                                                                                ("amr", verified.claims.amr.rawValue), ("result_ref", resultRef), ("result_jws", body.result)])
             guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
-            try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
+            try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil)
+                .set(\.$denyReason, to: verified.claims.denyReason?.rawValue).update()
+            try await AuthMatchGroups(db: tx, ctx: ctx).release(refId: request.id!)
             guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
+            if decision == .approve { try await AuthApprovalService(db: tx, ctx: ctx).closeGroup(after: decided) }
             try await ApproveWebhooks(db: tx, ctx: ctx).requestDecided(decided)
             let auditService = AuditService(db: tx, ctx: ctx)
             _ = try await auditService.record("approve.request_decided", principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",

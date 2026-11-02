@@ -85,6 +85,8 @@ public final class APNSwiftSender: APNsSender, Sendable {
         var loopInstanceId: String?
         /// Auth delivery id (`adl`): the only custom member of an auth push.
         var adl: String?
+        /// Approve v2 request id on this device (`req`, ADR-0022 §5.5, F-15): the only custom member of an approval push.
+        var req: String?
     }
 
     /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
@@ -96,12 +98,15 @@ public final class APNSwiftSender: APNsSender, Sendable {
         case "time-sensitive": level = .timeSensitive
         default: level = .active
         }
-        return APNSAlertNotification(
+        var notification = APNSAlertNotification(
             alert: .init(title: .raw(message.title), body: .raw(message.body)),
             expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
             priority: message.highPriority ? .immediately : .consideringDevicePower,
-            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId, adl: message.authDeliveryId), threadID: message.threadID,
-            category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
+            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId, adl: message.authDeliveryId, req: message.approveRequestId),
+            threadID: message.threadID, category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
+        // `apns-collapse-id` (R23-05): a retried dispatch or a token registered twice replaces the alert instead of duplicating it.
+        notification.collapseID = message.collapseID
+        return notification
     }
 }
 

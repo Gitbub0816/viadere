@@ -93,6 +93,9 @@ public struct ApproveLocalState: Codable, Sendable, Equatable {
     /// The log head last verified; the next one must extend it.
     public var lastSeenHead: SeenTreeHead?
     public var decisions: [LocalDecision] = []
+    /// Wrong number entries per open request id (Stage 4 review R4-02): survives a dismissal and a relaunch, pruned when the request leaves the open set.
+    /// Optional so state written by older builds still decodes.
+    public var matchAttempts: [String: Int]?
     public init() {}
 
     /// Records a verified tree head **monotonically** (gate finding F4): the stored head only ever moves forward. Two refreshes can verify

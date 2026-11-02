@@ -34,13 +34,18 @@ public struct AuthenticationDetails: Sendable, Hashable, Codable {
     public var actionDisplay: String
     /// The business's own reference (a login attempt id). `[\x21-\x7E]`, at most 64 characters.
     public var reference: String?
+    /// ADR-0022 §3 (Approve v2): the number-match length (2 or 3) when the request requires a typed number. It is part of the canonical form and
+    /// so of `txn_digest`: a relay that strips the requirement from a server-visible request breaks the business's own digest check. Absent
+    /// for requests without number matching (the v1 canonical form is unchanged).
+    public var matchDigits: Int?
 
-    public init(actionDisplay: String, reference: String? = nil) {
+    public init(actionDisplay: String, reference: String? = nil, matchDigits: Int? = nil) {
         self.actionDisplay = actionDisplay
         self.reference = reference
+        self.matchDigits = matchDigits
     }
 
-    enum CodingKeys: String, CodingKey { case actionDisplay = "action_display", reference }
+    enum CodingKeys: String, CodingKey { case actionDisplay = "action_display", reference, matchDigits = "match_digits" }
 }
 
 /// The exact displayed parameters of a `transaction.approve` request (spec 14.2).
@@ -115,6 +120,7 @@ public enum ApprovalSubject: Sendable, Hashable {
         case .authentication(let value):
             guard Self.isValidDisplay(value.actionDisplay, max: 120) else { throw ApprovalTransactionError.invalid(field: "action_display") }
             if let reference = value.reference, !Self.isPrintableASCII(reference, max: 64) { throw ApprovalTransactionError.invalid(field: "reference") }
+            if let digits = value.matchDigits, !(2...3).contains(digits) { throw ApprovalTransactionError.invalid(field: "match_digits") }
         }
     }
 
@@ -129,6 +135,7 @@ public enum ApprovalSubject: Sendable, Hashable {
         case .authentication(let value):
             var object: [String: JSONValue] = ["v": .integer(1), "capability": .string(Capability.authChallenge.rawValue), "action_display": .string(value.actionDisplay)]
             if let reference = value.reference { object["reference"] = .string(reference) }
+            if let digits = value.matchDigits { object["match_digits"] = .integer(Int64(digits)) }
             return object
         }
     }
@@ -154,9 +161,14 @@ public enum ApprovalSubject: Sendable, Hashable {
                   let reference = o["transaction_reference"]?.stringValue else { throw ApprovalTransactionError.invalid(field: "transaction") }
             subject = .transaction(TransactionDetails(currency: currency, amountMinor: amount, payeeDisplay: payee, transactionReference: reference))
         case .authChallenge:
-            guard Set(o.keys).isSubset(of: ["v", "capability", "action_display", "reference"]), let action = o["action_display"]?.stringValue else { throw ApprovalTransactionError.invalid(field: "transaction") }
+            guard Set(o.keys).isSubset(of: ["v", "capability", "action_display", "reference", "match_digits"]), let action = o["action_display"]?.stringValue else { throw ApprovalTransactionError.invalid(field: "transaction") }
             if o["reference"] != nil, o["reference"]?.stringValue == nil { throw ApprovalTransactionError.invalid(field: "reference") }
-            subject = .authentication(AuthenticationDetails(actionDisplay: action, reference: o["reference"]?.stringValue))
+            var digits: Int?
+            if let raw = o["match_digits"] {
+                guard let value = raw.int64Value, (2...3).contains(value) else { throw ApprovalTransactionError.invalid(field: "match_digits") }
+                digits = Int(value)
+            }
+            subject = .authentication(AuthenticationDetails(actionDisplay: action, reference: o["reference"]?.stringValue, matchDigits: digits))
         default:
             throw ApprovalTransactionError.invalid(field: "capability")
         }

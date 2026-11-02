@@ -529,12 +529,16 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     public var showFatigueWarning: Bool
     /// The request as a durable alert (spec v4 C5): its stable event id (dedupe repeated pushes), urgency, status and expiry.
     public var alert: AlertDescriptor?
+    /// `auth-approvals` requests (ADR-0022 §2): the number-match requirement. Server-visible: `{digits, code}` as the relay holds it; end to end:
+    /// `{digits}` only (the code is inside the business-signed envelope, and the device uses that one). Never displayed.
+    public var numberMatch: AuthApprovalNumberMatch?
 
     public init(id: UUID, requestId: String, business: BusinessSummary, subjectRef: SubjectRef, capability: Capability, kid: String, protection: ApprovalProtection,
                 status: ApprovalRequestStatus, createdAt: Date, expiresAt: Date, envelope: E2EEEnvelope? = nil, challenge: String? = nil,
                 transaction: TransactionDetails? = nil, authentication: AuthenticationDetails? = nil, requestsInWindow: Int = 1, showFatigueWarning: Bool = false,
-                alert: AlertDescriptor? = nil) {
+                alert: AlertDescriptor? = nil, numberMatch: AuthApprovalNumberMatch? = nil) {
         self.alert = alert
+        self.numberMatch = numberMatch
         self.id = id
         self.requestId = requestId
         self.business = business
@@ -556,7 +560,7 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, requestId = "request_id", business, subjectRef = "subject_ref", capability, kid, protection, status, createdAt = "created_at"
         case expiresAt = "expires_at", envelope, challenge, transaction, authentication, requestsInWindow = "requests_in_window", showFatigueWarning = "show_fatigue_warning"
-        case alert
+        case alert, numberMatch = "number_match"
     }
 }
 

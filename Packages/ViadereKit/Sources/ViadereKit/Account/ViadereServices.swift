@@ -113,6 +113,8 @@ public struct ViadereServices: Sendable {
                                residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
         if !isAppClip {
             services.approveAPI = LiveApproveAPI(client: client)
+            services.authDelivery = LiveAuthDeliveryAPI(client: client)
+            services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)
             services.brandKits = BrandKitStore(api: LiveBrandKitAPI(client: client), assets: TransportBrandAssetFetcher(transport: transport),

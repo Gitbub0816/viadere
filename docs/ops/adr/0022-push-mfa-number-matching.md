@@ -32,6 +32,7 @@ Additive version bump of SECURITY §2.54 (Core change with the SDK verifier upda
 - `authentication` details gain `match_digits` (2 or 3) so `txn_digest` covers that a number match was required (a relay cannot strip the requirement in server-visible mode without breaking the business's digest check).
 - **Downgrade-proof verifier API (S1-A3-08).** `ApprovalExpectation` (Swift, TypeScript, Kotlin) gains a **non-optional** `numberMatch: .notRequested | .required(code)` with no default value; every initializer requires it. `.required` means `v == 2`, `match` present, constant-time equality; `.notRequested` means `match` absent, v1 or v2 accepted. Cross-language vectors include "number-matched request, v1 result" and "v2 result without `match`" as refusals.
 - Replay: unchanged (`aud‖kid‖challenge` consumed once by the business; relay CAS).
+- **Implementation amendment (Stage 5, for A3 review):** v2 also **requires** `jti` (16 random bytes, base64url, 22 characters). The relay records it (`approval-jti:{business}`) and the business verifier consumes `aud‖jti` in addition to `aud‖kid‖challenge` (ADR-0023 §7). A v2 result without `jti` is malformed. Normative text: SECURITY §2.102; vectors `docs/protocol/vectors/approval-result-v2.json`.
 
 ### 4. Payment and high-value step-up
 

@@ -17,7 +17,7 @@ final class ApprovalResultTests: XCTestCase {
     private var enrolled: EnrolledApprovalKey { EnrolledApprovalKey(kid: kid, publicKey: key.publicKey, subject: subject, assurance: .biometric) }
 
     private var expectation: ApprovalExpectation {
-        ApprovalExpectation(audience: businessId, subject: subject, requestId: requestId, challenge: challenge, subjectDetails: details,
+        ApprovalExpectation(audience: businessId, subject: subject, requestId: requestId, challenge: challenge, subjectDetails: details, numberMatch: .notRequested,
                             requestExpiresAt: now.addingTimeInterval(120), minimumAMR: .biometric)
     }
 
@@ -214,8 +214,8 @@ final class ApprovalResultTests: XCTestCase {
         missing["txn_digest"] = nil
         assertRejected(try await forge(header: ["alg": .string("ES256"), "kid": .string(kid), "typ": .string(ApprovalResultJWS.type)], payload: missing), .malformed("claims"))
         var future = claims().object
-        future["v"] = .integer(2)
-        assertRejected(try await forge(header: ["alg": .string("ES256"), "kid": .string(kid), "typ": .string(ApprovalResultJWS.type)], payload: future), .unsupportedVersion(2))
+        future["v"] = .integer(3)
+        assertRejected(try await forge(header: ["alg": .string("ES256"), "kid": .string(kid), "typ": .string(ApprovalResultJWS.type)], payload: future), .unsupportedVersion(3))
     }
 
     func testKeyHandling() async throws {

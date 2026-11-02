@@ -104,12 +104,12 @@ final class ApproveE2EETests: XCTestCase {
             // The business verifies against ITS OWN record of the transaction (which it never had to disclose to the relay).
             let ref = try unwrap(try await h.requestView(f, body.requestId).resultRef)
             let fetched = try await h.business(f.business, .GET, "/v1/business/approve/results/\(ref)").json(ApprovalResultResponse.self)
-            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: content.challenge, subjectDetails: subject, minimumAMR: .biometric)
+            let expectation = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: content.challenge, subjectDetails: subject, numberMatch: .notRequested, minimumAMR: .biometric)
             let verified = try ApprovalResultVerifier.verify(fetched.result, expecting: expectation, keys: try await h.enrolledKeys(f), now: h.clock.now())
             XCTAssertEqual(verified.decision, .approve)
             // And a different amount in the business's record would not have verified.
             let other = ApprovalExpectation(audience: f.business.id, subject: f.subject, requestId: body.requestId, challenge: content.challenge,
-                                            subjectDetails: .transaction(h.transaction(payee: Self.secretPayee, amount: 1)))
+                                            subjectDetails: .transaction(h.transaction(payee: Self.secretPayee, amount: 1)), numberMatch: .notRequested)
             let enrolled = try await h.enrolledKeys(f)
             XCTAssertThrowsError(try ApprovalResultVerifier.verify(fetched.result, expecting: other, keys: enrolled, now: h.clock.now()))
             // After the whole flow, still nothing in the relay.

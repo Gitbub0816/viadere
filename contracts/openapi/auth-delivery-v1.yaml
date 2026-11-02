@@ -259,6 +259,46 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuthDeliveryView" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/auth-approvals:
+    post:
+      tags: [Business]
+      operationId: createAuthApproval
+      summary: Create a push approval with number matching (ADR-0022, ADR-0020 §2a)
+      description: |
+        Scope `approvals:manage`, `Idempotency-Key` required, behind `AUTH_DELIVERY_ENABLED` and `APPROVE_V2_ENABLED`. Body `AuthApprovalCreateRequest`
+        (strict): the Approve v2 request members plus `number_match {digits, code?}` (required), `match_tag`, `match_prefix_tag` (3 digits),
+        `risk`, `session_handle`. `transaction.approve`, `high` and `critical` need 3 digits and an end-to-end request (`422 e2ee_required`).
+        Answers `409 match_code_in_use`, `409 match_digits_required {digits: 3}`, `409 match_code_space_exhausted`; the SDK redraws on the first two.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201": { description: Created (`ApprovalRequestView`). }
+        "200": { description: Idempotent replay. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/business/auth-approvals/{requestId}:
+    get:
+      tags: [Business]
+      operationId: getAuthApproval
+      summary: Status and `result_ref` (never authorize on the status; verify the signed result)
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The relay's view (`ApprovalRequestView`). }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/approve/requests/{approvalId}/deny:
+    post:
+      tags: [Device]
+      operationId: denyApprovalReduceOnly
+      summary: Reduce-only Deny from the notification action (request key, no unlock; ADR-0022 §5.5)
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - { name: approvalId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: "`SubmitApprovalResultResponse` with status `denied` or `reported`." }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 components:
   securitySchemes:
     apiKey:

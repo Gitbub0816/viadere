@@ -40,13 +40,36 @@ public enum ApprovalVerificationError: Error, Sendable, Equatable {
     /// The claimed authentication method exceeds what the enrolled key can provide.
     case amrExceedsKey
     case replayed
+    /// ADR-0022 §3: the request required a typed number, and the result is v1 (no `match` member exists) — a downgrade.
+    case numberMatchRequired
+    /// The approve's `match` is missing or differs from the code the verifier recorded.
+    case numberMismatch
+    /// The result carries `match` for a request that never asked for one.
+    case unexpectedMatch
 }
 
-/// The claims of an ApprovalResult v1 (section 2.54).
+/// The claims of an ApprovalResult (section 2.54): v1, or v2 (ADR-0022 §3, ADR-0023 §2) with `jti` and the optional `match`, `deny_reason` and
+/// `invalid_match_attempts`.
 public struct ApprovalResultClaims: Sendable, Hashable {
     public static let version: Int64 = 1
+    /// Number matching and the replay id (ADR-0022 §3).
+    public static let version2: Int64 = 2
     /// Longest `exp - iat` a verifier accepts.
     public static let maxLifetime: TimeInterval = 600
+    static let v1Members: Set<String> = ["v", "alg", "kid", "aud", "sub", "request_id", "challenge", "cap", "decision", "amr", "iat", "exp", "txn_digest"]
+    static let v2Required: Set<String> = v1Members.union(["jti"])
+    static let v2Optional: Set<String> = ["match", "deny_reason", "invalid_match_attempts"]
+
+    /// `1` or `2`.
+    public var v: Int64 = ApprovalResultClaims.version
+    /// v2 only: 128 random bits, base64url (22 characters). Stored by the relay and by the business's verifier for replay rejection.
+    public var jti: String?
+    /// v2 only: the number the person typed (2 or 3 digits). Present on an approve of a number-matched request.
+    public var match: String?
+    /// v2 only, and only when `decision` is `deny` (`number_mismatch`, `destination_unverified`) or `report` (`not_me`).
+    public var denyReason: ApprovalDenyReason?
+    /// v2 only: wrong entries the device counted for this request (0...3). Advisory.
+    public var invalidMatchAttempts: Int?
 
     public var kid: String
     /// The business the result is addressed to.
@@ -78,10 +101,44 @@ public struct ApprovalResultClaims: Sendable, Hashable {
         self.transactionDigest = transactionDigest
     }
 
+    /// These claims as a v2 result: a fresh `jti` (unless given) and the number-match members.
+    public func asVersion2(jti: String = SecureToken.generate(byteCount: 16), match: String?, denyReason: ApprovalDenyReason?, invalidMatchAttempts: Int?) -> ApprovalResultClaims {
+        var copy = self
+        copy.v = Self.version2
+        copy.jti = jti
+        copy.match = match
+        copy.denyReason = denyReason
+        copy.invalidMatchAttempts = invalidMatchAttempts
+        return copy
+    }
+
     var object: [String: JSONValue] {
-        ["v": .integer(Self.version), "alg": .string("ES256"), "kid": .string(kid), "aud": .string(audience.description), "sub": .string(subject.rawValue),
-         "request_id": .string(requestId), "challenge": .string(challenge), "cap": .string(capability.rawValue), "decision": .string(decision.rawValue),
-         "amr": .string(amr.rawValue), "iat": .integer(issuedAt), "exp": .integer(expiresAt), "txn_digest": .string(transactionDigest)]
+        var o: [String: JSONValue] = [
+            "v": .integer(v), "alg": .string("ES256"), "kid": .string(kid), "aud": .string(audience.description), "sub": .string(subject.rawValue),
+            "request_id": .string(requestId), "challenge": .string(challenge), "cap": .string(capability.rawValue), "decision": .string(decision.rawValue),
+            "amr": .string(amr.rawValue), "iat": .integer(issuedAt), "exp": .integer(expiresAt), "txn_digest": .string(transactionDigest)]
+        guard v == Self.version2 else { return o }
+        o["jti"] = jti.map(JSONValue.string)
+        if let match { o["match"] = .string(match) }
+        if let denyReason { o["deny_reason"] = .string(denyReason.rawValue) }
+        if let invalidMatchAttempts { o["invalid_match_attempts"] = .integer(Int64(invalidMatchAttempts)) }
+        return o
+    }
+
+    /// `jti`: exactly 16 bytes, base64url without padding.
+    public static func isValidJTI(_ value: String) -> Bool { Base64URL.isValid(value, minLength: 22, maxLength: 22) && Base64URL.decode(value)?.count == 16 }
+
+    /// The v2 presence rules (ADR-0022 §3): `deny_reason` only on a refusal and consistent with it; `match` well-formed; attempts 0...3.
+    static func v2MembersAreConsistent(decision: ApprovalDecision, match: String?, denyReason: ApprovalDenyReason?, attempts: Int?) -> Bool {
+        if let match, !ApprovalNumberMatch.isValid(code: match, digits: match.utf8.count) { return false }
+        if let attempts, !(0...3).contains(attempts) { return false }
+        switch (decision, denyReason) {
+        case (_, nil): return true
+        case (.approve, _?): return false
+        case (.report, .notMe?): return true
+        case (.deny, .numberMismatch?), (.deny, .destinationUnverified?): return true
+        default: return false
+        }
     }
 
     public var issuedAtDate: Date { Date(timeIntervalSince1970: TimeInterval(issuedAt)) }
@@ -154,9 +211,15 @@ public enum ApprovalResultJWS {
         guard let verifying = try? key.signingKey(), verifying.isValidSignature(parts.signature, for: parts.signingInput) else { throw ApprovalVerificationError.badSignature }
         let o = parts.payload
         guard case .integer(let v)? = o["v"] else { throw ApprovalVerificationError.malformed("v") }
-        guard v == ApprovalResultClaims.version else { throw ApprovalVerificationError.unsupportedVersion(v) }
-        guard Set(o.keys) == ["v", "alg", "kid", "aud", "sub", "request_id", "challenge", "cap", "decision", "amr", "iat", "exp", "txn_digest"] else {
-            throw ApprovalVerificationError.malformed("claims")
+        guard v == ApprovalResultClaims.version || v == ApprovalResultClaims.version2 else { throw ApprovalVerificationError.unsupportedVersion(v) }
+        // Exact member sets (S1-A3-09): v1 is closed; v2 is the v1 set plus `jti`, plus only the three optional number-match members.
+        let keys = Set(o.keys)
+        if v == ApprovalResultClaims.version {
+            guard keys == ApprovalResultClaims.v1Members else { throw ApprovalVerificationError.malformed("claims") }
+        } else {
+            guard ApprovalResultClaims.v2Required.isSubset(of: keys), keys.isSubset(of: ApprovalResultClaims.v2Required.union(ApprovalResultClaims.v2Optional)) else {
+                throw ApprovalVerificationError.malformed("claims")
+            }
         }
         guard o["alg"]?.stringValue == "ES256", o["kid"]?.stringValue == parts.kid else { throw ApprovalVerificationError.headerPayloadMismatch }
         guard let aud = o["aud"]?.stringValue.flatMap(BusinessID.init), let sub = o["sub"]?.stringValue.flatMap({ SubjectRef($0) }),
@@ -167,9 +230,28 @@ public enum ApprovalResultJWS {
               let amr = o["amr"]?.stringValue.flatMap(ApprovalAMR.init(rawValue:)),
               let iat = o["iat"]?.int64Value, let exp = o["exp"]?.int64Value, iat > 0, exp > iat,
               let digest = o["txn_digest"]?.stringValue, Interaction.isValidContextDigest(digest) else { throw ApprovalVerificationError.malformed("claims values") }
-        return ApprovalResultClaims(kid: parts.kid, audience: aud, subject: sub, requestId: requestId, challenge: challenge, capability: cap,
-                                    decision: decision, amr: amr, issuedAt: Date(timeIntervalSince1970: TimeInterval(iat)),
-                                    expiresAt: Date(timeIntervalSince1970: TimeInterval(exp)), transactionDigest: digest)
+        var claims = ApprovalResultClaims(kid: parts.kid, audience: aud, subject: sub, requestId: requestId, challenge: challenge, capability: cap,
+                                          decision: decision, amr: amr, issuedAt: Date(timeIntervalSince1970: TimeInterval(iat)),
+                                          expiresAt: Date(timeIntervalSince1970: TimeInterval(exp)), transactionDigest: digest)
+        guard v == ApprovalResultClaims.version2 else { return claims }
+        guard let jti = o["jti"]?.stringValue, ApprovalResultClaims.isValidJTI(jti) else { throw ApprovalVerificationError.malformed("jti") }
+        var match: String?
+        if let raw = o["match"] { guard let value = raw.stringValue else { throw ApprovalVerificationError.malformed("match") }; match = value }
+        var reason: ApprovalDenyReason?
+        if let raw = o["deny_reason"] {
+            guard let value = raw.stringValue.flatMap(ApprovalDenyReason.init(rawValue:)) else { throw ApprovalVerificationError.malformed("deny_reason") }
+            reason = value
+        }
+        var attempts: Int?
+        if let raw = o["invalid_match_attempts"] {
+            guard let value = raw.int64Value, (0...3).contains(value) else { throw ApprovalVerificationError.malformed("invalid_match_attempts") }
+            attempts = Int(value)
+        }
+        guard ApprovalResultClaims.v2MembersAreConsistent(decision: decision, match: match, denyReason: reason, attempts: attempts) else {
+            throw ApprovalVerificationError.malformed("claims values")
+        }
+        claims = claims.asVersion2(jti: jti, match: match, denyReason: reason, invalidMatchAttempts: attempts)
+        return claims
     }
 }
 
@@ -206,10 +288,13 @@ public struct ApprovalExpectation: Sendable {
     public var requestExpiresAt: Date?
     public var minimumAMR: ApprovalAMR?
     public var maxClockSkew: TimeInterval
+    /// Number matching (ADR-0022 §3, S1-A3-08): **required in every initializer, with no default**, so a verifier cannot forget it and accept a
+    /// result without the typed number for a request that asked for one.
+    public var numberMatch: NumberMatchExpectation
 
     /// The business's expectation: the challenge and the transaction come from **its own** records, so a result for different parameters
     /// cannot verify.
-    public init(audience: BusinessID, subject: SubjectRef, requestId: String, challenge: String, subjectDetails: ApprovalSubject,
+    public init(audience: BusinessID, subject: SubjectRef, requestId: String, challenge: String, subjectDetails: ApprovalSubject, numberMatch: NumberMatchExpectation,
                 requestExpiresAt: Date? = nil, minimumAMR: ApprovalAMR? = nil, maxClockSkew: TimeInterval = 60) {
         self.audience = audience
         self.subject = subject
@@ -217,6 +302,7 @@ public struct ApprovalExpectation: Sendable {
         capability = subjectDetails.capability
         self.challenge = challenge
         self.subjectDetails = subjectDetails
+        self.numberMatch = numberMatch
         self.requestExpiresAt = requestExpiresAt
         self.minimumAMR = minimumAMR
         self.maxClockSkew = maxClockSkew
@@ -226,13 +312,14 @@ public struct ApprovalExpectation: Sendable {
     /// challenge and details only for server-visible requests. **Never use it to authorize anything**: only the business can check the digest
     /// against its own transaction record.
     public init(relayAudience audience: BusinessID, subject: SubjectRef, requestId: String, capability: Capability, challenge: String?,
-                subjectDetails: ApprovalSubject?, requestExpiresAt: Date?, minimumAMR: ApprovalAMR?, maxClockSkew: TimeInterval = 60) {
+                subjectDetails: ApprovalSubject?, numberMatch: NumberMatchExpectation, requestExpiresAt: Date?, minimumAMR: ApprovalAMR?, maxClockSkew: TimeInterval = 60) {
         self.audience = audience
         self.subject = subject
         self.requestId = requestId
         self.capability = capability
         self.challenge = challenge
         self.subjectDetails = subjectDetails
+        self.numberMatch = numberMatch
         self.requestExpiresAt = requestExpiresAt
         self.minimumAMR = minimumAMR
         self.maxClockSkew = maxClockSkew
@@ -245,6 +332,8 @@ public struct VerifiedApproval: Sendable, Hashable {
     public var decision: ApprovalDecision { claims.decision }
     /// `aud ‖ kid ‖ challenge`: consume it atomically (`ReplayGuard`) **after** verification succeeded, expiring at `expiresAt`.
     public var replayKey: String { "approval:\(claims.audience)|\(claims.kid)|\(claims.challenge)" }
+    /// v2: `aud ‖ jti`, consumed as well (ADR-0023 §7 "business side: `jti` / `aud‖kid‖challenge`").
+    public var jtiReplayKey: String? { claims.jti.map { "approval-jti:\(claims.audience)|\($0)" } }
 }
 
 /// Verifies an ApprovalResult against the verifier's own records. Pure; the replay cache is the caller's (`ReplayGuard`).
@@ -277,7 +366,26 @@ public enum ApprovalResultVerifier {
         }
         guard claims.amr.rank <= key.assurance.rank else { throw ApprovalVerificationError.amrExceedsKey }
         if let minimum = expectation.minimumAMR, !claims.amr.satisfies(minimum) { throw ApprovalVerificationError.insufficientAuthentication }
+        try checkNumberMatch(claims, expectation.numberMatch)
         return VerifiedApproval(claims: claims)
+    }
+
+    /// ADR-0022 §3: `.required` needs v2 and, on an approve, `match` equal in constant time to the verifier's own code; `.notRequested` refuses any `match`.
+    static func checkNumberMatch(_ claims: ApprovalResultClaims, _ expectation: NumberMatchExpectation) throws {
+        switch expectation.kind {
+        case .notRequested:
+            guard claims.match == nil else { throw ApprovalVerificationError.unexpectedMatch }
+        case .required(let code):
+            guard claims.v == ApprovalResultClaims.version2 else { throw ApprovalVerificationError.numberMatchRequired }
+            if claims.decision == .approve {
+                guard let match = claims.match, ConstantTime.equals(match, code) else { throw ApprovalVerificationError.numberMismatch }
+            }
+        case .relayRequired(let digits):
+            guard claims.v == ApprovalResultClaims.version2 else { throw ApprovalVerificationError.numberMatchRequired }
+            if claims.decision == .approve {
+                guard let match = claims.match, match.utf8.count == digits else { throw ApprovalVerificationError.numberMismatch }
+            }
+        }
     }
 
     /// `verify`, then requires `approve` and consumes the one-time challenge in `replayGuard` (atomic). Use this to grant access.
@@ -286,8 +394,13 @@ public enum ApprovalResultVerifier {
         let verified = try verify(compact, expecting: expectation, keys: keys, now: now)
         guard verified.decision == .approve else { throw ApprovalVerificationError.notApproved(verified.decision) }
         // Consumed only after every other check passed: a forged or wrong result cannot burn a real challenge.
-        let fresh = try await replayGuard.registerIfFresh(nonce: verified.replayKey, scope: "approval-result", expiresAt: verified.claims.expiresAtDate.addingTimeInterval(expectation.maxClockSkew), now: now)
+        let horizon = verified.claims.expiresAtDate.addingTimeInterval(expectation.maxClockSkew)
+        let fresh = try await replayGuard.registerIfFresh(nonce: verified.replayKey, scope: "approval-result", expiresAt: horizon, now: now)
         guard fresh else { throw ApprovalVerificationError.replayed }
+        // v2: the `jti` is recorded too, so the same signed bytes are refused under any other expectation as well.
+        if let jtiKey = verified.jtiReplayKey {
+            guard try await replayGuard.registerIfFresh(nonce: jtiKey, scope: "approval-jti", expiresAt: horizon, now: now) else { throw ApprovalVerificationError.replayed }
+        }
         return verified
     }
 }

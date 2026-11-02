@@ -493,7 +493,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             XCTAssertEqual(r1.status, .created)
             let pending = try await h.pendingRequests(consumer)
             let jws = try await h.answer(p1, try XCTUnwrap(pending.first { $0.requestId == body1.requestId }))
-            let asB2 = ApprovalExpectation(audience: b2.id, subject: f2.subject, requestId: body1.requestId, challenge: body1.challenge!, subjectDetails: .transaction(body1.transaction!))
+            let asB2 = ApprovalExpectation(audience: b2.id, subject: f2.subject, requestId: body1.requestId, challenge: body1.challenge!, subjectDetails: .transaction(body1.transaction!), numberMatch: .notRequested)
             XCTAssertThrowsError(try ApprovalResultVerifier.verify(jws, expecting: asB2, keys: [EnrolledApprovalKey(kid: p1.kid, publicKey: p1.approvalKey.publicKey, subject: f2.subject, assurance: .biometric)], now: h.clock.now()))
         }
     }

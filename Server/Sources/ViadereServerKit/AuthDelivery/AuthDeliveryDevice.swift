@@ -145,7 +145,8 @@ struct AuthDeliveryDispatcher {
                                       topic: token.bundleId.isEmpty ? ctx.config.appBundleID : token.bundleId, title: AuthPushPayloadPolicy.alertTitle,
                                       body: AuthPushPayloadPolicy.alertBody, category: AuthPushPayloadPolicy.category(for: row.methodValue),
                                       threadID: "auth." + String(ctx.hasher.hmacHex("auth-thread", token.deviceId.uuidString.lowercased()).prefix(16)),
-                                      interruptionLevel: "active", mutableContent: true, interactionId: nil, highPriority: true, authDeliveryId: row.wireId.description)
+                                      interruptionLevel: "active", mutableContent: true, interactionId: nil, highPriority: true,
+                                      collapseID: row.wireId.description, authDeliveryId: row.wireId.description)
             switch await ctx.apns.send(message) {
             case .delivered: accepted = true
             case .tokenInvalid: try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()

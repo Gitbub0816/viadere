@@ -22,9 +22,13 @@ struct ApproveRequestSheet: View {
         self.prompt = prompt
         self.controller = controller
         self.capture = capture
+        // R4-04: the number requirement comes from the verified prompts (signed policy), one screen per business group; the typed `match`, the
+        // `deny_reason` and the wrong-entry count go inside the signed v2 result. R4-02: wrong entries persist per request in the approval store.
+        let group = controller.numberMatchGroup(for: prompt)
         _model = State(initialValue: NumberMatchApprovalViewModel(
-            context: NumberMatchApprovalContext(prompt: prompt),
-            answering: ApproveControllerAnswering(controller: controller, prompt: prompt)))
+            context: NumberMatchApprovalContext(group: group),
+            answering: ApproveControllerAnswering(controller: controller, group: group, attempts: controller.attemptRecorder),
+            attempts: controller.attemptRecorder))
     }
 
     private var isBusy: Bool { model.phase == .submitting || controller.phase == .working }
@@ -70,7 +74,13 @@ struct ApproveRequestSheet: View {
         }
         .background(ViadereColor.background)
         .privacySensitive()
-        .interactiveDismissDisabled(isBusy)
+        // After a wrong entry a swipe cannot dismiss: the handle asks "Leave this request?" (R4-02).
+        .interactiveDismissDisabled(isBusy || model.confirmsBeforeLeaving)
+        .task {
+            if let recorder = controller.attemptRecorder {
+                model.restoreWrongEntries(await recorder.wrongEntries(requestIds: model.context.groupRequestIds))
+            }
+        }
         .onChange(of: capture.isCaptured, initial: true) { _, captured in model.isScreenCaptured = captured }
         .onChange(of: model.announcement) { _, text in
             // A wrong entry is announced, not shown by colour alone (ADR-0022 §2.3).
