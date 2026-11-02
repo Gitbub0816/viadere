@@ -12,7 +12,7 @@
 # No long-lived cloud credential exists anywhere: OpenTofu uses the providers' native GitHub OIDC support (ARM_USE_OIDC) and the deploy
 # job logs in with `az login --federated-token` (Azure CLI is Python and preinstalled on the runner). The third-party `azure/login`
 # JavaScript action is NOT used (CLAUDE.md rule 4); the only actions are GitHub's own checkout, pinned to a full SHA. OpenTofu and cosign
-# are checksum-pinned downloads. Fly workflows stay untouched until cutover (plan section 4).
+# are checksum-pinned downloads. Fly was retired (ADR-0029).
 name: Azure
 
 on:

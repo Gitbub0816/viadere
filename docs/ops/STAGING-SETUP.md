@@ -162,11 +162,11 @@ Steps 7.1 to 7.3 can be done now. Step 7.4 needs the Fly app from step 8.2, and 
 ### 9.1 Generate the server-owned secrets
 
 ```bash
-python3 -I Infra/fly/generate_secrets.py --check           # self-check of the generator (prints OK)
-python3 -I Infra/fly/generate_secrets.py --env-file ~/viadere-staging-secrets.env
+python3 -I Infra/azure/generate_secrets.py --check           # self-check of the generator (prints OK)
+python3 -I Infra/azure/generate_secrets.py --env-file ~/viadere-staging-secrets.env
 ```
 
-The script (`Infra/fly/generate_secrets.py`, standard library only) writes a mode-600 file with `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY` (base64url, 32 bytes, all different), `KEY_DIRECTORY_LOG_KEY` (a valid P-256 scalar), `EDGE_TOKEN` and `METRICS_TOKEN` (64 URL-safe characters, 32 to 256 required). Without `--env-file` it prints a ready-made `fly secrets set` command instead. `--check FILE` validates an existing file.
+The script (`Infra/azure/generate_secrets.py`, standard library only) writes a mode-600 file with `CONNECT_LINK_SIGNING_KEY`, `SERVER_PEPPER`, `DATA_ENCRYPTION_KEY`, `AUDIT_CHAIN_KEY`, `SUBJECT_REF_KEY` (base64url, 32 bytes, all different), `KEY_DIRECTORY_LOG_KEY` (a valid P-256 scalar), `EDGE_TOKEN` and `METRICS_TOKEN` (64 URL-safe characters, 32 to 256 required). Without `--env-file` it prints a ready-made `fly secrets set` command instead. `--check FILE` validates an existing file.
 
 Back up the file's contents in a password manager **before** deleting it: losing `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER` or `AUDIT_CHAIN_KEY` makes staging data unreadable (rebuild the database and regenerate, which is acceptable for staging).
 
@@ -373,7 +373,7 @@ The server prints `Startup failed: <error>` and exits (`Server/Sources/ViadereSe
 | `Missing required configuration: ENVIRONMENT (...)` / `Invalid configuration: ENVIRONMENT (...)` | `[env] ENVIRONMENT` is absent or misspelled; it must be `staging` in `fly.staging.toml`. |
 | `Missing required configuration: DATABASE_URL` | Secret not set (step 9.3). |
 | `Missing required configuration: CONNECT_LINK_SIGNING_KEY` / `SERVER_PEPPER` / `DATA_ENCRYPTION_KEY` / `AUDIT_CHAIN_KEY` / `SUBJECT_REF_KEY` | Secret not set. Run step 9.1 and 9.2. |
-| `Invalid configuration: X (base64url, at least 32 bytes)` | Value is not base64url or is too short, typically truncated while pasting. Regenerate it, or `python3 -I Infra/fly/generate_secrets.py --check file.env`. |
+| `Invalid configuration: X (base64url, at least 32 bytes)` | Value is not base64url or is too short, typically truncated while pasting. Regenerate it, or `python3 -I Infra/azure/generate_secrets.py --check file.env`. |
 | `Invalid configuration: A and B must be different values` | Two of the five keys are equal. Regenerate one. |
 | `Missing required configuration: EDGE_TOKEN` | Secret not set. `Invalid configuration: EDGE_TOKEN (at least 32 printable characters, no spaces)`: re-copy; no spaces or quotes. |
 | `Missing required configuration: APNS_KEY_P8 or APNS_KEY_PATH` | `.p8` secret missing (step 9.3). |
@@ -398,4 +398,4 @@ The server prints `Startup failed: <error>` and exits (`Server/Sources/ViadereSe
 
 ## Files this guide touches
 
-`Infra/fly/fly.staging.toml` (three placeholders), `Infra/fly/generate_secrets.py`, `App/Configs/Staging.xcconfig` (pins), `App/Configs/Local.xcconfig` (team ID; TestFlight overrides), `App/Scripts/compute-spki-pins.py`, `App/Scripts/check-release-pins.sh`, `App/project.yml`, `Site/deploy/upload.py`.
+`Infra/fly/fly.staging.toml` (three placeholders), `Infra/azure/generate_secrets.py`, `App/Configs/Staging.xcconfig` (pins), `App/Configs/Local.xcconfig` (team ID; TestFlight overrides), `App/Scripts/compute-spki-pins.py`, `App/Scripts/check-release-pins.sh`, `App/project.yml`, `Site/deploy/upload.py`.

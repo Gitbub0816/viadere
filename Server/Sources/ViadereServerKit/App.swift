@@ -32,7 +32,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
         guard let kms else { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL (for AZURE_KEY_VAULT_KD_LOG_KEY)") }
         config.approve.logKey = try await KMSSigningKey.load(kms: kms, keyRef: ref)
     }
-    // The link-descriptor key likewise (WP-C1); on Fly and in development it is the environment secret `LINK_DESCRIPTOR_SIGNING_KEY`.
+    // The link-descriptor key likewise (WP-C1); in development it is the environment secret `LINK_DESCRIPTOR_SIGNING_KEY`.
     if let ref = config.azure.linkDescriptorKey {
         guard let kms else { throw ServerConfigError.missing("AZURE_KEY_VAULT_URL (for AZURE_KEY_VAULT_LINK_DESCRIPTOR_KEY)") }
         config.approve.linkDescriptorKey = try await KMSSigningKey.load(kms: kms, keyRef: ref)
@@ -155,7 +155,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     app.databases.middleware.use(BrandPinMiddleware(ctx: app.ctx))
     // The database transport needs the database; Service Bus was chosen above.
     app.ctx.queue.install(DatabaseQueueTransport(database: { [app] in app.db }, now: { clock.now() }))
-    // The serving process must not hold DDL rights: the role split is mandatory in staging and production (Infra/fly/README.md, docs/ops/RUNBOOKS.md).
+    // The serving process must not hold DDL rights: the role split is mandatory in staging and production (docs/ops/AZURE-SETUP.md section 8, docs/ops/RUNBOOKS.md).
     if DatabaseRoles.mustVerifyRuntimeRole(config: config, migrating: migrating), try await DatabaseRoles.runtimeCanChangeSchema(app.db) {
         throw ServerConfigError.invalid("DATABASE_URL (the runtime role can change the schema; use a data-only role and DATABASE_MIGRATION_URL for migrations)")
     }

@@ -3,8 +3,8 @@ import FluentSQL
 import Foundation
 import SQLKit
 
-/// Database role split (WP6): the **migrator** role owns the schema and runs `ViadereServer migrate` (`DATABASE_MIGRATION_URL`, the Fly release
-/// command); the **runtime** role (`DATABASE_URL`) gets data privileges only. This migration, when `DATABASE_APP_ROLE` names the runtime role,
+/// Database role split (WP6): the **migrator** role owns the schema and runs `ViadereServer migrate` (`DATABASE_MIGRATION_URL`, the Azure migrate
+/// job); the **runtime** role (`DATABASE_URL`) gets data privileges only. This migration, when `DATABASE_APP_ROLE` names the runtime role,
 /// grants it SELECT/INSERT/UPDATE/DELETE on every table and USAGE on every sequence, and sets default privileges so tables created by later
 /// migrations are covered too. Without `DATABASE_APP_ROLE` (development, tests, a single-role deployment) it does nothing.
 struct GrantRuntimeRolePrivileges: AsyncMigration {
@@ -59,7 +59,7 @@ struct GrantWorkerRolePrivileges: AsyncMigration {
 enum DatabaseRoles {
     /// Platform gate C1: in staging and production `ViadereServer migrate` connects as the schema owner and only as the schema owner. Without
     /// `DATABASE_MIGRATION_URL` it refuses to run instead of silently migrating (and holding DDL) as the runtime login. Serving processes do not need
-    /// the secret, and should not have it (run the release from a separate app or machine: Infra/fly/README.md section 1a).
+    /// the secret, and should not have it (the migrate job job-viadere-migrate is a separate Container Apps job with its own identity: Infra/azure, docs/ops/AZURE-SETUP.md section 8).
     static func requireMigrationURL(config: ServerConfig, migrating: Bool) throws {
         guard config.isStrict, migrating, config.operations.migrationDatabaseURL == nil else { return }
         // With Entra authentication the migration job connects as its own principal (`viadere_migrator`), never as the runtime role.

@@ -5,7 +5,7 @@ Secret values are written through the ARM control plane (PUT Microsoft.KeyVault/
 public endpoint is reachable from this machine (standard profile: private endpoint only). Values are never printed, never put on a command
 line (they travel in a mode-600 temporary file inside a mode-700 directory that is deleted afterwards) and never written to the repository.
 
-    # every server secret from an env file made by `python3 -I Infra/fly/generate_secrets.py --env-file s.env` (plus the third-party values
+    # every server secret from an env file made by `python3 -I Infra/azure/generate_secrets.py --env-file s.env` (plus the third-party values
     # you add to it); NAME -> secret name comes from `tofu output -json key_vault_secret_map`:
     python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map map.json --env-file s.env
 

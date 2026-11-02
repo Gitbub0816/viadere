@@ -262,11 +262,11 @@ tofu output -json github_deploy          # -> GitHub environment variables (sect
 cd "$(git rev-parse --show-toplevel)"
 export WORK=$(mktemp -d)   # private scratch directory for files that hold secrets; deleted at the end of section 8
 # server-owned keys (fresh), written to a new mode-600 file:
-python3 -I Infra/fly/generate_secrets.py --env-file "$WORK/s.env"
+python3 -I Infra/azure/generate_secrets.py --env-file "$WORK/s.env"
 # append the third-party values to "$WORK/s.env" (one NAME=value per line):
 #   EMAIL_API_KEY=<MailerSend API token>
 #   MAILERSEND_SMS_API_TOKEN=...   MAILERSEND_SMS_INBOUND_SECRET=...   MAILERSEND_SMS_WEBHOOK_SECRET=...
-python3 -I Infra/fly/generate_secrets.py --check "$WORK/s.env"
+python3 -I Infra/azure/generate_secrets.py --check "$WORK/s.env"
 python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/map.json --env-file "$WORK/s.env" --dry-run
 python3 -I Infra/azure/kv_tool.py put-env --vault-id "$KV_ID" --map Infra/azure/map.json --env-file "$WORK/s.env"
 # multi-line values go one by one from a file (stdin keeps the newlines):

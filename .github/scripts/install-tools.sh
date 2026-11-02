@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install checksum-pinned, Go/Rust/native release binaries used by CI (no Node, no `curl | sh`, no unpinned downloads).
-# Usage: .github/scripts/install-tools.sh gitleaks syft grype trivy cosign flyctl osv-scanner actionlint
+# Usage: .github/scripts/install-tools.sh gitleaks syft grype trivy cosign osv-scanner actionlint
 # Every download is verified against the SHA-256 below (linux/amd64, computed 2026-10-27 from the official release assets) before it
 # is unpacked. To update a tool: bump VERSION, download the asset once, record `sha256sum`, run CI. Monthly, with the dependency
 # refresh (docs/ops/SECURE-SDLC.md).
@@ -37,11 +37,6 @@ VERSION[cosign]=3.1.4
 URL[cosign]="https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64"
 SHA[cosign]=424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
 KIND[cosign]="bin"
-
-VERSION[flyctl]=0.4.123
-URL[flyctl]="https://github.com/superfly/flyctl/releases/download/v0.4.123/flyctl_0.4.123_Linux_x86_64.tar.gz"
-SHA[flyctl]=08d8b45e04ed99223cd938622407664dbed70abeda8f1d15ccc7f4b3e91094bc
-KIND[flyctl]="tgz:flyctl"
 
 VERSION[osv-scanner]=2.7.0
 URL[osv-scanner]="https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64"
