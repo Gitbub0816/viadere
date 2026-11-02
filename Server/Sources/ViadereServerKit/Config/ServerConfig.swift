@@ -141,7 +141,19 @@ public struct ServerConfig: Sendable {
     public var phoneLinkSendTo: PhoneNumber?
     /// When true, an inbound link text from a provider that offers no sender-verification indicator is refused as well. A provider that
     /// does offer one is always held to it: a spoof flag, or a missing flag, never binds a number (ADR-0027 §1.3).
+    /// `PHONE_LINK_REQUIRE_SENDER_INDICATOR`: **on by default in staging and production** (S1-A10-4: the indicator is mandatory, a hard fail);
+    /// turning it off there is an owner exception while O-2 is open. Off by default in development and tests.
     public var phoneLinkRequireSenderIndicator = false
+
+    /// Parses `PHONE_LINK_REQUIRE_SENDER_INDICATOR`; unset means `strict` (staging and production require the indicator). A typo refuses to boot.
+    static func phoneLinkRequireSenderIndicator(_ env: [String: String], strict: Bool) throws -> Bool {
+        switch (env["PHONE_LINK_REQUIRE_SENDER_INDICATOR"] ?? "").trimmingCharacters(in: .whitespaces).lowercased() {
+        case "": return strict
+        case "1", "true", "yes": return true
+        case "0", "false", "no": return false
+        default: throw ServerConfigError.invalid("PHONE_LINK_REQUIRE_SENDER_INDICATOR (true or false)")
+        }
+    }
     /// The number to text, or nil when this deployment has none (a messaging service without a number): linking is then unavailable.
     public var phoneLinkNumber: PhoneNumber? {
         phoneLinkSendTo ?? twilio.flatMap { PhoneNumber($0.fromNumber) } ?? mailerSendSMS.flatMap { PhoneNumber($0.fromNumber) }
@@ -354,7 +366,7 @@ public struct ServerConfig: Sendable {
             guard let number = PhoneNumber(raw) else { throw ServerConfigError.invalid("PHONE_LINK_SEND_TO (E.164)") }
             config.phoneLinkSendTo = number
         }
-        config.phoneLinkRequireSenderIndicator = ["1", "true", "yes"].contains((env["PHONE_LINK_REQUIRE_SENDER_INDICATOR"] ?? "").lowercased())
+        config.phoneLinkRequireSenderIndicator = try Self.phoneLinkRequireSenderIndicator(env, strict: production)
         if let raw = env["AUDIT_CHAIN_LEGACY_THROUGH_SEQ"], !raw.isEmpty {
             guard let seq = Int(raw), seq >= 0 else { throw ServerConfigError.invalid("AUDIT_CHAIN_LEGACY_THROUGH_SEQ") }
             config.auditLegacyThroughSeq = seq

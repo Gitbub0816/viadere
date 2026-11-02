@@ -234,6 +234,18 @@ final class PhoneLinkMOTests: XCTestCase {
         }
     }
 
+    /// S1-A10-4 / ADR-0027 §1.3: the sender indicator is mandatory. The shipped adapters report `unsupported`, so staging and production must
+    /// refuse such a text unless the owner explicitly turns the requirement off (an exception while O-2 is open).
+    func testStagingAndProductionRequireASenderIndicatorUnlessExplicitlyWaived() throws {
+        XCTAssertTrue(try ServerConfig.phoneLinkRequireSenderIndicator([:], strict: true), "required by default in staging and production")
+        XCTAssertFalse(try ServerConfig.phoneLinkRequireSenderIndicator([:], strict: false))
+        XCTAssertFalse(try ServerConfig.phoneLinkRequireSenderIndicator(["PHONE_LINK_REQUIRE_SENDER_INDICATOR": "0"], strict: true))
+        XCTAssertTrue(try ServerConfig.phoneLinkRequireSenderIndicator(["PHONE_LINK_REQUIRE_SENDER_INDICATOR": "TRUE"], strict: false))
+        XCTAssertThrowsError(try ServerConfig.phoneLinkRequireSenderIndicator(["PHONE_LINK_REQUIRE_SENDER_INDICATOR": "ture"], strict: true))
+        XCTAssertFalse(try ServerConfig.fromEnvironment(["ENVIRONMENT": "development"]).phoneLinkRequireSenderIndicator)
+        XCTAssertTrue(try ServerConfig.fromEnvironment(["ENVIRONMENT": "development", "PHONE_LINK_REQUIRE_SENDER_INDICATOR": "1"]).phoneLinkRequireSenderIndicator)
+    }
+
     func testAnOptedOutNumberCannotBeLinked() async throws {
         try await withHarness { h in
             let consumer = try await h.readyConsumer()
