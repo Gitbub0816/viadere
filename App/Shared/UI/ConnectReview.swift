@@ -32,18 +32,29 @@ struct ConnectReview: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 ViadereSectionHeader("What you're allowing")
-                ViadereRowGroup {
-                    let rows = PermissionCopy.rows(supported: profile.supportedPurposes,
-                                                   granted: Dictionary(uniqueKeysWithValues: vm.optIns.map { ($0, true) }))
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        PermissionToggleRow(row: row, isOn: Binding(
-                            get: { row.isLocked ? true : (row.purpose.isGrantedByDefault ? true : vm.optIns.contains(row.purpose)) },
-                            set: { _ in vm.toggleOptIn(row.purpose) }),
-                            editable: !row.isLocked && !row.purpose.isGrantedByDefault)
-                        if index < rows.count - 1 { ViadereHairline() }
+                // One chip per purpose (not a column of switches): locked chips are always on while connected; offers and rewards are
+                // the only ones to choose here, and they start off.
+                let rows = PermissionCopy.rows(supported: profile.supportedPurposes,
+                                               granted: Dictionary(uniqueKeysWithValues: vm.optIns.map { ($0, true) }))
+                ViadereCard(padding: ViadereSpace.m) {
+                    VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                        ViadereChipSet("What \(profile.safeName) can contact you about",
+                                       chips: rows.map { row in
+                                           ViadereChipSet<InteractionPurpose>.Chip(row.purpose, row.title,
+                                                                                   isLocked: row.isLocked || row.purpose.isGrantedByDefault,
+                                                                                   hint: row.detail)
+                                       },
+                                       isSelected: { purpose in purpose.isGrantedByDefault || !purpose.isRevocable || vm.optIns.contains(purpose) },
+                                       toggle: { vm.toggleOptIn($0) })
+                        ForEach(rows.filter { !$0.isLocked && !$0.purpose.isGrantedByDefault }) { row in
+                            Text("\(row.title): \(row.detail)")
+                                .font(ViadereType.footnote)
+                                .foregroundStyle(ViadereColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                Text("Security and account notices stay on while you're connected. Offers and rewards are off unless you choose. You can change any of this later.")
+                Text("Security, account notices, orders and support stay on while you're connected. Offers and rewards are off unless you choose. You can change any of this later.")
                     .font(ViadereType.footnote)
                     .foregroundStyle(ViadereColor.textTertiary)
                     .padding(.top, ViadereSpace.s)
@@ -59,26 +70,3 @@ struct ConnectReview: View {
         }
     }
 }
-
-/// One permission: title, plain-language detail and a custom switch. Locked rows read "Always on".
-struct PermissionToggleRow: View {
-    let row: PermissionCopy.Row
-    @Binding var isOn: Bool
-    let editable: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
-                Text(row.isLocked ? "Always on while connected" : row.detail)
-                    .font(ViadereType.footnote)
-                    .foregroundStyle(ViadereColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .toggleStyle(.viadere)
-        .disabled(!editable)
-        .padding(.vertical, ViadereSpace.xxs)
-    }
-}
-

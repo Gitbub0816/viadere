@@ -11,6 +11,7 @@ struct ApproveRequestSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingReport = false
     @State private var understoodFatigue = false
+    @State private var confirmingLeave = false
 
     private var isBusy: Bool { controller.phase == .working }
     private var captured: Bool { capture.isCaptured }
@@ -18,7 +19,8 @@ struct ApproveRequestSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ViadereGrabber()
+            // Once the person has worked through the warning, a stray pull must not throw that away: Close asks first.
+            ViadereSheetHandle(onClose: understoodFatigue && !isBusy ? { confirmingLeave = true } : nil)
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     header
@@ -41,7 +43,13 @@ struct ApproveRequestSheet: View {
         }
         .background(ViadereColor.background)
         .privacySensitive()
-        .interactiveDismissDisabled(isBusy)
+        .interactiveDismissDisabled(isBusy || understoodFatigue)
+        .confirmationDialog("Leave this request?", isPresented: $confirmingLeave, titleVisibility: .visible) {
+            Button("Leave", role: .destructive) { dismiss() }
+            Button("Keep reviewing", role: .cancel) {}
+        } message: {
+            Text("Nothing is approved or declined. It stays in Alerts until it expires.")
+        }
         .onDisappear { controller.closePresented() }
         .confirmationDialog("Report this request?", isPresented: $confirmingReport, titleVisibility: .visible) {
             Button("Report as suspicious", role: .destructive) { Task { await answer(.report) } }

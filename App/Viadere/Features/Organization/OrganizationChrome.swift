@@ -3,7 +3,7 @@ import ViadereCore
 import ViadereKit
 
 /// The context bar wired to the model, plus the "Showing {business}" banner when a push or link put another business on screen (C9.7).
-/// Every primary destination starts with it, so the selector, Add business and Settings are always in the same place.
+/// Every business-filtered tab starts with it, so the selector and Add business are always in the same place (You, the account tab, does not).
 struct OrganizationContextHeader: View {
     @Bindable var model: AppModel
     @State private var choosing = false
@@ -16,8 +16,7 @@ struct OrganizationContextHeader: View {
                 title: store.title, accessibilityValue: store.accessibilityValue, isFiltered: store.effective != .all,
                 openSelector: { choosing = true },
                 adjust: { delta in _ = store.adjust(by: delta) },
-                add: { model.addBusinessPresented = true },
-                account: { model.settingsPresented = true })
+                add: { model.addBusinessPresented = true })
             if let temporary = store.temporaryBusiness {
                 ViadereContextBanner(businessName: temporary.safeName) { _ = store.returnToSaved() }
                     .transition(.opacity)

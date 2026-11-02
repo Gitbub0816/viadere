@@ -123,10 +123,10 @@ struct RecoveryCodesView: View {
                     .buttonStyle(.viadere(.secondary))
             }
             .disabled(model.codes == nil || model.isScreenBeingCaptured)
-            Toggle(isOn: $model.confirmedSaved) {
-                Text("I saved these").font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+            // An explicit affirmation: a checkbox, not a switch.
+            ViadereCheckbox(isOn: $model.confirmedSaved) {
+                Text("I saved these codes somewhere safe")
             }
-            .toggleStyle(.viadere)
             .padding(.vertical, ViadereSpace.xs)
             Button(continueTitle, action: onContinue)
                 .buttonStyle(.viadere(.primary))

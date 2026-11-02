@@ -118,7 +118,11 @@ extension MockViadereAPI: OrganizationAPI {
 
     public func updatePreferences(business: BusinessID, _ update: BusinessPreferencesUpdate) async throws -> BusinessPreferences {
         try online()
-        try await checkVisible(business)
+        // Like the server (`PreferenceService.ownedRelationship`): any of the account's own connections, ended ones included, so a
+        // blocked business can be unblocked.
+        guard relationshipList.contains(where: { $0.business.id == business }) else {
+            throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+        }
         guard !update.isEmpty else { throw APIError.server(status: 422, code: .validationFailed, message: "Change at least one preference.") }
         var prefs = org.preferences[business] ?? BusinessPreferences(businessId: business)
         if let favorite = update.favorite { prefs.favorite = favorite }

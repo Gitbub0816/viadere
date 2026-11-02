@@ -22,6 +22,7 @@ struct MessagesView: View {
                         ViadereSearchField("Search conversations", text: Binding(get: { messages.searchQuery }, set: { messages.searchQuery = $0 }))
                     }
                     content
+                    archivedEntry
                     if let error = messages.errorMessage {
                         ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m)
                     }
@@ -91,6 +92,24 @@ struct MessagesView: View {
         }
     }
 
+    /// Archived threads were hidden for good before: this is the way back to them.
+    @ViewBuilder private var archivedEntry: some View {
+        let archived = messages.archived(context: context)
+        if !archived.isEmpty, messages.searchQuery.isEmpty {
+            ViadereRowGroup {
+                NavigationLink {
+                    ArchivedConversationsView(model: model)
+                } label: {
+                    ViadereRow("Archived", subtitle: archived.count == 1 ? "1 conversation" : "\(archived.count) conversations") {
+                        ViadereIconTile(systemName: "archivebox")
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, ViadereSpace.m)
+        }
+    }
+
     private func threadList(_ threads: [ConversationSummary]) -> some View {
         ViadereRowGroup {
             ForEach(Array(threads.enumerated()), id: \.element.id) { index, conversation in
@@ -107,6 +126,34 @@ struct MessagesView: View {
                     }
                     .accessibilityAction(named: Text("Archive")) { Task { await messages.setArchived(conversation.id, true) } }
                 if index < threads.count - 1 { ViadereHairline(inset: 56) }
+            }
+        }
+    }
+}
+
+/// Messages → Archived: threads hidden from the list (for this account only; the business is never told). Restore puts one back.
+private struct ArchivedConversationsView: View {
+    let model: AppModel
+
+    private var messages: MessagesViewModel { model.messages }
+
+    var body: some View {
+        let threads = messages.archived(context: model.organization.effective)
+        SubScreen(title: "Archived", subtitle: "Hidden from Messages. The business isn't told.", backTitle: "Messages") {
+            if threads.isEmpty {
+                ViadereEmptyState("Nothing archived", message: "Conversations you archive appear here.")
+            } else {
+                ViadereRowGroup {
+                    ForEach(Array(threads.enumerated()), id: \.element.id) { index, conversation in
+                        HStack(spacing: ViadereSpace.xs) {
+                            ConversationRow(conversation: conversation)
+                            Button("Restore") { Task { await messages.setArchived(conversation.id, false) } }
+                                .buttonStyle(.viadere(.quiet, fullWidth: false))
+                                .accessibilityLabel(Text("Restore the conversation with \(conversation.business.safeName)"))
+                        }
+                        if index < threads.count - 1 { ViadereHairline(inset: 56) }
+                    }
+                }
             }
         }
     }

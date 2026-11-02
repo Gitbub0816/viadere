@@ -73,6 +73,7 @@ struct ConnectView: View {
                 }
                 Task { await vm.handleScanned(payload) }
             } onClose: { showingScanner = false }
+            .viaderePullDownToDismiss() // the scanner closes with a downward pull, like a sheet
         }
         .sheet(item: $linkSession) { pending in
             LinkSessionSheet(controller: AppEnvironment.shared.link, pending: pending)

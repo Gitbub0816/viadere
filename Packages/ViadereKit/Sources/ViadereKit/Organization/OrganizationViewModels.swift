@@ -117,6 +117,41 @@ public final class BusinessesViewModel {
         }
     }
 
+    /// Optimistic interruption level for one business (Notifications → Business by business), rolled back when the server refuses.
+    /// Security checks and requests that need an answer are never quieted, whatever the level (`MutePolicy`).
+    public func setMute(_ id: BusinessID, _ level: MuteLevel) async {
+        guard let api, let index = directory.firstIndex(where: { $0.business.id == id }) else { return }
+        let previous = directory[index].preferences
+        directory[index].preferences.muteLevel = level
+        directory[index].preferences.muteUntil = nil
+        do {
+            apply(try await api.updatePreferences(business: id, BusinessPreferencesUpdate(muteLevel: level)))
+            errorMessage = nil
+        } catch {
+            if let i = directory.firstIndex(where: { $0.business.id == id }) { directory[i].preferences = previous }
+            errorMessage = message(for: error, "Couldn't save that change.")
+        }
+    }
+
+    /// Unblocks a business the customer blocked. The connection stays ended; it can be reconnected from its code afterwards.
+    @discardableResult
+    public func unblock(_ id: BusinessID) async -> Bool {
+        guard let api, directory.contains(where: { $0.business.id == id }) else { return false }
+        do {
+            apply(try await api.updatePreferences(business: id, BusinessPreferencesUpdate(blocked: false)))
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = message(for: error, "Couldn't unblock that business.")
+            return false
+        }
+    }
+
+    /// How many active businesses are quieted at `now` (the Notifications row's summary).
+    public func quietedCount(at now: Date) -> Int {
+        active.filter { $0.preferences.effectiveMute(at: now) != MuteLevel.none }.count
+    }
+
     /// Reflects preferences saved elsewhere (the business settings screen).
     public func apply(_ preferences: BusinessPreferences) {
         guard let index = directory.firstIndex(where: { $0.business.id == preferences.businessId }) else { return }

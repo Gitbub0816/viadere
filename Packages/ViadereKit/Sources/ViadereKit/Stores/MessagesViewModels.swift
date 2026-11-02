@@ -25,7 +25,14 @@ public final class MessagesViewModel {
         isLoading = conversations.isEmpty
         defer { isLoading = false }
         do {
-            conversations = try await services.api.conversations()
+            // Archived threads come too (they are only hidden from the main list), so they can be found and restored.
+            let threads: [ConversationSummary]
+            if let organization = services.organizationAPI {
+                threads = try await organization.conversations(business: nil, includeArchived: true)
+            } else {
+                threads = try await services.api.conversations()
+            }
+            conversations = threads
                 .sorted { ($0.lastMessageAt ?? .distantPast) > ($1.lastMessageAt ?? .distantPast) }
             errorMessage = nil
         } catch {
@@ -63,6 +70,13 @@ public final class MessagesViewModel {
             byBusiness[thread.business.id]?.1.append(thread)
         }
         return order.compactMap { byBusiness[$0].map { ConversationGroup(business: $0.0, threads: $0.1) } }
+    }
+
+    /// Archived threads for the business context, newest first (Messages → Archived). Restoring one puts it back in the list.
+    public func archived(context: OrganizationContext) -> [ConversationSummary] {
+        conversations.filter { thread in
+            thread.archived == true && (context.businessFilter == nil || thread.business.id == context.businessFilter)
+        }
     }
 
     public func unread(context: OrganizationContext) -> Int {

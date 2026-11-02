@@ -28,7 +28,7 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ViadereSpace.l) {
-                ViadereBackButton("Settings") { dismiss() }
+                ViadereBackButton("You") { dismiss() }
                 Text("Profile")
                     .font(ViadereType.display)
                     .foregroundStyle(ViadereColor.textPrimary)
