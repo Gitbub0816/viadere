@@ -9,7 +9,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 | Stage | Name | Artifacts | Authoring roles | Reviewer roles | Commit | Status |
 |---|---|---|---|---|---|---|
 | 0 | Discovery | `docs/architecture/CURRENT_STATE.md`, `docs/architecture/GAP_ANALYSIS.md`, `docs/product/SCOPE_LEDGER.md`, `docs/reviews/IMPLEMENTATION_LEDGER.md`; evidence reports A4, A5, A6, A8, A14 (kept outside the repository in `/tmp/claude-0/auth/stage0/`, not committed) | A0 (reconciliation, spot-checks), A4, A5, A6, A8, A14 (evidence reports) | Pending: A2 and A5 on security findings F-01 to F-03; A14 on scope; A7 on Android notes (Kotlin package not yet merged); owner approval of the current-state inventory (gate: "Current-state inventory approved") | 59bc991 | Written, awaiting review |
-| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `TRUST_BOUNDARIES.md`, `docs/architecture/ADR/*` (ADR-0001 implementation strategy; phase table; retention table; in-app phone-ownership proof; number matching; link service; webhook signature v2; evidence model for decisions; exception for api-held keys) | A1, A2, A3, A5, A10 | A2 and A3 for crypto/key/token/grant ADRs; A10 for retention; A0 for consistency | | Not started |
+| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0030 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md` | One Stage 1 author acting as A1, A2, A3, A5, A10 | Pending, per `STAGE1_REVIEW_REQUEST.md`: A2 and A3 (both required for ADR-0023, 0024, 0025, 0028 and recovery), A6/A7 (feasibility), A9 (copy), A10 (privacy), A5 peer or A4 (network), A4 (contracts); A0 consistency. Author may not approve. | recorded by A0 after commit | Written, awaiting review |
 | 2 | API + data contracts | `contracts/openapi/auth-delivery-v1.yaml`, event and webhook schemas, migrations, retention sweeps, webhook signature v2 in Core | A4, A8, A10 | A10 (privacy), A2, A13 (contract tests); Core change reviewed by A3 | | Not started |
 | 3 | Delivery engine | Delivery aggregate and state machine, magic-link and OTP transport, code delivery, queue handlers, SDKs (Swift, TypeScript), harness, `tests/security/` | A4, A8 | A2, A9 (copy), A13 | | Not started |
 | 4 | Native handoffs | iOS confirm-gated handoff, number-matching UI, equal Deny, Live Activity policy, notification routing fixes, watch classification, Android handoff from the Kotlin branch, UX copy | A6, A7, A9 | A9 (UX), A13 (real-device checks), A2 | | Not started |
@@ -35,7 +35,8 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 | Gate | Condition | State |
 |---|---|---|
 | Stage 0 exit | Current-state inventory approved | Not yet approved; documents written |
-| Stage 1 entry | Stage 0 outputs reviewed | Blocked on the line above |
+| Stage 1 entry | Stage 0 outputs reviewed | Stage 1 drafted in parallel at the orchestrator's direction; Stage 0 review still pending |
+| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet; review request filed |
 | Production | Owner approval after release gates | Not applicable; no agent deploys to production |
 
 ## Open items carried to Stage 1
@@ -44,3 +45,24 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 2. Owner questions O-1 to O-6 (see `GAP_ANALYSIS.md` section 8 and `SCOPE_LEDGER.md` section 5).
 3. Unverified live settings listed in `CURRENT_STATE.md` section 12 need an operator with Azure, GitHub and Cloudflare access.
 4. THREAT_MODEL.md and ADR-0001 are spec §16 discovery outputs that belong to Stage 1 and are not written yet.
+
+## Stage 1 record
+
+Owner rulings applied after Stage 0: O-1 (Kotlin allowed; CLAUDE.md rule 4), O-3 (signed device decisions and approval-result JWS are high-value audit evidence; ADR-0026), O-6 (household delegation and customer profiles are baseline; "first-party actions" = existing first-party surfaces; THREAT_MODEL §1.4), decision 9 phone proof (ADR-0027). Still open: O-4 (GHCR visibility), O-5 (live Fly/Neon/GCP resources), O-2 narrowed to carrier behavior for customer-originated texts.
+
+| Item | Stage 1 resolution |
+|---|---|
+| F-01 | Exception recorded (CLAUDE.md row, ADR-0028 §1 migration plan); authority keys never on ordinary identities |
+| F-02, F-03 | Design in ADR-0028 §6-§7; implemented in Stage 6 |
+| F-04, F-22 | ADR-0025 |
+| F-05 | ADR-0022 §2-§3 |
+| F-06 | ADR-0027 |
+| F-07 | ADR-0026 |
+| F-08 | ADR-0021 §4 |
+| F-10, F-11 | ADR-0029 |
+| F-12 | ADR-0022 §1, ADR-0023 §1 (push MFA stays business-verified; privacy rule kept) |
+| F-14, F-15, F-16, F-25 | ADR-0022 §2.5, §5.5, §8 (UI work in Stage 4) |
+| F-19 | ADR-0020 §3 (RFC 9421 for live keys) |
+| F-23 | ADR-0023 §2 (JOSE profile; standard primitives only), for A3 review |
+
+Code claims re-verified by the Stage 1 author before relying on them: `Infra/azure/locals.tf` (`kv_keys`, `key_grants`, subnets), `identity.tf` (deploy identity roles and federated subject), `containerapps.tf` (internal ingress, `allow_insecure_connections`), `Services/PhoneLinkService.swift` (SMS OTP body), `Security/WebhookSignature.swift` (v1 MAC), `Approve/ApproveSupport.swift` (generic approve push, no request id), `docs/SECURITY.md` §2.26, §2.54-§2.58, §2.77, §2.95, `docs/ops/DATA-INVENTORY.md` §7.
