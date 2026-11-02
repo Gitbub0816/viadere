@@ -98,7 +98,7 @@ public struct StagingDemoCommand: AsyncCommand {
         context.console.print(owner.created ? "Console owner created (Owner of \(StagingDemo.displayName))." : "Console owner already exists (Owner of \(StagingDemo.displayName)).")
         context.console.print("One-time passkey enrollment link (valid 1 hour, shown once; earlier links are revoked):")
         context.console.print("  \(link)")
-        context.console.print("Open it, create a passkey, then sign in at \(demo.ctx.config.publicBaseURL)/dashboard/login.")
+        context.console.print("Open it, create a passkey, then sign in at \((demo.ctx.config.dashboardOrigin ?? demo.ctx.config.relyingPartyOrigin))/dashboard/login.")
     }
 
     static func seedBrandKit(_ demo: StagingDemo, businessId: UUID, runtime: BrandKitRuntime, context: CommandContext) async throws {
@@ -110,7 +110,7 @@ public struct StagingDemoCommand: AsyncCommand {
         context.console.print("")
         context.console.print(seed.createdKit ? "Brand Kit \"\(StagingDemo.kitKey)\" saved and sent for Viadere review."
                                               : "Brand Kit \"\(StagingDemo.kitKey)\" already exists (left unchanged).")
-        context.console.print("Operator review (any operator, fresh passkey): \(demo.ctx.config.publicBaseURL)\(OperatorBrand.path)")
+        context.console.print("Operator review (any operator, fresh passkey): \((demo.ctx.config.dashboardOrigin ?? demo.ctx.config.relyingPartyOrigin))\(OperatorBrand.path)")
         context.console.print("  1. Approve the logo image (asset \(seed.asset.id!.uuidString.lowercased())).")
         context.console.print("  2. Approve the kit (kit \(seed.kit.id!.uuidString.lowercased())); a kit can only be approved after its images.")
     }
@@ -125,7 +125,7 @@ public struct StagingDemoCommand: AsyncCommand {
         if let revision = seed.submitted {
             context.console.print("Loop \"\(seed.draft.loopKey)\" (template \(StagingDemo.loopTemplate), \(look)) submitted: revision \(revision.revision), "
                                   + "state \(revision.state), review \(revision.requiredReview).")
-            context.console.print("Operator review: \(demo.ctx.config.publicBaseURL)\(OperatorLoops.base)/revisions/\(revision.id!.uuidString.lowercased())")
+            context.console.print("Operator review: \((demo.ctx.config.dashboardOrigin ?? demo.ctx.config.relyingPartyOrigin))\(OperatorLoops.base)/revisions/\(revision.id!.uuidString.lowercased())")
         } else {
             context.console.print("Loop \"\(seed.draft.loopKey)\" (\(look)) is already waiting for review or published; nothing submitted.")
         }
@@ -134,7 +134,7 @@ public struct StagingDemoCommand: AsyncCommand {
 
     static func printStatus(_ demo: StagingDemo, businessId: UUID, context: CommandContext) async throws {
         let status = try await demo.status(businessId: businessId)
-        let base = demo.ctx.config.publicBaseURL
+        let base = (demo.ctx.config.dashboardOrigin ?? demo.ctx.config.relyingPartyOrigin)
         context.console.print("")
         context.console.print("Status")
         if let kit = status.kit {
