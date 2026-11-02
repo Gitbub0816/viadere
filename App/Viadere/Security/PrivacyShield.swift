@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ViadereKit
 
 /// Hides the app in the app switcher.
 ///
@@ -30,11 +31,8 @@ final class PrivacyShield {
         guard cover == nil, let window = keyWindow else { return }
         let view = UIView(frame: window.bounds)
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.backgroundColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.07, green: 0.07, blue: 0.067, alpha: 1)
-                : UIColor(red: 0.961, green: 0.949, blue: 0.925, alpha: 1)
-        }
+        // The person's appearance theme (Daybreak ivory, Midnight black, ...): the cover matches the app it hides.
+        view.backgroundColor = UIColor { traits in UIColor(viadereSwatch: traits.viadereTheme.palette.background) }
         if let image = UIImage(named: "BrandMark") {
             let imageView = UIImageView(image: image)
             imageView.contentMode = .scaleAspectFit

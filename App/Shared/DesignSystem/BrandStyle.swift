@@ -4,10 +4,13 @@ import ViadereKit
 
 // MARK: - Brand Kit style (WP-2.6)
 //
-// Maps a verified, contrast-clamped `BrandAppearanceStyle` (ViadereKit) to design-system colors and shapes. Rules:
-// * Only the roles a kit may color exist here (primary, on-primary, secondary, accent, surface); there is no API for text, labels,
-//   badges, risk chips, attribution, confirmation or outcome colors: those use `ViadereColor` / `BrandStyle.protected*`, always neutral.
-// * Light and dark come from the clamped palettes (`ContrastPolicy`), so a token that fails contrast is already Viadere's own.
+// Maps a verified Brand Kit (`BrandAppearanceStyle`, ViadereKit) to design-system colors and shapes, **per appearance theme**: the kit's
+// tokens are re-resolved over the theme on screen (`ThemedBrandPalette`: `ContrastPolicy` clamp, lighter/darker derived variants, tinted
+// canvas and cards), so a business's space follows Daybreak, Folio, Midnight, Lantern and the rest. Rules:
+// * Only the roles a kit may color exist here (primary, on-primary, secondary, accent, surface, and the canvas/card tints of its space);
+//   there is no API for the business name, verified badge, risk chips, attribution, approve/deny, confirmation or outcome colors: those use
+//   `ViadereColor` / `BrandStyle.protected*`, always the theme's own.
+// * Security surfaces set `.viadereProtectedSurface()` (neutral style for everything inside), whatever space they appear in.
 // * Frames are drawn behind content, never over it, and are decorative (hidden from accessibility).
 
 extension BrandColor {
@@ -24,9 +27,12 @@ extension Color {
         self.init(viadereLight: light.rgbValue, dark: dark.rgbValue)
     }
 
-    /// A dynamic color with optional brand values; a `nil` side uses `fallback`'s Viadere hex for that appearance.
-    init(brandLight light: BrandColor?, dark: BrandColor?, fallbackLight: UInt32, fallbackDark: UInt32) {
-        self.init(viadereLight: light?.rgbValue ?? fallbackLight, dark: dark?.rgbValue ?? fallbackDark)
+    /// A light / dark brand color pair (already clamped); a `nil` side draws the current theme's accent.
+    static func brandAccent(light: BrandColor?, dark: BrandColor?) -> Color {
+        Color.viadereDynamic { theme in
+            guard let color = theme.isDark ? dark : light else { return theme.palette.accent }
+            return ThemeSwatch(color: color)
+        }
     }
 }
 
@@ -39,16 +45,27 @@ public struct BrandStyle: Equatable {
 
     public var isBranded: Bool { style.source == .brandKit }
 
-    private var light: ResolvedPalette { style.palette.light }
-    private var dark: ResolvedPalette { style.palette.dark }
+    /// The kit's tokens to resolve per theme (`nil` = neutral).
+    private var tokens: BrandTokens? { style.themeTokens }
 
-    /// Fills of branded, non-protected elements (page accents, the branded header band, secondary buttons on the business home).
-    public var primary: Color { isBranded ? Color(brandLight: light.primary, dark: dark.primary) : ViadereColor.primaryFill }
-    public var onPrimary: Color { isBranded ? Color(brandLight: light.onPrimary, dark: dark.onPrimary) : ViadereColor.onPrimary }
-    public var secondary: Color { isBranded ? Color(brandLight: light.secondary, dark: dark.secondary) : ViadereColor.textSecondary }
-    public var accent: Color { isBranded ? Color(brandLight: light.accent, dark: dark.accent) : ViadereColor.accent }
-    public var surface: Color { isBranded ? Color(brandLight: light.surface, dark: dark.surface) : ViadereColor.surface }
-    public var onSurface: Color { isBranded ? Color(brandLight: light.onSurface, dark: dark.onSurface) : ViadereColor.textPrimary }
+    /// One role of the kit in the current theme.
+    private func role(_ pick: @escaping @Sendable (ThemedBrandPalette) -> BrandColor) -> Color {
+        let tokens = tokens
+        return Color.viadereDynamic { theme in ThemeSwatch(color: pick(ViadereThemeRuntime.shared.brand(tokens, theme: theme))) }
+    }
+
+    /// Fills of branded, non-protected elements: the header band, the business space's own actions.
+    public var primary: Color { isBranded ? role({ $0.primary }) : ViadereColor.primaryFill }
+    public var onPrimary: Color { isBranded ? role({ $0.onPrimary }) : ViadereColor.onPrimary }
+    public var secondary: Color { isBranded ? role({ $0.secondary }) : ViadereColor.textSecondary }
+    /// Icons, section rules and accent lines in the business space.
+    public var accent: Color { isBranded ? role({ $0.accent }) : ViadereColor.accent }
+    public var surface: Color { isBranded ? role({ $0.surface }) : ViadereColor.surface }
+    public var onSurface: Color { isBranded ? role({ $0.onSurface }) : ViadereColor.textPrimary }
+    /// The business space's page ground: the theme background with a breath of the brand color (untinted in high contrast).
+    public var canvas: Color { isBranded ? role({ $0.canvas }) : ViadereColor.background }
+    /// Cards and rows in the business space.
+    public var card: Color { isBranded ? role({ $0.card }) : ViadereColor.surface }
 
     public var cornerRadius: CGFloat {
         switch style.radius {
@@ -79,7 +96,8 @@ private struct BrandStyleKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// The business home's Brand Kit style; neutral everywhere else.
+    /// The Brand Kit style of the business space being shown (its page, thread, offers); neutral everywhere else and inside every
+    /// `.viadereProtectedSurface()`.
     public var brandStyle: BrandStyle {
         get { self[BrandStyleKey.self] }
         set { self[BrandStyleKey.self] = newValue }
@@ -178,9 +196,69 @@ public struct BrandAccentLine: View {
     public var body: some View {
         if let decoration, decoration.accentLight != nil || decoration.accentDark != nil {
             Capsule()
-                .fill(Color(brandLight: decoration.accentLight, dark: decoration.accentDark, fallbackLight: 0x8C7550, fallbackDark: 0xCDB993))
+                .fill(Color.brandAccent(light: decoration.accentLight, dark: decoration.accentDark))
                 .frame(width: 3)
                 .accessibilityHidden(true)
         }
     }
+}
+
+/// A business's monogram drawn in the band's own ink (no logo yet, or none): initials only, never a verified mark (the badge is drawn
+/// by the caller in protected colors).
+public struct BrandMonogram: View {
+    let name: String
+    let ink: Color
+    let size: CGFloat
+
+    public init(name: String, ink: Color, size: CGFloat = 72) {
+        self.name = name
+        self.ink = ink
+        self.size = size
+    }
+
+    private var initials: String {
+        let words = name.split(whereSeparator: { $0 == " " || $0 == "-" }).prefix(2)
+        return words.compactMap(\.first).map { String($0).uppercased() }.joined()
+    }
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+        Text(initials)
+            .font(.system(size: size * 0.36, weight: .semibold, design: .default))
+            .foregroundStyle(ink)
+            .frame(width: size, height: size)
+            .overlay(shape.strokeBorder(ink.opacity(0.5), lineWidth: 1.5))
+            .accessibilityHidden(true)
+    }
+}
+
+/// The business's own (non-security) actions inside its space: the kit's primary fill and ink; Viadere's secondary button when neutral.
+public struct BrandButtonStyle: ButtonStyle {
+    let brand: BrandStyle
+
+    public init(_ brand: BrandStyle) { self.brand = brand }
+
+    @ViewBuilder
+    public func makeBody(configuration: Configuration) -> some View {
+        if brand.isBranded {
+            let shape = RoundedRectangle(cornerRadius: ViadereRadius.button, style: .continuous)
+            configuration.label
+                .font(ViadereType.headline)
+                .foregroundStyle(brand.onPrimary)
+                .lineLimit(1)
+                .padding(.horizontal, 22)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background { shape.fill(brand.primary).opacity(configuration.isPressed ? 0.86 : 1) }
+                .contentShape(shape)
+                .scaleEffect(configuration.isPressed ? 0.985 : 1)
+                .animation(ViadereMotion.quick, value: configuration.isPressed)
+        } else {
+            ViadereButtonStyle(.secondary).makeBody(configuration: configuration)
+        }
+    }
+}
+
+extension ButtonStyle where Self == BrandButtonStyle {
+    /// `.buttonStyle(.brand(style))`: never on an approval, sign-in, payment or verification action.
+    public static func brand(_ style: BrandStyle) -> BrandButtonStyle { BrandButtonStyle(style) }
 }

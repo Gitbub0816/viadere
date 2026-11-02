@@ -9,6 +9,8 @@ struct ViadereApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: AppEnvironment.shared.model, capture: AppEnvironment.shared.captureObserver)
+                // The person's appearance themes (Settings → Appearance); changes apply at once.
+                .viadereAppearance(ViadereThemeRuntime.model)
                 .onOpenURL { url in
                     Task { await AppEnvironment.shared.model.open(url: url) }
                 }

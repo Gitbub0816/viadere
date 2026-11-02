@@ -124,22 +124,22 @@ struct WalletPassDetailView: View {
             HStack {
                 Image(systemName: presentation.symbol)
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color(red: 0.788, green: 0.663, blue: 0.431))
+                    .foregroundStyle(ViadereBrand.passLabel)
                     .accessibilityHidden(true)
                 Text(presentation.kindTitle.uppercased())
                     .font(ViadereType.caption)
-                    .foregroundStyle(Color(red: 0.788, green: 0.663, blue: 0.431))
+                    .foregroundStyle(ViadereBrand.passLabel)
                 Spacer()
                 if passes.showsBetaLabel {
-                    Text("BETA").font(ViadereType.caption).foregroundStyle(Color(red: 0.788, green: 0.663, blue: 0.431).opacity(0.8))
+                    Text("BETA").font(ViadereType.caption).foregroundStyle(ViadereBrand.passLabel.opacity(0.8))
                 }
             }
             Text(presentation.businessName)
                 .font(ViadereType.title)
-                .foregroundStyle(Color(red: 0.969, green: 0.953, blue: 0.922))
+                .foregroundStyle(ViadereBrand.passForeground)
             Text(presentation.statusText)
                 .font(ViadereType.subhead)
-                .foregroundStyle(Color(red: 0.969, green: 0.953, blue: 0.922).opacity(0.75))
+                .foregroundStyle(ViadereBrand.passForeground.opacity(0.75))
         }
         .padding(ViadereSpace.l)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,7 +150,7 @@ struct WalletPassDetailView: View {
             }
         }
         // Charcoal, ivory and champagne: the same colors the server puts on the pass itself.
-        .background(shape.fill(Color(red: 0.122, green: 0.122, blue: 0.122)))
+        .background(shape.fill(ViadereBrand.passBackground))
         .clipShape(shape)
         .overlay(shape.strokeBorder(ViadereColor.hairline, lineWidth: 1))
         .accessibilityElement(children: .combine)

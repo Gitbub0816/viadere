@@ -239,9 +239,23 @@ extension StagingDemo {
     struct Status {
         var kit: BrandKitRecord?
         var logo: BrandAssetRecord?
+        /// The newest brand manifest version (what `GET /v1/businesses/{id}/brand` serves while it is active).
+        var manifest: BrandManifestRecord?
+        var brandReach: BrandReach = .notPublished
         var draft: LoopStudioDraftRecord?
         var revision: LoopRevisionRecord?
         var publication: LoopPublicationRecord?
+    }
+
+    /// What a connected device receives for the demo business's branding.
+    enum BrandReach: Equatable {
+        /// No active manifest: devices render neutral (nothing approved yet, a withdrawal, or no signing key when the kit was approved).
+        case notPublished
+        /// No `brand-manifest` signing key on this server: devices render neutral.
+        case signingUnavailable
+        /// Devices get a manifest signed with `kid` (compare with the app build's `VIADERE_BRAND_MANIFEST_KEYS`); the logo comes from
+        /// `assetHost`, or cannot reach devices at all when it is `nil` (`ASSET_DOMAIN` unset).
+        case branded(kid: String, assetHost: String?)
     }
 
     func status(businessId: UUID) async throws -> Status {
@@ -261,6 +275,15 @@ extension StagingDemo {
                     .sort(\.$revision, .descending).first()
             }
         }
-        return Status(kit: kit, logo: logo, draft: draft, revision: revision, publication: publication)
+        let manifest = try await BrandManifestRecord.query(on: db).filter(\.$businessId == businessId).sort(\.$version, .descending).first()
+        let reach: BrandReach
+        if !ctx.config.brandKits.signingAvailable {
+            reach = .signingUnavailable
+        } else if let manifest, manifest.status == "active", let kid = manifest.kid, (manifest.notAfter ?? .distantPast) > ctx.now {
+            reach = .branded(kid: kid, assetHost: ctx.config.brandKits.assetDomain?.host)
+        } else {
+            reach = .notPublished
+        }
+        return Status(kit: kit, logo: logo, manifest: manifest, brandReach: reach, draft: draft, revision: revision, publication: publication)
     }
 }

@@ -18,6 +18,11 @@ struct ApprovalSheet: View {
     @State private var multiSelection: Set<String> = []
 
     var body: some View {
+        // A security surface: Viadere's own look in every theme, never a business's Brand Kit (anti-spoofing, SECURITY.md §2.93).
+        sheetBody.viadereProtectedSurface()
+    }
+
+    @ViewBuilder private var sheetBody: some View {
         VStack(spacing: 0) {
             ViadereGrabber()
             ScrollView {

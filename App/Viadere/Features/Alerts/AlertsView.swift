@@ -83,7 +83,8 @@ struct AlertsView: View {
         } else {
             VStack(spacing: ViadereSpace.s) {
                 ForEach(items) { entry in
-                    AlertCard(entry: entry, canAct: alerts.canAct(entry), now: model.services.clock()) {
+                    AlertCard(entry: entry, canAct: alerts.canAct(entry), now: model.services.clock(),
+                              brand: BrandStyle(AlertBrandStyle.make(entry, brand: model.services.brandKits))) {
                         Task { await AlertOpener.open(entry, model: model) }
                     }
                 }
@@ -156,6 +157,9 @@ struct AlertCard: View {
     let entry: AlertEntry
     let canAct: Bool
     let now: Date
+    /// The business's kit for this card (`AlertBrandStyle`: informational updates only; neutral for every request, approval,
+    /// verification and security item). Draws an accent strip beside the neutral content.
+    var brand: BrandStyle = .neutral
     let open: () -> Void
 
     var body: some View {
@@ -202,7 +206,12 @@ struct AlertCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .viadereSurface()
             .overlay(alignment: .leading) {
-                if canAct { Capsule().fill(ViadereColor.accent).frame(width: 3).padding(.vertical, ViadereSpace.l) }
+                // The leading strip: the business's kit color on its informational updates, else Viadere's accent while actionable.
+                if brand.isBranded {
+                    Capsule().fill(brand.primary).frame(width: 4).padding(.vertical, ViadereSpace.l).accessibilityHidden(true)
+                } else if canAct {
+                    Capsule().fill(ViadereColor.accent).frame(width: 3).padding(.vertical, ViadereSpace.l)
+                }
             }
             .contentShape(Rectangle())
         }

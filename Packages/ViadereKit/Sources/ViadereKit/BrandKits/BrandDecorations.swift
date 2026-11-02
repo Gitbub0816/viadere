@@ -13,6 +13,8 @@ public struct MessageCardDecoration: Sendable, Hashable {
     public var accentDark: BrandColor?
     /// The palette the name and verified badge use: always the protected (neutral) one.
     public var identityPalette: BrandStyleResolution
+    /// The kit's style for the conversation space (canvas, business bubbles); neutral when unbranded. Never the sender line.
+    public var style: BrandAppearanceStyle = .neutral
 
     public static func make(business: BusinessSummary, brand: BrandKitStore?) -> MessageCardDecoration {
         let resolved = brand?.resolution(for: business.id, surface: .messageCard) ?? .neutral(business.id)
@@ -27,12 +29,13 @@ public struct MessageCardDecoration: Sendable, Hashable {
             dark = palette.overriddenDark.contains(role) ? nil : color(palette.dark)
         }
         return MessageCardDecoration(senderName: business.safeName, isVerified: business.isVerified, accentLight: light, accentDark: dark,
-                                     identityPalette: .neutral)
+                                     identityPalette: .neutral, style: resolved.kit == nil ? .neutral : resolved.style)
     }
 }
 
-/// The branded business home (WP-2.6): the kit's clamped style, a registered frame and the verified logo, around Viadere's own modules.
-/// The verified profile block (name, verified badge, handle), every action, wording and navigation stay neutral and come from Viadere.
+/// The branded business home (WP-2.6): the kit's style (re-resolved per appearance theme, `headerBand(in:)`, `ThemedBrandPalette`), a
+/// registered frame and the verified logo, around Viadere's own modules. The verified profile block (name, verified badge, handle),
+/// wording, navigation and every security surface stay neutral and come from Viadere.
 public struct BusinessHomeDecoration: Sendable, Hashable {
     public var style: BrandAppearanceStyle
     /// Verified logo bytes (`logo`, else `mark`) from the cache; `nil` = Viadere's monogram avatar.

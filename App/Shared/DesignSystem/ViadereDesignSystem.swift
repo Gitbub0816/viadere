@@ -10,36 +10,50 @@
 //   • Restrained motion: short ease-outs and critically damped springs; honours Reduce Motion.
 //
 //  Requires iOS 17+. Depends on ViadereMark.swift (ViadereBrand, ViadereMark, Color(viadereHex:)).
-//  Colours mirror App/Resources/Assets.xcassets/Colors so either source can be used.
+//  Colours come from the appearance themes (ViadereThemes.swift); the asset catalog colors match the Daybreak / Nightfall pair.
 //
 
 import SwiftUI
+import ViadereCore
+import ViadereKit
 #if canImport(UIKit)
 import UIKit
 #endif
 
-// MARK: - Colour tokens (appearance-aware)
+// MARK: - Colour tokens (theme-aware)
 
+/// The design system's colors. Each one is a role of the current appearance theme (`ViadereThemes.swift`, ViadereKit `AppearanceTheme`:
+/// Daybreak, Folio, Sage, Beacon by day; Nightfall, Midnight, Ember, Lantern by night) and resolves per light / dark appearance. Screens
+/// read these roles and never hex values, so every theme, and every business space themed by a Brand Kit, renders consistently.
 public enum ViadereColor {
-    public static let background     = Color(viadereLight: 0xF5F2EC, dark: 0x121211)
-    public static let surface        = Color(viadereLight: 0xFCFBF8, dark: 0x1C1B1A)
-    public static let surfaceRaised  = Color(viadereLight: 0xFFFFFF, dark: 0x262523)
+    public static let background     = Color.viadere(.background)
+    public static let surface        = Color.viadere(.surface)
+    public static let surfaceRaised  = Color.viadere(.surfaceRaised)
     /// Recessed fill for tracks (segmented control, slider, switch off).
-    public static let track          = Color(viadereLight: 0xEAE6DF, dark: 0x2A2927)
-    public static let textPrimary    = Color(viadereLight: 0x1F1E1C, dark: 0xF3F0EA)
-    public static let textSecondary  = Color(viadereLight: 0x6B675F, dark: 0xA29D94)
-    public static let textTertiary   = Color(viadereLight: 0x9A958C, dark: 0x6F6B64)
-    /// Champagne accent. Deeper in light mode so text stays readable on ivory.
-    public static let accent         = Color(viadereLight: 0x8C7550, dark: 0xCDB993)
-    public static let accentSoft     = Color(viadereLight: 0xC2AE8E, dark: 0xCDB993, lightOpacity: 0.16, darkOpacity: 0.14)
-    /// Primary action fill: charcoal on light, ivory on dark.
-    public static let primaryFill    = Color(viadereLight: 0x1F1E1C, dark: 0xF3F0EA)
-    public static let onPrimary      = Color(viadereLight: 0xF5F2EC, dark: 0x1F1E1C)
-    public static let danger         = Color(viadereLight: 0xA3412E, dark: 0xE08068)
-    public static let success        = Color(viadereLight: 0x4C7458, dark: 0x8DBB98)
-    public static let hairline       = Color(viadereLight: 0x1F1E1C, dark: 0xF3F0EA, lightOpacity: 0.10, darkOpacity: 0.12)
-    public static let switchOn       = Color(viadereLight: 0x1F1E1C, dark: 0xCDB993)
-    public static let knob           = Color(viadereLight: 0xFFFFFF, dark: 0xF5F2EC)
+    public static let track          = Color.viadere(.track)
+    public static let textPrimary    = Color.viadere(.textPrimary)
+    public static let textSecondary  = Color.viadere(.textSecondary)
+    /// Incidental text only (placeholders, timestamps, captions beside a primary label): 3:1 (4.5:1 in the high-contrast themes).
+    public static let textTertiary   = Color.viadere(.textTertiary)
+    /// Champagne accent (links, focus, verification). Deeper on light themes so text stays readable.
+    public static let accent         = Color.viadere(.accent)
+    public static let accentSoft     = Color.viadere(.accentSoft)
+    /// Primary action fill: charcoal ink by day, ivory (or champagne in Midnight) by night.
+    public static let primaryFill    = Color.viadere(.primaryFill)
+    public static let onPrimary      = Color.viadere(.onPrimary)
+    public static let danger         = Color.viadere(.danger)
+    public static let success        = Color.viadere(.success)
+    public static let warning        = Color.viadere(.warning)
+    public static let hairline       = Color.viadere(.hairline)
+    public static let switchOn       = Color.viadere(.switchOn)
+    public static let knob           = Color.viadere(.knob)
+    /// Card shadow: barely there on light themes, none on dark ones.
+    public static let shadow         = Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.palette.shadowOpacity) }
+    /// The switch knob's small lift (all themes: the knob must read as a separate piece).
+    public static let knobShadow     = Color.viadereDynamic { ThemeSwatch(color: BrandColor("#000000")!, opacity: $0.isDark ? 0.4 : 0.14) }
+    /// Tinted fills behind danger / success text (the opacity is part of the palette contract tested in ViadereKit).
+    public static let dangerTint     = Color.viadereDynamic { ThemeSwatch(color: $0.palette.danger.color, opacity: ThemePalette.dangerTintOpacity) }
+    public static let successTint    = Color.viadereDynamic { ThemeSwatch(color: $0.palette.success.color, opacity: ThemePalette.successTintOpacity) }
 }
 
 extension Color {
@@ -202,7 +216,7 @@ private struct ViadereButtonBody: View {
         switch kind {
         case .primary: return ViadereColor.primaryFill
         case .secondary: return ViadereColor.surface
-        case .destructive: return ViadereColor.danger.opacity(0.08)
+        case .destructive: return ViadereColor.dangerTint
         case .quiet: return .clear
         }
     }
@@ -283,14 +297,15 @@ public struct ViadereTextField: View {
 
 public struct ViadereSurfaceModifier: ViewModifier {
     let radius: CGFloat
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.brandStyle) private var brand
 
     public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
             .background(
-                shape.fill(ViadereColor.surface)
-                    .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.045), radius: 14, x: 0, y: 6)
+                // Inside a branded business space cards take the space's tinted card color; elsewhere the theme surface.
+                shape.fill(brand.isBranded ? brand.card : ViadereColor.surface)
+                    .shadow(color: ViadereColor.shadow, radius: 14, x: 0, y: 6)
             )
             .overlay(shape.strokeBorder(ViadereColor.hairline, lineWidth: 1))
     }
@@ -304,7 +319,16 @@ extension View {
 
     /// Ivory / near-black screen background, edge to edge.
     public func viadereScreenBackground() -> some View {
-        background(ViadereColor.background.ignoresSafeArea())
+        modifier(ViadereScreenBackground())
+    }
+}
+
+/// The screen ground: the theme background, or a business space's brand-tinted canvas (`BrandStyle.canvas`).
+private struct ViadereScreenBackground: ViewModifier {
+    @Environment(\.brandStyle) private var brand
+
+    func body(content: Content) -> some View {
+        content.background((brand.isBranded ? brand.canvas : ViadereColor.background).ignoresSafeArea())
     }
 }
 
@@ -340,12 +364,14 @@ public struct ViadereChevron: View {
 /// 36-pt rounded tile holding an SF Symbol: the standard row leading element.
 public struct ViadereIconTile: View {
     private let systemName: String
+    @Environment(\.brandStyle) private var brand
     public init(systemName: String) { self.systemName = systemName }
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         Image(systemName: systemName)
             .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(ViadereColor.textPrimary)
+            // In a branded business space icons take the kit's accent (clamped for the theme); elsewhere the theme's ink.
+            .foregroundStyle(brand.isBranded ? brand.accent : ViadereColor.textPrimary)
             .frame(width: 36, height: 36)
             .background(shape.fill(ViadereColor.surfaceRaised))
             .overlay(shape.strokeBorder(ViadereColor.hairline, lineWidth: 1))
@@ -441,7 +467,9 @@ private struct ViadereSwitchTrack: View {
                 .overlay(Capsule().strokeBorder(ViadereColor.hairline, lineWidth: isOn ? 0 : 1))
             Circle()
                 .fill(ViadereColor.knob)
-                .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
+                // The hairline outlines the knob (a real border in the high-contrast themes, a whisper elsewhere).
+                .overlay(Circle().strokeBorder(ViadereColor.hairline, lineWidth: 1))
+                .shadow(color: ViadereColor.knobShadow, radius: 2, x: 0, y: 1)
                 .padding(3)
         }
         .frame(width: 50, height: 30)
@@ -483,7 +511,7 @@ public struct ViadereSegmented<Value: Hashable>: View {
                             if selected {
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                                     .fill(ViadereColor.surfaceRaised)
-                                    .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 1)
+                                    .shadow(color: ViadereColor.shadow, radius: 3, x: 0, y: 1)
                                     .matchedGeometryEffect(id: "pill", in: namespace)
                             }
                         }
@@ -550,8 +578,8 @@ public struct ViadereBadge: View {
         switch kind {
         case .verified: return ViadereColor.accentSoft
         case .neutral, .pending: return ViadereColor.track
-        case .success: return ViadereColor.success.opacity(0.10)
-        case .danger: return ViadereColor.danger.opacity(0.08)
+        case .success: return ViadereColor.successTint
+        case .danger: return ViadereColor.dangerTint
         }
     }
 }
@@ -660,6 +688,8 @@ public struct ViadereSlideToConfirm: View {
         .accessibilityLabel(Text(confirmed ? confirmedTitle : title))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { confirm() }
+        // A security control: never takes a business's Brand Kit style, whatever space it appears in.
+        .viadereProtectedSurface()
     }
 
     private func confirm() {
@@ -689,6 +719,7 @@ public struct ViadereApprovalButtons: View {
             Button(denyTitle, action: onDeny).buttonStyle(.viadere(.destructive))
             Button(approveTitle, action: onApprove).buttonStyle(.viadere(.primary))
         }
+        .viadereProtectedSurface()
     }
 }
 
@@ -765,6 +796,7 @@ public struct ViadereApprovalCard: View {
                 }
             }
         }
+        .viadereProtectedSurface()
     }
 }
 

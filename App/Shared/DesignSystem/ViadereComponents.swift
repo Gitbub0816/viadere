@@ -313,7 +313,7 @@ public struct ViadereNotice: View {
     private var tint: Color {
         switch kind {
         case .info: return ViadereColor.textSecondary
-        case .warning: return ViadereColor.accent
+        case .warning: return ViadereColor.warning
         case .danger: return ViadereColor.danger
         }
     }
@@ -372,7 +372,7 @@ public struct ViadereRiskChip: View {
         self.severity = severity
     }
 
-    private var tint: Color { severity == "high" ? ViadereColor.danger : (severity == "warning" ? ViadereColor.accent : ViadereColor.textSecondary) }
+    private var tint: Color { severity == "high" ? ViadereColor.danger : (severity == "warning" ? ViadereColor.warning : ViadereColor.textSecondary) }
 
     public var body: some View {
         HStack(spacing: 6) {

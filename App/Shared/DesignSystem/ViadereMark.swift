@@ -33,6 +33,12 @@ public enum ViadereBrand {
     public static let champagneDeep = Color(viadereHex: 0x8C7550)   // accent text on ivory (AA)
     public static let black         = Color(viadereHex: 0x121211)   // dark-mode background
 
+    /// Wallet pass colors. Fixed in every appearance theme on purpose: the in-app card mirrors the server-signed `pass.json`
+    /// (backgroundColor rgb(31,31,31), foregroundColor rgb(247,243,235), labelColor rgb(201,169,110)).
+    public static let passBackground = Color(viadereHex: 0x1F1F1F)
+    public static let passForeground = Color(viadereHex: 0xF7F3EB)
+    public static let passLabel      = Color(viadereHex: 0xC9A96E)
+
     /// Width ÷ height of the full mark (ribbon + dot).
     public static let markAspectRatio: CGFloat = 2.2
     /// Width ÷ height of the ribbon alone (the dot excluded).

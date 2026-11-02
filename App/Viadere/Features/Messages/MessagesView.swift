@@ -196,8 +196,16 @@ struct ConversationView: View {
             composer
         }
         .viadereScreenBackground()
+        // The business's space: its kit tints the thread and its bubbles (re-resolved per theme); the sender line stays protected.
+        .environment(\.brandStyle, BrandStyle(decoration.style))
         .toolbar(.hidden, for: .navigationBar)
         .task { await vm.load() }
+        .task {
+            // Separate task: branding never delays the thread.
+            guard let store = model.services.brandKits, conversation.business.isVerified else { return }
+            await store.refresh(conversation.business.id)
+            decoration = MessageCardDecoration.make(business: conversation.business, brand: store)
+        }
     }
 
     private var header: some View {
@@ -249,7 +257,7 @@ struct ConversationView: View {
                     .padding(.bottom, ViadereSpace.xxs)
             }
         }
-        .background(ViadereColor.background)
+        .background(BrandStyle(decoration.style).canvas)
     }
 }
 
@@ -259,6 +267,7 @@ struct MessageBubble: View {
     /// Brand decoration of business messages: an accent line beside the bubble. The sender line (name, verified mark) stays neutral.
     var decoration: MessageCardDecoration? = nil
     let onChoose: (ChoiceOption) -> Void
+    @Environment(\.brandStyle) private var brand
 
     var body: some View {
         let mine = row.isFromConsumer
@@ -276,7 +285,7 @@ struct MessageBubble: View {
                     .foregroundStyle(mine ? ViadereColor.onPrimary : ViadereColor.textPrimary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(mine ? ViadereColor.primaryFill : ViadereColor.surface))
+                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(mine ? ViadereColor.primaryFill : (brand.isBranded ? brand.card : ViadereColor.surface)))
                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(mine ? .clear : ViadereColor.hairline, lineWidth: 1))
             }
             .fixedSize(horizontal: false, vertical: true)

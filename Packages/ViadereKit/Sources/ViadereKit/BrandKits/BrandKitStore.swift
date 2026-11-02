@@ -37,9 +37,12 @@ public struct BrandAppearanceStyle: Sendable, Hashable {
     public var radius: BrandRadius
     public var border: BrandBorder
     public var typeScale: BrandTypeScale
+    /// The kit's verified tokens, re-resolved over each appearance theme (`palette(in:)`); `nil` for neutral and for Loop trees.
+    public var tokens: BrandTokens?
 
     public init(source: Source, kitId: String?, palette: BrandStyleResolution, frameId: String?, radius: BrandRadius, border: BrandBorder,
-                typeScale: BrandTypeScale) {
+                typeScale: BrandTypeScale, tokens: BrandTokens? = nil) {
+        self.tokens = source == .brandKit ? tokens : nil
         self.source = source
         self.kitId = kitId
         self.palette = palette
@@ -55,7 +58,8 @@ public struct BrandAppearanceStyle: Sendable, Hashable {
     /// A kit's style: tokens clamped for contrast, frame only if registered and available `now`.
     public init(kit: BrandKit, now: Date, frames: FrameRegistry = .v1) {
         self.init(source: .brandKit, kitId: kit.kitId, palette: ContrastPolicy.resolve(kit.tokens), frameId: frames.resolve(kit.frameId, at: now),
-                  radius: kit.tokens.radius ?? .medium, border: kit.tokens.border ?? .hairline, typeScale: kit.tokens.typeScale ?? .standard)
+                  radius: kit.tokens.radius ?? .medium, border: kit.tokens.border ?? .hairline, typeScale: kit.tokens.typeScale ?? .standard,
+                  tokens: kit.tokens)
     }
 
     /// The style of a built Loop tree (`PresentationTree.style`).
