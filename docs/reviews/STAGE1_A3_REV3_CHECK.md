@@ -150,3 +150,57 @@ Targeted check of Stage 1 revision 3 by A3 (cryptography and key management), 20
 - **New:** Medium S3-A3-01 and S3-A3-02; Low S3-A3-03 to -05; Info S3-A3-06.
 
 This is an agent review record. It is not a third-party certification, and it does not replace the external review that spec §13 requires before any production identity provider.
+
+## Revision 3.1 confirmation (A3, 2026-11-02, at `3295db8`)
+
+Scope: the A3 deltas listed in `STAGE1_RESPONSE.md` "Revision 3.1 check scope" (`git diff adee409..3295db8 -- docs/`): ADR-0033 §3.3, §4.1, §6; ADR-0034 §4, §5, §7-§10 and threat assumptions; ADR-0028 §1, §2, §5; ADR-0031 §1.2; ADR-0032 §3.1-§3.2; THREAT_MODEL T-AUTH-6, T-AUTH-15, R-23. Documents only; nothing built.
+
+### Bound of the device-add comparison code (ADR-0033 §4.1 item 7)
+
+Correct. The comparison nonce is a fresh 256-bit value drawn after the entry's `kids` are stored, so for a substituted entry E_X the code f(nonce, kids_X) is uniform over 10^6 (bias < 2^-44) and independent of the code c_B that genuine device B shows. With one challenge per entry for its lifetime, AS-1 gets exactly one draw per entry and cannot filter. A failed `match` cannot be retried with other digits, because the person types c_B every time. With at most 5 entries per account per rolling 24 h, the genuine entry included, the union bound gives P ≤ 4 × (10^-6 + 2^-44) < 5 × 10^-6 per account per day, so the stated bound is conservative. The window is rolling, so a persistent attacker accumulates linearly, to about 1.5 × 10^-3 per account per year. That figure assumes a concurrent genuine add every day, and each such add cancels the person's own entry (one pending entry per account) and alerts from the fourth entry. A3 accepts this. The PoP nonce and the comparison nonce are separated, and ST-REC-22 tests that separation.
+
+### JWE production construction (ADR-0034 §9)
+
+| Check | Result |
+|---|---|
+| Key size | RSA-HSM 3072 (about 128-bit security, matching ADR-0012). The encrypted key is exactly 384 bytes and is checked before any Key Vault call. Key operation `decrypt` only, on a separate standby object with no role. **OK** |
+| OAEP parameters | `RSA-OAEP-256` = OAEP with SHA-256 and MGF1-SHA-256 and an empty label. This is what Key Vault's `RSA-OAEP-256` and iOS `rsaEncryptionOAEPSHA256` implement. The Android trap (provider default MGF1-SHA-1) is named, and the explicit `OAEPParameterSpec` is required, with a failing vector. **OK** |
+| Content encryption | `A256GCM` with a 32-byte CEK from the device CSPRNG, a 12-byte IV and a 16-byte tag; one CEK per envelope, so IV reuse is impossible. No `zip`, no unprotected header, compact form only. **OK** |
+| Binding of the recovery context | The protected header is exactly `{alg, enc, kid, typ, env, ach, nonce}`. The GCM AAD is ASCII(base64url(protected header)) (RFC 7516 §5.1 step 14), so purpose (`typ`), environment, challenge and nonce are authenticated, as `info`/`aad` were in HPKE. The plaintext still repeats `purpose`, `nonce` and `account_ref`/`recovery_id`, and step 3 checks them. The header is compared with the challenge **before** the Key Vault call. The encrypted CEK is not bound to the header, but that is the standard JWE property and harmless here, because forging a tag needs the CEK. `envelope_digest` over the whole compact serialization is committed by the device signature, which also removes AES-GCM's lack of key commitment. **OK** |
+| Oracle exposure | One `decrypt` per challenge (`pending → opening` by CAS), a generic `401`, and no adaptive queries **per challenge**. The number of challenges **across accounts** is still not bounded by this rule; see S31-A3-01 |
+| Migration from the HPKE staging envelopes | Stored verifiers do not depend on the seal construction (HMAC over the normalized code), so no set needs to be re-registered just because the construction changes. Envelopes are never retained, so nothing has to be converted. What is missing is the dispatch and switch-over rule; see S31-A3-03 |
+
+### Earlier findings
+
+| Finding | Sev. | Status | Evidence |
+|---|---|---|---|
+| S3-A3-01 grinding by filtering challenges | Medium | **SATISFIED** (stricter than required) | ADR-0033 §4.1 items 2, 3, 7; §6 ST-REC-18, ST-REC-22; ADR-0023 §4; THREAT_MODEL T-REC-10 |
+| S3-A3-02 R-23 understated, no production plan, no lifetime | Medium | **SATISFIED** | Item 1: R-23 restated in my words (THREAT_MODEL R-23; ADR-0034 threat assumptions). Item 2: `seal_kid` per set, `seal-key exposed` procedure §8.2, ST-REC-23. Item 3: ≤ 6 months (90 days under an exception), `refresh_suggested`, alert 30 days ahead, fail closed past `not_after`. Item 4: §10. Item 5: option (a), §9, recorded with the production gate §9.4 / L-13; `AUTH-SIGNER-ROLE` updated, and `standard` fails while a KEK or the Unwrapper role exists |
+| S3-A3-03 tenant key PoP rules | Low | **SATISFIED** (design; vectors in Stage 6) | ADR-0031 §1.2 (a)-(d), DNSSEC rule, ST-AUTH-16, vectors listed |
+| S3-A3-04 revocation-list processing | Low | **SATISFIED** (design; Android storage mechanism named in Stage 4, L-16) | ADR-0033 §3.3 "List processing" (a)-(d), ST-REC-13 |
+| S3-A3-05 sealed-recovery loose ends | Low | **SATISFIED** (design; vectors in Stage 6) | ADR-0034 §4 step 3, §5.1 hygiene, §7 vectors; ADR-0032 §3.1-§3.2 (set_id in the challenge request, account from the challenge, WebAuthn checks, COSE → SPKI) |
+| S3-A3-06 availability side effects | Info | **SATISFIED** (recorded) | ADR-0034 §4 step 2 audit reasons; L-16 for copy and the Android biometric parameter |
+
+### New findings (revision 3.1 only; none blocks Stage 1)
+
+- **S31-A3-01, Low: uniform OAEP failure handling and a global decrypt-failure alert** (ADR-0034 §9.3). The per-challenge limit bounds queries per challenge, but not in total. A compromised api that holds a recorded envelope can submit its encrypted CEK, mauled for a Manger-style attack, under fresh challenges of many accounts it controls. Each submission passes the header and digest checks, because AS-1 signs the PoPs for its own accounts. Required: (a) on a Key Vault `decrypt` error, continue with a random 32-byte CEK, so the path and timing match an AES-GCM failure (RFC 7516 §11.5, RFC 7518 §8.3); (b) honest clients never cause a `decrypt` error, so **every** one is audited and raises an alert, with a global circuit breaker (for example, 3 per hour per environment stops JWE starts and pages); (c) a vector and ST case. Stage 6.
+- **S31-A3-02, Low: reconciliation must not rely only on records the authority process writes** (ADR-0034 §5.2, §9.3, §9.5). A compromised authority process can write a decrypt record (or a start record) before each illegitimate call, so matching Key Vault `AuditEvent` against those records alone would not detect it. That would make §9.5's "detectable" weaker than stated. Required: also reconcile against a source outside the authority's write path: the api's relay log of envelope submissions (a separate trust domain) for `decrypt`, and Container Apps replica start events for `unwrapKey`. Add an absolute low-baseline rate alert on `decrypt` (recovery events are rare). Restate §9.5 accordingly. Stage 6, with ST-AUTH-25.
+- **S31-A3-03, Low: the HPKE → JWE switch is not specified** (ADR-0034 §9.6). Required: (a) the authority selects the construction from the pinned `kid` alone (EC seal key → HPKE wire form; RSA seal key → compact JWE), never from the shape of the envelope, and refuses a mismatch; (b) a `standard` build has no HPKE open path enabled (a release-build test); (c) a staging switch is a §8.1 rotation: the HPKE key is retired (`refresh_suggested`, existing sets stay valid) and destroyed once no supported app pins it; (d) the JWE header is parsed as strict JSON with duplicate members refused; (e) vectors: an HPKE envelope under an RSA `kid` and a JWE under an EC `kid` are refused. Stage 6, with the A3 delta check that §9.6 already requires.
+
+### Final Stage 1 verdict
+
+**APPROVE (Stage 1 passes for A3), with the conditions below.** Every A3 finding from the Stage 1 review, the re-review and the revision 3 check is closed or satisfied in the design. The three new Lows are implementation specifications for Stage 6 and do not change the architecture.
+
+### Remaining conditions for Stages 2-8
+
+| Stage | Condition |
+|---|---|
+| 2 | The authority OpenAPI encodes the §4.1 caps (`409 challenge_exists`, `429 device_add_limit`), `409 key_in_use`, and the `set_id` member of the `recovery_codes_set` challenge request (C-13) |
+| 3 | No A3 condition beyond the unchanged flag gates |
+| 4 | KEY-ROTATION.md (L-2) is written before any key is pinned and includes the §8.2 exposure procedure and the §8.1 lifetime. Revocation storage survives a reinstall, whole lists are refused (S3-A3-04), and A7 names the Android mechanism (L-16). Comparison screens follow §4.1. The single typed verifier and the cross-`typ` vector include the revocation `typ`. Per-environment pins have a release-build test (§10.4) |
+| 5 | L-10 stays with A2; nothing new from A3 |
+| 6 | Vectors and tests for S3-A3-03/-04/-05 and S31-A3-01/-02/-03. ST-REC-13, -14, -15, -16, -18, -19, -21, -22, -23, ST-AUTH-16 and -25 pass. The L-12 re-check is done on Microsoft Learn (key agreement in Key Vault and Managed HSM; built-in Crypto User definition; the Container Apps exec action of §10.3). The §10 memory-hygiene controls are verified. An A3 delta check is required if lean staging moves to §9 |
+| 7-8 / pilot | The C-15 drill (exposure procedure, reconciliation alerting) is done once in staging before any authority flag. The flag gates are unchanged: no `AUTH_LINK_SERVICE_ENABLED`, `OIDC_PROVIDER_ENABLED`, `AUTHORITY_OIDC_ENABLED` or `RECOVERY_REFRESH_PROMPT_ENABLED` until ADR-0032 §3 and ADR-0034 are implemented and ST-REC-07, -08, -14, -15, -16 and -21 pass |
+| Production | Blocked (L-13) until §9 ships with S31-A3-01/-02 and ST-REC-14, -15, -21, -23 and ST-AUTH-25 pass on that construction, or until an owner exception is signed and countersigned by A2 and A3 (§8 and §10, seal-key lifetime ≤ 90 days, review date). The external review required by spec §13 is still needed before any production identity provider |
+
+Confirmation by A3 (cryptography and key management), 2026-11-02, at `3295db8`. This is an agent review record, not a third-party certification.
