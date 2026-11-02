@@ -197,7 +197,7 @@ targets:
       - path: Shared/DesignSystem
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationContent
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationContent1 # the plain ID was unavailable in the portal (2026-11-03)
         INFOPLIST_FILE: ViadereNotificationContent/Info.plist
         CODE_SIGN_ENTITLEMENTS: ViadereNotificationContent/ViadereNotificationContent.entitlements
         GENERATE_INFOPLIST_FILE: NO
