@@ -94,6 +94,9 @@ public struct LiveViadereAPI: ViadereAPI {
         _ = try await client.call(APIRoutes.sessionRevoke, params: ["sessionId": id])
     }
     public func securityNotices() async throws -> [SecurityNotice] { try await client.call(APIRoutes.securityNotices) }
+    public func markSecurityNoticeSeen(_ id: UUID) async throws {
+        _ = try await client.call(APIRoutes.securityNoticeSeen, params: ["noticeId": id.uuidString.lowercased()])
+    }
     public func dismissSecurityNotice(_ id: UUID) async throws {
         _ = try await client.call(APIRoutes.securityNoticeDismiss, params: ["noticeId": id.uuidString.lowercased()])
     }

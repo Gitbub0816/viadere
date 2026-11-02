@@ -21,8 +21,13 @@ public final class SecurityNoticesViewModel {
 
     public init(services: ViadereServices) { self.services = services }
 
-    /// The notice the banner shows: the newest one.
-    public var current: SecurityNotice? { notices.first }
+    /// The notice the banner shows: the newest one, except that a pending phone transfer always comes first. It is the one notice whose
+    /// outcome depends on the person seeing it with its "Keep my number" action (R-1), so a newer notice never hides it.
+    public var current: SecurityNotice? { notices.first { $0.action == .keepPhoneNumber } ?? notices.first }
+    /// Whether something covers the screen (the app lock): a notice behind it is not shown, so it is not reported as seen.
+    public private(set) var isCovered = false
+    private var shownNoticeId: UUID?
+    private var reportedSeen: Set<UUID> = []
     /// How many more notices wait behind the one shown.
     public var additionalCount: Int { max(0, notices.count - 1) }
 
@@ -30,6 +35,31 @@ public final class SecurityNoticesViewModel {
         guard let list = try? await services.api.securityNotices() else { return }
         notices = list.sorted { $0.createdAt > $1.createdAt }
         if notices.isEmpty { message = nil }
+    }
+
+    /// The banner calls this when it appears with `notice`. A notice whose outcome waits for it (a pending phone transfer) is reported to the server
+    /// as **seen**, only while nothing covers the screen and only once it was really rendered with its action: loading the list, or having it
+    /// behind the lock screen, never counts. A failed report is tried again the next time the banner appears or the lock opens.
+    public func noteShown(_ notice: SecurityNotice) async {
+        shownNoticeId = notice.id
+        await reportShownIfNeeded()
+    }
+
+    /// The app lock closed or opened over the banner (`AppModel.lock()` and `unlocked()`).
+    public func setCovered(_ covered: Bool) async {
+        isCovered = covered
+        if !covered { await reportShownIfNeeded() }
+    }
+
+    private func reportShownIfNeeded() async {
+        guard !isCovered, let id = shownNoticeId, !reportedSeen.contains(id),
+              let notice = notices.first(where: { $0.id == id }), notice.action == .keepPhoneNumber, actionTitle(for: notice) != nil else { return }
+        do {
+            try await services.api.markSecurityNoticeSeen(id)
+            reportedSeen.insert(id)
+        } catch {
+            // Not recorded: the transfer keeps waiting for the owner, which is the safe side. The next appearance tries again.
+        }
     }
 
     public func dismiss(_ notice: SecurityNotice) async {
@@ -80,7 +110,8 @@ public final class SecurityNoticesViewModel {
         }
     }
 
-    /// Runs the notice's action. Both need a trusted device (`403 device_cool_down` otherwise, said calmly). Returns whether it worked.
+    /// Runs the notice's action. The cancel actions need a trusted device (`403 device_cool_down` otherwise, said calmly); "Keep my number" works
+    /// from any app device of the account. Returns whether it worked.
     @discardableResult
     public func perform(_ notice: SecurityNotice) async -> Bool {
         guard !isActing, let action = notice.action else { return false }
@@ -169,7 +200,7 @@ public final class SecurityNoticesViewModel {
         case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
         case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
         case .phoneTransferRequested: return "Someone asked to link your phone number to another Viadere account \(when). If that number is still yours, keep it."
-        case .phoneUnlinked: return "Your phone number was unlinked by a text from that number."
+        case .phoneUnlinked: return "Someone texted UNLINK from your phone number, so Viadere stopped using it. Remove it in Settings to release it."
         case .phoneTransferred: return "Your phone number was moved to another Viadere account \(when) because you did not keep it."
         case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
         case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."

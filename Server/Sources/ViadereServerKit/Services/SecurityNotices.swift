@@ -71,7 +71,8 @@ struct SecurityNotices {
             case .newPhone: "A phone number was linked to your Viadere account. If this wasn't you, open Viadere and remove it."
             case .phoneTransferRequested:
                 "Someone asked to link a phone number on your Viadere account to another Viadere account. If that number is still yours, keep it."
-            case .phoneUnlinked: "Your phone number was unlinked by a text from that number."
+            case .phoneUnlinked:
+                "Someone texted UNLINK from your phone number, so Viadere stopped using it. It stays linked to your account until you remove it in Viadere settings."
             case .phoneTransferred:
                 "Your phone number was moved to another Viadere account because you did not keep it. If that number is still yours, text UNLINK from it and link it again."
             case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
@@ -157,24 +158,34 @@ struct SecurityNotices {
         }
     }
 
+    /// How far back the app's list reaches. A notice older than this can no longer be shown (R-4).
+    static let listWindow: TimeInterval = 30 * 86_400
+
     /// The account's undismissed notices of the last 30 days, newest first, without the ones the caller's own device caused.
+    /// **Listing does not record anything.** The app shows only one notice at a time (and loads before the lock screen is passed), so a
+    /// listed notice is not a seen one: `seen` records that the app actually displayed it (R-1).
     func pending(for consumer: UUID, viewedBy device: UUID?) async throws -> [SecurityNotice] {
-        let cutoff = ctx.now.addingTimeInterval(-30 * 86_400)
+        let cutoff = ctx.now.addingTimeInterval(-Self.listWindow)
         let rows = try await SecurityNoticeRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$dismissedAt == nil)
             .filter(\.$createdAt > cutoff).sort(\.$createdAt, .descending).limit(50).all()
             .filter { $0.originDeviceId == nil || $0.originDeviceId != device }
-        // The app now has these notices: remember when (a pending phone transfer waits for it, ADR-0027 section 1.3).
-        let unseen = rows.compactMap { $0.fetchedAt == nil ? $0.id : nil }
-        if !unseen.isEmpty {
-            let now = ctx.now
-            try await SecurityNoticeRecord.query(on: db).filter(\.$id ~~ unseen).filter(\.$fetchedAt == nil).set(\.$fetchedAt, to: now).update()
-        }
         return rows
             .compactMap { row in
                 row.id.map { SecurityNotice(id: $0, rawKind: row.kind, message: row.message,
                                             createdAt: row.createdAt, subjectId: row.subjectId,
                                             action: row.action.flatMap(SecurityNoticeAction.init(rawValue:))) }
             }
+    }
+
+    /// The app displayed this notice (with its action, when it has one). A pending phone transfer waits for it (ADR-0027 section 1.3). Any live app
+    /// device of the account may say so, a phone still in cool-down included: it records a fact, it changes nothing.
+    func seen(_ id: UUID, principal: ConsumerPrincipal) async throws {
+        try await DeviceTrust.requireActiveApp(principal, db: db, now: ctx.now)
+        guard let row = try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$consumerId == principal.consumerId.uuid).first()
+        else { throw APIError.notFound }
+        // Conditional: the first sighting wins and later ones change nothing.
+        try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$fetchedAt == nil).set(\.$fetchedAt, to: ctx.now).update()
+        _ = row
     }
 
     func dismiss(_ id: UUID, principal: ConsumerPrincipal) async throws {

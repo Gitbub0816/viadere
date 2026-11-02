@@ -57,6 +57,15 @@ enum DeviceTrust {
         return device
     }
 
+    /// The calling device, if it is a live app instance of the account: not an App Clip, not revoked, not expired. Trusted or still in cool-down:
+    /// for acts that only keep things as they are (recording that a notice was shown, "Keep my number"), which a new phone must be able to do.
+    @discardableResult
+    static func requireActiveApp(_ principal: ConsumerPrincipal, db: any Database, now: Date) async throws -> DeviceRecord {
+        let device = try await callingDevice(principal, db: db)
+        guard device.kind == .app, device.revokedAt == nil, !device.isExpired(at: now) else { throw APIError(.forbidden, .forbidden, "This device can't do that.") }
+        return device
+    }
+
     /// The calling device, if it is D1 (high-risk approvals, approving other devices); otherwise `403 device_cool_down`.
     @discardableResult
     static func requireTier(_ minimum: DeviceTrustTier, _ principal: ConsumerPrincipal, db: any Database, now: Date) async throws -> DeviceRecord {

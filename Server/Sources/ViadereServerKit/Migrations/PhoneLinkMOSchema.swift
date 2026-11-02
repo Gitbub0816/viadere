@@ -24,9 +24,11 @@ final class PhoneLinkMOChallengeRecord: Model, @unchecked Sendable {
     init() {}
 }
 
-/// `PhoneLinkTransferNotice.v1` (additive): `security_notices.fetched_at`, set when the account's app fetches or dismisses the notice. A pending
-/// phone transfer completes only after the current owner's app fetched its notice (ADR-0027 section 1.3, F-1 of the SMS-removal review).
-/// Notices that exist before this migration stay `NULL`: a transfer waiting on one is re-notified by the job.
+/// `PhoneLinkTransferNotice.v1` (additive): `security_notices.fetched_at`, the moment the account's app **showed** the notice (`POST
+/// /v1/security-notices/{id}/seen`, or a dismissal; listing it does not count, R-1 of the re-check). A pending phone transfer completes only
+/// after the current owner's app showed its notice (ADR-0027 section 1.3, F-1 of the SMS-removal review).
+/// Notices that exist before this migration stay `NULL`. A transfer waiting on one is re-notified by the job only when the notice is older than
+/// the app's 30-day list window (R-4), because until then the owner's app can still show it.
 struct CreatePhoneLinkTransferNoticeSchema: AsyncMigration {
     var name: String { "PhoneLinkTransferNotice.v1" }
 
@@ -75,5 +77,30 @@ struct CreatePhoneLinkMOSchema: AsyncMigration {
             try await sql.raw("DROP INDEX IF EXISTS idx_phone_link_mo_phone").run()
         }
         try await db.schema(PhoneLinkMOChallengeRecord.schema).delete()
+    }
+}
+
+/// `PhoneLinkHardening.v1` (additive; re-check of the SMS-removal review):
+/// * `phone_links.suspended_at`: an UNLINK text pauses a link without releasing the number (F-4);
+/// * `phone_links.proved_by_device_id`: the device that proved the link, checked when a pending transfer completes (R-3);
+/// * `job_leases`: a named lease so overlapping runs of a job do not do the same work twice (R-2).
+struct CreatePhoneLinkHardeningSchema: AsyncMigration {
+    var name: String { "PhoneLinkHardening.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema(PhoneLinkRecord.schema).field("suspended_at", .datetime).update()
+        try await db.schema(PhoneLinkRecord.schema).field("proved_by_device_id", .uuid).update()
+        try await db.schema(JobLeaseRecord.schema).id()
+            .field("name", .string, .required)
+            .field("holder", .uuid, .required)
+            .field("expires_at", .datetime, .required)
+            .unique(on: "name")
+            .create()
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema(JobLeaseRecord.schema).delete()
+        try await db.schema(PhoneLinkRecord.schema).deleteField("proved_by_device_id").update()
+        try await db.schema(PhoneLinkRecord.schema).deleteField("suspended_at").update()
     }
 }

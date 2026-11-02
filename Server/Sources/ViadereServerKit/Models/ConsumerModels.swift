@@ -336,10 +336,15 @@ final class PhoneLinkRecord: Model, @unchecked Sendable {
     /// `otp` or `sms_link`.
     @OptionalField(key: "source") var source: String?
     @OptionalField(key: "confirmed_at") var confirmedAt: Date?
+    /// Set by an `UNLINK` text (ADR-0027 section 1.5, rev 4): routing and delivery stop, but the number stays **bound** to this account. Only the
+    /// holder's in-app removal (or a completed transfer) releases it, so a forged UNLINK can never open a number for a fresh link.
+    @OptionalField(key: "suspended_at") var suspendedAt: Date?
+    /// The device that proved the link (the requester's own device). A pending transfer completes only while it is still active.
+    @OptionalField(key: "proved_by_device_id") var provedByDeviceId: UUID?
 
-    /// Verified and past its cool-down (or confirmed). The only state in which the number acts as the account: interaction delivery, RCS
-    /// and SMS replies, and SMS routing (`GatewayService.loadContext`).
-    func isUsable(at now: Date) -> Bool { state == "verified" && (usableFrom.map { $0 <= now } ?? true) }
+    /// Verified, not suspended by an UNLINK text, and past its cool-down (or confirmed). The only state in which the number acts as the account:
+    /// interaction delivery, RCS and SMS replies, and SMS routing (`GatewayService.loadContext`).
+    func isUsable(at now: Date) -> Bool { state == "verified" && suspendedAt == nil && (usableFrom.map { $0 <= now } ?? true) }
 
     init() {}
 

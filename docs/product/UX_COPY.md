@@ -186,7 +186,7 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | S-PH-08 | Number unlinked by UNLINK | Your phone number was unlinked by a text from that number. |
 | SMS-01 | Gateway "get Viadere" (on-ramp) | Get the Viadere app to connect with businesses: https://{domain}/get |
 | SMS-02 | MT notice after a valid MO | Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages. |
-| SMS-03 | Reply to UNLINK | Viadere: Done. This number is no longer linked to a Viadere app. |
+| SMS-03 | Reply to UNLINK | Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app. |
 | SMS-04 | Secure request on a text-only number | Viadere: {Business} sent you something that needs the Viadere app. Open Viadere to respond. |
 | SMS-05 | Routing refused for an unlinked number (menu or direct address) | Viadere: To message {Business}, link this number in the Viadere app first. Get the app: https://{domain}/get |
 | SMS-06 | Menu items "Account help" and "Manage businesses in app" (replaces the hand-off link) | Viadere: Open the Viadere app for account help and settings. |

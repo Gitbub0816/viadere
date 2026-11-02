@@ -111,6 +111,10 @@ public enum APIRoutes {
     /// Dismisses a notice. Needs a trusted device (`403 device_cool_down` while the device is new).
     public static let securityNoticeDismiss = Endpoint<EmptyBody, EmptyBody>(
         "securityNotices.dismiss", .POST, "/v1/security-notices/{noticeId}/dismiss", auth: .deviceSignedBearer)
+    /// The app now shows this notice (with its action, if any). Any active app device of the account may say so; no trusted device is needed, so a
+    /// phone still in cool-down can record it. A pending phone transfer completes only after the holder's app showed its notice (ADR-0027 section 1.3).
+    public static let securityNoticeSeen = Endpoint<EmptyBody, EmptyBody>(
+        "securityNotices.seen", .POST, "/v1/security-notices/{noticeId}/seen", auth: .deviceSignedBearer)
     /// Revokes every device and token, erases/anonymizes personal data, keeps a redacted audit record.
     public static let accountDelete = Endpoint<EmptyBody, EmptyBody>(
         "account.delete", .DELETE, "/v1/account", auth: .deviceSignedBearer)
@@ -450,7 +454,7 @@ public enum APIRoutes {
         recoveryCodesBegin.descriptor, recoveryCodesRegenerate.descriptor,
         phoneLinkMOBegin.descriptor, phoneLinkStatus.descriptor, phoneLinkKeep.descriptor,
         phoneLinkConfirm.descriptor,
-        phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, accountDelete.descriptor,
+        phoneLinksList.descriptor, phoneLinkDelete.descriptor, sessionsList.descriptor, sessionRevoke.descriptor, securityNotices.descriptor, securityNoticeDismiss.descriptor, securityNoticeSeen.descriptor, accountDelete.descriptor,
         directorySearch.descriptor, directoryHandle.descriptor, directoryCode.descriptor, directoryResolve.descriptor,
         relationshipConnect.descriptor, relationshipsList.descriptor, relationshipDisconnect.descriptor,
         consentsGet.descriptor, consentsUpdate.descriptor,

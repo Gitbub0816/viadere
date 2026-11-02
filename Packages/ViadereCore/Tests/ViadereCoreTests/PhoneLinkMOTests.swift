@@ -150,7 +150,7 @@ struct PhoneLinkMOTests {
 
     @Test func theNoticesUseTheApprovedWording() {
         #expect(GatewayCopy.phoneLinkedNotice == "Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages.")
-        #expect(GatewayCopy.unlinkDone == "Viadere: Done. This number is no longer linked to a Viadere app.")
+        #expect(GatewayCopy.unlinkDone == "Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app.")
         #expect(GatewayCopy.getViadere(url: "https://viadere.com/get") == "Get the Viadere app to connect with businesses: https://viadere.com/get")
         #expect(GatewayCopy.secureRequestNotice(business: GatewayHarness.airline) == "Viadere: Sky Air sent you something that needs the Viadere app. Open Viadere to respond.")
         for text in [GatewayCopy.phoneLinkedNotice, GatewayCopy.unlinkDone, GatewayCopy.secureRequestNotice(business: GatewayHarness.airline)] {
