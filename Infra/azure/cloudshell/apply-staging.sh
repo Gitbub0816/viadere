@@ -1,7 +1,9 @@
 #!/bin/bash
 # Plans, policy-checks and applies the lean staging environment from Cloud Shell (ephemeral sessions included: it installs OpenTofu,
 # checksum-verified, on every run). Run from the checkout: bash Infra/azure/cloudshell/apply-staging.sh
-# Required: SUB_ID STATE_SA SUFFIX DB_ADMINS_ID IMAGE. Optional: CRYPTO_OFFICERS_ID, GHCR_USER, STATE_RG (default rg-viadere-stg-tfstate).
+# Runs in Cloud Shell or a macOS/Linux terminal (az logged in).
+# Required: SUB_ID STATE_SA SUFFIX DB_ADMINS_ID IMAGE. Optional: CRYPTO_OFFICERS_ID, GHCR_USER, STATE_RG (default rg-viadere-stg-tfstate),
+# DIDIT_WORKFLOW_ID (required while app_env enables VERIFY_ENABLED; not a secret).
 set -uo pipefail
 source "$(dirname "$0")/common.sh"
 need SUB_ID STATE_SA SUFFIX DB_ADMINS_ID IMAGE
@@ -14,7 +16,7 @@ tofu_ready
 
 step "2/4 settings"
 cp terraform.tfvars.example terraform.tfvars
-sed -i \
+sed -i.bak \
   -e "s/^subscription_id *= .*/subscription_id = \"$SUB_ID\"/" \
   -e "s/^tenant_id *= .*/tenant_id       = \"$TENANT_ID\"/" \
   -e "s/^name_suffix *= .*/name_suffix     = \"$SUFFIX\"/" \
@@ -23,10 +25,14 @@ sed -i \
   -e "s/^key_vault_crypto_officers_group_object_id .*/key_vault_crypto_officers_group_object_id  = \"${CRYPTO_OFFICERS_ID:-}\"/" \
   -e "s#^image .*#image              = \"$IMAGE\"#" \
   -e "s/^ghcr_pull_username .*/ghcr_pull_username = \"${GHCR_USER:-}\"/" \
+  -e "s/^  DIDIT_WORKFLOW_ID_IDENTITY *= .*/  DIDIT_WORKFLOW_ID_IDENTITY               = \"${DIDIT_WORKFLOW_ID:-}\"/" \
   terraform.tfvars
+rm -f terraform.tfvars.bak
+if grep -qE '^  VERIFY_ENABLED *= *"true"' terraform.tfvars && [ -z "${DIDIT_WORKFLOW_ID:-}" ]; then fail "set DIDIT_WORKFLOW_ID (Verify is enabled in app_env)"; fi
+case "${DIDIT_WORKFLOW_ID:-}" in *[!A-Za-z0-9-]*) fail "DIDIT_WORKFLOW_ID: letters, digits and hyphens only" ;; esac
 # api_min_replicas = 0 is for the first apply only (no replica before secrets and database roles exist); after the first migration the
 # module default (1) applies, so a later apply does not scale the api back to zero.
-if migrate_has_run; then sed -i '/^api_min_replicas *=/d' terraform.tfvars; echo "first deploy done: api_min_replicas uses the default"; fi
+if migrate_has_run; then sed -i.bak '/^api_min_replicas *=/d' terraform.tfvars && rm -f terraform.tfvars.bak; echo "first deploy done: api_min_replicas uses the default"; fi
 if grep -nE "REPLACE|OWNER/|00000000-0000" terraform.tfvars; then fail "placeholder left in terraform.tfvars"; fi
 grep -E "^(location|name_suffix|api_min_replicas)" terraform.tfvars
 

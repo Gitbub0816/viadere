@@ -9,18 +9,25 @@ TOFU_VERSION=1.13.2
 RG_APP=rg-viadere-stg-app
 STATE_RG="${STATE_RG:-rg-viadere-stg-tfstate}"
 
-# Installs OpenTofu (checksum-verified; ephemeral sessions keep nothing) and initialises Infra/azure against the remote state.
+# Installs OpenTofu (checksum-verified; Linux Cloud Shell or macOS, Intel or Apple silicon; ephemeral sessions keep nothing) and initialises Infra/azure against the remote state.
 tofu_ready() {
   if ! ~/bin/tofu version 2>/dev/null | grep -q "v$TOFU_VERSION"; then
     local dl base want
     dl="$(mktemp -d)" || fail "mktemp"
     mkdir -p ~/bin || fail "mkdir ~/bin"
     base="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
-    curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/tofu.zip" "$base/tofu_${TOFU_VERSION}_linux_amd64.zip" || fail "download tofu"
+    local os arch
+    case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) fail "unsupported OS $(uname -s)" ;; esac
+    case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=amd64 ;; *) fail "unsupported CPU $(uname -m)" ;; esac
+    curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/tofu.zip" "$base/tofu_${TOFU_VERSION}_${os}_${arch}.zip" || fail "download tofu"
     curl --proto '=https' --tlsv1.2 -fsSL -o "$dl/sums" "$base/tofu_${TOFU_VERSION}_SHA256SUMS" || fail "download sums"
-    want="$(grep " tofu_${TOFU_VERSION}_linux_amd64.zip\$" "$dl/sums" | cut -d' ' -f1)"
+    want="$(grep " tofu_${TOFU_VERSION}_${os}_${arch}.zip\$" "$dl/sums" | cut -d' ' -f1)"
     [ -n "$want" ] || fail "checksum missing"
-    echo "$want  $dl/tofu.zip" | sha256sum --check --quiet || fail "checksum"
+    if command -v sha256sum >/dev/null; then
+      echo "$want  $dl/tofu.zip" | sha256sum --check --quiet || fail "checksum"
+    else
+      echo "$want  $dl/tofu.zip" | shasum -a 256 --check --quiet || fail "checksum"
+    fi
     unzip -o -q "$dl/tofu.zip" tofu -d "$dl" || fail "unzip tofu"
     install "$dl/tofu" ~/bin/ || fail "install tofu"
   fi
