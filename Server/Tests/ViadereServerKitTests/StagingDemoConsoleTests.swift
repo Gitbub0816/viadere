@@ -244,4 +244,67 @@ final class StagingDemoConsoleTests: XCTestCase {
             try await eq(try await LoopStudioDraftRecord.query(on: h.db).count(), 1)
         }
     }
+
+    /// The whole staging demo as a phone sees it: the seeded, reviewed and rolled-out Loop must pass the device's own presentation checks
+    /// (`PresentationBuilder`, with the key set the server serves and the directory record the app holds). Staging showed "This request
+    /// can't be shown" for it.
+    func testSeededLoopRendersOnADeviceAfterReview() async throws {
+        try await withHarness { h in
+            let demo = try StagingDemo(db: h.db, ctx: h.ctx, environment: .staging)
+            let business = try await demo.ensureBusiness()
+            let atlas = business.id!
+            let owner = try await demo.ensureConsoleOwner(businessId: atlas, email: Self.ownerEmail, displayName: nil).user
+            let seed = try await demo.seedBrandKit(businessId: atlas, runtime: h.app.brandKits)
+            let (op, account) = try await h.makeOperator()
+            try await eq(try await h.dashReauth(op, account).status, .ok)
+            try await eq(try await h.formPost("/operator/brand/assets/\(seed.asset.id!.uuidString.lowercased())/approve", op).status, .seeOther)
+            try await eq(try await h.formPost("/operator/brand/kits/\(seed.kit.id!.uuidString.lowercased())/approve", op).status, .seeOther)
+            let loop = try await demo.seedLoop(businessId: atlas, authorId: owner.id!)
+            XCTAssertEqual(loop.appearance, .brandKit(StagingDemo.kitKey))
+            let revision = try XCTUnwrap(loop.submitted)
+            try await OperatorPermissions(db: h.db, ctx: h.ctx).set(email: "ops@viadere.test", permission: .loopReviewer, granted: true)
+            try await eq(try await h.formPost("/operator/loops/revisions/\(revision.id!.uuidString.lowercased())/decide", op,
+                                              [("decision", "approve"), ("reason", "Demo pickup Loop checked.")]).status, .seeOther)
+            let settledStatus = try await demo.status(businessId: atlas)
+            let publication = try XCTUnwrap(settledStatus.publication)
+            let reviewer = try await DashboardUserRecord.query(on: h.db).filter(\.$emailHash == DashboardAuthService(db: h.db, ctx: h.ctx).emailHash("ops@viadere.test")).first()!.id!
+            try await LoopPublicationService(db: h.db, ctx: h.ctx).setRollout(publicationId: publication.id!, percent: 100, operatorId: reviewer,
+                                                                                reason: "Open to all customers.")
+
+            // The phone: connect, consent, list, start.
+            let consumer = try await h.readyConsumer()
+            let connected = try await h.signedPost(consumer, APIRoutes.relationshipConnect.template,
+                                                   ConnectRequest(businessId: BusinessID(atlas), source: .handle, optInPurposes: []))
+            XCTAssertTrue([.ok, .created].contains(connected.status), connected.text)
+            let text = LoopConsentCatalog.current
+            var answers: [String: String] = [:]
+            for check in text.checks { answers[check.id] = check.correctOptionId }
+            try await eq(try await h.signed(consumer, .PUT, "/v1/loops/consent", body: try ViadereJSON.encode(
+                LoopGlobalConsentRequest(textVersion: text.version, textDigest: text.digest, answers: answers, agree: true))).status, .ok)
+            try await eq(try await h.signed(consumer, .PUT, "/v1/loops/consent/businesses/\(BusinessID(atlas))", body: try ViadereJSON.encode(
+                LoopBusinessConsentRequest(textVersion: text.version, textDigest: text.digest, agree: true))).status, .ok)
+            let available = try await h.signed(consumer, .GET, "/v1/loops/available?business_id=\(BusinessID(atlas))").json([LoopSummary].self)
+            let summary = try XCTUnwrap(available.first)
+            let started = try await h.signed(consumer, .POST, "/v1/loops/instances", body: try ViadereJSON.encode(
+                LoopInstanceCreateRequest(publicationId: summary.publicationId, entryPoint: .businessPage)))
+            XCTAssertEqual(started.status, .created, started.text)
+            let view = try started.json(LoopInstanceView.self)
+
+            // What the app does with it (LoopInstanceViewModel.rebuild): pinned keys ∩ served keys, the connected-business record.
+            let served = try await h.signed(consumer, .GET, "/v1/loops/keys").json(LoopPublicationKeySet.self)
+            let pinned = served.keys.compactMap(\.pinned)
+            XCTAssertFalse(pinned.isEmpty)
+            let definition = try XCTUnwrap(LoopDefinition.parse(view.definition).definition, "the device must parse the served definition")
+            let directory = try await h.signed(consumer, .GET, APIRoutes.relationshipsList.template).json([Relationship].self)
+            let entry = try XCTUnwrap(directory.first { $0.business.id == BusinessID(atlas) })
+            let record = VerifiedBusinessRecord(id: entry.business.id, displayName: entry.business.displayName,
+                                                verificationStatus: entry.business.verificationStatus, category: .retail)
+            let context = LoopPresentationContext(manifest: view.manifest, pinnedKeys: pinned, definition: definition, instanceBusinessId: view.businessId,
+                                                  publisher: record, publicationStatus: view.publicationStatus, brand: nil, now: h.clock.now())
+            let tree = PresentationBuilder.build(context, phase: .step(view.currentStepId))
+            XCTAssertNil(tree.fallbackReason, "the device refuses the demo Loop: \(tree.fallbackReason ?? "")")
+            XCTAssertEqual(tree.origin, .business)
+        }
+    }
 }
+

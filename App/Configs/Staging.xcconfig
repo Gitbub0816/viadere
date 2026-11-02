@@ -50,3 +50,7 @@ VIADERE_LOOP_PUBLICATION_KEYS = p6LAkYzgN__FDWgdy9ol0Ph10qGLOrbOljoUq7jyePE:BI2l
 VIADERE_APNS_ENVIRONMENT = $(VIADERE_STAGING_APNS_ENVIRONMENT:default=sandbox)
 APS_ENVIRONMENT = $(VIADERE_STAGING_APS_ENVIRONMENT:default=development)
 APP_ATTEST_ENVIRONMENT = $(VIADERE_STAGING_APP_ATTEST_ENVIRONMENT:default=development)
+
+// ---- diagnostics -------------------------------------------------------------------------------------------------------------
+// Staging-only diagnostics (e.g. the Loop fallback reason under the generic "can't be shown" notice). Release never defines it.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) VIADERE_STAGING
