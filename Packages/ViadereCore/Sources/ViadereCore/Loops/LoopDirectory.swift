@@ -328,14 +328,40 @@ public struct LoopInstallRequest: Codable, Sendable, Hashable {
     public var textVersion: Int
     public var textDigest: String
     public var agree: Bool
+    /// The customer's choice on the install sheet: show this Loop's own alerts in Alerts (F-4). Absent means off; an install never turns it
+    /// on by itself, and a re-install without the member leaves an earlier choice unchanged.
+    public var alertsEnabled: Bool?
 
-    public init(mode: LoopInstallMode, source: LoopInstallSource, textVersion: Int, textDigest: String, agree: Bool) {
+    public init(mode: LoopInstallMode, source: LoopInstallSource, textVersion: Int, textDigest: String, agree: Bool, alertsEnabled: Bool? = nil) {
         self.mode = mode
         self.source = source
         self.textVersion = textVersion
         self.textDigest = textDigest
         self.agree = agree
+        self.alertsEnabled = alertsEnabled
     }
+}
+
+/// `PUT /v1/loops/installed/{loopId}/alerts`: allow or stop **this installed Loop's own** alerts in Alerts (owner decision F-4). It never
+/// subscribes the customer to anything else from the business (offers, messages, other alerts, other Loops).
+public struct LoopAlertsRequest: Codable, Sendable, Hashable {
+    public var enabled: Bool
+
+    public init(enabled: Bool) { self.enabled = enabled }
+}
+
+/// The wording of the per-Loop alerts choice on the install sheet and in Your Loops. One place so the device and the docs agree.
+public enum LoopAlertsCopy {
+    public static let title = "Alerts from this Loop"
+
+    /// What turning it on does, and what it never does.
+    public static func detail(business: String) -> String {
+        let name = business.isEmpty ? "the business" : business
+        return "Show this Loop's own requests and answers in Alerts. Nothing else from \(name): no offers, no messages, no other alerts."
+    }
+
+    /// The short state line in Your Loops.
+    public static func state(enabled: Bool) -> String { enabled ? "On: this Loop's requests appear in Alerts" : "Off: open it from Your Loops" }
 }
 
 /// One installed Loop (`GET /v1/loops/installed`, Your Loops and Settings).
@@ -357,13 +383,15 @@ public struct InstalledLoop: Codable, Sendable, Hashable, Identifiable {
     /// Open (active or submitted) instances, newest first, so Your Loops can resume them.
     public var openInstances: [LoopInstanceID]
     public var brandKitId: String?
+    /// The customer allows this Loop's own alerts in Alerts (F-4). Off unless chosen; only ever about this Loop.
+    public var alertsEnabled: Bool
 
     public var id: LoopDefinitionID { loopId }
     public var isStartable: Bool { publicationId != nil && entryPoints.contains(.businessPage) }
 
     public init(loopId: LoopDefinitionID, business: BusinessSummary, businessCategory: BusinessCategory, title: String, mode: LoopInstallMode,
                 source: LoopInstallSource, installedAt: Date, connected: Bool, publicationId: LoopPublicationID?, entryPoints: [LoopEntryPoint],
-                openInstances: [LoopInstanceID], brandKitId: String?) {
+                openInstances: [LoopInstanceID], brandKitId: String?, alertsEnabled: Bool = false) {
         self.loopId = loopId
         self.business = business
         self.businessCategory = businessCategory
@@ -376,6 +404,30 @@ public struct InstalledLoop: Codable, Sendable, Hashable, Identifiable {
         self.entryPoints = entryPoints
         self.openInstances = openInstances
         self.brandKitId = brandKitId
+        self.alertsEnabled = alertsEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case loopId, business, businessCategory, title, mode, source, installedAt, connected, publicationId, entryPoints, openInstances, brandKitId
+        case alertsEnabled
+    }
+
+    /// Additive: a response from a server older than F-4 has no `alertsEnabled`, which reads as off.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        loopId = try c.decode(LoopDefinitionID.self, forKey: .loopId)
+        business = try c.decode(BusinessSummary.self, forKey: .business)
+        businessCategory = try c.decode(BusinessCategory.self, forKey: .businessCategory)
+        title = try c.decode(String.self, forKey: .title)
+        mode = try c.decode(LoopInstallMode.self, forKey: .mode)
+        source = try c.decode(LoopInstallSource.self, forKey: .source)
+        installedAt = try c.decode(Date.self, forKey: .installedAt)
+        connected = try c.decode(Bool.self, forKey: .connected)
+        publicationId = try c.decodeIfPresent(LoopPublicationID.self, forKey: .publicationId)
+        entryPoints = try c.decode([LoopEntryPoint].self, forKey: .entryPoints)
+        openInstances = try c.decode([LoopInstanceID].self, forKey: .openInstances)
+        brandKitId = try c.decodeIfPresent(String.self, forKey: .brandKitId)
+        alertsEnabled = try c.decodeIfPresent(Bool.self, forKey: .alertsEnabled) ?? false
     }
 }
 
@@ -403,12 +455,15 @@ extension APIRoutes {
     /// for a blocked business; `422` for a stale text or `agree != true`; `429` over the rate or the per-account cap.
     public static let loopInstall = Endpoint<LoopInstallRequest, LoopInstallResult>(
         "loops.installed.put", .PUT, "/v1/loops/installed/{loopId}", auth: .deviceSignedBearer)
+    /// Allow or stop this installed Loop's own alerts in Alerts (F-4). `404` when the Loop is not installed. Returns the updated Loop.
+    public static let loopInstalledAlerts = Endpoint<LoopAlertsRequest, InstalledLoop>(
+        "loops.installed.alerts.put", .PUT, "/v1/loops/installed/{loopId}/alerts", auth: .deviceSignedBearer)
     /// Uninstall: cancels the caller's open instances of that Loop; the connection (if any) is untouched. Returns the remaining list.
     public static let loopUninstall = Endpoint<EmptyBody, [InstalledLoop]>(
         "loops.installed.delete", .DELETE, "/v1/loops/installed/{loopId}", auth: .deviceSignedBearer)
 
     /// Appended to `APIRoutes.all`.
     public static let loopInstallEndpoints: [AnyEndpoint] = [
-        loopDirectory.descriptor, loopDirectoryDetail.descriptor, loopsInstalled.descriptor, loopInstall.descriptor, loopUninstall.descriptor,
+        loopDirectory.descriptor, loopDirectoryDetail.descriptor, loopsInstalled.descriptor, loopInstall.descriptor, loopInstalledAlerts.descriptor, loopUninstall.descriptor,
     ]
 }

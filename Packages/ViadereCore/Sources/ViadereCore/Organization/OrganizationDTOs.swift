@@ -301,21 +301,44 @@ public struct BusinessPreferences: Codable, Sendable, Hashable {
     /// Blocked: the connection is ended and new connections or link sessions with this business are refused until unblocked.
     public var blocked: Bool
     public var updatedAt: Date?
+    /// The customer chose a level for this business. `false`: the business follows the account-wide default level
+    /// (`NotificationSettings.defaultLevel`), and `muteLevel` is `none`.
+    public var hasOwnLevel: Bool
 
     public init(businessId: BusinessID, favorite: Bool = false, muteLevel: MuteLevel = .none, muteUntil: Date? = nil, blocked: Bool = false,
-                updatedAt: Date? = nil) {
+                updatedAt: Date? = nil, hasOwnLevel: Bool? = nil) {
         self.businessId = businessId
         self.favorite = favorite
         self.muteLevel = muteLevel
         self.muteUntil = muteUntil
         self.blocked = blocked
         self.updatedAt = updatedAt
+        self.hasOwnLevel = hasOwnLevel ?? (muteLevel != .none)
     }
 
-    /// The mute in force at `now` (an elapsed `muteUntil` means no mute).
+    private enum CodingKeys: String, CodingKey { case businessId, favorite, muteLevel, muteUntil, blocked, updatedAt, hasOwnLevel }
+
+    /// Additive: a response without `hasOwnLevel` (an older server, which has no account default) keeps its level as the business's own.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        businessId = try c.decode(BusinessID.self, forKey: .businessId)
+        favorite = try c.decode(Bool.self, forKey: .favorite)
+        muteLevel = try c.decode(MuteLevel.self, forKey: .muteLevel)
+        muteUntil = try c.decodeIfPresent(Date.self, forKey: .muteUntil)
+        blocked = try c.decode(Bool.self, forKey: .blocked)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        hasOwnLevel = try c.decodeIfPresent(Bool.self, forKey: .hasOwnLevel) ?? (muteLevel != .none)
+    }
+
+    /// The business's own mute in force at `now` (an elapsed `muteUntil` means no mute). Ignores the account default; see `effectiveLevel`.
     public func effectiveMute(at now: Date) -> MuteLevel {
         if let muteUntil, muteUntil <= now { return .none }
         return muteLevel
+    }
+
+    /// The level in force for this business: its own when set (and not ended), else the account-wide default.
+    public func effectiveLevel(accountDefault: MuteLevel, at now: Date) -> MuteLevel {
+        NotificationPolicy.effectiveLevel(business: self, accountDefault: accountDefault, at: now)
     }
 }
 
@@ -325,18 +348,21 @@ public struct BusinessPreferencesUpdate: Codable, Sendable, Hashable {
     public var muteLevel: MuteLevel?
     public var muteUntil: Date?
     public var blocked: Bool?
+    /// `true`: drop this business's own level and follow the account-wide default again. Cannot be combined with `muteLevel`.
+    public var followDefault: Bool?
 
-    public init(favorite: Bool? = nil, muteLevel: MuteLevel? = nil, muteUntil: Date? = nil, blocked: Bool? = nil) {
+    public init(favorite: Bool? = nil, muteLevel: MuteLevel? = nil, muteUntil: Date? = nil, blocked: Bool? = nil, followDefault: Bool? = nil) {
         self.favorite = favorite
         self.muteLevel = muteLevel
         self.muteUntil = muteUntil
         self.blocked = blocked
+        self.followDefault = followDefault
     }
 
     /// The longest timed mute.
     public static let maxMuteDuration: TimeInterval = 366 * 86_400
 
-    public var isEmpty: Bool { favorite == nil && muteLevel == nil && muteUntil == nil && blocked == nil }
+    public var isEmpty: Bool { favorite == nil && muteLevel == nil && muteUntil == nil && blocked == nil && followDefault == nil }
 }
 
 /// One entry of the Businesses directory (`GET /v1/businesses`): a connection the customer has or had, with its preferences.
