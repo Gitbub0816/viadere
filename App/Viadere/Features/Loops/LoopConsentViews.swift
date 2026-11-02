@@ -298,13 +298,13 @@ private struct IdentifiedBusiness: Identifiable {
 struct BusinessLoopsSection: View {
     let business: BusinessSummary
     let model: AppModel
-    @State private var catalog: LoopCatalogViewModel
+    /// Owned and loaded by the page (`BusinessHomeView`): a `.task` here would never run, because this view is empty until the list has
+    /// loaded and SwiftUI does not start tasks on a view with no content.
+    let catalog: LoopCatalogViewModel
 
-    init(business: BusinessSummary, model: AppModel) {
-        self.business = business
-        self.model = model
+    static func makeCatalog(business: BusinessSummary, model: AppModel) -> LoopCatalogViewModel {
         let consent = model.loopConsent
-        _catalog = State(initialValue: LoopCatalogViewModel(business: business.id, api: model.services.loopsAPI, consent: { consent.status }))
+        return LoopCatalogViewModel(business: business.id, api: model.services.loopsAPI, consent: { consent.status })
     }
 
     var body: some View {
@@ -328,6 +328,5 @@ struct BusinessLoopsSection: View {
                 }
             }
         }
-        .task(id: model.loopConsent.status) { await catalog.load() }
     }
 }

@@ -12,12 +12,16 @@ struct BusinessHomeView: View {
     let model: AppModel
     @State private var home: BusinessHomeViewModel
     @State private var decoration: BusinessHomeDecoration
+    @State private var loops: LoopCatalogViewModel
+    @State private var rewards: BusinessRewardsViewModel
     @Environment(\.dismiss) private var dismiss
 
     init(entry: ConnectedBusiness, model: AppModel) {
         self.entry = entry
         self.model = model
         _home = State(initialValue: BusinessHomeViewModel(business: entry.business, api: model.services.organizationAPI))
+        _rewards = State(initialValue: BusinessRewardsViewModel(business: entry.business, services: model.services))
+        _loops = State(initialValue: BusinessLoopsSection.makeCatalog(business: entry.business, model: model))
         // From the verified local cache only: instant, and neutral when there is nothing verified.
         _decoration = State(initialValue: BusinessHomeDecoration.make(business: entry.business, brand: model.services.brandKits))
     }
@@ -35,7 +39,7 @@ struct BusinessHomeView: View {
                     moduleView(module.module)
                 }
                 if !home.modules.contains(where: { $0.module == "loops" }) {
-                    BusinessLoopsSection(business: business, model: model)
+                    BusinessLoopsSection(business: business, model: model, catalog: loops)
                 }
                 ViadereRowGroup {
                     NavigationLink {
@@ -58,6 +62,9 @@ struct BusinessHomeView: View {
             await home.load()
             await model.alerts.ensureLoaded(scope)
         }
+        // The page loads the Loop list (the section is empty until it has loaded, so it cannot start its own task); again when consent changes.
+        .task(id: model.loopConsent.status) { await loops.load() }
+        .task { await rewards.load() }
         .task {
             // Separate task: branding never delays the page or its modules.
             guard let store = model.services.brandKits, business.isVerified else { return }
@@ -73,9 +80,9 @@ struct BusinessHomeView: View {
         case "approvals": requests(title: "Waiting for you", matching: { $0.category == .approval || ($0.category == .request) })
         case "verification_requests": requests(title: "Verification requests", matching: { $0.category == .verification })
         case "offers": offers
-        case "rewards": BusinessRewardsEntry(business: business, model: model)
+        case "rewards": BusinessRewardsEntry(business: business, model: model, vm: rewards)
         case "recent_activity": recentActivity
-        case "loops": BusinessLoopsSection(business: business, model: model)
+        case "loops": BusinessLoopsSection(business: business, model: model, catalog: loops)
         default: EmptyView()
         }
     }

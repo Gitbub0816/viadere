@@ -10,6 +10,7 @@ struct BusinessDetailView: View {
     let model: AppModel
     @State private var vm: BusinessDetailViewModel
     @State private var prefs: BusinessPreferencesViewModel
+    @State private var rewards: BusinessRewardsViewModel
     @State private var confirmingBlock = false
     @State private var confirmingDisconnect = false
     @State private var copied = false
@@ -20,6 +21,7 @@ struct BusinessDetailView: View {
         self.relationship = relationship
         self.model = model
         _vm = State(initialValue: BusinessDetailViewModel(relationship: relationship, services: model.services))
+        _rewards = State(initialValue: BusinessRewardsViewModel(business: relationship.business, services: model.services))
         _prefs = State(initialValue: BusinessPreferencesViewModel(business: relationship.business,
                                                                   initial: model.businesses.entry(relationship.business.id)?.preferences,
                                                                   api: model.services.organizationAPI, clock: model.services.clock))
@@ -32,7 +34,7 @@ struct BusinessDetailView: View {
                 hero
                 actions
                 ApproveBusinessFreezeRow(controller: AppEnvironment.shared.approve, relationshipId: relationship.id, businessName: vm.business.safeName)
-                BusinessRewardsEntry(business: vm.business, model: model)
+                BusinessRewardsEntry(business: vm.business, model: model, vm: rewards)
                 notifications
                 permissions
                 BusinessLoopAuthorizationRow(business: vm.business, model: model)
@@ -47,6 +49,7 @@ struct BusinessDetailView: View {
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .task { await rewards.load() }
         .task {
             prefs.onSaved = { saved in model.businesses.apply(saved) }
             await vm.load()

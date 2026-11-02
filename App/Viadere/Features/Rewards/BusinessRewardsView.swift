@@ -111,14 +111,10 @@ struct BusinessRewardsView: View {
 struct BusinessRewardsEntry: View {
     let business: BusinessSummary
     let model: AppModel
-    @State private var vm: BusinessRewardsViewModel
+    /// Owned and loaded by the page that shows the entry: a `.task` here would never run, because this view is empty until the program has
+    /// loaded and SwiftUI does not start tasks on a view with no content.
+    let vm: BusinessRewardsViewModel
     @State private var joining = false
-
-    init(business: BusinessSummary, model: AppModel) {
-        self.business = business
-        self.model = model
-        _vm = State(initialValue: BusinessRewardsViewModel(business: business, services: model.services))
-    }
 
     var body: some View {
         Group {
@@ -145,7 +141,6 @@ struct BusinessRewardsEntry: View {
                 }
             }
         }
-        .task { await vm.load() }
         .sheet(isPresented: $joining) {
             LoyaltyEnrollSheet(vm: vm) { joining = false }
                 .presentationDetents([.large])
