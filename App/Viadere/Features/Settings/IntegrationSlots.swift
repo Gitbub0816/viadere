@@ -8,16 +8,14 @@ import ViadereKit
 // already, so wiring one is a one-line change: replace the body with the real view and keep the type (or change the one call site named
 // below). They are deliberately plain until then.
 
-/// You → Appearance. Owner: the appearance/themes work (an appearance picker view: light, dark, system and themes).
+/// You → Appearance: the appearance picker (`AppearanceSettingsView`).
 /// Call site: `SettingsView.screen(_:)`, `case .appearance`.
 struct AppearanceSettingsSlot: View {
     let model: AppModel
 
     var body: some View {
-        SubScreen(title: "Appearance", subtitle: "Light, dark and theme") {
-            // INTEGRATION SLOT (themes): replace with the appearance picker.
-            ViadereEmptyState("Appearance", message: "Viadere follows your iPhone's light and dark setting.")
-        }
+        // Wired: the themes picker (pairings, day/night themes, Increase Contrast), persisted per device in the app group.
+        AppearanceSettingsView(model: ViadereThemeRuntime.model)
     }
 }
 

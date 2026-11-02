@@ -4,9 +4,11 @@ import ViadereKit
 
 /// A business home (spec C3, C6.2; WP-1.6, WP-2.6): Viadere's standard modules in the order the business chose, always starting with the
 /// verified profile. The page renders at once in Viadere's neutral style with the default order, then adopts the business's order and its
-/// verified Brand Kit (clamped colors, a registered frame, the hash-checked logo) when they arrive; nothing waits for either. The kit
-/// decorates the header band and accents only: the name, verified badge, handle, every action, wording, navigation and security surface
-/// stay Viadere's. Modules with nothing to show are left out rather than drawn as empty placeholders (C8.3).
+/// verified Brand Kit when they arrive; nothing waits for either. An approved kit themes the business's whole space (owner decision):
+/// the header band in the kit's color with the hash-checked logo, the brand-tinted page and cards, accents and the business's own actions,
+/// all re-resolved over the person's appearance theme (`BrandStyle`). The name, verified badge and handle, wording, navigation and every
+/// security surface (approvals, verification requests) stay Viadere's (`.viadereProtectedSurface()`). Modules with nothing to show are
+/// left out rather than drawn as empty placeholders (C8.3).
 ///
 /// Organization (docs/APP-IA.md): identity and the quick actions (Message, Settings, favorite) first, then what needs you, then the
 /// business's modules, then "Your connection" (how it may interrupt, and everything else about the connection one tap away). Requests built
@@ -81,7 +83,9 @@ struct BusinessHomeView: View {
         case "profile": profile
         case "message": EmptyView() // a quick action under the profile
         case "approvals": requests(title: "Waiting for you", matching: { $0.category == .approval || ($0.category == .request) })
+            .viadereProtectedSurface()
         case "verification_requests": requests(title: "Verification requests", matching: { $0.category == .verification })
+            .viadereProtectedSurface()
         case "offers": offers
         case "rewards": BusinessRewardsEntry(business: business, model: model, vm: rewards)
         case "recent_activity": recentActivity
@@ -161,19 +165,26 @@ struct BusinessHomeView: View {
         }
     }
 
-    /// The logo (verified bytes, else the monogram) on the kit's band. Decoration only: the identity below is neutral.
+    /// The header band in the kit's primary color (`BusinessHomeDecoration.headerBand`), holding the verified logo or, without one, the
+    /// business's monogram in the band's own ink. Decoration only: the identity below is drawn in the theme's protected colors.
     @ViewBuilder private var brandBand: some View {
         if brand.isBranded {
-            HStack {
-                BrandLogo(data: decoration.logo, name: business.safeName, isVerified: business.isVerified, size: 64,
-                          accessibilityLabel: decoration.logoAccessibilityLabel)
-                Spacer()
+            let shape = RoundedRectangle(cornerRadius: brand.cornerRadius, style: .continuous)
+            HStack(spacing: ViadereSpace.m) {
+                if decoration.logo != nil {
+                    BrandLogo(data: decoration.logo, name: business.safeName, isVerified: business.isVerified, size: 72,
+                              accessibilityLabel: decoration.logoAccessibilityLabel)
+                } else {
+                    BrandMonogram(name: business.safeName, ink: brand.onPrimary, size: 72)
+                }
+                Spacer(minLength: 0)
             }
-            .padding(ViadereSpace.m)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: brand.cornerRadius, style: .continuous).fill(brand.surface))
-            .overlay(RoundedRectangle(cornerRadius: brand.cornerRadius, style: .continuous).strokeBorder(brand.accent, lineWidth: brand.borderWidth))
+            .padding(ViadereSpace.l)
+            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            .background(shape.fill(brand.primary))
+            .overlay(shape.strokeBorder(brand.accent, lineWidth: brand.borderWidth))
             .brandFrameBackground(brand)
+            .accessibilityHidden(decoration.logo == nil)
         } else {
             ViadereAvatar(name: business.safeName, size: 72, isVerified: business.isVerified)
         }

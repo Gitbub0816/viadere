@@ -18,6 +18,11 @@ struct ApproveRequestSheet: View {
     private var needsFatigueAck: Bool { prompt.showFatigueWarning && !understoodFatigue }
 
     var body: some View {
+        // A security surface: Viadere's own look in every theme, never a business's Brand Kit (anti-spoofing, SECURITY.md §2.93).
+        sheetBody.viadereProtectedSurface()
+    }
+
+    @ViewBuilder private var sheetBody: some View {
         VStack(spacing: 0) {
             // Once the person has worked through the warning, a stray pull must not throw that away: Close asks first.
             ViadereSheetHandle(onClose: understoodFatigue && !isBusy ? { confirmingLeave = true } : nil)

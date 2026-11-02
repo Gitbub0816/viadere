@@ -80,6 +80,11 @@ struct ProfileRequestSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        // A security surface: Viadere's own look in every theme, never a business's Brand Kit (anti-spoofing, SECURITY.md §2.93).
+        sheetBody.viadereProtectedSurface()
+    }
+
+    @ViewBuilder private var sheetBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ViadereSpace.l) {
                 if let vm {

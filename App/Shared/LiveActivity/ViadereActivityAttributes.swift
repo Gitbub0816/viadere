@@ -27,6 +27,6 @@ extension ViadereActivityAttributes {
         let light = accentLight.flatMap(BrandColor.init)
         let dark = accentDark.flatMap(BrandColor.init)
         guard light != nil || dark != nil else { return ViadereColor.accent }
-        return Color(brandLight: light, dark: dark, fallbackLight: 0x8C7550, fallbackDark: 0xCDB993)
+        return Color.brandAccent(light: light, dark: dark)
     }
 }

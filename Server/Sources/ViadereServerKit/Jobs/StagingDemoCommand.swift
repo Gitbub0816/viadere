@@ -143,6 +143,20 @@ public struct StagingDemoCommand: AsyncCommand {
             context.console.print("  Brand Kit: not seeded (--seed-brand-kit)")
         }
         if let logo = status.logo { context.console.print("  Logo image: \(logo.state)") }
+        switch status.brandReach {
+        case .signingUnavailable:
+            context.console.warning("  Devices: neutral (no brand-manifest signing key on this server)")
+        case .notPublished:
+            if status.kit != nil { context.console.print("  Devices: neutral (no active brand manifest yet: approve the logo, then the kit)") }
+        case .branded(let kid, let assetHost):
+            context.console.print("  Devices: branded, manifest version \(status.manifest?.version ?? 0) signed by kid \(kid)")
+            context.console.print("    The app build must pin this kid (VIADERE_BRAND_MANIFEST_KEYS).")
+            if let assetHost {
+                context.console.print("    Logo served from https://\(assetHost)/b/…")
+            } else {
+                context.console.warning("    ASSET_DOMAIN is not set: no logo reaches devices (the page shows the kit's colors and a monogram)")
+            }
+        }
         if status.kit != nil { context.console.print("  Brand review: \(base)\(OperatorBrand.path)") }
         guard let draft = status.draft else {
             context.console.print("  Loop: not seeded (--seed-loop)")
