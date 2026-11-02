@@ -1,6 +1,6 @@
 # ADR-0020: Auth-delivery API, state machine, tenant authorization, idempotency and outbox
 
-- **Status:** proposed (2026-11-02); revision 3 (2026-11-02), additive only: optional `session_handle` and supersession narrowed to it (S2-A2-9; §2, §8), `destination_unverified` denials excluded from fatigue counting (S2-A2-10; §1, §5); revision 2 (2026-11-02): `audience` removed (S1-A2-8), destination signature (ADR-0031), RFC 9421 profile (S1-A3-19), budgets limit alerting (S1-A2-6), Android push pipeline (A6/A7 finding 3), variables as personal data (S1-A10-9), email fallback limits (S1-A10-6), log allow-list (S1-A10-2)
+- **Status:** proposed (2026-11-02); revision 3.1 (2026-11-02), additive only: `match_tag`/`match_prefix_tag` on `auth-approvals` with three `409` answers and a group-pressure audit event (S3-A2-2; §2a, §8, §9), `session_handle` derivation MUST and abuse rule (S3-A2-6; §2, §8); revision 3 (2026-11-02), additive only: optional `session_handle` and supersession narrowed to it (S2-A2-9; §2, §8), `destination_unverified` denials excluded from fatigue counting (S2-A2-10; §1, §5); revision 2 (2026-11-02): `audience` removed (S1-A2-8), destination signature (ADR-0031), RFC 9421 profile (S1-A3-19), budgets limit alerting (S1-A2-6), Android push pipeline (A6/A7 finding 3), variables as personal data (S1-A10-9), email fallback limits (S1-A10-6), log allow-list (S1-A10-2)
 - **Spec reference:** §3.1, §6.1, §6.2, §6.5, §12, §19, Appendix A; owner decisions 1, 2, 3, 4, 7, 9
 - **Related:** ADR-0014 (outbox), ADR-0019, ADR-0021 (magic links), ADR-0022 (push MFA), ADR-0025 (webhooks), ADR-0026 (retention); SECURITY §2.27 (idempotency), §2.29 (policy), §2.30 (`subject_ref`), §2.91 (queue envelope)
 - **Review:** A4 (author of Stage 2 contract), A2, A10, A8
@@ -48,7 +48,7 @@ Business routes stay under the existing `/v1/business/` namespace (the route cat
 | `otp` | object | `otp` only: `{code: 4-10 chars [0-9A-Z], code_kind: "otp" \| "totp"}` |
 | `correlation_id` | string ≤ 128 | echoed in events |
 | `client_transaction_ref` | string ≤ 128 | opaque business handle, echoed |
-| `session_handle` | string 1-64 `[A-Za-z0-9_-]`, optional | *(revision 3, additive; S2-A2-9)* opaque value the business derives from its own initiating session; class T; never shown, never in webhooks. The only input to supersession (§8). Also accepted on `POST /v1/business/auth-approvals` (ADR-0022 §5.2) |
+| `session_handle` | string 1-64 `[A-Za-z0-9_-]`, optional | *(revision 3, additive; S2-A2-9)* opaque value the business derives from its own initiating session; class T; never shown, never in webhooks. The only input to supersession (§8). Also accepted on `POST /v1/business/auth-approvals` (ADR-0022 §5.2). *(Revision 3.1, S3-A2-6, documentation and SDK only, no schema change:)* MUST be `base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" ‖ initiating_session_id))` (ADR-0022 §5.2 item 1); the api cannot check this and applies the abuse rule of §8 |
 | `expires_in_seconds` | int | `magic_link` 120-600 (default 300), `otp` 60-600 (default 300), `notice` 300-86400 |
 | `channels` | array of `push`, `inbox`, `email` | default `["push","inbox"]`; `email` needs `fallback.email` |
 | `fallback` | `{email: {address}}` | §7 |
@@ -57,6 +57,17 @@ Business routes stay under the existing `/v1/business/` namespace (the route cat
 Any member not listed, **including `tenant_id` and `audience`**, is `422 validation_failed` (spec App. A: tenant is authenticated from the credential, never from the payload). Grant `aud` and `tid` come only from the authority's link-client record (S1-A2-8; revision 1's `audience` member is removed).
 
 Response `201` (`200` on idempotent replay): `{id: "adl_<22 b64url>", request_id, status, expires_at, created_at, correlation_id}`.
+
+### 2a. `auth-approvals` create: number-match tags *(revision 3.1, additive; S3-A2-2, ADR-0022 §5.2 item 6)*
+
+`POST /v1/business/auth-approvals` keeps the Approve v2 request body (ADR-0022 §1-§3) and gains two members, present **iff** the request carries `number_match`:
+
+| Field | Type | Rule |
+|---|---|---|
+| `match_tag` | string, 43 base64url characters | `base64url(HMAC-SHA256(K_match, "viadere-match-tag-v1\n" ‖ subject_ref ‖ "\n" ‖ code))`, computed by the SDK; class T; never in webhooks, events, logs or the dashboard; deleted at terminal state |
+| `match_prefix_tag` | string, 43 base64url characters | 3-digit codes only: the same HMAC over the first 2 digits; absent for 2-digit codes |
+
+New error answers on this route only (all `409`, problem+json, no other effect, nothing created): `match_code_in_use` (a tag equals an open request's tag or prefix tag in the same (tenant, subject) group, or the prefix tag equals an open tag), `match_digits_required` (body `{digits: 3}`: the group has 30 or more open requests), `match_code_space_exhausted` (no free code can exist; critical operator alert). The SDKs redraw on the first two transparently. A request without `number_match` is unaffected. Existing members, states and answers are unchanged.
 
 ### 3. Business authentication for auth routes
 
@@ -114,11 +125,13 @@ New fail-closed namespaces (added to the `DatabaseRateLimitStore` fail-closed li
 
 **Budgets limit alerting, not availability (S1-A2-6).** When a per-subject or per-relationship budget is exhausted, the new delivery is still created, collapsed and placed in the inbox, but delivered **silently** (no alert push); the inbox shows "You have a pending sign-in from {Business}". An attacker who knows a victim's identifier can therefore no longer make the victim's own sign-in undeliverable. Collapse (narrowed in revision 3, S2-A2-9): a new `sign_in` delivery or approval for the same (tenant, subject) cancels an open one with reason `superseded` **only when both carry the same `session_handle`** (§2); requests without a matching `session_handle` stay open side by side until they complete, expire or are answered (for approvals the typed number selects the request, ADR-0022 §5.2), so an attacker who triggers sign-ins cannot cancel the person's own request; while over budget, supersession is silent too. Fatigue counters are shared with Approve (ADR-0022 §5). Business guidance and the SDK helper throttle unauthenticated sign-in triggers per client IP and per account on the business side (residual R-20).
 
+*Revision 3.1 (additive).* **`session_handle` abuse rule (S3-A2-6):** a `session_handle` seen on more than 3 distinct `request_id`s for the same (tenant, subject) within 10 minutes is treated as absent for supersession from then on (the new request joins the group; nothing is cancelled because of it), audited and shown on the business dashboard; one handle on more than 20 requests per hour for a tenant raises an operator alert. **Approval groups (S3-A2-2):** codes of open approvals in one (tenant, subject) group are kept distinct and prefix-free through the §2a tags; 3 digits are required from 30 open requests; above 10 open requests the api writes `auth_delivery.group_pressure` and alerts operators and the business (at most once per group per hour). These answers are not budgets: `authdl-tenant` stays the only budget that refuses with `429`, and nothing is refused because of a per-subject count until the code space is exhausted (ADR-0022 §5.2 items 4 and 6).
+
 ### 9. Idempotency, outbox and audit
 
 - `Idempotency-Key` required on every POST above (SECURITY §2.27 semantics: one row per `(business, operation, key)` with the SHA-256 of operation and request; same key + same request replays; different request `409 idempotency_conflict`). `request_id` is additionally unique per tenant.
 - Outbox: dispatch, expiry and webhook rows are written in the creating transaction; queue envelopes carry ids only (SECURITY §2.91; new message types `auth.delivery.dispatch`, `auth.delivery.expire`; unknown types dead-lettered).
-- Audit events (no secrets, no `variables`): `auth_delivery.created|opened|denied|cancelled|completed|expired|cross_tenant_refused|destination_unverified`, with tenant, pseudonymous actor, delivery id, method, purpose, policy version, request-signing key id, correlation id.
+- Audit events (no secrets, no `variables`): `auth_delivery.created|opened|denied|cancelled|completed|expired|cross_tenant_refused|destination_unverified|group_pressure` (`group_pressure` added in revision 3.1: tenant, pseudonymous subject, open count; no code or tag), with tenant, pseudonymous actor, delivery id, method, purpose, policy version, request-signing key id, correlation id.
 - **Log allow-list (S1-A10-2).** Auth-delivery, phone-link and OIDC routes log only an allow-list of fields (route template, status, ids, latency, error code); never the query string, body or headers other than ids. The allow-list is implemented in the logger and in the App Insights telemetry initializer (fields not on the list are dropped), not by regex redaction.
 - Template ids are fixed: N-06 "{Business} sent a security notice." never takes business text (S1-A9-14).
 

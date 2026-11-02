@@ -9,7 +9,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 | Stage | Name | Artifacts | Authoring roles | Reviewer roles | Commit | Status |
 |---|---|---|---|---|---|---|
 | 0 | Discovery | `docs/architecture/CURRENT_STATE.md`, `docs/architecture/GAP_ANALYSIS.md`, `docs/product/SCOPE_LEDGER.md`, `docs/reviews/IMPLEMENTATION_LEDGER.md`; evidence reports A4, A5, A6, A8, A14 (kept outside the repository in `/tmp/claude-0/auth/stage0/`, not committed) | A0 (reconciliation, spot-checks), A4, A5, A6, A8, A14 (evidence reports) | Pending: A2 and A5 on security findings F-01 to F-03; A14 on scope; A7 on Android notes (Kotlin package not yet merged); owner approval of the current-state inventory (gate: "Current-state inventory approved") | 59bc991 | Written, awaiting review |
-| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0034 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy; ADR-0031-0033 added in revision 2, ADR-0034 in revision 3), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md`, reviews `STAGE1_A2_SECURITY_REVIEW.md`, `STAGE1_A3_CRYPTO_REVIEW.md`, `STAGE1_A6A7_PLATFORM_REVIEW.md`, `STAGE1_A9A10_UX_PRIVACY_REVIEW.md`, author response `STAGE1_RESPONSE.md`, `docs/ops/DATA-INVENTORY.md` update | One Stage 1 author acting as A1, A2, A3, A5, A10 | Reviewed once (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions). Revision 2 re-reviewed: A2 BLOCK (narrow), A3 approve with conditions (`STAGE1_A2_SECURITY_REREVIEW.md`, `STAGE1_A3_CRYPTO_REREVIEW.md`). Revision 3 (ADR-0034 added) awaits A2 and A3 delta re-review; A9 copy review (C-12); A5 peer or A4 (network) and A4 (contracts) still pending; A0 consistency. Author may not approve. | recorded by A0 after commit | Revision 3 written, awaiting delta re-review |
+| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0034 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy; ADR-0031-0033 added in revision 2, ADR-0034 in revision 3), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md`, reviews `STAGE1_A2_SECURITY_REVIEW.md`, `STAGE1_A3_CRYPTO_REVIEW.md`, `STAGE1_A6A7_PLATFORM_REVIEW.md`, `STAGE1_A9A10_UX_PRIVACY_REVIEW.md`, author response `STAGE1_RESPONSE.md`, `docs/ops/DATA-INVENTORY.md` update | One Stage 1 author acting as A1, A2, A3, A5, A10 | Reviewed once (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions). Revision 2 re-reviewed: A2 BLOCK (narrow), A3 approve with conditions (`STAGE1_A2_SECURITY_REREVIEW.md`, `STAGE1_A3_CRYPTO_REREVIEW.md`). Revision 3 checked: A2 and A3 **approve with conditions** (`STAGE1_A2_REV3_CHECK.md`, `STAGE1_A3_REV3_CHECK.md`). Revision 3.1 answers those conditions (C-13 is a hard gate before the Stage 2 authority contract freezes; A2 checks the documents, no new round; A3 re-checks only the S3-A3-01/-02 deltas before Stage 6). A9 copy review (C-12); A5 peer or A4 (network) and A4 (contracts) still pending; A0 consistency. Author may not approve. | recorded by A0 after commit | Revision 3.1 written, awaiting the C-13 document check |
 | 2 | API + data contracts | `contracts/openapi/auth-delivery-v1.yaml`, event and webhook schemas, migrations, retention sweeps, webhook signature v2 in Core | A4, A8, A10 | A10 (privacy), A2, A13 (contract tests); Core change reviewed by A3 | | Not started |
 | 3 | Delivery engine | Delivery aggregate and state machine, magic-link and OTP transport, code delivery, queue handlers, SDKs (Swift, TypeScript), harness, `tests/security/` | A4, A8 | A2, A9 (copy), A13 | | Not started |
 | 4 | Native handoffs | iOS confirm-gated handoff, number-matching UI, equal Deny, Live Activity policy, notification routing fixes, watch classification, Android handoff from the Kotlin branch, UX copy | A6, A7, A9 | A9 (UX), A13 (real-device checks), A2 | | Not started |
@@ -36,7 +36,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 |---|---|---|
 | Stage 0 exit | Current-state inventory approved | Not yet approved; documents written |
 | Stage 1 entry | Stage 0 outputs reviewed | Stage 1 drafted in parallel at the orchestrator's direction; Stage 0 review still pending |
-| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet. Revision 2 re-reviewed (A2 BLOCK narrow; A3 approve with conditions); revision 3 and the "Revision 3" table in `STAGE1_RESPONSE.md` written; A2/A3 delta re-review requested |
+| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet. Revision 2 re-reviewed (A2 BLOCK narrow; A3 approve with conditions); revision 3 and the "Revision 3" table in `STAGE1_RESPONSE.md` written; A2 and A3 approved revision 3 with conditions; revision 3.1 written ("Revision 3.1" table); C-13 document check by A2 pending before the Stage 2 authority contract freezes |
 | Production | Owner approval after release gates | Not applicable; no agent deploys to production |
 
 ## Open items carried to Stage 1
@@ -67,7 +67,7 @@ All Critical, High and Medium findings of the four reviews are fixed or replaced
 | Id | Item | Owner | Stage |
 |---|---|---|---|
 | L-1 | ~~Upgrade path for outage-created accounts~~ **Closed in revision 3**: no account is created without genesis (ADR-0032 §1.5, S2-A2-8 option (a)) | A2 | — |
-| L-2 | `docs/ops/KEY-ROTATION.md`: explicit versions, standby keys as separate objects, revocation rules for both pinned families, compromise and loss-of-both runbooks, routine rotation, seal-key creation and destruction (ADR-0033 §3, ADR-0034 §5) | A3, A11 | **before Stage 4 pins any key** (moved from 6; condition C-6) |
+| L-2 | `docs/ops/KEY-ROTATION.md`: explicit versions, standby keys as separate objects, revocation rules for both pinned families, compromise and loss-of-both runbooks, routine rotation, seal-key creation (two separate runs, attested KEK public halves) and destruction, seal-key lifetime (≤ 6 months), and the **"seal key exposed"** procedure (ADR-0033 §3, ADR-0034 §5, §8; revision 3.1) | A3, A11 | **before Stage 4 pins any key** (moved from 6; condition C-6); the exposure procedure is **drilled once in staging** before any authority flag in the pilot (C-15) |
 | L-3 | Purge for `channel_endpoints`, `rcs_postbacks` | A10 | 2 |
 | L-4 | `sms_consent_events` retention and TCPA/CTIA review | A10 with counsel | before production |
 | L-5 | `login_hint` by signed request object or PAR | A1 | 9 |
@@ -77,7 +77,7 @@ All Critical, High and Medium findings of the four reviews are fixed or replaced
 | L-9 | Counsel list from the A10 review §4 (E periods, state privacy law, COPPA, TCPA/CTIA, residency wording, controller/processor, lawful requests, OIDC consent terms, claims language) | A10 with counsel | before production |
 | L-10 | Optional device-side `subject_ref` statement to narrow R-07' (S2-A2-11 item 5, S1-A3-R04 item 3) | A2 | 5 |
 | L-11 | Format vectors from the A3 re-review Lows (R04-R06) in `docs/protocol/vectors/` (`keylog-v1.json` incl. comparison code, `auth-destination-v1.json`, device-statement vectors incl. cross-`typ` and revocation, `recovery-seal-v1.json`, RFC 7638 `kid` agreement) | A3 with the implementing stage | 2-6 |
-| L-12 | Re-check on Microsoft Learn whether Key Vault or Managed HSM offers a key-agreement (ECDH) operation; if so, move the seal key into it and retire R-23 | A3 | 6 |
+| L-12 | Re-check on Microsoft Learn whether Key Vault or Managed HSM offers a key-agreement (ECDH) operation (and the built-in Crypto User role definition). If one exists, HPKE with an HSM-resident KEM key becomes an alternative to ADR-0034 §9 (A3 re-check); if not, §9 stands. Either way it feeds L-13 | A3 | 6 |
 
 ## Stage 1 revision 3 (2026-11-02)
 
@@ -93,6 +93,43 @@ Answers the A2 re-review (BLOCK, narrow) and the A3 re-review (approve with cond
 | OQ-2 (restated) | The "Make new recovery codes" offer of decision 16 is kept, but it is **not shown** until sealed recovery (ADR-0034) ships and its tests pass (condition C-4). Registering a new set retires the old codes, including the api's legacy set | Timing and UX of an owner-accepted feature | Offer after ADR-0034 ships |
 | OQ-9 | Device add needs typing a 6-digit code from the new device on an existing device; passkey-only people add a device through an existing device or recovery, not with the passkey alone | Product friction from S2-A2-2/-3 | Design as revision 3 |
 | OQ-10 | Business-mode tenants must publish a DNS TXT (or well-known) key thumbprint and renew destination keys at least every 13 months | Onboarding friction from S1-A3-R03 (extends OQ-7) | Design as revision 3 |
+
+## Stage 1 revision 3.1 (2026-11-02)
+
+Answers the A2 and A3 checks of revision 3 (both **approve with conditions**); full table in `STAGE1_RESPONSE.md` "Revision 3.1". Docs only. Changes: device-add caps and comparison-nonce timing (ADR-0033 §4.1, ADR-0023 §4, DF-5; S3-A2-1, S3-A3-01; **C-13**); collision-free, prefix-free number allocation in approval groups (ADR-0022 §5.2 item 6, ADR-0020 §2a, §8; S3-A2-2; C-14); seal-key custody, `seal_kid`, exposure procedure, lifetime, lean-pilot mitigations and the production HSM construction (ADR-0034 §5, §8-§10, ADR-0028, TRUST_BOUNDARIES §3, §4.2; S3-A2-3, S3-A3-02; C-15, C-16); Lows S3-A2-4..-6 and S3-A3-03..-05 fixed in the design (C-17); S3-A3-06 recorded.
+
+**Changes to ADRs that Stages 2-3 code against (ADR-0020, additive only; forward to the agent implementing ADR-0020):**
+- §2 `session_handle`: derivation is now a MUST (`HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" ‖ initiating_session_id)`); documentation and SDK only, **no schema change**.
+- New §2a on `POST /v1/business/auth-approvals`: two members `match_tag` and `match_prefix_tag` (present iff `number_match`), and three new `409` answers on that route: `match_code_in_use`, `match_digits_required {digits: 3}`, `match_code_space_exhausted`.
+- §8: the `session_handle` abuse rule (more than 3 request ids per (tenant, subject) in 10 minutes → treated as absent for supersession; alert above 20 per hour per tenant); group rules (distinct and prefix-free codes, 3 digits from 30 open, group-pressure alert above 10). `authdl-tenant` remains the only `429` budget.
+- §9: new audit event `auth_delivery.group_pressure`.
+- No member, state, route or answer is removed or changed.
+
+**Authority contract (Stage 2), gate C-13:** the authority OpenAPI encodes `POST challenges` purpose `keylog_pop` (PoP nonce), one `keylog_device_added` challenge per entry (`409 challenge_exists`), one pending `device_added` entry per account, `429 device_add_limit` (5 per account per 24 h), `409 key_in_use`, the `set_id` member on `recovery_codes_set` challenges, the head member `recovery_set`, and the admin commands `seal-key create --role`, `seal-key exposed`.
+
+### Conditions from the revision 3 checks
+
+| Condition | Where it is met | Gate | State |
+|---|---|---|---|
+| C-1 … C-12 (A2, earlier) | unchanged; C-1 test list now also includes ST-REC-22, ST-REC-23, ST-MFA-11, ST-AUTH-25 | as before | carried |
+| C-13 S3-A2-1 | ADR-0033 §4.1, ADR-0023 §4, DF-5, THREAT_MODEL T-REC-10, ST-REC-22 | before the Stage 2 authority contract freezes | design done; A2 document check pending; OpenAPI in Stage 2 |
+| C-14 S3-A2-2 | ADR-0022 §5.2 item 6, ADR-0020 §2a, §8, R-20, ST-MFA-11 | Stage 2 contract; ST-MFA-11 before the pilot | design done |
+| C-15 R-23 lean mitigations | ADR-0034 §8, §10; L-2; L-14 | before `RECOVERY_REFRESH_PROMPT_ENABLED` or any authority flag in the pilot | design done; drill and container hardening open |
+| C-16 R-23 production | ADR-0034 §9 (JWE `RSA-OAEP-256` + `A256GCM`, RSA-HSM, one `decrypt` per envelope); L-13 | before any production authority | **production blocked** until §9 ships or an owner exception is signed |
+| C-17 S3-A2-4..-6 | ADR-0032 §1.8; ADR-0031 §4; ADR-0022 §5.2 item 1, ADR-0020 §8 | before Stage 7 | design done |
+| C-18 OQ-8 | owner | pilot | open (owner) |
+| A3 Stage 4 conditions | S3-A3-01 amended (ADR-0033 §4.1); revocation storage and whole-list refusal (ADR-0033 §3.3); KEY-ROTATION.md with the seal-key incident procedure and lifetime (L-2) | Stage 4 | design done; L-2 open |
+| A3 "before Stage 6 starts" | R-23 restated; `seal_kid`; lifetime; production option chosen (§9) | before Stage 6 | design done; A3 delta re-check pending |
+
+### Tracked follow-ups from revision 3.1
+
+| Id | Item | Owner | Stage |
+|---|---|---|---|
+| L-13 | Implement ADR-0034 §9 (JWE `RSA-OAEP-256` + `A256GCM`, `recovery-seal-rsa` RSA-HSM 3072, Decrypter role, per-challenge decrypt record and reconciliation, iOS and Android OAEP parameters, vectors), or obtain an owner exception countersigned by A2 and A3 (seal-key lifetime ≤ 90 days, review date). **No production authority and no real-customer recovery set until one of the two exists.** Recommended: adopt §9 in lean staging too, after an A3 delta check | A3, A5, A6/A7 | 6 (before production) |
+| L-14 | Authority container hardening for C-15: `RLIMIT_CORE` 0, `PR_SET_DUMPABLE` 0, route-list test (no debug endpoints), shell-less runtime image test, no `CAP_SYS_PTRACE`, no exec permission on the authority app (policy check), release-build test refusing staging thumbprints in production builds | A5, A11 | 6 (before any authority flag in the pilot) |
+| L-15 | `docs/protocol/vectors/`: `keylog-v1.json` cap cases and filtering-bound vector; `recovery-seal-v1.json` additions of ADR-0034 §7; `auth-destination-v1.json` PoP nonce and window cases; SDK vectors for `session_handle`, `match_tag` and `match_prefix_tag` | A3 with the implementing stage | 2-6 |
+| L-16 | UX and platform follow-ups: A9 checks S-DEV-05 for failed and expired adds, S-REC-05 as a required step after an exposure, S-REC-04's support path for people with no device after an invalidation, and S3-A3-06 copy ("set up Face ID / Touch ID to make recovery codes") in FLOW_MATRIX and UX_COPY; A6/A7 confirm the Android `AUTH_BIOMETRIC_STRONG` equivalent for `approvalBiometric` and name the reinstall-surviving revocation store on Android | A9, A6, A7 | 4 |
+| L-17 | S3-A2-6 RP integration guide sentence and SDK helper `sessionHandle(for:)`; S3-A2-4 closure task for unconfirmed accounts | A8, A4 | 2-3 |
 
 ## Stage 1 record
 
