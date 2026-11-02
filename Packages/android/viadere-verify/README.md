@@ -7,7 +7,7 @@ the hand-off table are in [`docs/VERIFY-BUTTON.md`](../../../docs/VERIFY-BUTTON.
 |---|---|
 | Module | `:library`, namespace `com.viadere.verify`, `minSdk 30`, compile SDK 37.2 |
 | Toolchain | Gradle 9.8.2, AGP 9.5.0 (built-in Kotlin), Kotlin 2.4.21 (Compose compiler plugin), Compose BOM 2026.09.00 (`ui`, `foundation`), JUnit 4.13.2 |
-| Dependencies | Compose `ui` and `foundation` only. No Material, no networking, no QR library (`QrCode.kt` is a dependency-free encoder) |
+| Dependencies | Compose `ui` and `foundation` only (CLAUDE.md rule 4 justification: the deliverable is a Jetpack Compose component, so the integrating app already ships both; nothing else). No Material, no networking, no QR library (`QrCode.kt` is a dependency-free encoder) |
 | Pure logic | `VerifyModel.kt` (session link, hand-off rule, panel state, return check, colours, mark paths), `QrCode.kt` |
 | Android | `VerifyLauncher.kt` (`FLAG_ACTIVITY_REQUIRE_NON_BROWSER`), `VerifyWithViadereButton.kt` (Compose button and panel) |
 
@@ -19,3 +19,5 @@ the hand-off table are in [`docs/VERIFY-BUTTON.md`](../../../docs/VERIFY-BUTTON.
   itself (`compileSdk { version = release(37) { minorApiLevel = 2 } }` uses the AGP 9 DSL). Build it once in Android Studio or CI before release.
 - The Gradle wrapper JAR and scripts are not committed: run `gradle wrapper --gradle-version 9.8.2` once (the properties pin the distribution
   checksum), then `./gradlew :library:testDebugUnitTest`.
+- Still to do on the first real build: commit Gradle dependency locks (`./gradlew dependencies --write-locks`) and verification metadata
+  (`./gradlew --write-verification-metadata sha256 help`), so the pinned tooling has a committed lockfile as CLAUDE.md rule 4 asks.
