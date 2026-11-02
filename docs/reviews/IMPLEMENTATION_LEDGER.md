@@ -9,7 +9,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 | Stage | Name | Artifacts | Authoring roles | Reviewer roles | Commit | Status |
 |---|---|---|---|---|---|---|
 | 0 | Discovery | `docs/architecture/CURRENT_STATE.md`, `docs/architecture/GAP_ANALYSIS.md`, `docs/product/SCOPE_LEDGER.md`, `docs/reviews/IMPLEMENTATION_LEDGER.md`; evidence reports A4, A5, A6, A8, A14 (kept outside the repository in `/tmp/claude-0/auth/stage0/`, not committed) | A0 (reconciliation, spot-checks), A4, A5, A6, A8, A14 (evidence reports) | Pending: A2 and A5 on security findings F-01 to F-03; A14 on scope; A7 on Android notes (Kotlin package not yet merged); owner approval of the current-state inventory (gate: "Current-state inventory approved") | 59bc991 | Written, awaiting review |
-| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0033 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy; ADR-0031-0033 added in revision 2), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md`, reviews `STAGE1_A2_SECURITY_REVIEW.md`, `STAGE1_A3_CRYPTO_REVIEW.md`, `STAGE1_A6A7_PLATFORM_REVIEW.md`, `STAGE1_A9A10_UX_PRIVACY_REVIEW.md`, author response `STAGE1_RESPONSE.md`, `docs/ops/DATA-INVENTORY.md` update | One Stage 1 author acting as A1, A2, A3, A5, A10 | Reviewed once (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions). Revision 2 awaits delta re-review by the same reviewers; A5 peer or A4 (network) and A4 (contracts) still pending; A0 consistency. Author may not approve. | recorded by A0 after commit | Revision 2 written, awaiting delta re-review |
+| 1 | Threat model + ADRs | `docs/architecture/THREAT_MODEL.md`, `docs/architecture/TRUST_BOUNDARIES.md`, ADR-0019 to ADR-0034 in `docs/ops/adr/` (the spec's `docs/architecture/ADR/` and "ADR-0001" map to this existing series; ADR-0019 is the implementation strategy; ADR-0031-0033 added in revision 2, ADR-0034 in revision 3), `docs/product/UX_COPY.md`, `docs/product/FLOW_MATRIX.md`, CLAUDE.md exception row for api-held keys (decision 12), `docs/reviews/STAGE1_REVIEW_REQUEST.md`, reviews `STAGE1_A2_SECURITY_REVIEW.md`, `STAGE1_A3_CRYPTO_REVIEW.md`, `STAGE1_A6A7_PLATFORM_REVIEW.md`, `STAGE1_A9A10_UX_PRIVACY_REVIEW.md`, author response `STAGE1_RESPONSE.md`, `docs/ops/DATA-INVENTORY.md` update | One Stage 1 author acting as A1, A2, A3, A5, A10 | Reviewed once (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions). Revision 2 re-reviewed: A2 BLOCK (narrow), A3 approve with conditions (`STAGE1_A2_SECURITY_REREVIEW.md`, `STAGE1_A3_CRYPTO_REREVIEW.md`). Revision 3 (ADR-0034 added) awaits A2 and A3 delta re-review; A9 copy review (C-12); A5 peer or A4 (network) and A4 (contracts) still pending; A0 consistency. Author may not approve. | recorded by A0 after commit | Revision 3 written, awaiting delta re-review |
 | 2 | API + data contracts | `contracts/openapi/auth-delivery-v1.yaml`, event and webhook schemas, migrations, retention sweeps, webhook signature v2 in Core | A4, A8, A10 | A10 (privacy), A2, A13 (contract tests); Core change reviewed by A3 | | Not started |
 | 3 | Delivery engine | Delivery aggregate and state machine, magic-link and OTP transport, code delivery, queue handlers, SDKs (Swift, TypeScript), harness, `tests/security/` | A4, A8 | A2, A9 (copy), A13 | | Not started |
 | 4 | Native handoffs | iOS confirm-gated handoff, number-matching UI, equal Deny, Live Activity policy, notification routing fixes, watch classification, Android handoff from the Kotlin branch, UX copy | A6, A7, A9 | A9 (UX), A13 (real-device checks), A2 | | Not started |
@@ -36,7 +36,7 @@ Branch for Stage 0: the working branch `worktree-agent-aef563e35efb70f43`, start
 |---|---|---|
 | Stage 0 exit | Current-state inventory approved | Not yet approved; documents written |
 | Stage 1 entry | Stage 0 outputs reviewed | Stage 1 drafted in parallel at the orchestrator's direction; Stage 0 review still pending |
-| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet. Reviews received (A2 BLOCK; A3, A6/A7, A9/A10 approve with conditions); revision 2 and `STAGE1_RESPONSE.md` written; delta re-review requested |
+| Stage 1 exit | Threat model, trust boundaries, ADRs signed by reviewers (spec §24) | Not yet. Revision 2 re-reviewed (A2 BLOCK narrow; A3 approve with conditions); revision 3 and the "Revision 3" table in `STAGE1_RESPONSE.md` written; A2/A3 delta re-review requested |
 | Production | Owner approval after release gates | Not applicable; no agent deploys to production |
 
 ## Open items carried to Stage 1
@@ -66,8 +66,8 @@ All Critical, High and Medium findings of the four reviews are fixed or replaced
 
 | Id | Item | Owner | Stage |
 |---|---|---|---|
-| L-1 | Upgrade path for outage-created accounts (must rest on authority-verified evidence) | A2 | 6 |
-| L-2 | `docs/ops/KEY-ROTATION.md`: explicit versions, standby device-statement key, emergency rollover | A3, A11 | 6 |
+| L-1 | ~~Upgrade path for outage-created accounts~~ **Closed in revision 3**: no account is created without genesis (ADR-0032 §1.5, S2-A2-8 option (a)) | A2 | — |
+| L-2 | `docs/ops/KEY-ROTATION.md`: explicit versions, standby keys as separate objects, revocation rules for both pinned families, compromise and loss-of-both runbooks, routine rotation, seal-key creation and destruction (ADR-0033 §3, ADR-0034 §5) | A3, A11 | **before Stage 4 pins any key** (moved from 6; condition C-6) |
 | L-3 | Purge for `channel_endpoints`, `rcs_postbacks` | A10 | 2 |
 | L-4 | `sms_consent_events` retention and TCPA/CTIA review | A10 with counsel | before production |
 | L-5 | `login_hint` by signed request object or PAR | A1 | 9 |
@@ -75,6 +75,24 @@ All Critical, High and Medium findings of the four reviews are fixed or replaced
 | L-7 | Device checks marked **verify** (watch action routing, `sms_body` on OEM apps, RCS inbound, Android clipboard flag) | A6, A7, A13 | 4, 5, 7 |
 | L-8 | MailerSend and SMS-provider storage locations verified and recorded (email fallback gate) | A10, owner | before enabling email fallback |
 | L-9 | Counsel list from the A10 review §4 (E periods, state privacy law, COPPA, TCPA/CTIA, residency wording, controller/processor, lawful requests, OIDC consent terms, claims language) | A10 with counsel | before production |
+| L-10 | Optional device-side `subject_ref` statement to narrow R-07' (S2-A2-11 item 5, S1-A3-R04 item 3) | A2 | 5 |
+| L-11 | Format vectors from the A3 re-review Lows (R04-R06) in `docs/protocol/vectors/` (`keylog-v1.json` incl. comparison code, `auth-destination-v1.json`, device-statement vectors incl. cross-`typ` and revocation, `recovery-seal-v1.json`, RFC 7638 `kid` agreement) | A3 with the implementing stage | 2-6 |
+| L-12 | Re-check on Microsoft Learn whether Key Vault or Managed HSM offers a key-agreement (ECDH) operation; if so, move the seal key into it and retire R-23 | A3 | 6 |
+
+## Stage 1 revision 3 (2026-11-02)
+
+Answers the A2 re-review (BLOCK, narrow) and the A3 re-review (approve with conditions); full table in `STAGE1_RESPONSE.md` "Revision 3". Structural changes: **ADR-0034** (new): recovery codes generated on the device, sealed with HPKE (`DHKEM(P-256, HKDF-SHA256)` / `HKDF-SHA256` / `AES-256-GCM`, the ADR-0007 suite) to a pinned `recovery-seal` key, never seen or hashed by the api, and bound to the new keys at recovery start; passkey assertions accepted only for `oidc_login` and `recovery_cancel` (ADR-0023 §3a); device-add comparison code typed on the existing device (ADR-0033 §4.1); defined, role-restricted, sticky revocation of pinned keys with standbys as separate key objects (ADR-0033 §3); tenant destination keys need a PoP and their thumbprint in the domain evidence (ADR-0031 §1); request grouping with number selection and `session_handle`-only supersession (ADR-0022 §5.2); no account without genesis (ADR-0032 §1.5).
+
+**Additive changes to ADRs that Stages 2-3 code against** (for forwarding): ADR-0020 §2 optional `session_handle`; §8 supersession only with a matching `session_handle`; §1/§5 `destination_unverified` denials not counted toward fatigue. ADR-0027 §1.3 one clarifying sentence (dormant owner: transfer waits indefinitely), no behavior change. ADR-0025 and ADR-0026 unchanged.
+
+### Owner questions raised by revision 3
+
+| Id | Question | Why | Default until answered |
+|---|---|---|---|
+| OQ-8 | Decision 16 OQ-4 said outage-created accounts "stay limited until re-bound". Revision 3 (A2 S2-A2-8 option (a)) instead creates **no** account while the authority is down: sign-up waits and retries. Replace the OQ-4 wording? | Changes the product behavior the owner accepted provisionally | Design as revision 3 (no limited accounts) |
+| OQ-2 (restated) | The "Make new recovery codes" offer of decision 16 is kept, but it is **not shown** until sealed recovery (ADR-0034) ships and its tests pass (condition C-4). Registering a new set retires the old codes, including the api's legacy set | Timing and UX of an owner-accepted feature | Offer after ADR-0034 ships |
+| OQ-9 | Device add needs typing a 6-digit code from the new device on an existing device; passkey-only people add a device through an existing device or recovery, not with the passkey alone | Product friction from S2-A2-2/-3 | Design as revision 3 |
+| OQ-10 | Business-mode tenants must publish a DNS TXT (or well-known) key thumbprint and renew destination keys at least every 13 months | Onboarding friction from S1-A3-R03 (extends OQ-7) | Design as revision 3 |
 
 ## Stage 1 record
 

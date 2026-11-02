@@ -21,7 +21,7 @@ Decision 2 asks for both: business-supplied single-use URLs on verified domains 
 ### 2. Domain verification and destination policy
 
 1. A tenant's `business_domains` row gains `purposes` (set; `auth_links` new) and an exact `allowed_hosts` list (each an A-label host equal to the verified domain or a subdomain of it). Adding a host or the `auth_links` purpose needs a fresh dashboard passkey step-up (existing re-authentication) by an Owner or Security Admin.
-2. Verification is re-checked every 7 days (existing DNS/well-known method); a failed re-check suspends `auth_links` for that domain (deliveries to it are refused with `422 destination_not_allowed`) and notifies Owners.
+2. Verification is re-checked every 7 days (existing DNS/well-known method); a failed re-check suspends `auth_links` for that domain (deliveries to it are refused with `422 destination_not_allowed`) and notifies Owners. Since revision 3 the worker also removes the host from the tenant's authority record (`allowed_hosts`) through the reduce-only `revocations` route, so devices stop accepting it within 15 minutes even if the api's own suspension is bypassed (ADR-0031 §1.5, S2-A2-10).
 3. Phishing-domain defenses (spec App. B): adding a host notifies every Owner by console notice and email; a tenant verified less than 30 days ago gets a 24 h hold before the host is usable; hosts whose registrable domain is on Viadere's reserved list (look-alikes of `viadere` and of other verified tenants' registrable domains by the existing confusable skeleton, SECURITY §2.9) are refused and flagged to operators.
 
 ### 3. URL validation (`AuthDestinationValidator`, in Core so the app and server share it)

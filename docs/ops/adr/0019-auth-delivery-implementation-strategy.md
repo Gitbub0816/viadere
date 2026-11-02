@@ -37,7 +37,7 @@ Options considered for the authority:
 - The authority needs Vapor and Fluent like the api; no new dependency is added for it except linking webauthn-swift (already an exception row in CLAUDE.md).
 - Cost (lean, to be confirmed by A5): workload-profile environment with only the Consumption profile has no fixed environment charge; the internal load balancer and ACR Basic registry add a small monthly amount; the authority runs `min_replicas = 1` at the smallest size.
 - An Entra application registration and app role are needed (AzureAD provider or bootstrap; A5 decides in Stage 6). Until it exists, `AUTHORITY_ENABLED` stays off.
-- Business-verified push MFA (ADR-0022) and delivery-only flows (ADR-0020) do not depend on the authority, so an authority outage does not stop them.
+- Business-verified push MFA (ADR-0022) and delivery-only flows (ADR-0020) for existing accounts do not depend on the authority's grant path, so an authority outage does not stop them. Two exceptions (revision 3): sign-up waits for genesis (ADR-0032 §1.5), and business-mode links need a fresh authority-signed tenant record, so during an outage longer than 15 minutes they wait on the device instead of opening (ADR-0031 §4).
 
 ## Threat assumptions changed
 

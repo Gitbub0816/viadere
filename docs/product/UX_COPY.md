@@ -1,4 +1,4 @@
-# Authentication delivery — approved customer copy (Stage 1, revision 2)
+# Authentication delivery — approved customer copy (Stage 1, revision 3)
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Decisions | 1 and 9 (no SMS authentication), 2, 3, 4, 13; ADR-0021, ADR-0022, ADR-0024, ADR-0027, ADR-0031, ADR-0032, ADR-0033 |
 | Voice | Existing app wording and `Design/brand-guide.html`: plain, calm, short sentences; second person; the business named exactly as verified; no exclamation marks, no urgency words ("now", "immediately", "warning", "hacked"), no shield imagery; existing patterns kept: "Not you? …", "This wasn't me", "Approve on your iPhone", "Approvals never happen by text." |
 | Owner | A9 writes, A2 reviews for phishing and fatigue susceptibility, A6/A7 validate native affordances (spec §20). Validation on real devices is a Stage 4 gate (spec §27). |
-| Status | Revision 2 after the A9 and A6/A7 reviews (`docs/reviews/STAGE1_RESPONSE.md`). English source strings; localization rules in §10. Every string must survive 200% text and AX5 sizes without truncating the business name, the host or the Deny button. |
+| Status | Revision 3 (A2/A3 re-reviews): new S-DEV-03..05 (comparison code), S-REC-04 rewritten without a self-service path, S-REC-05 gated, S-REC-06, S-SEC-03 retired, S-SEC-04/-05, S-LINK-11/-12, S-MFA-14/-15, OIDC-11. **A9 must review these before the Stage 4 merge (condition C-12).** Revision 2 after the A9 and A6/A7 reviews (`docs/reviews/STAGE1_RESPONSE.md`). English source strings; localization rules in §10. Every string must survive 200% text and AX5 sizes without truncating the business name, the host or the Deny button. |
 
 ## 0. Rules every string follows
 
@@ -78,6 +78,10 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | S-LINK-08 | Destination failed validation on device | We didn't open this link because it doesn't go to a website {Business} has verified. |
 | S-LINK-09 | Destination signature failed (ADR-0031 §4) | We couldn't confirm this link came from {Business}. We didn't open it. |
 | S-LINK-10 | Old `/l/` or `/h/` link (ADR-0027 §4) | This link is no longer used. Open Viadere to see your requests. |
+| S-LINK-11 | Destination could not be checked (tenant record stale or unavailable; ADR-0031 §4, availability class; nothing is sent to the business) | We couldn't check this sign-in link right now, so we didn't open it. Try again in a moment. |
+| | Button | Try again |
+| S-LINK-12 | Device clock outside the allowed window (ADR-0031 §4) | We couldn't check this sign-in link. Check your phone's date and time, then try again. |
+| | Button | Try again |
 
 ## 3. Push approval and payment screens (ADR-0022)
 
@@ -106,6 +110,8 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | S-MFA-11 | Answer could not be sent (offline or error; nothing is queued) | Your answer wasn't sent. Check your connection and try again. {Business} hasn't received anything yet. |
 | S-MFA-12 | Expired before the answer could be sent | This request expired before your answer could be sent. If you still need to sign in, start again on {Business}. |
 | S-MFA-13 | Inbox item: request blocked by a pause | A request from {Business} was blocked while requests are paused until {time}. Resume if you're trying to sign in. |
+| S-MFA-14 | Several open requests from one business (ADR-0022 §5.2; shown above the number field when n > 1) | {n} open sign-in requests from {Business}. Enter the number shown where you're signing in. Only that request is approved. |
+| S-MFA-15 | Typed number matches more than one open request | This number matches more than one request. Nothing was approved. Start again on {Business} to get a new number. |
 | S-PAY-01 | Title | Confirm a payment to {payee}? |
 | | Rows | Amount {amount formatted with currency} · Payee {payee} · Reference {reference} |
 | | Subtitle | Only approve if you started this payment. |
@@ -138,18 +144,35 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | | Detail | From {old device name} to {new device name}. You'll confirm with Face ID. |
 | | Buttons | This wasn't me · Confirm |
 | S-DEV-02 | New device recovery (spec §20) | Verify your existing device or use an approved recovery method. |
+| S-DEV-03 | New device: comparison code (ADR-0033 §4.1; shown only after the device verified the signed challenge lists exactly its own keys) | Enter this number on your other device: {code} |
+| | Detail | Only enter it on a device you own and are holding. Viadere never asks for this number by phone, text or email. |
+| | Code rendering | 6 digits in two groups of 3, monospaced, read digit by digit by VoiceOver/TalkBack |
+| S-DEV-04 | Existing device: approve a new device (the code is never shown here) | Add a new device to your account? |
+| | Row | Name chosen on the new device: {reported name} |
+| | Field label | Number on the new device |
+| | Helper | Type the 6-digit number shown on the new device. No new device in front of you, or someone gave you a number? Tap This wasn't me. |
+| | Buttons (equal, safe action first) | This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
+| | Wrong number | That number doesn't match the new device. Check it and try again. (after 3: "Nothing was added. Start again on the new device.") |
+| S-DEV-05 | New device: the signed challenge does not list exactly this device's keys | We couldn't confirm this request belongs to this device, so nothing was added. Start again. |
 | S-REC-01 | Recovery downgrade (spec §7) | Recovering with a code gives this device less access. |
 | | Detail | After a 72-hour wait, your other devices are signed out and this device takes over. It can message and deny requests, but it can't approve payments or other high-risk requests until each business sets it up again. Shared household access ends. Another trusted device of yours can cancel during the wait. |
 | | Detail, no other trusted device | You don't have another trusted device, so nobody can cancel this during the wait. |
 | | Buttons | Cancel · Continue |
 | S-REC-02 | Pending recovery seen in the key-log head | Someone used a recovery code to start recovering your account. It finishes on {date and time} unless you cancel. Not you? Cancel. Cancelling also turns off your remaining recovery codes, so make new ones afterwards. |
 | S-REC-03 | Trade-off statement (Settings → Recovery) | Keep your recovery codes somewhere safe and private. Anyone with your recovery ID and one code can start a recovery. If you lose every device and every code, nobody at Viadere can restore your account. That's what keeps others from taking it. |
-| S-REC-04 | After recovery with old codes (ADR-0032 §3.3) | Your account was recovered with older recovery codes. Signing in to websites with Viadere stays off until you make new recovery codes on this device. |
-| | Action | Make new recovery codes |
-| S-REC-05 | Prompt after release (ADR-0032 §3.5) | Make new recovery codes. Your old codes still work for recovery, but new ones also protect sign-ins with Viadere. |
+| S-REC-04 | After recovery with old codes (ADR-0032 §3.3; revision 3 wording, no self-service path, S2-A2-7) | Your account was recovered with older recovery codes, so signing in to websites with Viadere is off for this account. Messaging and approvals still work. |
+| | Detail | To turn it back on, recover again with a recovery code you made in Viadere before this recovery. If you don't have one, contact Viadere support. |
+| | Action | Contact support (no "Make new recovery codes" action on this screen) |
+| S-REC-05 | Prompt to make new codes (ADR-0032 §3.5). **Shown only in builds with sealed recovery (ADR-0034) and only after the server enables it; never before (condition C-4)** | Make new recovery codes. They replace your current codes and also protect sign-ins with Viadere. |
+| S-REC-06 | Confirm a new code set (authority-built display: set id, count; ADR-0033 §1) | Make {count} new recovery codes? Your current recovery codes stop working. Confirm with Face ID. |
+| | Buttons (equal, safe action first) | Cancel · Make codes |
+| | After | Write these codes down or store them somewhere safe and private. They are shown once. |
+| | Not allowed (key not yet trusted, or not a Face ID/Touch ID key) | You can make new recovery codes on a device that has been on your account for at least a day and uses Face ID or Touch ID. |
 | S-SEC-01 | Head unavailable for over 1 hour while online (ADR-0032 §3.4) | We couldn't check your account's security. If you didn't start a recovery or add a device, keep Viadere open on a network you trust and try again. |
 | S-SEC-02 | Enrollment not yet confirmed (ADR-0032 §1.4) | Finishing security setup… |
-| S-SEC-03 | Account created during an authority outage (ADR-0032 §1.5) | Some sign-in features aren't available for this account. Messaging and approvals still work. |
+| S-SEC-03 | *Retired in revision 3*: accounts are no longer created during an authority outage (ADR-0032 §1.5, S2-A2-8 option (a)) | — |
+| S-SEC-04 | Sign-up while the authority is unavailable (ADR-0032 §1.5) | We couldn't finish setting up your account. We'll keep trying. You can keep this screen open or come back later. |
+| S-SEC-05 | Imported account with other devices (ADR-0032 §1.4) | Devices on your account: {device name}, added {date}. Don't recognize one? Remove it. |
 | S-PH-01 | Phone linking intro | Link your number to your Viadere account on this phone by sending one text from it. We never send you codes by text. |
 | | Button | Write text |
 | S-PH-02 | Compose prefill (SMS body) | Link my number to my Viadere app {nonce} |
@@ -211,6 +234,7 @@ The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not 
 | OIDC-08 | Phone screen after QR or `login_hint` push | Title "Sign in to {Client}?"; row "Website {redirect host}"; number field as S-MFA-01; subtitle "Only approve if you opened this page yourself."; buttons Deny · Approve; footer This wasn't me |
 | OIDC-09 | Settings list | Apps you've signed in to with Viadere · {Client}, last used {date} |
 | OIDC-10 | Revoke action | Stop {Client} recognizing me |
+| OIDC-11 | Authorize page over the challenge limit (ADR-0024 §4) | Too many sign-in attempts from here. Wait a minute and try again. |
 
 ## 9. Business-facing integration guidance (developer docs, not customer copy)
 

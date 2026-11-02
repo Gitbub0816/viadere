@@ -1,6 +1,6 @@
 # ADR-0020: Auth-delivery API, state machine, tenant authorization, idempotency and outbox
 
-- **Status:** proposed (2026-11-02); revision 2 (2026-11-02): `audience` removed (S1-A2-8), destination signature (ADR-0031), RFC 9421 profile (S1-A3-19), budgets limit alerting (S1-A2-6), Android push pipeline (A6/A7 finding 3), variables as personal data (S1-A10-9), email fallback limits (S1-A10-6), log allow-list (S1-A10-2)
+- **Status:** proposed (2026-11-02); revision 3 (2026-11-02), additive only: optional `session_handle` and supersession narrowed to it (S2-A2-9; §2, §8), `destination_unverified` denials excluded from fatigue counting (S2-A2-10; §1, §5); revision 2 (2026-11-02): `audience` removed (S1-A2-8), destination signature (ADR-0031), RFC 9421 profile (S1-A3-19), budgets limit alerting (S1-A2-6), Android push pipeline (A6/A7 finding 3), variables as personal data (S1-A10-9), email fallback limits (S1-A10-6), log allow-list (S1-A10-2)
 - **Spec reference:** §3.1, §6.1, §6.2, §6.5, §12, §19, Appendix A; owner decisions 1, 2, 3, 4, 7, 9
 - **Related:** ADR-0014 (outbox), ADR-0019, ADR-0021 (magic links), ADR-0022 (push MFA), ADR-0025 (webhooks), ADR-0026 (retention); SECURITY §2.27 (idempotency), §2.29 (policy), §2.30 (`subject_ref`), §2.91 (queue envelope)
 - **Review:** A4 (author of Stage 2 contract), A2, A10, A8
@@ -28,7 +28,7 @@ Business routes stay under the existing `/v1/business/` namespace (the route cat
 | `GET /v1/auth-deliveries` | device-signed bearer | inbox: open deliveries for this device's account |
 | `GET /v1/auth-deliveries/{id}` | device-signed bearer | display object (no secret); marks `delivered` |
 | `POST /v1/auth-deliveries/{id}/open` | device-signed bearer (request key) | returns the URL or code once, deletes ciphertext, marks `opened` |
-| `POST /v1/auth-deliveries/{id}/deny` | device-signed bearer | Deny or "This wasn't me": `denied`, optional `report: true`, optional `reason: "destination_unverified"` (ADR-0031 §4, audited and alerted) |
+| `POST /v1/auth-deliveries/{id}/deny` | device-signed bearer | Deny or "This wasn't me": `denied`, optional `report: true`, optional `reason: "destination_unverified"` (ADR-0031 §4, audited and alerted; since revision 3 sent only for integrity failures, never for a stale record or clock skew, and not counted toward fatigue, §5) |
 | `GET /v1/auth-tenants/{tenant_id}/destination-keys` | device-signed bearer | relays the authority-signed `viadere-tenant-keys+jws` unchanged (ADR-0031 §2) |
 | `POST /v1/auth-deliveries/{id}/approve` | device-signed bearer + factor JWS | link-service and OIDC app approval: relays evidence to the authority |
 
@@ -48,6 +48,7 @@ Business routes stay under the existing `/v1/business/` namespace (the route cat
 | `otp` | object | `otp` only: `{code: 4-10 chars [0-9A-Z], code_kind: "otp" \| "totp"}` |
 | `correlation_id` | string ≤ 128 | echoed in events |
 | `client_transaction_ref` | string ≤ 128 | opaque business handle, echoed |
+| `session_handle` | string 1-64 `[A-Za-z0-9_-]`, optional | *(revision 3, additive; S2-A2-9)* opaque value the business derives from its own initiating session; class T; never shown, never in webhooks. The only input to supersession (§8). Also accepted on `POST /v1/business/auth-approvals` (ADR-0022 §5.2) |
 | `expires_in_seconds` | int | `magic_link` 120-600 (default 300), `otp` 60-600 (default 300), `notice` 300-86400 |
 | `channels` | array of `push`, `inbox`, `email` | default `["push","inbox"]`; `email` needs `fallback.email` |
 | `fallback` | `{email: {address}}` | §7 |
@@ -87,7 +88,7 @@ States (lowercase on the wire; `cancelled` spelling matches existing events):
 | `queued`, `sent`, `delivered` | `opened` | device-signed `open` (business link, OTP view) or verified factor evidence (link service) | the P-class secret is deleted in the same transaction |
 | `opened` | `completed` | business `complete {outcome: succeeded}`, or authority redemption (link service) | only the verifier/business; Viadere never infers it |
 | `opened` | `failed` | business `complete {outcome: failed}` | |
-| any non-terminal | `denied` | device-signed `deny` | P deleted; event; fatigue counter |
+| any non-terminal | `denied` | device-signed `deny` | P deleted; event; fatigue counter, **except** `reason: destination_unverified`, which never counts toward the fatigue counter or pause (revision 3, additive; ADR-0031 §4, S2-A2-10) |
 | any non-terminal | `cancelled` | business `cancel`, supersession (§8), operator, device revocation | P deleted |
 | any non-terminal | `expired` | `expires_at` reached (job `auth.delivery.expire`, scheduled at create) | P deleted |
 | `queued` | `failed` | no channel could be attempted (no device token and inbox disabled), or tenant suspended | |
@@ -111,7 +112,7 @@ Every transition is a compare-and-swap `UPDATE … WHERE id = ? AND status = ? A
 
 New fail-closed namespaces (added to the `DatabaseRateLimitStore` fail-closed list): `authdl-tenant` (per tenant, plan-dependent; **the only budget that refuses with `429`**), `authdl-subject` (per tenant+subject: 5 per 10 min, 20 per day; **alert budget**), `authdl-open` (per device), `authdl-deny`, `authlink-redeem` (per tenant), `bizsig-nonce`, `authority-challenge` (per tenant and per account, at the authority).
 
-**Budgets limit alerting, not availability (S1-A2-6).** When a per-subject or per-relationship budget is exhausted, the new delivery is still created, collapsed and placed in the inbox, but delivered **silently** (no alert push); the inbox shows "You have a pending sign-in from {Business}". An attacker who knows a victim's identifier can therefore no longer make the victim's own sign-in undeliverable. Collapse: a new `sign_in` delivery or approval for the same (tenant, subject) cancels the open one with reason `superseded` (one live sign-in prompt per pair); while over budget, supersession is silent too. Fatigue counters are shared with Approve (ADR-0022 §5). Business guidance and the SDK helper throttle unauthenticated sign-in triggers per client IP and per account on the business side (residual R-20).
+**Budgets limit alerting, not availability (S1-A2-6).** When a per-subject or per-relationship budget is exhausted, the new delivery is still created, collapsed and placed in the inbox, but delivered **silently** (no alert push); the inbox shows "You have a pending sign-in from {Business}". An attacker who knows a victim's identifier can therefore no longer make the victim's own sign-in undeliverable. Collapse (narrowed in revision 3, S2-A2-9): a new `sign_in` delivery or approval for the same (tenant, subject) cancels an open one with reason `superseded` **only when both carry the same `session_handle`** (§2); requests without a matching `session_handle` stay open side by side until they complete, expire or are answered (for approvals the typed number selects the request, ADR-0022 §5.2), so an attacker who triggers sign-ins cannot cancel the person's own request; while over budget, supersession is silent too. Fatigue counters are shared with Approve (ADR-0022 §5). Business guidance and the SDK helper throttle unauthenticated sign-in triggers per client IP and per account on the business side (residual R-20).
 
 ### 9. Idempotency, outbox and audit
 

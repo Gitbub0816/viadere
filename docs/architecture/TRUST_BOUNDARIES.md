@@ -6,7 +6,7 @@
 | Decisions | 5 (authority in staging), 11 (Azure only), 12 (key placement); `docs/product/AUTH-OWNER-DECISIONS.md` |
 | Companion | `docs/architecture/THREAT_MODEL.md`; ADR-0019 (layout), ADR-0023 (evidence), ADR-0028 (keys and CI) |
 | Date | 2026-11-02 |
-| Status | Proposed target for staging, **revision 2** after the Stage 1 reviews (`docs/reviews/STAGE1_RESPONSE.md`): field-level trust table (§4.3a), authority-minted accounts and authority-verified recovery (ADR-0032), authority-built displays and device statements (ADR-0033), tenant destination keys (ADR-0031), JWKS publication path (ADR-0024 §7). Section 1 is today (verified against `Infra/azure/locals.tf`, `identity.tf`, `containerapps.tf`, `network.tf`); sections 2 onward are the target. |
+| Status | Proposed target for staging, **revision 3** after the A2 and A3 re-reviews (`docs/reviews/STAGE1_RESPONSE.md` "Revision 3"): recovery codes and recovery keys sealed to `recovery-seal` (ADR-0034), passkey assertions limited to `oidc_login` and `recovery_cancel`, device-add comparison code, standby keys as separate objects, new §4.3a rows, DF-5 and DF-6 rewritten. **Revision 2** after the Stage 1 reviews (`docs/reviews/STAGE1_RESPONSE.md`): field-level trust table (§4.3a), authority-minted accounts and authority-verified recovery (ADR-0032), authority-built displays and device statements (ADR-0033), tenant destination keys (ADR-0031), JWKS publication path (ADR-0024 §7). Section 1 is today (verified against `Infra/azure/locals.tf`, `identity.tf`, `containerapps.tf`, `network.tf`); sections 2 onward are the target. |
 
 ## 1. Today (baseline, for contrast)
 
@@ -69,12 +69,15 @@ Rule (spec §4.3, §18): B2 and the network part of B5 are access restrictions. 
 | `grant-signing` | EC P-256, ES256, non-exportable | `viadere-grant+jwt` (link-service results) | `kv-vdr-auth` | `id-viadere-authority` (Crypto User, key scope) | api, worker, every deploy identity |
 | `oidc-signing-rs256` | RSA 3072, RS256 | id_token default alg (OIDC Discovery requires RS256 support); RFC 9068 access tokens | `kv-vdr-auth` | `id-viadere-authority` | same |
 | `oidc-signing-es256` | EC P-256, ES256 | id_tokens for clients registered with `id_token_signed_response_alg = ES256` | `kv-vdr-auth` | `id-viadere-authority` | same |
-| `device-statement-signing` (was `keylog-signing`; active + standby) | EC P-256, ES256 | `viadere-keylog-head+jws`, `viadere-challenge+jws`, `viadere-tenant-keys+jws`, pinned-key revocation lists (ADR-0033); both versions pinned in the app | `kv-vdr-auth` | `id-viadere-authority` | same |
+| `device-statement-signing` (was `keylog-signing`) | EC P-256, ES256 | `viadere-keylog-head+jws`, `viadere-challenge+jws`, `viadere-tenant-keys+jws`, seal-family revocation lists (ADR-0033); pinned in the app as the active key | `kv-vdr-auth` | `id-viadere-authority` | same |
+| `device-statement-signing-standby` (separate key object) | EC P-256, ES256, created disabled | statement-family revocation lists and statements after rollover (ADR-0033 §3); pinned in the app as the standby | `kv-vdr-auth` | **nobody** until rollover (role granted by `id-gh-infra-auth-apply`, reviewer-gated), then `id-viadere-authority` | everyone before rollover (`AUTH-STANDBY-ROLE`) |
+| `recovery-seal` active + standby | HPKE KEM key pairs, P-256 (suite of ADR-0034) | open sealed recovery sets and starts | private halves only wrapped in `authority_seal_keys`; active one in authority memory after unwrap | `id-viadere-authority` (active only) | api, worker, every deploy identity |
+| `recovery-seal-kek`, `recovery-seal-kek-standby` | RSA 3072, RSA-OAEP-256, `wrapKey`/`unwrapKey` only | wrap the seal private keys | `kv-vdr-auth` | authority: custom "Unwrapper" role on `recovery-seal-kek` only; standby KEK: nobody until rollover | api, worker |
 | `OIDC_PAIRWISE_KEY` | 32-byte secret | HMAC for pairwise OIDC `sub` only | `kv-vdr-auth` secret | `id-viadere-authority` (Secrets User, secret scope) | api |
 | `ACCOUNT_REF_KEY` | 32-byte secret | HMAC for `account_ref` (ADR-0032 §4) | `kv-vdr-auth` secret | `id-viadere-authority` | api |
-| `RECOVERY_VERIFIER_KEY` | 32-byte secret | HMAC for authority recovery-code verifiers (ADR-0032 §3) | `kv-vdr-auth` secret | `id-viadere-authority` | api |
+| `RECOVERY_VERIFIER_KEY` | 32-byte secret | HMAC for authority recovery-code verifiers (ADR-0032 §3, ADR-0034 §4); the codes it verifies are a separate set the api never sees or hashes | `kv-vdr-auth` secret | `id-viadere-authority` | api |
 | `SUBJECT_REF_KEY` (authority copy) | 32-byte secret | compute `sub` of grants = the tenant's existing `subject_ref` (SECURITY §2.30) | `kv-vdr-auth` secret (copy; rotation coordinated, ADR-0028 §3) | authority (also api, by design: knowing it does not let the api choose the account, **because** the authority checks the account id against the signing key's `account_ref` first, ADR-0032 §2) | n/a |
-| Tenant destination public keys | P-256 public | verify `viadere-destination+jws` | `authority_tenant_keys` (admin job only) | authority (relayed to devices in a signed record) | private halves: the business only |
+| Tenant destination public keys | P-256 public | verify `viadere-destination+jws` | `authority_tenant_keys` (admin job only, after a registration PoP and the key's thumbprint in DNS or well-known evidence fetched by the reviewer-gated workflow; `not_after` ≤ 13 months; ADR-0031 §1) | authority (relayed to devices in a signed record) | private halves: the business only |
 | `kd-log-signing` | EC P-256 | key-directory log heads | `kv-vdr` | api (**decision 12 exception**) | authority (unneeded) |
 | `link-descriptor` | EC P-256 | link-session descriptors | `kv-vdr` | api (exception) | |
 | `loop-publication` | EC P-256 | Loop manifests | `kv-vdr` | api (exception) | |
@@ -96,12 +99,12 @@ New authority keys never exist in `kv-vdr` and are never granted to an ordinary 
 |---|---|---|
 | `id-viadere-api` | Crypto User on the five exception keys (`kv-vdr`, key scope); Secrets User on api secrets; Service Bus sender/receiver; Monitoring Metrics Publisher; DB role `viadere_app` (DML on `viadere`); app role `Authority.Evidence.Submit` on the authority's Entra application | any role on `kv-vdr-auth`; CONNECT on `viadere_authority`; any role on `rg-viadere-<env>-auth` |
 | `id-viadere-worker` | as today (`kek-data`, `audit-head-signing`, secrets, Service Bus); app role `Authority.Revocations` only (reaches `POST revocations` and nothing else; S1-A2-8) | same as api; `Authority.Evidence.Submit` |
-| `id-viadere-authority` | custom role "Viadere Authority Signer" (`keys/read`, `keys/sign/action`) on the authority keys, key scope, pinned versions; Secrets User on `OIDC_PAIRWISE_KEY`, `ACCOUNT_REF_KEY`, `RECOVERY_VERIFIER_KEY` and the `SUBJECT_REF_KEY` copy; DB role `viadere_authority`; Monitoring Metrics Publisher on its own App Insights; AcrPull on the authority registry | any role on `kv-vdr`; Key Vault Crypto User (includes backup/update); any Service Bus role; any provider credential; any role on `rg-viadere-<env>-app` |
+| `id-viadere-authority` | custom role "Viadere Authority Signer" (`keys/read`, `keys/sign/action`) on the active authority signing keys, key scope, pinned versions; custom role "Viadere Authority Unwrapper" (`keys/read`, `keys/unwrapKey/action`) on `recovery-seal-kek` only; no role on standby keys before rollover; Secrets User on `OIDC_PAIRWISE_KEY`, `ACCOUNT_REF_KEY`, `RECOVERY_VERIFIER_KEY` and the `SUBJECT_REF_KEY` copy; DB role `viadere_authority`; Monitoring Metrics Publisher on its own App Insights; AcrPull on the authority registry | any role on `kv-vdr`; Key Vault Crypto User (includes backup/update); any Service Bus role; any provider credential; any role on `rg-viadere-<env>-app` |
 | `id-viadere-authority-admin` | DB role `viadere_authority_admin` (INSERT on `authority_policy_versions`, `authority_oidc_clients`, `authority_link_clients`, `authority_tenant_keys`, `authority_keylog_imports`; UPDATE of `grant_capable` only through the audited restore command); no Key Vault role | Key Vault roles; network ingress |
 | `id-viadere-authority-migrator` | owner of `viadere_authority` schema | runtime roles, Key Vault |
 | `id-gh-deploy-<env>` (existing, reduced) | Container Apps Contributor on `rg-viadere-<env>-app`; Managed Identity Operator on api, worker, migrator, cloudflared | any role on `rg-viadere-<env>-auth` or on any authority identity |
 | `id-gh-deploy-auth-<env>` (new) | Container Apps Contributor on `rg-viadere-<env>-auth`; Managed Identity Operator on `id-viadere-authority`, `-authority-admin`, `-authority-migrator`; AcrPush on the authority registry (lean) | any role on `rg-viadere-<env>-app` |
-| `id-gh-authority-admin-<env>` (new) | custom role "Container Apps Job Starter" on `job-viadere-authority-admin` only | deploy rights, Key Vault |
+| `id-gh-authority-admin-<env>` (new) | custom role "Container Apps Job Starter" on `job-viadere-authority-admin` only; Log Analytics Reader on the authority workspace, limited to the admin job's execution-log table (to attest the printed key inventory, ADR-0024 §7.3) | deploy rights, Key Vault |
 | `authority-publish.yml` (GitHub environment `authority-publish-<env>`) | Cloudflare token scoped to `id.` static assets only; no Azure identity | any other Cloudflare scope; any Azure role |
 | `id-gh-infra-apply-<env>` (existing, re-scoped) | Contributor + constrained RBAC Administrator on the four existing resource groups only (F-03) | any role on `rg-viadere-<env>-auth` |
 | `id-gh-infra-auth-apply-<env>` (new) | Contributor + constrained RBAC Administrator on `rg-viadere-<env>-auth` | roles elsewhere |
@@ -118,9 +121,10 @@ All under `https://<authority internal FQDN>/internal/v1/`, JSON, strict decodin
 | `POST evidence` | verify a `viadere-factor+jws` or WebAuthn assertion for a challenge; on success mint the purpose's artifact (link-code registration, OIDC authorization code) | increases (only with evidence) | device or passkey evidence over the challenge nonce, display and (link) return URL |
 | `POST link-codes/redeem` | business redemption → `viadere-grant+jwt` | increases (only with a code whose hash is in verified evidence + PKCE verifier) | prior evidence |
 | `POST oidc/token` | code + PKCE + client auth → id_token, access token | increases (only with a prior code) | prior evidence |
-| `POST keylog/entries` | append to an account's key log; `genesis` mints the account id (no caller-chosen id) | increases (only with proof by a logged key, PoP + App Attest for genesis of an authority-minted account, or authority-verified recovery) | proof (ADR-0023 §4, ADR-0032) |
-| `GET keylog/{account_ref}/head` | signed head for relay to the app | neutral | none |
-| `GET tenant-keys/{tenant_id}` | signed tenant destination-key record for relay to the app (ADR-0031) | neutral | none |
+| `POST keylog/entries` | append to an account's key log; `genesis` mints the account id (no caller-chosen id) | increases (only with a factor JWS by a logged grant-capable device key, never a passkey assertion; PoP + App Attest for genesis; a device-add comparison code; or a sealed, authority-verified recovery code bound to the new keys) | proof (ADR-0023 §3a, §4; ADR-0032; ADR-0033 §4.1; ADR-0034) |
+| `GET keylog/{account_ref}/head` | signed head (plus the latest pinned-key revocation list) for relay to the app | neutral | none |
+| `GET tenant-keys/{tenant_id}` | signed tenant destination-key record (plus the revocation list) for relay to the app (ADR-0031) | neutral | none |
+| `GET oidc/clients/{client_id}/check` | `{valid, display_name}` for an exact redirect URI; no signing (ADR-0024 §4) | neutral | none |
 | `POST policy/raise` | raise a tenant/client assurance floor | **reduce-only** (tightens) | none |
 | `POST revocations` | revoke a key, a challenge family, a grant family, a client (suspension) | **reduce-only** | none |
 | `GET health` | liveness | neutral | none |
@@ -140,13 +144,22 @@ Every value the authority uses that arrives through the api. Rule: a field that 
 | `challenges` | `code_challenge` (link service) | business via api | as data | stored; redemption requires the matching verifier | link service: a wrong value only makes redemption fail for the real business; OIDC: R-17 |
 | `challenges` | OIDC `code_challenge`, `state`, `nonce` | RP via api | as data | stored with the code; PKCE at token | R-17 (session swap of a genuine login), named exception |
 | `challenges` | `login_hint` | RP via api | as a lookup only | resolves an account for a push; evidence must come from that account's key | at most a prompt to the wrong person, which counts against fatigue budgets |
-| `evidence` | factor JWS / WebAuthn assertion | device via api | yes, after verification | ADR-0023 §3 | refused |
+| `challenges` | delivery id | api | as a reference only | must name a delivery of the same tenant as the client record; bound into the signed challenge | at most a challenge for another delivery of the same tenant, which the device displays from authority data |
+| `challenges` (OIDC) | creation itself | api, on a user action | neutral | created only after a method is chosen; edge limits per IP and client; per-tenant signing bulkhead (ADR-0024 §4, ADR-0033 §2) | that tenant's OIDC challenges degrade; nothing else does |
+| `evidence` | factor JWS | device via api | yes, after verification | ADR-0023 §3 | refused |
+| `evidence` | WebAuthn assertion | browser or app via api | **only** for `oidc_login` and `recovery_cancel` | `clientDataJSON.origin` on the per-purpose allow-list, UV, grant-capable passkey (ADR-0023 §3a) | refused for every key-adding purpose; for `oidc_login`, R-17 (single session only) |
+| `evidence` (`keylog_device_added`) | `match` (comparison code) | person types it on the approving device | after verification | equals the code the authority computes from the entry's `kids` and the challenge nonce (ADR-0033 §4.1) | substituted keys give a different code; refused |
 | `evidence`, `link-codes/redeem`, `oidc/token` | `accountId` | api | no | constant-time check against the signing key's `account_ref` (ADR-0032 §2) | refused, alerted |
 | `link-codes/redeem` | tenant | api | equality only | must equal the link-client record's tenant; never a source | refused |
 | `link-codes/redeem` | `code`, `code_verifier` | business via api | as data | hash in authority store; PKCE; single use; 120 s | refused |
 | `keylog/entries` | account id | — | **not accepted** at genesis | minted by the authority | no effect |
 | `keylog/entries` | keys, proofs, App Attest | device via api | after verification | PoP by every new key, proof by a logged key, attestation | refused |
-| `keylog/entries` | recovery code | person via api | after verification | authority HMAC verifier, attempt limits (ADR-0032 §3) | without a valid code only `recovery_started_legacy`, never grant-capable |
+| `keylog/entries` (`device_added`) | new-device name | new device via api | **as reported text only** | bounded, NFC, no control/bidi characters; marked `reported_name` and rendered "Name chosen on the new device" (ADR-0033 §1) | a misleading name; the comparison code, not the name, decides |
+| `keylog/entries` (`enrollment_confirmed`) | `head_hash`, `seq` | device via api | after verification | equal to the current head; every key of the entry must confirm the same head (ADR-0032 §1.4) | refused |
+| `keylog/entries` (`recovery_codes_set`) | recovery codes | device | **never seen by the api** | HPKE envelope to the pinned `recovery-seal` key; `envelope_digest` in the factor JWS by a D1-equivalent `approvalBiometric` key (ADR-0034) | api sees ciphertext only; a swapped envelope breaks the factor JWS |
+| `keylog/entries` (`recovery_started`) | recovery code, new passkey and app keys (`new_kids`) | recovering device | code: never seen by the api; keys: after verification | code and `new_kids` sealed together; every new key's PoP commits to `envelope_digest`; activation adds exactly `new_kids` (ADR-0032 §3.2-§3.3) | a substituted key does not match `new_kids`; refused. Without a sealed code: `recovery_started_legacy`, never grant-capable, refused when an authority set exists |
+| `keylog/entries` | recovery id | api | as a reference only | names the recovery the sealed start answers; inside the sealed plaintext | a wrong id fails the sealed comparison |
+| `tenant-keys/{tenant_id}` | path parameter | api | as a reference only | selects which signed record to return; the device checks `tenant_id` and `seq` in the signed record against the delivery | the device refuses a record for another tenant or an older `seq` |
 | `oidc/token` | client assertion | RP via api | after verification | `private_key_jwt`, `aud` = issuer, registered JWK | `invalid_client` |
 | `revocations`, `policy/raise` | any | api/worker | yes | reduce-only by construction | DoS only (R-14, R-19) |
 
@@ -167,7 +180,8 @@ worker/api ⇢ APNs (ids only: adl id, category viadere.auth.link) [B8]
 Device NSE ─[B4]→ api GET /v1/auth-deliveries/{id} (display: business, purpose, host, destination statement; no URL)  → status delivered
 Device ─[B4]→ api GET tenant destination-key record (authority-signed) [B11]; verifies statement [B11b]; shows name and host from them
 User taps Continue ─[B4]→ api POST /v1/auth-deliveries/{id}/open → URL once; ciphertext deleted; status opened
-Device: SHA-256(URL) == url_sha256, host == statement host, validator → opens URL via system API (else deny destination_unverified)
+Device: SHA-256(URL) == url_sha256, host == statement host, validator → opens URL via system API
+  integrity failure → deny {reason: destination_unverified} (alert, not counted toward the pause); stale/absent record or clock skew → no server call, item stays open, retry (ADR-0031 §4)
 Business verifies its own token; ─[B3]→ api POST /v1/business/auth-deliveries/{id}/complete → completed
 api ⇢ webhook v2 auth.delivery.* (ids only) [B9]
 ```
@@ -200,9 +214,10 @@ authority → viadere-grant+jwt {iss, aud = link client from record, tid from re
 ### DF-4 OIDC (staging; Viadere-asserted; authority mints)
 
 ```
-RP browser → api GET /oidc/authorize (code, PKCE S256, nonce, state, redirect_uri)
+RP browser → api GET /oidc/authorize (code, PKCE S256, nonce, state, redirect_uri) → api ─[B5]→ authority GET oidc/clients/{id}/check (no challenge, no signing)
+person chooses a method (POST, CSRF; edge limits per IP and client)
 api ─[B5]→ authority POST challenges {purpose: oidc_login, client_id, redirect_uri, code_challenge, nonce, state} (authority checks client + exact redirect URI, builds and signs the display) — R-17: the api controls this front end
-User: passkey (WebAuthn, rpId = RP_ID, origin https://id.<domain>) or app approval (login_hint or QR) with number matching
+User: passkey (WebAuthn, rpId = RP_ID, origin https://id.<domain> on the oidc_login allow-list; this assertion can only ever yield this one login, ADR-0023 §3a) or app approval (login_hint or QR) with number matching
 api ─[B5]→ authority POST evidence → authorization code (authority-held, 60 s)
 api → 302 redirect_uri?code&state
 RP backend → api POST /oidc/token ─[B5]→ authority POST oidc/token (PKCE, client auth) → id_token (RS256 or ES256)
@@ -214,9 +229,28 @@ RP verifies with JWKS from static publication [B10]
 ```
 New account:  device ─[B4]→ api ─[B5]→ authority POST keylog/entries {genesis, keys, PoP over authority nonce, App Attest} → authority mints account_id, returns it + signed head
               api creates the consumer row with that account_id; device verifies head lists exactly its keys → enrollment_confirmed (factor JWS) → keys grant-capable
-New device:   enrolls at api (existing passkey or D1 confirmation, App Attest)
-api ─[B5]→ authority POST keylog/entries {account_ref, entry: device_added, new keys, PoP by each new key, proof: factor JWS by logged grant-capable D1 key over an authority-built display of the new thumbprints, or WebAuthn assertion by logged passkey}
-authority verifies proofs against its log; records usable_from = now + 24 h (cool-down) → signs new head; new device verifies the head lists its keys → enrollment_confirmed
+              enrollment_confirmed carries head_hash + seq and a PoP by every key of the entry; keys grant-capable only when all confirmed the same head
+New device B: enrolls at api (existing D1 confirmation, App Attest); submits device_added entry {new keys, PoP by each}
+api ─[B5]→ authority POST challenges {keylog_device_added, entry} → signed challenge {account_ref, kids, nonce, display: reported_name, kids, match_digits 6}
+B verifies the challenge: kids == exactly its own keys (else S-DEV-05, stop) → shows code = decimal6(SHA-256("VIADERE-DEVICE-ADD-V1\n" ‖ env ‖ nonce ‖ sorted kids))   [never shown on A]
+A (grant-capable approvalBiometric, cool-down over) verifies the challenge, account_ref == its own → person types B's code → factor JWS {match: code}
+api ─[B5]→ authority POST keylog/entries {device_added, factor JWS} → expected code from the stored entry, constant-time compare, approving key in the entry's account, PoPs
+authority records usable_from = now + 24 h (cool-down) → signs new head; B verifies the head lists exactly its keys → enrollment_confirmed
+No passkey assertion is accepted for device_added or passkey_added (ADR-0023 §3a); a passkey-only person adds a device through an existing device or through recovery (DF-6)
+```
+
+### DF-6 Recovery (sealed codes, ADR-0032 §3, ADR-0034)
+
+```
+Register:  trusted device generates 10 codes → authority challenge {recovery_codes_set} → HPKE seal {account_ref, set_id, nonce, codes} to pinned recovery-seal (info VIADERE-RECOVERY-SET-V1\n{env}, aad ach\nnonce)
+           ─[B4]→ api (ciphertext only) ─[B5]→ authority {envelope, factor JWS by D1-equivalent approvalBiometric key with envelope_digest} → verifiers stored, old authority set invalidated
+           app → api: invalidate the api's legacy set (the api never held the new codes)
+Start:     recovering device ─[B4]→ api POST /v1/recovery/begin {recoveryId} ─[B5]→ authority challenge {recovery_started}
+           device creates passkey + app keys → seals {recovery_id, nonce, code, new_kids} → PoP by each new key over (…\n{nonce}\n{envelope_digest})
+           ─[B4]→ api ─[B5]→ authority: open, verify code (limits), PoP keys == new_kids → recovery_started {kids}; head pending_recoveries[].kids
+           recovering device verifies the head lists exactly its new_kids
+Hold:      72 h; any logged key (factor JWS) or logged passkey (assertion, allowed origin) cancels; S-REC-02 on existing devices from the head
+Activate:  adds exactly kids, revokes earlier keys; grant-capable only for a sealed, authority-verified start
 ```
 
 ## 7. Mapping to spec §4.3 invariants
@@ -227,7 +261,7 @@ authority verifies proofs against its log; records usable_from = now + 24 h (coo
 | Public gateway cannot export grant/token keys or self-authorize signatures | §4.1, §4.2 (no Key Vault role), non-exportable keys, ADR-0028 |
 | Grant decisions require independently authenticated, audience-bound, short-lived evidence; policy controls assurance | ADR-0023 §3 (factor JWS: `aud`, `ach`, nonce, `exp − iat ≤ 120`), §6 (policy evaluation in the authority) |
 | Tenant isolation at data, key, authorization, message-routing layers | data: per-query tenant filter + authority DB separation; key: pairwise approval keys, per-tenant link/OIDC clients; authorization: tenant from credential (ADR-0020 §4); routing: pairwise `subject_ref`, webhook v2 binds tenant (ADR-0025) |
-| Recovery and enrollment cannot bypass effective assurance without explicit controlled downgrade | ADR-0032 (authority-minted accounts, authority-verified recovery codes; legacy-code recovery never grant-capable), ADR-0023 §4 (key-log proofs, recovery hold), ADR-0027 (phone link is never a factor), SECURITY §2.26 |
+| Recovery and enrollment cannot bypass effective assurance without explicit controlled downgrade | ADR-0032 (authority-minted accounts, authority-verified recovery codes; legacy-code recovery never grant-capable), ADR-0034 (codes sealed end to end, separate from the api's, bound to the new keys), ADR-0033 §4.1 (device-add comparison code), ADR-0023 §3a (no passkey assertion adds a key), ADR-0023 §4 (key-log proofs, recovery hold), ADR-0027 (phone link is never a factor), SECURITY §2.26 |
 | Any failure to validate nonce, audience, origin, signature, state, time, policy version or replay state results in denial | ADR-0023 §6 verification order, fail-closed defaults; ST-AUTH-09, ST-GR-* |
 | A tunnel or mTLS handshake is never itself sufficient authorization | §3 rule; B5 requires evidence |
 
@@ -240,7 +274,7 @@ authority verifies proofs against its log; records usable_from = now + 24 h (coo
 | Verified business domain bypass | ADR-0021 §2-§3 (api validator), ADR-0031 (business-signed destinations verified on the device against authority tenant records; fail closed), ADR-0021 §5.2 and ADR-0033 (authority-registered, signed return URLs); residual R-07' only |
 | Cross-tenant access | §7 tenant row |
 | Critical keys exportable to application processes | §4.1 non-exportable, held only by the authority |
-| Recovery bypasses assurance | §7 recovery row |
+| Recovery bypasses assurance | §7 recovery row; DF-6 |
 
 ## 9. Network specifics (staging, lean)
 

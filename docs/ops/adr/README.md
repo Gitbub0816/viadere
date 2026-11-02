@@ -46,4 +46,5 @@ ADRs 0019 to 0030 come from `docs/product/AUTH-DELIVERY-SPEC-v2.md` Stage 1 (aut
 | [0030](0030-sdk-packaging-and-versioning.md) | TypeScript, Kotlin and Swift SDK packaging, zero runtime dependencies, versioning and deprecation | proposed |
 | [0031](0031-tenant-destination-keys-and-signed-destinations.md) | Authority-attested tenant destination keys and business-signed magic-link destinations verified on the device (closes R-07) | proposed |
 | [0032](0032-authority-account-binding-and-recovery.md) | Authority-minted account identity, account binding before `sub`, authority-verified recovery codes | proposed |
-| [0033](0033-authority-device-statements-and-pinned-keys.md) | Authority-built displays, authority-signed challenges, key-log heads and tenant records; pinned-key rollover | proposed |
+| [0033](0033-authority-device-statements-and-pinned-keys.md) | Authority-built displays, authority-signed challenges, key-log heads and tenant records; device-add comparison code; pinned-key roles and revocation | proposed |
+| [0034](0034-sealed-recovery-envelopes.md) | Recovery codes and recovery keys sealed to a pinned authority key (HPKE P-256/HKDF-SHA256/AES-256-GCM), separate from the api's codes | proposed |
