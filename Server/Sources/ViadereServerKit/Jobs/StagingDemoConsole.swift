@@ -206,6 +206,22 @@ extension StagingDemo {
     /// `atlas` kit when an operator has approved it, else it stays neutral. Nothing is submitted while a revision waits for review, or
     /// when the published revision already has the wanted appearance; after a rejection or a change of kit approval it submits again.
     func seedLoop(businessId: UUID, authorId: UUID) async throws -> LoopSeed {
+        let seed = try await submitLoop(businessId: businessId, authorId: authorId)
+        try await seedDirectoryListing(businessId: businessId, loopKey: seed.draft.loopKey)
+        return seed
+    }
+
+    /// The demo Loop's directory metadata (§2.98 "Installed Loops"), once: listed and featured under Food and drink. The name and description
+    /// customers see stay the reviewed definition's; nothing shows in the directory until a reviewer has approved and published a revision.
+    static let directoryCategory = LoopDirectoryCategory.foodAndDrink
+
+    func seedDirectoryListing(businessId: UUID, loopKey: String) async throws {
+        guard let definition = try await LoopDefinitionRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$key == loopKey).first() else { return }
+        try await LoopInstallService(db: db, ctx: ctx).seedListing(definitionId: definition.id!, businessId: businessId, category: Self.directoryCategory,
+                                                                   featured: true, actor: Self.actorAudit)
+    }
+
+    private func submitLoop(businessId: UUID, authorId: UUID) async throws -> LoopSeed {
         let studio = LoopStudioService(db: db, ctx: ctx)
         let draft: LoopStudioDraftRecord
         if let existing = try await LoopStudioDraftRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$templateKey == Self.loopTemplate)

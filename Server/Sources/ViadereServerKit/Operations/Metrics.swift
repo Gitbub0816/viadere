@@ -54,6 +54,8 @@ final class MetricsRegistry: @unchecked Sendable {
         case loopPublished = "loop_published"
         case loopAutoSuspended = "loop_auto_suspended"
         case loopManifestSignFailed = "loop_manifest_sign_failed"
+        case loopInstalled = "loop_installed"
+        case loopUninstalled = "loop_uninstalled"
         // Brand Kits (plan 5.5). Rejections are also counted per reason in `viadere_brand_asset_rejections_total`.
         case brandAssetAccepted = "brand_asset_accepted"
         case brandAssetRejected = "brand_asset_rejected"

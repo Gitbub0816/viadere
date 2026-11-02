@@ -114,8 +114,15 @@ public struct LoopSummary: Codable, Sendable, Hashable {
     public var entryPoints: [LoopEntryPoint]
     /// The customer authorized this business for Loops (otherwise starting one asks for the authorization first).
     public var authorized: Bool
+    /// The stable Loop (definition) id. Additive: absent from older servers.
+    public var loopId: LoopDefinitionID?
+    /// The caller has this Loop installed (§2.98 "Installed Loops"). Additive: absent from older servers.
+    public var installed: Bool?
 
-    public init(publicationId: LoopPublicationID, businessId: BusinessID, revision: Int64, title: String, entryPoints: [LoopEntryPoint], authorized: Bool) {
+    public init(publicationId: LoopPublicationID, businessId: BusinessID, revision: Int64, title: String, entryPoints: [LoopEntryPoint], authorized: Bool,
+                loopId: LoopDefinitionID? = nil, installed: Bool? = nil) {
+        self.loopId = loopId
+        self.installed = installed
         self.publicationId = publicationId
         self.businessId = businessId
         self.revision = revision
@@ -277,13 +284,14 @@ extension APIRoutes {
     /// Turns Loops off: revokes the global grant and every business authorization, cancels open instances (history is kept).
     public static let loopConsentDelete = Endpoint<EmptyBody, LoopConsentStatus>(
         "loops.consent.delete", .DELETE, "/v1/loops/consent", auth: .deviceSignedBearer)
-    /// Authorizes one actively connected business (`404` otherwise). Requires the current global grant (`409`).
+    /// Authorizes one actively connected business, or one with an installed Loop (`404` otherwise). Requires the current global grant (`409`).
     public static let loopBusinessConsentPut = Endpoint<LoopBusinessConsentRequest, LoopConsentStatus>(
         "loops.consent.business.put", .PUT, "/v1/loops/consent/businesses/{businessId}", auth: .deviceSignedBearer)
     /// Revokes one business's authorization and cancels its open instances.
     public static let loopBusinessConsentDelete = Endpoint<EmptyBody, LoopConsentStatus>(
         "loops.consent.business.delete", .DELETE, "/v1/loops/consent/businesses/{businessId}", auth: .deviceSignedBearer)
-    /// Loops the caller may start. Query: `business_id` (optional filter, checked against the caller's connections).
+    /// Loops the caller may start: every Loop of a connected business, and installed Loops. Query: `business_id` (optional filter, checked
+    /// against the caller's connections and installs).
     public static let loopsAvailable = Endpoint<EmptyBody, [LoopSummary]>(
         "loops.available", .GET, "/v1/loops/available", auth: .deviceSignedBearer)
     public static let loopInstanceCreate = Endpoint<LoopInstanceCreateRequest, LoopInstanceView>(

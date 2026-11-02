@@ -201,8 +201,28 @@ enum ConsoleInbox {
             rows.append([DashboardUI.esc(definitions[revision.definitionId] ?? "—"), String(revision.revision), DashboardUI.esc(revision.state.replacingOccurrences(of: "_", with: " ")),
                          DashboardUI.esc(stages), DashboardUI.esc(messages.prefix(6).joined(separator: "; ")), withdraw])
         }
+        // Install links for published Loops (§2.98 "Installed Loops"): a customer who opens one sees the Loop's reviewed permissions and chooses
+        // to add it with or without connecting. The page shows aggregate install counts only, never who installed.
+        let published = try await LoopPublicationRecord.query(on: req.db).filter(\.$businessId == businessId)
+            .filter(\.$status == LoopPublicationStatus.active.rawValue).sort(\.$revision, .descending).all()
+        var linkCards: [String] = []
+        var seenLoops = Set<UUID>()
+        for publication in published where seenLoops.insert(publication.definitionId).inserted {
+            guard let url = LoopInstallLink(loopId: LoopDefinitionID(publication.definitionId)).url(domain: req.ctx.config.linkDomain) else { continue }
+            let installs = try await LoopInstallRecord.query(on: req.db).filter(\.$definitionId == publication.definitionId).filter(\.$businessId == businessId)
+                .filter(\.$uninstalledAt == nil).count()
+            let qr = (try? QRCode.encode(url.absoluteString, errorCorrection: .medium))?.svg(title: "QR code for the install link of \(definitions[publication.definitionId] ?? "this Loop")") ?? ""
+            linkCards.append("""
+            <div class="cols"><div><div class="qr">\(qr)</div></div><div><h3>\(DashboardUI.esc(definitions[publication.definitionId] ?? "Loop"))</h3>\
+            <pre>\(DashboardUI.esc(url.absoluteString))</pre><p class="mu sm">\(installs) customers have this Loop installed\(publication.rolloutPercent < 100 ? ". Viadere is still rolling it out, so not every customer can add it yet" : "").</p></div></div>
+            """)
+        }
+        let linksCard = linkCards.isEmpty ? "" : """
+        <div class="card"><h2>Install links</h2><p class="mu sm">Share a link or QR code so customers can add a published Loop in the Viadere app, whether or not they're \
+        connected to you. Customers who add a Loop without connecting send you only their answers to it; you can't message them.</p>\(linkCards.joined())</div>
+        """
         let body = """
-        <div class="card"><h2>Your Loops</h2><p class="mu sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer \
+        \(linksCard)<div class="card"><h2>Your Loops</h2><p class="mu sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer \
         (two for high-risk actions), then a signed publication. You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review.</p>\
         \(DashboardFormat.table(["Loop", "Revision", "State", "Pipeline", "Messages", ""], rows, empty: "No Loops submitted yet.", caption: "Loop revisions"))</div>\
         <div class="card"><h2>Build or change a Loop</h2><p class="sm">Use <a href="\(ConsoleLoopStudio.path)">Loop Studio</a> to start from a template, edit it with \

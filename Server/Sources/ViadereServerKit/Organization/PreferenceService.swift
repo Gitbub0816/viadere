@@ -73,6 +73,8 @@ struct PreferenceService {
         // (it re-reads the relationship and does nothing when it already ended).
         if update.blocked == true {
             try await RelationshipService(db: db, ctx: ctx).disconnect(consumer: consumer, relationshipId: RelationshipID(relationship.id!))
+            // Its installed Loops go too (open instances cancelled): a block is never weaker than an uninstall (§2.98 "Installed Loops").
+            try await LoopInstallService(db: db, ctx: ctx).uninstallAll(principal: principal, business: business.uuid, reason: "blocked")
         }
         return result
     }

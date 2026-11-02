@@ -372,9 +372,11 @@ struct BrandKitService {
     /// `GET /v1/businesses/{id}/brand`: `404` unless the caller has an active relationship with a verified business; otherwise the signed
     /// manifest, or `neutral` (kill switch, banned category, nothing published, no signing key).
     func view(consumer: ConsumerID, business: BusinessID) async throws -> BrandManifestResponse {
-        guard try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$businessId == business.uuid)
-            .filter(\.$status == "active").first() != nil,
-              let record = try await DirectoryService(db: db).verified(id: business.uuid) else { throw APIError.notFound }
+        // A connected business, or one whose Loop the customer installed or can see in the Loop directory (its icon, §2.98 "Installed Loops").
+        var visible = try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer.uuid).filter(\.$businessId == business.uuid)
+            .filter(\.$status == "active").first() != nil
+        if !visible { visible = try await LoopInstallService(db: db, ctx: ctx).brandVisible(consumer: consumer.uuid, business: business.uuid) }
+        guard visible, let record = try await DirectoryService(db: db).verified(id: business.uuid) else { throw APIError.notFound }
         guard !Self.isBanned(record), ctx.config.brandKits.signingAvailable,
               !(await PlatformFlags(db: db, ctx: ctx).brandKitsStopped(businessId: business.uuid)),
               let manifest = try await current(businessId: business.uuid), let jws = manifest.jws else {

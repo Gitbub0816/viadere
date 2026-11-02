@@ -156,6 +156,9 @@ public struct StagingDemoCommand: AsyncCommand {
         }
         if let publication = status.publication {
             context.console.print("  Published: publication id \(publication.id!.uuidString.lowercased()), revision \(publication.revision), rollout \(publication.rolloutPercent)%")
+            if let link = LoopInstallLink(loopId: LoopDefinitionID(publication.definitionId)).url(domain: demo.ctx.config.linkDomain) {
+                context.console.print("  Install link (Loop directory: \(StagingDemo.directoryCategory.title), featured): \(link.absoluteString)")
+            }
             if publication.rolloutPercent < 100 {
                 context.console.print("  Customers can start it only inside the rollout; set it at \(base)\(OperatorLoops.base)/publications/\(publication.id!.uuidString.lowercased())")
             }

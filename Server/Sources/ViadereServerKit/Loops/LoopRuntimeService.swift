@@ -57,7 +57,10 @@ struct LoopRuntimeService {
     func grantBusiness(principal: ConsumerPrincipal, business: BusinessID, request: LoopBusinessConsentRequest) async throws -> LoopConsentStatus {
         let current = LoopConsentCatalog.current
         let consumer = principal.consumerId.uuid
-        guard try await activeRelationship(consumer: consumer, business: business.uuid) != nil else { throw APIError.notFound }
+        // A connection, or an installed Loop of this business (§2.98 "Installed Loops"), is the basis for authorizing it.
+        if try await activeRelationship(consumer: consumer, business: business.uuid) == nil {
+            guard try await LoopInstallService(db: db, ctx: ctx).hasInstall(consumer: consumer, business: business.uuid) else { throw APIError.notFound }
+        }
         guard request.agree else { throw APIError.validation("Agree to allow this business.", details: ["agree": "required"]) }
         guard request.textVersion == current.version, request.textDigest == current.digest else {
             throw APIError.validation("The text changed. Read the current version first.", details: ["textVersion": "stale"])
@@ -109,11 +112,15 @@ struct LoopRuntimeService {
     struct AccessFacts {
         var decision: LoopAccessDecision
         var relationship: RelationshipRecord?
+        /// The customer's active install of this Loop (looked up only without a relationship).
+        var install: LoopInstallRecord?
     }
 
     func access(_ operation: LoopAccessOperation, consumer: UUID, publication: LoopPublicationRecord, instance: LoopInstanceRecord?) async throws -> AccessFacts {
         let business = try await BusinessRecord.find(publication.businessId, on: db)
         let relationship = try await activeRelationship(consumer: consumer, business: publication.businessId)
+        // Without a connection, an active install of this very Loop (never of another Loop of the business) stands in for it.
+        let install = relationship == nil ? try await LoopInstallService(db: db, ctx: ctx).activeInstall(consumer: consumer, definition: publication.definitionId) : nil
         var status = publication.statusValue
         // A retired (superseded) publication starts nothing new, but instances already pinned to it may finish.
         if operation != .createInstance, status == .retired { status = .active }
@@ -124,8 +131,9 @@ struct LoopRuntimeService {
             publicationStatus: status, businessLoopsSwitchedOff: try await LoopPublicationService.businessSwitchedOff(publication.businessId, on: db),
             platformLoopsOff: await PlatformFlags(db: db, ctx: ctx).isStopped(.loops),
             instanceExpired: instance.map { $0.expiresAt <= ctx.now } ?? false,
-            instanceOwnedByCaller: instance.map { $0.consumerId == consumer && $0.businessId == publication.businessId } ?? true)
-        return AccessFacts(decision: LoopAccessPolicy.evaluate(operation, input), relationship: relationship)
+            instanceOwnedByCaller: instance.map { $0.consumerId == consumer && $0.businessId == publication.businessId } ?? true,
+            installActive: install != nil)
+        return AccessFacts(decision: LoopAccessPolicy.evaluate(operation, input), relationship: relationship, install: install)
     }
 
     /// Audits and maps a denial to the HTTP answer. Not-found classes never reveal that the object exists.
@@ -156,7 +164,18 @@ struct LoopRuntimeService {
         let consumer = principal.consumerId.uuid
         if await PlatformFlags(db: db, ctx: ctx).isStopped(.loops) { return [] }
         let relationships = try await RelationshipRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$status == "active").all()
-        var businesses = Set(relationships.map(\.businessId))
+        let connected = Set(relationships.map(\.businessId))
+        // Installed Loops of businesses the customer is not connected to (§2.98 "Installed Loops"): only those Loops, never the business's
+        // other Loops. A blocked business's installs never count.
+        let installService = LoopInstallService(db: db, ctx: ctx)
+        let installRows = try await installService.activeInstalls(consumer: consumer)
+        let installedLoops = Set(installRows.map(\.definitionId))
+        var installed: [UUID: Set<UUID>] = [:]
+        for row in installRows where !connected.contains(row.businessId) {
+            if try await PreferenceService(db: db, ctx: ctx).isBlocked(consumer: consumer, business: row.businessId) { continue }
+            installed[row.businessId, default: []].insert(row.definitionId)
+        }
+        var businesses = connected.union(installed.keys)
         if let filter {
             guard businesses.contains(filter.uuid) else { throw APIError.notFound }
             businesses = [filter.uuid]
@@ -164,6 +183,7 @@ struct LoopRuntimeService {
         guard !businesses.isEmpty else { return [] }
         let publications = try await LoopPublicationRecord.query(on: db).filter(\.$businessId ~~ Array(businesses))
             .filter(\.$status == LoopPublicationStatus.active.rawValue).all()
+            .filter { connected.contains($0.businessId) || installed[$0.businessId]?.contains($0.definitionId) == true }
         let allowed = Set(try await LoopRolloutAllowRecord.query(on: db).filter(\.$consumerId == consumer).all().map(\.publicationId))
         let consents = try await LoopConsentRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$revokedAt == nil).all()
         let current = LoopConsentCatalog.current.version
@@ -179,7 +199,8 @@ struct LoopRuntimeService {
             let authorized = consents.contains { $0.businessId == publication.businessId && $0.textVersion >= current }
             out.append(LoopSummary(publicationId: LoopPublicationID(id), businessId: BusinessID(publication.businessId), revision: Int64(publication.revision),
                                    title: DisplayTextSanitizer.sanitize(definition.title, maxCharacters: LoopLimits.titleLength), entryPoints: definition.entryPoints,
-                                   authorized: authorized))
+                                   authorized: authorized, loopId: LoopDefinitionID(publication.definitionId),
+                                   installed: installedLoops.contains(publication.definitionId)))
         }
         return out.sorted { $0.title < $1.title }
     }
@@ -200,7 +221,7 @@ struct LoopRuntimeService {
         }
         let allowListed = try await LoopRolloutAllowRecord.query(on: db).filter(\.$publicationId == publication.id!).filter(\.$consumerId == consumer).first() != nil
         guard LoopRollout.isEligible(consumerId: consumer, publicationId: publication.id!, percent: publication.rolloutPercent, allowListed: allowListed),
-              let relationship = facts.relationship,
+              facts.relationship != nil || facts.install != nil,
               let revision = try await LoopRevisionRecord.find(publication.revisionId, on: db),
               let definition = LoopDefinition.parse(Data(revision.definitionJSON.utf8)).definition, let entry = definition.steps.first else {
             throw await refuse("not_found", principal: principal, business: publication.businessId, subject: nil, operation: "create")
@@ -215,7 +236,9 @@ struct LoopRuntimeService {
         instance.revisionId = revision.id!
         instance.businessId = publication.businessId
         instance.consumerId = consumer
-        instance.relationshipId = relationship.id!
+        // Install only: no relationship exists, and none is implied (`noRelationship`); the install is recorded instead.
+        instance.relationshipId = facts.relationship?.id ?? LoopInstanceRecord.noRelationship
+        instance.installId = facts.relationship == nil ? facts.install?.id : nil
         instance.entryPoint = request.entryPoint.rawValue
         instance.state = LoopInstanceState.active.rawValue
         instance.currentStepId = entry.id

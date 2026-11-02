@@ -19,6 +19,12 @@ public struct LoopSettings: Sendable {
     public var reportRate: RateRule = .perHour(10, burst: 5)
     /// Inbox items kept after they are closed (then purged with their events' inputs by the retention job).
     public var inboxRetention: TimeInterval = 180 * 86_400
+    /// Installs and uninstalls per account (§2.98 "Installed Loops"): bounds install spam and churn.
+    public var installRate: RateRule = .perHour(30, burst: 10)
+    /// Directory reads (browse, search, detail) per account.
+    public var directoryRate: RateRule = .perMinute(60, burst: 30)
+    /// Loops one account may have installed at once.
+    public var maxInstalledPerAccount = 100
 
     public init() {}
 }
