@@ -60,7 +60,8 @@ final class VerifyButtonTests: XCTestCase {
         XCTAssertTrue(guide.contains(try sri("viadere-verify.css")), "…and the current viadere-verify.css hash")
         XCTAssertTrue(guide.contains("https://viadere.com/verify-button/v1/viadere-verify.js"))
         let example = try String(contentsOf: repo.appendingPathComponent("docs/examples/verify-button.html"), encoding: .utf8)
-        XCTAssertTrue(example.contains(try sri("viadere-verify.js")) && example.contains(try sri("viadere-verify.css")), "the example page pins the hashes too")
+        let jsHash = try sri("viadere-verify.js"), cssHash = try sri("viadere-verify.css")
+        XCTAssertTrue(example.contains(jsHash) && example.contains(cssHash), "the example page pins the hashes too")
         XCTAssertFalse(example.contains("<script>"), "the example needs no inline script")
         XCTAssertFalse(example.contains("style="), "…and no inline style")
     }
