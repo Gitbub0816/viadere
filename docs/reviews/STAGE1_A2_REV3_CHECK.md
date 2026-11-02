@@ -154,3 +154,47 @@ C-1 to C-12 of the previous re-review **stand unchanged**. The C-1 test list now
 A2 targeted check of Stage 1 revision 3 at `2eadc4e`. Verdict: **APPROVE WITH CONDITIONS**. S2-A2-1, S2-A2-2, S2-A2-4 to -10, S2-A2-11 and the S1-A2-2 and S1-A2-6 remainders are closed. S2-A2-3 is partially closed, pending new High finding S3-A2-1, which condition C-13 gates before the Stage 2 authority contract is frozen. New Mediums S3-A2-2 and -3 are due before the pilot (C-14, C-15). R-23 is accepted for the lean staging pilot only (C-15), and production requires C-16. Reviewer: A2 agent, 2026-11-02.
 
 This is an agent review record produced for the Viadere multi-agent build process (spec §15, §27). It is **not a third-party certification**, penetration test or independent external security assessment, and it does not replace the external review that spec §13 requires before any production IdP.
+
+## Revision 3.1 confirmation (A2, 2026-11-02)
+
+| | |
+|---|---|
+| Baseline | `claude/inspiring-cannon-t5hxfw` at `3295db8`; deltas read with `git diff adee409..3295db8 -- docs/` |
+| Read | `STAGE1_RESPONSE.md` "Revision 3.1"; ADR-0033 §4.1, §6; ADR-0023 §4 (`device_added` row, one account per key); TRUST_BOUNDARIES §4.2, DF-5; ADR-0022 §5.2 items 1, 4, 6, 7; ADR-0020 §2a; ADR-0034 §5, §8-§10; ADR-0028 `AUTH-ADMIN-NO-KV`, `AUTH-STANDBY-ROLE`; THREAT_MODEL T-REC-10, T-AUTH-6, T-AUTH-15, R-20, R-23, ST-REC-22, ST-REC-23, ST-MFA-11, ST-AUTH-25 |
+| Method | Documents only; nothing built |
+
+### Findings and gated conditions
+
+| Item | Ruling | Basis / what remains |
+|---|---|---|
+| **S3-A2-1** (High) device-add grinding | **SATISFIED** | ADR-0033 §4.1 items 1-3, 7: separate earlier `keylog_pop` nonce; comparison nonce drawn at challenge creation after the entry and `kids` are stored, never a PoP nonce; one challenge per entry for life (failure ends the entry, new keys required); one pending entry per account; ≤ 5 entries per account per 24 h, `429 device_add_limit`, alerts from the fourth and on every refusal. The bound ≤ 5 × 10^-6 per account per day follows from these rules, and I agree with it. The rules are mirrored in ADR-0023 §4, DF-5, T-REC-10, and ST-REC-22 covers each rule |
+| **C-13** (hard gate before the Stage 2 authority contract freezes) | **SATISFIED at document level** | The design gate is met, so Stage 2 may proceed. One part stays open until freeze: the Stage 2 authority OpenAPI must encode `409 challenge_exists`, `429 device_add_limit`, the `keylog_pop` purpose and the entry states `pending/abandoned/cancelled`. A2 checks that at freeze, with no further review round |
+| **S3-A2-2** (Medium) collision lockout | **SATISFIED** | ADR-0022 §5.2 item 6 and ADR-0020 §2a (additive): business-keyed `match_tag`, so the api learns equality without learning codes; `409 match_code_in_use`; SDK redraw; group-pressure alert above 10; R-20 restated; ST-MFA-11. Two parts go further than I asked, and I accept both: prefix-freeness (it closes a real cross-length selection path), and 3 digits required from 30 open requests (more than about 600 open requests before exhaustion, critical alert). A business that sends inconsistent tags harms only its own customers, and S-MFA-15 stays as the defence |
+| **Author deviation: no per-initiator caps at Viadere** | **ACCEPTED** | My S3-A2-2 change did not require per-initiator caps, so this is a design choice rather than a departure from the finding. The reasoning is correct. Viadere cannot see the initiator. A network identifier behind carrier-grade NAT would give a neighbour exactly the lockout lever that S2-A2-9 removed, and a cookie identifier costs the attacker nothing to rotate. Collision-freeness removes the lockout, and exhaustion is bounded and alerted, so a cap at Viadere would add risk without adding protection. Condition: the per-requester throttle guidance (≤ 3 open triggers per account and client network prefix) ships in the SDK helpers and the RP integration guide as a default, not only as prose (C-14) |
+| **S3-A2-3** (Medium) seal-key custody | **SATISFIED** | (1) `id-viadere-authority-admin` keeps no Key Vault role (`AUTH-ADMIN-NO-KV`). The KEK public halves are attested inputs read once by the crypto-officer group, which keeps `AUTH-STANDBY-ROLE` consistent. A substituted KEK fails closed at the first unwrap. (2) Active and standby are created in separate executions, and a second create in one execution is refused. (3) Each set records `seal_kid`; the exposure procedure (ADR-0034 §8.2) invalidates exactly those sets, keeps grant capability, and is tested by ST-REC-23. (4) Reconciliation against a start or decrypt record, tested by ST-AUTH-25 |
+| **C-15** (R-23, lean pilot) | **SATISFIED in design; delivery pending** | ADR-0034 §8, §10 specify items (i)-(v). Delivery remains: KEY-ROTATION.md written, the exposure procedure drilled once in staging, the container hygiene and route/image tests passing, reconciliation alerting drilled with C-11, all **before any authority flag in the pilot**. The 6-month seal-key lifetime cap is accepted |
+| **C-16** (R-23, production) | **SATISFIED as a gate** | ADR-0034 §9: option (a), compact JWE `RSA-OAEP-256` + `A256GCM` to a non-exportable RSA-HSM 3072 key, `decrypt` only, the whole protected header used as AAD, strict pre-checks before Key Vault, at most one decrypt per challenge by CAS, generic error, reconciliation, MGF1-SHA-256 trap covered by a vector. Production stays **blocked** (ledger L-13) until §9 ships with its tests, or until an owner exception is countersigned by A2 and A3 with a lifetime of 90 days or less. I prefer that lean staging also move to §9 in Stage 6 (single code path) |
+| S3-A2-4 (Low) `kid` in more than one account | **SATISFIED** | `409 key_in_use` on any non-revoked entry of any account; closure after 24 h with no enrollment confirmation; ST-AUTH-15 |
+| S3-A2-5 (Low) failures moved into the silent class | **SATISFIED** | A lower `seq` is now `destination_mismatch`; skew is judged against an authority-signed `issued_at`; telemetry is kept |
+| S3-A2-6 (Low) `session_handle` | **SATISFIED** | The HMAC derivation is a MUST, with vectors; a handle repeated on more than 3 requests in 10 minutes is ignored for supersession; alert above 20 per hour |
+
+### New observation
+
+- **S3.1-A2-1 (Low): duplicate test id.** THREAT_MODEL §6 now has two rows named `ST-MFA-11`: the new collision test and the existing push action-option test. T-MFA-10 cites the existing one. Rename the new test, for example to ST-MFA-16, in THREAT_MODEL, ADR-0022 §5.2 item 7 and the response/ledger references before the Stage 2 test catalog is frozen. This is editorial; nothing changes in the control.
+
+### Final Stage 1 verdict: **APPROVE WITH CONDITIONS**
+
+No Critical, High or Medium finding remains open at design level. C-13 is met, so this approval **does** extend to the Stage 2 authority contract. Conditions that remain for Stages 2-8:
+
+| # | Condition | Gate |
+|---|---|---|
+| C-1 … C-12 | As in the previous re-review, unchanged. The C-1 test list includes ST-REC-22, ST-REC-23, ST-MFA-11 (renamed), ST-AUTH-25 and the extended ST-AUTH-15 and ST-ML-15 | as stated there |
+| C-13 (remainder) | The Stage 2 authority OpenAPI encodes the device-add caps, states and error answers; A2 checks at freeze | Stage 2 contract freeze |
+| C-14 | ADR-0020 §2a in the Stage 2 business contract; SDK redraw, plus the per-requester throttle shipped as the SDK default and stated in the RP guide; ST-MFA-11 (renamed) passing | contract in Stage 2; test before the pilot |
+| C-15 | Delivery of ADR-0034 §8 and §10 with the drill | before any authority flag in the pilot |
+| C-16 | §9 implemented and tested, or an owner exception countersigned by A2 and A3 | before any production authority environment |
+| C-17 | S3-A2-4..-6 implemented with their tests | before Stage 7 |
+| C-18 | OQ-8 answered by the owner (C-3 governs until then) | pilot |
+| C-19 | S3.1-A2-1 test id renamed | before the Stage 2 test catalog is frozen |
+
+Reviewer: A2 agent, 2026-11-02, at `3295db8`. This is an agent review record, not a third-party assessment (see the note above).
