@@ -28,13 +28,13 @@ Severity scale: Critical / High / Medium / Low / Info. "Fixed" means fixed in th
 - **Issue:** The third wrong entry submits the automatic `number_mismatch` deny. If that submission failed, `submit` put the screen back to `.entering`, for example because Face ID was cancelled on the "Decline the request" prompt (which the in-app deny needs) or because the phone was offline. `canApprove` did not look at `wrongEntries`, so a fourth entry with the right number signed an **approve**. The person, or someone coaching them, got unlimited further guesses on a 2-digit code. This breaks ADR-0022 §2 item 4 and §5.2 item 2 ("the third makes the device submit a signed deny"). Reproduced with the new test before the fix: the approve was sent.
 - **Change made:** `wrongEntryLimitReached` (`wrongEntries >= 3`) now disables Approve for good. `deny()` resends the `number_mismatch` denial of the whole group, ending in `.autoDenied`. Test: `aFailedAutomaticDenialNeverReopensApprove`.
 
-### R4-02 — Medium — OPEN — the three-strikes counter is per screen, not per request
+### R4-02 — Medium — CLOSED (Stage 5) — the three-strikes counter is per screen, not per request
 
 - **Where:** `NumberMatchApproval.swift:103` (`wrongEntries`, in memory only); `App/Viadere/Features/Approve/ApproveRequestSheet.swift:45`, `:73`.
 - **Issue:** ADR-0022 §2 item 4 says "up to 3 wrong entries **per request** (local counter)", and §5.2 item 2 says "3 per group". The counter lives in the view model, which is built anew each time the sheet opens. Two wrong entries, then a dismissal (swipe-down is allowed; only the handle asks "Leave this request?"), then a reopen, give three fresh tries. So does a relaunch. The counter is not reported either (`invalid_match_attempts`, see R4-04), so nothing upstream sees the attempts.
 - **Required change:** Persist the wrong-entry count per request id (or per group key) in the approval store, alongside `LocalDecision`. Keep it until the request leaves the open set. Seed the view model from it, and add a test that a new view model for the same request starts at the stored count. Also make swipe-dismiss go through the same "Leave this request?" confirmation once `wrongEntries > 0`.
 
-### R4-03 — Medium — PARTLY FIXED — notification Deny on `viadere.approve` cannot succeed in the shipping build
+### R4-03 — Medium — CLOSED (Stage 5; production flag stays off until the pilot) — notification Deny on `viadere.approve` cannot succeed in the shipping build
 
 - **Where:** `NotificationActionHandler.handleAuthDelivery`; `ViadereServices.swift:35` (`authDelivery = UnavailableAuthDeliveryAPI()`); `NotificationModel.swift:61`; server `ApproveSupport.pushRequest` (sends `category: "viadere.approve"` with no `req`, and `interruption-level: time-sensitive`).
 - **Issue:** Stage 4 registers the `viadere.approve` category, so every Approve v2 push the server sends today now shows **Deny** on the Lock Screen. In the shipping build that Deny cannot work, for two reasons:
@@ -46,7 +46,7 @@ Severity scale: Critical / High / Medium / Low / Info. "Fixed" means fixed in th
 
   Separately, the server still marks these pushes `time-sensitive`. That contradicts ADR-0022 §5.5, which Core's `ChannelRenderer` now follows. This is a server item, so it is logged here for the Stage 5/server owner. F-14 and F-15 routing (`req`) is inert until the server sends `req`.
 
-### R4-04 — Medium — OPEN (condition) — number matching is inert on the shipping path
+### R4-04 — Medium — CLOSED (Stage 5) — number matching is inert on the shipping path
 
 - **Where:** `NumberMatchApproval.swift` `NumberMatchApprovalContext.init(prompt:numberMatch:)` (`requiresNumber: numberMatch != nil`, and `ApproveRequestSheet` always passes `nil`); `ApproveControllerAnswering.answer` (drops `match` and `deny_reason`).
 - **Issue:** The code says, and the comment admits, that `number_match` is not yet in the business-signed request. So today every Approve v2 request is approved **without** a number. The signed result carries no `match`, no `deny_reason: number_mismatch` and no `invalid_match_attempts`. The device logic is correct and well tested, but it protects nothing in production until the Core `ApprovalResult` v2 wire lands. The fail-closed switch (`requiresNumber`) depends on whether the requirement is present. It does not depend on a policy that says "this business or request kind must be number-matched". A relay that strips `number_match` would therefore silently downgrade a request.
@@ -128,7 +128,7 @@ Without the Public Suffix List, the "strong" part is a heuristic: for example `e
 Agent review record: Stage 4 code review by A2 (security) and A6 (iOS), independent reviewer agent, 2026-11-02, at `ca7601d` plus this review's fixes (R4-01, R4-03 item 1, R4-06).
 
 - **Verdict:** **APPROVE WITH CONDITIONS.**
-- **Before release of a build that registers `viadere.approve`:** R4-03.
-- **Before the pilot:** R4-02 and R4-04.
+- **Before release of a build that registers `viadere.approve`:** R4-03. *Closed in Stage 5:* the server sends `req` with `interruption-level: active` and `apns-collapse-id`, and accepts the request-key reduce-only deny (`POST /v1/approve/requests/{id}/deny`, `AuthApprovalTests.testTheNotificationDenyIsReduceOnlyAndCountsTowardThePause`); `LiveAuthDeliveryAPI.reduce` is wired; `AuthDeliveryFlags.forConfiguration` turns the Deny action on for staging and local builds only.
+- **Before the pilot:** R4-02 and R4-04. *Closed in Stage 5:* R4-02 — wrong entries persist per request id in `ApproveLocalState.matchAttempts`, the sheet seeds from it and cannot be swiped away after a wrong entry (`NumberMatchStage5Tests.theWrongEntryCountSurvivesANewScreenForTheSameRequest`); R4-04 — `number_match` is inside the business-signed request (v2), `match`/`deny_reason`/`invalid_match_attempts` inside the signed result, `requiresNumber` comes from signed or digest-bound policy (payments always), and `ApproveRequestSheet` builds its context from the verified group (SECURITY 2.102).
 - **Before the first device build:** R4-05.
 - **Before Stage 6 closes:** R4-07 to R4-09 and R4-11.
