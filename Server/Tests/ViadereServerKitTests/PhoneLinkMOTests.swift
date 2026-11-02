@@ -336,26 +336,121 @@ final class PhoneLinkMOTests: XCTestCase {
         }
     }
 
-    func testATransferCompletesOnlyAfterTheWaitingPeriodWhenTheOwnerDoesNotObject() async throws {
+    /// Sets up a pending transfer: `oldOwner` holds the number, `newOwner` asked for it by text. Returns the old owner's link id.
+    private func pendingTransfer(_ h: TestHarness, oldOwner: TestConsumer, newOwner: inout TestConsumer) async throws -> PhoneLinkID {
+        let first = try await h.linkPhoneByText(oldOwner, phone: phone)
+        let oldLink = try XCTUnwrap(first.status.link)
+        h.clock.advance(by: 72 * 3600 + 1)
+        newOwner = try await h.login(newOwner)
+        let begin = try await h.beginPhoneLink(newOwner, phone: phone).json(PhoneLinkMOBeginResponse.self)
+        try await h.textViadere(from: phone, begin.prefill)
+        let pending = try await XCTUnwrapAsync(await PhoneLinkRecord.find(begin.phoneLinkId.uuid, on: h.db))
+        XCTAssertEqual(pending.state, "pending_transfer")
+        return oldLink.id
+    }
+
+    /// F-1 (ADR-0027 section 1.3, rev 3): a dormant owner's app never fetched the notice, so the number never moves, however long the wait.
+    func testADormantOwnerWhoNeverFetchedTheNoticeNeverLosesTheNumber() async throws {
         try await withHarness { h in
             let oldOwner = try await h.readyConsumer(name: "Old")
             var newOwner = try await h.readyConsumer(name: "New")
-            try await h.linkPhoneByText(oldOwner, phone: phone)
-            h.clock.advance(by: 72 * 3600 + 1)
-            newOwner = try await h.login(newOwner)
-            let begin = try await h.beginPhoneLink(newOwner, phone: phone).json(PhoneLinkMOBeginResponse.self)
-            h.clock.advance(by: 24 * 3600)   // the daily churn cap
-            newOwner = try await h.login(newOwner)
-            let begin2 = try await h.beginPhoneLink(newOwner, phone: phone).json(PhoneLinkMOBeginResponse.self)
-            XCTAssertNotEqual(begin.nonce, begin2.nonce)
-            try await h.textViadere(from: phone, begin2.prefill)
+            _ = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
             try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
-            try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 0, "still waiting")
+            let service = PhoneLinkService(db: h.db, ctx: h.ctx)
+            for days in [1, 3, 30, 365] {
+                h.clock.advance(by: Double(days) * 24 * 3600)
+                try await eq(try await service.completeTransfers(), 0, "the owner's app never fetched the notice: still pending after \(days) more days")
+                try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
+            }
+            let old = try await XCTUnwrapAsync(await PhoneLinkRecord.query(on: h.db).filter(\.$consumerId == oldOwner.id.uuid).first())
+            XCTAssertEqual(old.state, "verified")
+        }
+    }
+
+    func testATransferCompletesOnlyAfterTheOwnerFetchedTheNoticeAndTheWaitEndedAndTheOwnerDidNotKeep() async throws {
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            _ = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            let service = PhoneLinkService(db: h.db, ctx: h.ctx)
+            // The owner's app fetches the notice before the wait ended: still waiting.
+            oldOwner = try await h.login(oldOwner)
+            let notices = try await h.signed(oldOwner, .GET, "/v1/security-notices").json([SecurityNotice].self)
+            XCTAssertTrue(notices.contains { $0.topic == .phoneTransferRequested })
+            try await eq(try await service.completeTransfers(), 0, "fetched, but the waiting period has not ended")
+            try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
             h.clock.advance(by: 72 * 3600 + 1)
-            try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 1)
+            try await eq(try await service.completeTransfers(), 1)
             try await eq(try await h.gatewayConsumer(phone), newOwner.id)
-            let old = try await PhoneLinkRecord.query(on: h.db).filter(\.$consumerId == oldOwner.id.uuid).first()
-            XCTAssertEqual(old?.state, "revoked")
+            let old = try await XCTUnwrapAsync(await PhoneLinkRecord.query(on: h.db).filter(\.$consumerId == oldOwner.id.uuid).first())
+            XCTAssertEqual(old.state, "revoked")
+            // The losing account is told in the app.
+            oldOwner = try await h.login(oldOwner)
+            let after = try await h.signed(oldOwner, .GET, "/v1/security-notices").json([SecurityNotice].self)
+            XCTAssertTrue(after.contains { $0.topic == .phoneTransferred }, "the account that lost the number is notified")
+        }
+    }
+
+    func testAnOwnerWhoFetchedTheNoticeAndKeptTheNumberKeepsIt() async throws {
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            let oldLink = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            oldOwner = try await h.login(oldOwner)
+            _ = try await h.signed(oldOwner, .GET, "/v1/security-notices")
+            try await eq(try await h.signedPost(oldOwner, "/v1/phone-links/\(oldLink)/keep", EmptyBody()).status, .ok)
+            h.clock.advance(by: 30 * 24 * 3600)
+            try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 0)
+            try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
+        }
+    }
+
+    /// The account that was notified is not the holder any more: the new holder gets a fresh notice and the flow restarts; nothing moves.
+    func testWhenTheHolderChangedTheNewHolderIsNotifiedAndTheTransferDoesNotMove() async throws {
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            var third = try await h.readyConsumer(name: "Third")
+            let oldLink = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            // The notified owner fetched the notice, then their link went away and a third account took the number.
+            oldOwner = try await h.login(oldOwner)
+            _ = try await h.signed(oldOwner, .GET, "/v1/security-notices")
+            let old = try await XCTUnwrapAsync(await PhoneLinkRecord.find(oldLink.uuid, on: h.db))
+            old.state = "revoked"
+            old.verifiedPhoneHash = nil
+            try await old.update(on: h.db)
+            third = try await h.login(third)
+            try await h.linkVerifiedPhone(third, phone: phone)
+            h.clock.advance(by: 72 * 3600 + 1)
+            let service = PhoneLinkService(db: h.db, ctx: h.ctx)
+            try await eq(try await service.completeTransfers(), 0, "the notified account is no longer the holder")
+            try await eq(try await h.gatewayConsumer(phone), third.id)
+            // Running the job again does not pile up notices, and the new holder gets a full waiting period to see it and keep the number.
+            h.clock.advance(by: 3600)
+            try await eq(try await service.completeTransfers(), 0)
+            third = try await h.login(third)
+            let notices = try await h.signed(third, .GET, "/v1/security-notices").json([SecurityNotice].self)
+            let fresh = try XCTUnwrap(notices.first { $0.topic == .phoneTransferRequested }, "the new holder is told")
+            XCTAssertEqual(fresh.action, .keepPhoneNumber)
+            try await eq(try await service.completeTransfers(), 0, "restarted wait has not ended")
+            h.clock.advance(by: 25 * 3600)
+            try await eq(try await service.completeTransfers(), 1, "fetched by the new holder, wait ended, not kept")
+            try await eq(try await h.gatewayConsumer(phone), newOwner.id)
+            let count = try await SecurityNoticeRecord.query(on: h.db).filter(\.$consumerId == third.id.uuid)
+                .filter(\.$kind == "phoneTransferRequested").count()
+            XCTAssertEqual(count, 1)
+        }
+    }
+
+    /// F-4: a flood of forged link texts cannot block the real owner's UNLINK (its own bucket, not the link-text one).
+    func testUnlinkIsNotBlockedByAFloodOfLinkTexts() async throws {
+        try await withHarness({ $0.rateLimits.phoneLinkMOPerPhone = RateRule(capacity: 2, perMinute: 0.001) }) { h in
+            let consumer = try await h.readyConsumer()
+            try await h.linkVerifiedPhone(consumer, phone: phone)
+            for _ in 0..<5 { try await h.textViadere(from: phone, PhoneLinkMO.prefill(nonce: "VDR-AAAAAAAA")) }
+            let replies = try await h.textViadere(from: phone, "UNLINK")
+            XCTAssertEqual(replies, [GatewayCopy.unlinkDone], "UNLINK is answered although the link-text bucket is empty")
+            try await eq(try await h.gatewayConsumer(phone), nil)
         }
     }
 
@@ -432,6 +527,18 @@ final class PhoneLinkMOTests: XCTestCase {
     }
 
     // MARK: Sweep, deletion, routes
+
+    /// F-3: the sweep has its own once-a-minute task (`ViadereServer maintenance minute`), not the 5-minute maintenance run.
+    func testTheMinuteTaskSweepsAnExpiredChallenge() async throws {
+        try await withHarness { h in
+            let a = try await h.readyConsumer(name: "A")
+            _ = try await h.beginPhoneLink(a, phone: phone).json(PhoneLinkMOBeginResponse.self)
+            XCTAssertEqual(BackgroundJobs.Task(rawValue: "minute"), .minute)
+            h.clock.advance(by: 10 * 60 + 121)
+            try await BackgroundJobs(app: h.app).run(.minute)
+            try await eq(try await PhoneLinkMOChallengeRecord.query(on: h.db).count(), 0)
+        }
+    }
 
     func testExpiredChallengesAreSweptTwoMinutesAfterExpiryAndAccountDeletionRemovesLiveOnes() async throws {
         try await withHarness { h in

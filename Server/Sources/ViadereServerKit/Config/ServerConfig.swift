@@ -420,6 +420,8 @@ public struct RateLimitSettings: Sendable {
     public var phoneLinkStatus: RateRule = .perMinute(60, burst: 30)
     /// Inbound link texts per phone that the gateway looks at (more are dropped silently).
     public var phoneLinkMOPerPhone: RateRule = .perHour(20, burst: 10)
+    /// `UNLINK` texts per phone: separate from the link-text bucket so forged link texts cannot block the real owner's UNLINK.
+    public var phoneUnlinkPerPhone: RateRule = .perHour(60, burst: 30)
     public var smsInboundPerPhone: RateRule
     public var smsInboundGlobal: RateRule
     public var providerIP: RateRule

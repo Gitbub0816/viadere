@@ -170,6 +170,7 @@ public final class SecurityNoticesViewModel {
         case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
         case .phoneTransferRequested: return "Someone asked to link your phone number to another Viadere account \(when). If that number is still yours, keep it."
         case .phoneUnlinked: return "Your phone number was unlinked by a text from that number."
+        case .phoneTransferred: return "Your phone number was moved to another Viadere account \(when) because you did not keep it."
         case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
         case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."
         case .unknown:

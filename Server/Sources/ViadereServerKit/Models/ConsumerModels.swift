@@ -244,6 +244,9 @@ final class SecurityNoticeRecord: Model, @unchecked Sendable {
     @OptionalField(key: "origin_device_id") var originDeviceId: UUID?
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "dismissed_at") var dismissedAt: Date?
+    /// When the account's app first fetched this notice (`GET /v1/security-notices`) or dismissed it. A phone transfer never completes before the
+    /// current owner's app has fetched its notice (ADR-0027 section 1.3).
+    @OptionalField(key: "fetched_at") var fetchedAt: Date?
     /// `SecurityNoticeAction` raw value: what the notice's "Not you? Cancel" button does.
     @OptionalField(key: "action") var action: String?
 

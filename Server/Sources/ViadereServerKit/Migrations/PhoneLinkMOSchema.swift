@@ -24,6 +24,21 @@ final class PhoneLinkMOChallengeRecord: Model, @unchecked Sendable {
     init() {}
 }
 
+/// `PhoneLinkTransferNotice.v1` (additive): `security_notices.fetched_at`, set when the account's app fetches or dismisses the notice. A pending
+/// phone transfer completes only after the current owner's app fetched its notice (ADR-0027 section 1.3, F-1 of the SMS-removal review).
+/// Notices that exist before this migration stay `NULL`: a transfer waiting on one is re-notified by the job.
+struct CreatePhoneLinkTransferNoticeSchema: AsyncMigration {
+    var name: String { "PhoneLinkTransferNotice.v1" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema("security_notices").field("fetched_at", .datetime).update()
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema("security_notices").deleteField("fetched_at").update()
+    }
+}
+
 /// `PhoneLinkMO.v1` (additive, forward-only):
 /// * `phone_link_mo_challenges` (ADR-0027 §1.1);
 /// * every outstanding SMS-code link attempt and every open SMS link token is revoked and their secrets cleared (decision 9: no authentication
