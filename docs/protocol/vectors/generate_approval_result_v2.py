@@ -76,6 +76,10 @@ cases = [
     {"name": "v2_approve_without_match", "expectation": "required", "jws": sign(HEADER, claims(match=None)), "error": "numberMismatch"},
     {"name": "v2_approve_with_the_wrong_number", "expectation": "required", "jws": sign(HEADER, claims(match="74")), "error": "numberMismatch"},
     {"name": "match_on_a_request_that_asked_for_none", "expectation": "not_requested", "jws": sign(HEADER, claims()), "error": "unexpectedMatch"},
+    # The compatible side of the downgrade rule (Stage 5 review S5-07): a request that asked for no number accepts a v1 result and a v2 result without `match`.
+    {"name": "v1_result_for_a_request_that_asked_for_none", "expectation": "not_requested",
+     "jws": sign(HEADER, claims(v=1, jti=None, match=None, invalid_match_attempts=None)), "outcome": "approve"},
+    {"name": "v2_approve_without_match_for_a_request_that_asked_for_none", "expectation": "not_requested", "jws": sign(HEADER, claims(match=None)), "outcome": "approve"},
     {"name": "unknown_payload_member", "expectation": "required", "jws": sign(HEADER, claims(extra="x")), "error": "malformed"},
     {"name": "deny_reason_on_an_approve", "expectation": "required", "jws": sign(HEADER, claims(deny_reason="not_me")), "error": "malformed"},
     {"name": "not_me_on_a_deny", "expectation": "required", "jws": sign(HEADER, claims(decision="deny", match=None, deny_reason="not_me")), "error": "malformed"},

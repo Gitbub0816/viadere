@@ -161,6 +161,10 @@ final class ApproveRequestRecord: Model, @unchecked Sendable {
     @OptionalField(key: "match_digits") var matchDigits: Int?
     @OptionalField(key: "session_handle") var sessionHandle: String?
     @OptionalField(key: "deny_reason") var denyReason: String?
+    /// `ApproveStage5Review.v1`. The device's `answer_group` of a group Deny, report or automatic deny: the refusals of one group count once toward the pause (S5-02).
+    @OptionalField(key: "answer_group") var answerGroup: String?
+    /// `ApproveStage5Review.v1`. `auth-approvals` over the hourly budget: created and listed, but delivered without an alert push (S5-04).
+    @OptionalField(key: "silent") var silent: Bool?
 
     init() {}
 

@@ -153,7 +153,13 @@ public final class NumberMatchApprovalViewModel {
     /// Seeds the persisted count when the screen opens (R4-02). Only ever raises the count.
     public func restoreWrongEntries(_ stored: Int) {
         wrongEntries = max(wrongEntries, min(max(stored, 0), Self.maxWrongEntries))
+        restoringWrongEntries = false
     }
+
+    /// Approve stays off until `restoreWrongEntries` ran (S5-06): the sheet loads the stored count asynchronously after it is on screen, and until then the
+    /// screen must not offer a fresh set of tries.
+    public func holdApproveUntilRestored() { restoringWrongEntries = true }
+    private var restoringWrongEntries = false
 
     /// True once a wrong number was typed: the App then asks "Leave this request?" before any dismissal, the swipe included (R4-02).
     public var confirmsBeforeLeaving: Bool { wrongEntries > 0 && (phase == .entering || phase == .submitting) }
@@ -172,7 +178,11 @@ public final class NumberMatchApprovalViewModel {
     }
     public var subtitle: String { isPayment ? AuthDeliveryCopy.paymentSubtitle : AuthDeliveryCopy.signInSubtitle }
     public var fieldLabel: String { AuthDeliveryCopy.numberFieldLabel(business: context.business) }
-    public var helper: String { AuthDeliveryCopy.numberHelper(business: context.business, digits: digits, payment: isPayment) }
+    public var helper: String {
+        context.requirement?.hasMixedLengths == true
+            ? AuthDeliveryCopy.numberHelperAnyLength(business: context.business)
+            : AuthDeliveryCopy.numberHelper(business: context.business, digits: digits, payment: isPayment)
+    }
     public var groupLine: String? {
         context.openRequestCount > 1 ? AuthDeliveryCopy.openRequests(count: context.openRequestCount, business: context.business) : nil
     }
@@ -211,7 +221,10 @@ public final class NumberMatchApprovalViewModel {
     private var numberRequired: Bool { context.requiresNumber || context.requirement != nil }
     private var requirementUsable: Bool { context.requirement?.isWellFormed == true }
 
-    public var isNumberComplete: Bool { NumberMatcher.isComplete(entry, digits: digits) }
+    public var isNumberComplete: Bool {
+        if let requirement = context.requirement { return NumberMatcher.isComplete(entry, requirement: requirement) }
+        return NumberMatcher.isComplete(entry, digits: digits)
+    }
 
     public var needsFatigueAcknowledgement: Bool { context.showFatigueWarning && !fatigueAcknowledged }
 
@@ -220,7 +233,7 @@ public final class NumberMatchApprovalViewModel {
     public var wrongEntryLimitReached: Bool { wrongEntries >= Self.maxWrongEntries }
 
     public var canApprove: Bool {
-        guard phase == .entering, !wrongEntryLimitReached, !isScreenCaptured, context.deviceCanApprove, !needsFatigueAcknowledgement, context.expiresAt > clock() else { return false }
+        guard phase == .entering, !restoringWrongEntries, !wrongEntryLimitReached, !isScreenCaptured, context.deviceCanApprove, !needsFatigueAcknowledgement, context.expiresAt > clock() else { return false }
         if numberRequired { return requirementUsable && isNumberComplete }
         return context.singleRequestId != nil
     }
@@ -343,7 +356,8 @@ extension NumberMatchApprovalContext {
         var requirement = numberMatch
         if requirement == nil {
             let candidates = prompts.compactMap { p in p.content.numberMatch.map { NumberMatchRequirement.Candidate(requestId: p.request.requestId, code: $0.code) } }
-            if !candidates.isEmpty { requirement = NumberMatchRequirement(digits: prompts.compactMap { $0.content.numberMatch?.digits }.max() ?? 2, candidates: candidates) }
+            // The field is as long as the longest code; each candidate keeps its own length (S5-01).
+            if !candidates.isEmpty { requirement = NumberMatchRequirement(digits: candidates.map { $0.code.utf8.count }.max() ?? 2, candidates: candidates) }
         }
         let required = numberMatch != nil || prompts.contains(where: Self.requiresNumber)
         let business = UntrustedText.name(prompt.business.displayName, max: 40, attribution: nil).text
@@ -372,6 +386,7 @@ public final class ApproveControllerAnswering: ApprovalAnswering {
     private let controller: ApproveController
     private let prompts: [ApprovalPrompt]
     private let attempts: (any NumberMatchAttemptRecording)?
+    private var refusalGroup: String?
 
     public convenience init(controller: ApproveController, prompt: ApprovalPrompt, attempts: (any NumberMatchAttemptRecording)? = nil) {
         self.init(controller: controller, group: [prompt], attempts: attempts)
@@ -404,10 +419,15 @@ public final class ApproveControllerAnswering: ApprovalAnswering {
         let targets = prompts.filter { requestIds.contains($0.request.requestId) }
         guard !targets.isEmpty else { throw AuthDeliveryError.notActive }
         let wrong = await attempts?.wrongEntries(requestIds: requestIds) ?? 0
+        // A Deny, This wasn't me or automatic deny of a group is one refusal, however many requests it closes: every result carries the same group id so the
+        // relay counts it once toward the pause (ADR-0022 §5.2 item 2, S5-02). An approve answers one request and needs none.
+        // The id is kept for this screen, so a retry after a partly sent group answer still counts once.
+        let group: String? = decision == .approve || (targets.count < 2 && refusalGroup == nil) ? nil : (refusalGroup ?? ApprovalAnswerGroup.make())
+        if group != nil { refusalGroup = group }
         for prompt in targets {
             // `ApproveController.answer` returns only after the relay accepted the signed result.
             guard await controller.answer(prompt, decision, dismissOnSuccess: false,
-                                          numberMatch: Self.numberMatchAnswer(answer, prompt: prompt, wrongEntries: wrong)) else { throw AuthDeliveryError.failed }
+                                          numberMatch: Self.numberMatchAnswer(answer, prompt: prompt, wrongEntries: wrong), answerGroup: group) else { throw AuthDeliveryError.failed }
         }
     }
 }

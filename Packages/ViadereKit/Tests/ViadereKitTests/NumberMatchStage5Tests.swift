@@ -102,18 +102,79 @@ struct NumberMatchStage5Tests {
         #expect(await answering.answers.last?.0 == .deny(reason: .numberMismatch))
     }
 
-    @Test func theApprovalStorePersistsAndPrunesWrongEntries() async throws {
+    @Test func theApprovalStorePersistsWrongEntriesPerBusinessAndRequest() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
         let key = try await phone.enrolled()
         _ = try await relay.deliverNumberMatched(to: key, code: "47", requestId: "req_number_match_02")
-        _ = try await phone.handler.load()
-        #expect(await phone.handler.recordWrongEntry(requestIds: ["req_number_match_02"]) == 1)
-        #expect(await phone.handler.recordWrongEntry(requestIds: ["req_number_match_02"]) == 2)
-        #expect(await phone.handler.wrongEntries(requestIds: ["req_number_match_02"]) == 2)
+        let prompt = try #require(try await phone.handler.load().prompts.first)
+        let recorder = phone.handler.attemptRecorder(for: prompt.key.businessId)
+        #expect(await recorder.recordWrongEntry(requestIds: ["req_number_match_02"]) == 1)
+        #expect(await recorder.recordWrongEntry(requestIds: ["req_number_match_02"]) == 2)
+        #expect(await recorder.wrongEntries(requestIds: ["req_number_match_02"]) == 2)
+        // S5-06: another business that happens to use the same request id has its own counter.
+        let other = phone.handler.attemptRecorder(for: BusinessID())
+        #expect(await other.wrongEntries(requestIds: ["req_number_match_02"]) == 0)
+    }
+
+    /// S5-06 exploit: a relay that omits the request from one listing (or one that fails verification once) used to reset the count to 0.
+    @Test func aListingThatOmitsTheRequestDoesNotResetTheThreeStrikes() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let key = try await phone.enrolled()
+        _ = try await relay.deliverNumberMatched(to: key, code: "47", requestId: "req_number_match_03")
+        let prompt = try #require(try await phone.handler.load().prompts.first)
+        let recorder = phone.handler.attemptRecorder(for: prompt.key.businessId)
+        await recorder.recordWrongEntry(requestIds: ["req_number_match_03"])
+        await recorder.recordWrongEntry(requestIds: ["req_number_match_03"])
         await relay.clearRequests()
-        _ = try await phone.handler.load()
-        #expect(await phone.handler.wrongEntries(requestIds: ["req_number_match_02"]) == 0)
+        #expect(try await phone.handler.load().prompts.isEmpty)
+        #expect(await recorder.wrongEntries(requestIds: ["req_number_match_03"]) == 2, "an omitted request keeps its count")
+    }
+
+    @Test func nothingBelowTheScreenSignsAnApproveAfterThreeWrongEntries() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let key = try await phone.enrolled()
+        _ = try await relay.deliverNumberMatched(to: key, code: "47", requestId: "req_number_match_04")
+        let prompt = try #require(try await phone.handler.load().prompts.first)
+        let recorder = phone.handler.attemptRecorder(for: prompt.key.businessId)
+        for _ in 0..<3 { await recorder.recordWrongEntry(requestIds: ["req_number_match_04"]) }
+        // The right number, offered directly to the handler (a reopened sheet whose count was still loading): refused, nothing sent.
+        let answer = ApprovalNumberMatchAnswer(match: "47", denyReason: nil, invalidMatchAttempts: 3)
+        await #expect(throws: ApproveError.requestRejected("wrong_entry_limit")) { _ = try await phone.handler.answer(prompt, decision: .approve, numberMatch: answer) }
+        #expect(await relay.submitted.isEmpty)
+        // A refusal is still accepted, and the terminal answer clears the count.
+        _ = try await phone.handler.answer(prompt, decision: .deny, numberMatch: ApprovalNumberMatchAnswer(match: nil, denyReason: .numberMismatch, invalidMatchAttempts: 3))
+        #expect(await recorder.wrongEntries(requestIds: ["req_number_match_04"]) == 0)
+    }
+
+    /// S5-04 / INB-01: a request delivered without an alert says so in the list.
+    @Test func aSilentSignInCarriesTheInboxLine() async throws {
+        let relay = try await makeRelay()
+        let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
+        let key = try await phone.enrolled()
+        _ = try await relay.deliverNumberMatched(to: key, code: "47", requestId: "req_number_match_05")
+        var prompt = try #require(try await phone.handler.load().prompts.first)
+        #expect(prompt.inboxLine == nil)
+        prompt.request.silent = true
+        #expect(prompt.inboxLine == "You have a pending sign-in from \u{2068}Harbor Bank\u{2069}.")
+    }
+
+    @Test func approveStaysOffUntilTheStoredCountIsLoaded() {
+        let requirement = NumberMatchRequirement(digits: 2, candidates: [.init(requestId: "r1", code: "47")])
+        let context = NumberMatchApprovalContext(business: "Northwind", expiresAt: Date().addingTimeInterval(300), requirement: requirement, groupRequestIds: ["r1"])
+        let vm = NumberMatchApprovalViewModel(context: context, answering: RecordingAnswering())
+        vm.holdApproveUntilRestored()
+        vm.edit("4"); vm.edit("47")
+        #expect(!vm.canApprove, "the sheet has not loaded the stored count yet")
+        vm.restoreWrongEntries(3)
+        #expect(!vm.canApprove && vm.wrongEntryLimitReached)
+        let fresh = NumberMatchApprovalViewModel(context: context, answering: RecordingAnswering())
+        fresh.holdApproveUntilRestored()
+        fresh.edit("4"); fresh.edit("47")
+        fresh.restoreWrongEntries(0)
+        #expect(fresh.canApprove)
     }
 
     @Test func theNotificationDenyIsOnForStagingAndOffForProduction() {

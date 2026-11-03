@@ -10,6 +10,8 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../Packages/ViadereCore"),
+        // Test-only: the server tests drive the phone's number-matching screen logic (ST-MFA-10/11 go through `NumberMatchApprovalViewModel`, not through a harness signer).
+        .package(path: "../Packages/ViadereKit"),
         .package(url: "https://github.com/vapor/vapor.git", from: "4.122.3"),
         .package(url: "https://github.com/vapor/fluent.git", from: "4.13.0"),
         .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.14.0"),
@@ -57,6 +59,7 @@ let package = Package(
             name: "ViadereServerKitTests",
             dependencies: [
                 "ViadereServerKit",
+                .product(name: "ViadereKit", package: "ViadereKit"),
                 .product(name: "XCTVapor", package: "vapor"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),

@@ -21,6 +21,11 @@ public struct ApprovalPrompt: Identifiable, Sendable, Equatable {
     /// SEC-DEV-008: "You've received several requests" (the relay's count, or this device's own, whichever is higher).
     public var showFatigueWarning: Bool
     public var requestsInWindow: Int
+    /// INB-01 (ADR-0022 §5.1, S5-04): the line of a sign-in that arrived without an alert, shown in the app's list instead of the usual one.
+    public var inboxLine: String? {
+        guard request.silent == true, case .authentication = content.details else { return nil }
+        return AuthDeliveryCopy.silentPendingSignIn(business: UntrustedText.name(business.displayName, max: 40, attribution: nil).text)
+    }
     /// The line shown on the Face ID sheet.
     public var promptReason: String {
         switch content.details {
@@ -41,7 +46,7 @@ public struct RejectedRequest: Identifiable, Sendable, Equatable {
 }
 
 /// Loads, verifies, displays and answers approval requests on the device (APP-003, APP-004, SEC-CR-004).
-public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
+public struct ApproveRequestHandler: Sendable {
     private let api: any ApproveAPI
     private let vault: any ApprovalKeyVault
     private let store: any ApproveLocalStore
@@ -89,11 +94,7 @@ public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
                 rejected.append(RejectedRequest(id: request.id, requestId: request.requestId, businessName: key.businessName, reason: "unverifiable"))
             }
         }
-        // R4-02: wrong-entry counts live as long as their request is open.
-        let open = Set(prompts.map(\.request.requestId))
-        if let attempts = local.matchAttempts, !Set(attempts.keys).isSubset(of: open) {
-            try? await store.update { state in state.matchAttempts = state.matchAttempts?.filter { open.contains($0.key) } }
-        }
+        await pruneWrongEntries()
         return Loaded(prompts: prompts, rejected: rejected)
     }
 
@@ -166,9 +167,15 @@ public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
 
     /// Signs the answer with the pairwise key — **over exactly the content that was displayed** — and sends it. The Face ID sheet names the
     /// business and the amount. Denying and reporting are signed too: they are results a business can verify.
-    public func answer(_ prompt: ApprovalPrompt, decision: ApprovalDecision, numberMatch: ApprovalNumberMatchAnswer? = nil) async throws -> ApprovalRequestStatus {
+    ///
+    /// `answerGroup` is shared by every request of one group Deny, report or automatic deny so the relay counts it as one refusal (S5-02).
+    public func answer(_ prompt: ApprovalPrompt, decision: ApprovalDecision, numberMatch: ApprovalNumberMatchAnswer? = nil, answerGroup: String? = nil) async throws -> ApprovalRequestStatus {
         let now = clock()
         guard prompt.content.expiresAtDate > now else { throw ApproveError.expired }
+        // S5-06: nothing below the screen signs an approve once three wrong numbers were entered for this request, whatever the screen shows.
+        if decision == .approve, await wrongEntries(business: prompt.key.businessId, requestIds: [prompt.content.requestId]) >= NumberMatchAttemptLimit.max {
+            throw ApproveError.requestRejected("wrong_entry_limit")
+        }
         if decision == .approve, let alert = try await directory.alert(for: prompt.key.businessId) {
             throw alert == .rootConflict ? ApproveError.rootConflict(prompt.key.businessId) : ApproveError.rootChanged(prompt.key.businessId)
         }
@@ -196,7 +203,7 @@ public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
         let status: ApprovalRequestStatus
         // An attested device asserts over exactly this result (WP-C2); the relay rebuilds the same client data from the route and the body.
         let assertionValue = await assertion?(ApprovalAppAttest.clientData(deliveryId: prompt.id, result: jws))
-        do { status = try await api.submitResult(id: prompt.id, result: jws, appAttestAssertion: assertionValue).status } catch let error as APIError {
+        do { status = try await api.submitResult(id: prompt.id, result: jws, appAttestAssertion: assertionValue, answerGroup: answerGroup).status } catch let error as APIError {
             switch error.code {
             case .approvalsFrozen?: throw ApproveError.frozen
             case .expired?, .gone?: throw ApproveError.expired
@@ -205,28 +212,74 @@ public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
         }
         let businessId = prompt.key.businessId
         try await store.update { $0.decisions.append(LocalDecision(businessId: businessId, at: now, decision: decision)); $0.decisions = Array($0.decisions.suffix(200)) }
+        // The relay accepted a terminal answer: the request's wrong-entry count has done its job.
+        await clearWrongEntries(business: businessId, requestIds: [prompt.content.requestId])
         return status
     }
 
-    // MARK: Wrong number entries (R4-02)
+    // MARK: Wrong number entries (R4-02, S5-06)
+
+    /// How long after its last wrong entry a request's count is kept: longer than any request lives (600 s), so only the counts of requests that
+    /// have expired are dropped.
+    static let wrongEntryRetention: TimeInterval = 1800
+
+    static func attemptKey(_ business: BusinessID, _ requestId: String) -> String { business.description + "|" + requestId }
+
+    /// The recorder for one business's requests: the counter is keyed by business and request id.
+    public func attemptRecorder(for business: BusinessID) -> any NumberMatchAttemptRecording { BusinessScopedAttempts(handler: self, business: business) }
 
     /// The persisted wrong-entry count of a group: the highest count of any of its open requests.
-    public func wrongEntries(requestIds: [String]) async -> Int {
+    func wrongEntries(business: BusinessID, requestIds: [String]) async -> Int {
         let attempts = (try? await store.load())?.matchAttempts ?? [:]
-        return requestIds.map { attempts[$0] ?? 0 }.max() ?? 0
+        return requestIds.map { attempts[Self.attemptKey(business, $0)] ?? 0 }.max() ?? 0
     }
 
     /// Records one more wrong entry for every request of the group and returns the new count.
     @discardableResult
-    public func recordWrongEntry(requestIds: [String]) async -> Int {
-        let current = await wrongEntries(requestIds: requestIds)
+    func recordWrongEntry(business: BusinessID, requestIds: [String]) async -> Int {
+        let current = await wrongEntries(business: business, requestIds: requestIds)
         let next = min(current + 1, NumberMatchAttemptLimit.max)
+        let now = clock()
         try? await store.update { state in
             var attempts = state.matchAttempts ?? [:]
-            for id in requestIds { attempts[id] = next }
+            var stamps = state.matchAttemptStamps ?? [:]
+            for id in requestIds {
+                let key = Self.attemptKey(business, id)
+                attempts[key] = next
+                stamps[key] = now
+            }
             state.matchAttempts = attempts
+            state.matchAttemptStamps = stamps
         }
         return next
+    }
+
+    func clearWrongEntries(business: BusinessID, requestIds: [String]) async {
+        let keys = Set(requestIds.map { Self.attemptKey(business, $0) })
+        try? await store.update { state in
+            state.matchAttempts = state.matchAttempts?.filter { !keys.contains($0.key) }
+            state.matchAttemptStamps = state.matchAttemptStamps?.filter { !keys.contains($0.key) }
+        }
+    }
+
+    /// Drops the counts of requests that have expired (`wrongEntryRetention` after the last wrong entry). A request that is merely absent from one listing keeps its
+    /// count: an end-to-end relay must not be able to reset the three-strikes rule by omitting the request once (S5-06). Entries from builds that keyed by bare
+    /// request id (no `|`) are dropped.
+    private func pruneWrongEntries() async {
+        let now = clock()
+        guard let local = try? await store.load(), let attempts = local.matchAttempts, !attempts.isEmpty else { return }
+        let stamps = local.matchAttemptStamps ?? [:]
+        let unstamped = attempts.keys.filter { stamps[$0] == nil }
+        let expired = attempts.keys.filter { key in !key.contains("|") || (stamps[key].map { now.timeIntervalSince($0) > Self.wrongEntryRetention } ?? false) }
+        guard !expired.isEmpty || !unstamped.isEmpty else { return }
+        try? await store.update { state in
+            var attempts = state.matchAttempts ?? [:]
+            var stamps = state.matchAttemptStamps ?? [:]
+            for key in expired { attempts[key] = nil; stamps[key] = nil }
+            for key in attempts.keys where stamps[key] == nil { stamps[key] = now }
+            state.matchAttempts = attempts
+            state.matchAttemptStamps = stamps
+        }
     }
 
     static func describe(_ error: ApproveError) -> String {
@@ -238,4 +291,12 @@ public struct ApproveRequestHandler: Sendable, NumberMatchAttemptRecording {
         default: "unverifiable"
         }
     }
+}
+
+/// `NumberMatchAttemptRecording` for one business's requests (S5-06).
+struct BusinessScopedAttempts: NumberMatchAttemptRecording {
+    let handler: ApproveRequestHandler
+    let business: BusinessID
+    func wrongEntries(requestIds: [String]) async -> Int { await handler.wrongEntries(business: business, requestIds: requestIds) }
+    @discardableResult func recordWrongEntry(requestIds: [String]) async -> Int { await handler.recordWrongEntry(business: business, requestIds: requestIds) }
 }

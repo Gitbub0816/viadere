@@ -532,13 +532,17 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     /// `auth-approvals` requests (ADR-0022 §2): the number-match requirement. Server-visible: `{digits, code}` as the relay holds it; end to end:
     /// `{digits}` only (the code is inside the business-signed envelope, and the device uses that one). Never displayed.
     public var numberMatch: AuthApprovalNumberMatch?
+    /// True when the request was over the hourly budget and so delivered without an alert push (ADR-0022 §5.1, S5-04): it is in the app only, and the app says
+    /// "You have a pending sign-in from {Business}" (INB-01). Absent on requests that alerted.
+    public var silent: Bool?
 
     public init(id: UUID, requestId: String, business: BusinessSummary, subjectRef: SubjectRef, capability: Capability, kid: String, protection: ApprovalProtection,
                 status: ApprovalRequestStatus, createdAt: Date, expiresAt: Date, envelope: E2EEEnvelope? = nil, challenge: String? = nil,
                 transaction: TransactionDetails? = nil, authentication: AuthenticationDetails? = nil, requestsInWindow: Int = 1, showFatigueWarning: Bool = false,
-                alert: AlertDescriptor? = nil, numberMatch: AuthApprovalNumberMatch? = nil) {
+                alert: AlertDescriptor? = nil, numberMatch: AuthApprovalNumberMatch? = nil, silent: Bool? = nil) {
         self.alert = alert
         self.numberMatch = numberMatch
+        self.silent = silent
         self.id = id
         self.requestId = requestId
         self.business = business
@@ -560,7 +564,7 @@ public struct ApproveDeviceRequest: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, requestId = "request_id", business, subjectRef = "subject_ref", capability, kid, protection, status, createdAt = "created_at"
         case expiresAt = "expires_at", envelope, challenge, transaction, authentication, requestsInWindow = "requests_in_window", showFatigueWarning = "show_fatigue_warning"
-        case alert, numberMatch = "number_match"
+        case alert, numberMatch = "number_match", silent
     }
 }
 
@@ -571,12 +575,23 @@ public struct SubmitApprovalResultRequest: Codable, Sendable, Hashable {
     /// App Attest assertion (CBOR, base64url) over `ApprovalAppAttest.clientData` from a device enrolled with an attested key
     /// (`APP_ATTEST_ASSERTION_MODE`, WP-C2).
     public var appAttestAssertion: String?
-    public init(result: String, appAttestAssertion: String? = nil) {
+    /// One random value (`ApprovalAnswerGroup.make()`) shared by every result of **one** group Deny, This wasn't me, or automatic `number_mismatch` deny
+    /// (ADR-0022 §5.2 item 2). The relay counts the refusals of one `answer_group` once toward the pause (Stage 5 review S5-02). Absent: each result counts on
+    /// its own. Opaque to the business; never part of a signed result.
+    public var answerGroup: String?
+    public init(result: String, appAttestAssertion: String? = nil, answerGroup: String? = nil) {
         self.result = result
         self.appAttestAssertion = appAttestAssertion
+        self.answerGroup = answerGroup
     }
 
-    enum CodingKeys: String, CodingKey { case result, appAttestAssertion = "app_attest_assertion" }
+    enum CodingKeys: String, CodingKey { case result, appAttestAssertion = "app_attest_assertion", answerGroup = "answer_group" }
+}
+
+/// The `answer_group` of a group answer (S5-02): 16 random bytes, base64url (22 characters).
+public enum ApprovalAnswerGroup {
+    public static func make() -> String { SecureToken.generate(byteCount: 16) }
+    public static func isValid(_ value: String) -> Bool { Base64URL.isValid(value, minLength: 22, maxLength: 22) }
 }
 
 /// App Attest client data of an approval result (`docs/SECURITY.md` §2.55): `"VIADERE-APPATTEST-APPROVE-V1\n{delivery id}\n{hex SHA-256 of the JWS}"`.

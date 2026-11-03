@@ -17,11 +17,17 @@ public protocol ApproveAPI: Sendable {
     func keyDirectory(businessId: BusinessID, since: Int?) async throws -> KeyDirectoryResponse
     /// The result with an App Attest assertion over it (WP-C2). Default: without one.
     func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse
+    /// The result of one request of a group answer: `answerGroup` is shared by every result of the group so the relay counts a group Deny once toward the
+    /// pause (S5-02). Default: without it.
+    func submitResult(id: UUID, result: String, appAttestAssertion: String?, answerGroup: String?) async throws -> SubmitApprovalResultResponse
 }
 
 extension ApproveAPI {
     public func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse {
         try await submitResult(id: id, result: result)
+    }
+    public func submitResult(id: UUID, result: String, appAttestAssertion: String?, answerGroup: String?) async throws -> SubmitApprovalResultResponse {
+        try await submitResult(id: id, result: result, appAttestAssertion: appAttestAssertion)
     }
 }
 
@@ -46,8 +52,11 @@ public struct LiveApproveAPI: ApproveAPI {
         try await submitResult(id: id, result: result, appAttestAssertion: nil)
     }
     public func submitResult(id: UUID, result: String, appAttestAssertion: String?) async throws -> SubmitApprovalResultResponse {
+        try await submitResult(id: id, result: result, appAttestAssertion: appAttestAssertion, answerGroup: nil)
+    }
+    public func submitResult(id: UUID, result: String, appAttestAssertion: String?, answerGroup: String?) async throws -> SubmitApprovalResultResponse {
         try await client.call(APIRoutes.approveRequestResult, params: ["approvalId": id.uuidString.lowercased()],
-                              body: SubmitApprovalResultRequest(result: result, appAttestAssertion: appAttestAssertion))
+                              body: SubmitApprovalResultRequest(result: result, appAttestAssertion: appAttestAssertion, answerGroup: answerGroup))
     }
     public func freezeState() async throws -> ApproveFreezeState { try await client.call(APIRoutes.approveFreezeGet) }
     public func setFreeze(_ request: ApproveFreezeRequest) async throws -> ApproveFreezeState { try await client.call(APIRoutes.approveFreezeSet, body: request) }

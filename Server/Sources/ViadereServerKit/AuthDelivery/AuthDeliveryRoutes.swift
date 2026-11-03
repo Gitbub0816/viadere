@@ -114,7 +114,9 @@ enum AuthDeliveryRoutes {
             return try req.jsonResponse(try service.view(record))
         }
         routes.api(APIRoutes.approveRequestDeny) { req in
-            try AuthApprovalService.requireEnabled(req.ctx)
+            // Gated on Approve alone (S5-05): every Approve v2 push carries `req`, so staging builds show Deny on every approval notification, including legacy ones and
+            // while `AUTH_DELIVERY_ENABLED` is off. A Deny must work wherever the notification is shown.
+            try ApproveGate.require(req.ctx)
             let body: ApproveDenyRequest
             if req.bodyBytes.isEmpty { body = ApproveDenyRequest() } else {
                 do { body = try ViadereJSON.decode(ApproveDenyRequest.self, from: req.bodyBytes) } catch { throw APIError.validation("The request failed validation.") }

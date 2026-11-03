@@ -20,6 +20,22 @@ struct CreateAuthApprovalsSchema: AsyncMigration {
     }
 }
 
+/// `ApproveStage5Review.v1` (additive, forward-only): two nullable columns on `approve_requests` from the Stage 5 code review: `answer_group` (S5-02, one group answer
+/// counts once toward the pause) and `silent` (S5-04, the request was delivered without an alert push). Existing rows keep them null.
+struct CreateApproveStage5ReviewSchema: AsyncMigration {
+    var name: String { "ApproveStage5Review.v1" }
+
+    func prepare(on db: any Database) async throws {
+        // One column per statement: SQLite adds one column per ALTER TABLE.
+        try await db.schema(ApproveRequestRecord.schema).field("answer_group", .string).update()
+        try await db.schema(ApproveRequestRecord.schema).field("silent", .bool).update()
+    }
+
+    func revert(on db: any Database) async throws {
+        for column in ["answer_group", "silent"] { try await db.schema(ApproveRequestRecord.schema).deleteField(.string(column)).update() }
+    }
+}
+
 /// The number-match part of an `auth-approvals` create, handed to `ApproveRequestService.create`.
 struct AuthApprovalExtras: Sendable {
     var digits: Int
@@ -43,6 +59,13 @@ struct AuthApprovalService {
     static func requireEnabled(_ ctx: ServerContext) throws {
         try AuthDeliveryGate.require(ctx)
         try ApproveGate.require(ctx)
+    }
+
+    /// The legacy `POST /v1/business/approve/requests` carries no number (Stage 5 review S5-03). With `AUTH_NUMBER_MATCHING_REQUIRED` on it creates nothing, so a fatigue
+    /// attacker cannot get a number-less push approval out of a business that has not migrated, and a payment that the device could only deny is never delivered.
+    static func requireNumberMatching(_ ctx: ServerContext) throws {
+        guard ctx.config.authDelivery.numberMatchingRequired else { return }
+        throw APIError(.unprocessableEntity, .validationFailed, "Approvals need number matching. Use POST /v1/business/auth-approvals.", details: ["reason": "number_match_required"])
     }
 
     func create(principal: BusinessPrincipal, body: Data) async throws -> (view: ApprovalRequestView, created: Bool) {

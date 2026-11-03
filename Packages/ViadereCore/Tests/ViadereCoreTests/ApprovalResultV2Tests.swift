@@ -39,6 +39,22 @@ struct ApprovalResultV2Tests {
                        key: EnrolledApprovalKey(kid: kid, publicKey: publicKey, subject: SubjectRef(context["sub"] as! String)!, assurance: .biometric), context: context)
     }
 
+    @Test func theAnswerGroupIsAnOpaqueSixteenByteValue() {
+        let group = ApprovalAnswerGroup.make()
+        #expect(ApprovalAnswerGroup.isValid(group) && ApprovalAnswerGroup.make() != group)
+        #expect(!ApprovalAnswerGroup.isValid("") && !ApprovalAnswerGroup.isValid(group + "A") && !ApprovalAnswerGroup.isValid(String(group.dropLast()) + "="))
+    }
+
+    @Test func openRequestsOnlySilenceTheLegacyRouteNotAuthApprovals() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let open = (0..<5).map { ApprovalPromptPolicy.Record(createdAt: now.addingTimeInterval(-Double($0)), decision: nil, isOpen: true) }
+        guard case .rateLimited = ApprovalPromptPolicy.standard.evaluate(history: open, now: now) else { Issue.record("legacy: 3 open requests refuse the next"); return }
+        // S5-04: auth approvals ignore the open count; only more than 6 in the hour silence the next.
+        #expect(ApprovalPromptPolicy.standard.evaluate(history: open, now: now, limitOpenRequests: false) == .allow(requestsInWindow: 6, showWarning: true))
+        let seven = (0..<6).map { ApprovalPromptPolicy.Record(createdAt: now.addingTimeInterval(-Double($0)), decision: nil, isOpen: true) }
+        guard case .rateLimited = ApprovalPromptPolicy.standard.evaluate(history: seven, now: now, limitOpenRequests: false) else { Issue.record("the seventh in an hour is silent"); return }
+    }
+
     @Test func theTransactionDigestCoversTheNumberMatchLength() throws {
         let f = try Self.fixture()
         let details = ApprovalSubject.authentication(AuthenticationDetails(actionDisplay: "Sign in to Example Bank", matchDigits: 2))
@@ -61,6 +77,21 @@ struct ApprovalResultV2Tests {
                 #expect(expected != nil && String(describing: error).hasPrefix(expected!), "\(name): \(error)")
             }
         }
+    }
+
+    /// S5-07: the vectors pin both sides of the downgrade rule, not only the refusals.
+    @Test func theVectorsPinTheCompatibleSideOfTheDowngradeRule() throws {
+        let f = try Self.fixture()
+        let cases = Self.vectors["cases"] as! [[String: Any]]
+        for name in ["v1_result_for_a_request_that_asked_for_none", "v2_approve_without_match_for_a_request_that_asked_for_none"] {
+            let vector = try #require(cases.first { $0["name"] as? String == name })
+            #expect(vector["expectation"] as? String == "not_requested" && vector["outcome"] as? String == "approve")
+            let verified = try ApprovalResultVerifier.verify(vector["jws"] as! String, expecting: f.expectation("not_requested"), keys: [f.key], now: f.now)
+            #expect(verified.decision == .approve && verified.claims.match == nil, "\(name)")
+        }
+        // The same v1 bytes are refused the moment the request asked for a number.
+        let v1 = try #require(cases.first { $0["name"] as? String == "v1_result_for_a_request_that_asked_for_none" })["jws"] as! String
+        #expect(throws: ApprovalVerificationError.numberMatchRequired) { _ = try ApprovalResultVerifier.verify(v1, expecting: f.expectation("required"), keys: [f.key], now: f.now) }
     }
 
     @Test func aV2ResultIsConsumedOnceByChallengeAndByJti() async throws {
