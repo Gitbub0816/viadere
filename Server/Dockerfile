@@ -15,6 +15,9 @@ RUN apt-get update \
 
 # Resolve dependencies first so they are cached between source changes.
 COPY Packages/ViadereCore ./Packages/ViadereCore
+# ViadereKit is a test-only dependency of the server tests (ST-MFA-10/11); SwiftPM resolves every path dependency, so it must exist
+# in the build stage. It is never linked into ViadereServer and the runtime stage copies only the server binary.
+COPY Packages/ViadereKit ./Packages/ViadereKit
 COPY Server/Package.swift Server/Package.resolved ./Server/
 WORKDIR /build/Server
 # SwiftPM requires every declared target's directory to exist, even when only one product is built.
