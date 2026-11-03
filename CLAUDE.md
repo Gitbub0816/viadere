@@ -13,7 +13,7 @@ The stack is Swift end to end:
 | `Packages/ViadereCore` | Shared contract (Linux + Apple): identifiers, interaction protocol, assurance policy, signing, SMS state machine, DTOs, route catalog |
 | `Packages/ViadereKit` | iOS app logic (tested on Linux) and Apple-only security code |
 | `Packages/ViadereBusinessSDK` | Swift SDK for business integrations |
-| `Server` | Vapor backend, business dashboard, operator console (PostgreSQL; SQLite in tests) |
+| `Server` | Vapor backend, business dashboard, operator console (PostgreSQL; SQLite in tests); the private grant/OIDC authority `ViadereAuthority` (its own image, `Server/Dockerfile.authority`, never links `ViadereServerKit`) |
 | `App` | XcodeGen project: app, notification extensions, Live Activities, App Clip, watchOS |
 | `Design` | Brand assets and brand guide |
 
