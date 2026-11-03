@@ -17,6 +17,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY Packages/ViadereCore ./Packages/ViadereCore
+# Server/Package.swift has a test-only path dependency on ViadereKit; SwiftPM resolves every path dependency, so it must be in the context.
+COPY Packages/ViadereKit ./Packages/ViadereKit
 COPY Server/Package.swift Server/Package.resolved ./Server/
 WORKDIR /build/Server
 # SwiftPM requires every declared target's directory to exist, even when only one product is built.
