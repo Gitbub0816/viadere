@@ -54,7 +54,7 @@ public enum WatchActionResult: String, Codable, Sendable, Equatable {
     public init(_ outcome: NotificationOutcome) {
         switch outcome {
         case .submitted: self = .done
-        case .requiresApp, .open, .openApproveRequest, .openAuthDelivery, .openRequests: self = .needsPhone
+        case .requiresApp, .open, .openApproveRequest, .openAuthDelivery, .openOIDCSignIn, .openRequests: self = .needsPhone
         case .reduced: self = .done
         case .stale: self = .stale
         case .expired: self = .expired

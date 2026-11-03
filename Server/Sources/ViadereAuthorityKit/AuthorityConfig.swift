@@ -47,6 +47,10 @@ public struct AuthorityConfig: Sendable {
     public var oidcEnabled = false
     /// `OIDC_ISSUER`: the exact issuer string (`https://id.<staging domain>`, no trailing slash). Grants use `<issuer>/grant`.
     public var issuer = "https://id.viadere.test"
+    /// `AUTHORITY_WEBAUTHN_RP_ID`: the existing Viadere WebAuthn RP id (so existing account passkeys work at `/oidc/authorize`, ADR-0024 §4 method 1).
+    /// The issuer host must be this id or a subdomain of it. The accepted WebAuthn origins come from `OIDCProfile.passkeyOrigins` (the issuer
+    /// origin only for `oidc_login`), never from this setting.
+    public var webAuthnRelyingPartyID = "viadere.test"
 
     // Entra callers (ADR-0019 §4.2).
     public var tenantId = ""
@@ -121,6 +125,15 @@ public struct AuthorityConfig: Sendable {
             config.issuer = raw
         } else if strict && config.enabled {
             throw AuthorityConfigError.missing("OIDC_ISSUER")
+        }
+        if let raw = env["AUTHORITY_WEBAUTHN_RP_ID"], !raw.isEmpty {
+            guard raw.utf8.count <= 253, raw.range(of: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", options: .regularExpression) != nil else { throw AuthorityConfigError.invalid("AUTHORITY_WEBAUTHN_RP_ID (a lowercase host)") }
+            config.webAuthnRelyingPartyID = raw
+        } else if strict && config.enabled && config.oidcEnabled {
+            throw AuthorityConfigError.missing("AUTHORITY_WEBAUTHN_RP_ID (required when AUTHORITY_OIDC_ENABLED is true)")
+        }
+        if config.oidcEnabled, !Self.issuer(config.issuer, isWithin: config.webAuthnRelyingPartyID), strict || env["AUTHORITY_WEBAUTHN_RP_ID"] != nil {
+            throw AuthorityConfigError.invalid("AUTHORITY_WEBAUTHN_RP_ID (the OIDC_ISSUER host must be the RP id or a subdomain of it)")
         }
 
         config.tenantId = env["AZURE_TENANT_ID"] ?? ""
@@ -202,6 +215,12 @@ public struct AuthorityConfig: Sendable {
         guard let components = URLComponents(string: raw), components.scheme == "https", let host = components.host, !host.isEmpty,
               components.path.isEmpty, components.query == nil, components.fragment == nil, components.user == nil, !raw.hasSuffix("/") else { return false }
         return true
+    }
+
+    /// WebAuthn: the origin's host must equal the RP id or end with `.` + RP id.
+    static func issuer(_ issuer: String, isWithin rpId: String) -> Bool {
+        guard let host = URLComponents(string: issuer)?.host?.lowercased() else { return false }
+        return host == rpId || host.hasSuffix("." + rpId)
     }
 
     /// The app-pinned statement keys for this deployment (Core constants), or the development override.

@@ -49,6 +49,10 @@ final class AuthorityHarness: @unchecked Sendable {
     let accountId = UUID()
     let biometricKey = SoftwareP256SigningKey()
     let presenceKey = SoftwareP256SigningKey()
+    /// A discoverable passkey of the imported account for the RP id `viadere.test` (the passkey method, ADR-0024 §4 method 1).
+    let passkey: PasskeyCredential = try! WebAuthnAuthenticator.makeCredential(
+        rpId: "viadere.test", userHandle: Data([7, 7, 7, 7]), userName: "account", clientDataHash: Data(repeating: 1, count: 32), requireUserVerification: true,
+        userVerified: true, backedUp: true, now: Date(timeIntervalSince1970: 1_800_000_000)).credential
     var config: AuthorityConfig
     var statementKey: P256.Signing.PublicKey!
     var oidcRSAKey: _RSA.Signing.PublicKey!
@@ -117,6 +121,8 @@ final class AuthorityHarness: @unchecked Sendable {
                 .object(["public_key": .string(biometricKey.publicKey.base64URL), "key_purpose": .string("approvalBiometric"), "hardware_attested": .bool(true)]),
                 .object(["public_key": .string(presenceKey.publicKey.base64URL), "key_purpose": .string("approvalUserPresence")]),
             ]),
+            "passkeys": .array([.object(["credential_id": .string(Base64URL.encode(passkey.credentialId)),
+                                         "public_key": .string(Base64URL.encode(try passkey.cosePublicKey()))])]),
         ])])])
         let config = self.config
         let clock = self.clock

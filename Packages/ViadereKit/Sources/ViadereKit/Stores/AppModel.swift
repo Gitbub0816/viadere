@@ -63,6 +63,8 @@ public final class AppModel {
     /// A sign-in link delivery (a tapped `viadere.auth.link` push or its "Open" action): the root presents the confirm screen
     /// (`LinkConfirmationViewModel`). Nothing is opened or consumed until the person taps Continue.
     public var pendingAuthDelivery: PendingAuthDelivery?
+    /// "Sign in with Viadere" (`/o/{ach}` QR or a `viadere.oidc` push): the root presents the confirm screen (`OIDCSignInViewModel`).
+    public var pendingOIDCSignIn: PendingOIDCSignIn?
     /// Set by the app: opens an Approve v2 request (`nil` key: the list of requests). Kept out of the Kit because the controller lives in the app.
     public var openApproveRequest: (@MainActor (String?) async -> Void)?
     public var conversationToOpen: SessionID?
@@ -269,6 +271,7 @@ public final class AppModel {
         pendingLinkSession = nil
         pendingVerificationSession = nil
         pendingAuthDelivery = nil
+        pendingOIDCSignIn = nil
         conversationToOpen = nil
         businessToOpen = nil
         addBusinessPresented = false
@@ -343,6 +346,8 @@ public final class AppModel {
             loopToInstall = id
         case .verificationSession(let code):
             pendingVerificationSession = PendingVerificationSession(code: code)
+        case .oidcSignIn(let challengeId):
+            pendingOIDCSignIn = PendingOIDCSignIn(challengeId: challengeId)
         }
     }
 
@@ -381,6 +386,7 @@ public final class AppModel {
             switch outcome {
             case .requiresApp(let id), .open(let id?): enqueueWhileLocked(.interaction(id))
             case .openAuthDelivery(let id): enqueueWhileLocked(.authDelivery(id))
+            case .openOIDCSignIn(let ach): enqueueWhileLocked(.oidcSignIn(challengeId: ach))
             case .openApproveRequest(let key): enqueueWhileLocked(.approveRequest(key))
             case .openRequests: enqueueWhileLocked(.approveRequest(nil))
             default: break
@@ -398,6 +404,7 @@ public final class AppModel {
         case .reduced: await home.load()
         // F-14/F-15: a tapped approval or link push opens that request (or the confirm screen), not the Alerts list.
         case .openAuthDelivery(let id): pendingAuthDelivery = PendingAuthDelivery(id: id)
+        case .openOIDCSignIn(let ach): pendingOIDCSignIn = PendingOIDCSignIn(challengeId: ach)
         case .openApproveRequest(let key): await openApproveRequest?(key)
         case .openRequests: await openApproveRequest?(nil)
         case .stale: toast = "That was already handled."; await home.load()
@@ -447,6 +454,7 @@ public final class AppModel {
         pendingApproveEnrollment = nil
         pendingLinkSession = nil
         pendingVerificationSession = nil
+        pendingOIDCSignIn = nil
         conversationToOpen = nil
         businessToOpen = nil
         lockedQueue.removeAll()
@@ -486,6 +494,13 @@ public struct PendingLinkSession: Sendable, Equatable {
 public struct PendingAuthDelivery: Sendable, Equatable, Identifiable {
     public var id: UUID
     public init(id: UUID) { self.id = id }
+}
+
+/// An OIDC sign-in to confirm: the authority challenge id from the QR universal link or the push.
+public struct PendingOIDCSignIn: Sendable, Equatable, Identifiable {
+    public var challengeId: String
+    public var id: String { challengeId }
+    public init(challengeId: String) { self.challengeId = challengeId }
 }
 
 /// A verification session to review: its code (from the link, the QR, or typed by the person).

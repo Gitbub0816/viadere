@@ -137,7 +137,8 @@ final class AuthorityEvidenceTests: XCTestCase {
         await XCTAssertEqualAsync(try await h.submit(try await h.answer(challenge)).status, .unauthorized)
         // The revocation is a key-log entry (append-only chain).
         let entries = try await AuthorityKeylogEntry.query(on: h.app.db).sort(\.$seq).all()
-        XCTAssertEqual(entries.map(\.type), ["imported", "imported", "key_revoked"])
+        // Two device keys and the account's passkey were imported.
+        XCTAssertEqual(entries.map(\.type), ["imported", "imported", "imported", "key_revoked"])
         XCTAssertEqual(entries.last?.kid, kid)
         XCTAssertEqual(entries[0].prevHash, AuthorityKeyLog.genesisHash)
         for i in 1..<entries.count { XCTAssertEqual(entries[i].prevHash, entries[i - 1].entryHash) }

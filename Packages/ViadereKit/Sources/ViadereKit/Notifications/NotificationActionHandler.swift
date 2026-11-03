@@ -18,6 +18,8 @@ public enum NotificationOutcome: Sendable, Equatable {
     case openApproveRequest(String)
     /// A tapped link or code push or its "Open" action: open the confirm screen for that delivery. Nothing is opened or consumed yet.
     case openAuthDelivery(UUID)
+    /// A tapped `viadere.oidc` push (`login_hint` path): open the OIDC confirm screen. Nothing is signed from the notification.
+    case openOIDCSignIn(String)
     /// An authentication-delivery push that names nothing usable: open the list of requests.
     case openRequests
 }
@@ -107,6 +109,7 @@ public struct NotificationActionHandler: Sendable {
         switch target {
         case .approveRequest(let id)?: return .openApproveRequest(id)
         case .authDelivery(let id)?: return .openAuthDelivery(id)
+        case .oidcSignIn(let ach)?: return .openOIDCSignIn(ach)
         case .interaction(let id)?: return .open(id)
         default: return .openRequests
         }

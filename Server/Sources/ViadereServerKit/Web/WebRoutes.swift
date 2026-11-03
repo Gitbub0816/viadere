@@ -46,7 +46,7 @@ enum WebRoutes {
                 // Every universal-link prefix the app parses (`DeepLinkRouter`): connect, the retired account-link and handoff prefixes (kept one release so old texts open the app on a "no longer used" screen), Approve enrollment, link sessions and
                 // Loop install links and verification sessions (`/v/`, the "Verify with Viadere" button).
                 // Fragments (`#es=`) are never sent to a server; the matching rules ignore them.
-                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"], ["/": "/v/*"]]]]],
+                "applinks": ["details": [["appIDs": [appID], "components": [["/": "/c/*"], ["/": "/l/*"], ["/": "/h/*"], ["/": "/a/*"], ["/": "/k/*"], ["/": "/lp/*"], ["/": "/v/*"], ["/": "/o/*"]]]]],
                 "webcredentials": ["apps": [appID]],
                 "appclips": ["apps": [clipID]],
             ]
@@ -63,6 +63,8 @@ enum WebRoutes {
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("h", ":token", use: retiredLinkPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("get", use: getAppPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("lp", ":loopId", use: loopInstallPage)
+        // The OIDC app path's QR universal link (`/o/{ach}`, ADR-0024 §4): the app handles it; in a browser nothing is looked up or completed.
+        routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("o", ":challengeId", use: oidcChallengeLinkPage)
     }
 
     // MARK: Pages
@@ -144,6 +146,13 @@ enum WebRoutes {
             body += "<a class=\"btn\" href=\"https://apps.apple.com/app/id\(storeID)\">Get Viadere</a>"
         }
         return page(title: "Continue in Viadere", head: head, body: body, ctx: ctx)
+    }
+
+    /// `/o/{ach}` opened in a browser (the Viadere app is not installed, or the link was pasted): the challenge id is never read or looked up.
+    @Sendable
+    static func oidcChallengeLinkPage(_ req: Request) async throws -> Response {
+        page(title: "Open this in the Viadere app", body: "<p>Scan the code with the Viadere app on your phone. Nothing was approved here.</p>"
+             + "<p class=\"muted\">Only scan a code on the sign-in page you opened yourself.</p>", ctx: req.ctx)
     }
 
     /// UX_COPY S-LINK-RETIRED: an old text link opens the app (universal link) or this page. Viadere no longer texts links that sign you in,

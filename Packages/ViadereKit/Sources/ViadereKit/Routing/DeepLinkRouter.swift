@@ -30,6 +30,9 @@ public enum DeepLink: Sendable, Equatable {
     case approveRequest(String?)
     /// `https://{link domain}/v/{CODE}` (a business's "Verify with Viadere" button or its QR): review a verification session. No secret, no query.
     case verificationSession(code: String)
+    /// `https://{link domain}/o/{ach}` (the QR on the "Sign in with Viadere" page) or a tapped `viadere.oidc` push: the OIDC confirm screen
+    /// (ADR-0024 §4 method 2). It approves nothing by itself: the app verifies the authority-signed statement and needs the number on the page.
+    case oidcSignIn(challengeId: String)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -76,6 +79,11 @@ public enum DeepLinkRouter {
             // Strict: the exact link domain, `/k/{CODE}`, no query, and a fragment that is exactly `es=` plus 43 characters (or none).
             guard let parsed = LinkSessionLink.parse(url, domain: domain) else { return nil }
             return .linkSession(code: parsed.code, secret: parsed.secret)
+        }
+        if components.path.hasPrefix(APIRoutes.Web.oidcChallengePrefix) {
+            // Strict: the exact link domain, `/o/{ach}`, no query, no fragment.
+            guard let ach = OIDCChallengeLink.parse(url, domain: domain) else { return nil }
+            return .oidcSignIn(challengeId: ach)
         }
         if components.path.hasPrefix(APIRoutes.Web.verificationSessionPrefix) {
             // Strict: the exact link domain, `/v/{CODE}`, no query, no fragment.

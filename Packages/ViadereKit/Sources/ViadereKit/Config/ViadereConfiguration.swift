@@ -48,6 +48,9 @@ public struct ViadereConfiguration: Sendable {
     /// Viadere's `loop-publication` verification keys, pinned in the build (Info.plist `ViadereLoopPublicationKeys`). Empty = every Loop
     /// shows the safe "can't be shown" fallback.
     public var loopPublicationKeys: [PinnedManifestKey] = []
+    /// The authority's `device-statement-signing` public keys (base64url X9.63; Info.plist `ViadereAuthorityStatementKeys`). Used only where their
+    /// thumbprint is also in Core's `AuthorityPinnedKeys` (`AuthorityStatementKeyPins.effective`). Empty = authority-backed screens fail closed.
+    public var authorityStatementKeys: [String] = []
 
     public static let productionHost = "api.viadere.com"
 

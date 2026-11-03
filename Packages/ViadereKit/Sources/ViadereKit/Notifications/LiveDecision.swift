@@ -283,7 +283,7 @@ public struct LiveDecisionPerformer: Sendable {
         switch outcome {
         case .submitted(_, let status), .stale(_, let status): return .finished(DecisionActivityState.stage(for: status))
         case .expired: return .finished(.expired)
-        case .requiresApp, .open, .openApproveRequest, .openAuthDelivery, .openRequests: return .openApp
+        case .requiresApp, .open, .openApproveRequest, .openAuthDelivery, .openOIDCSignIn, .openRequests: return .openApp
         case .reduced: return .rejected
         case .failed(_, let message): return .failed(message)
         case .ignored: return .rejected

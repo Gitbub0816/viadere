@@ -60,7 +60,7 @@ public enum AuthorityAdmin {
     /// ADR-0024 §3: `ocl_` ids, confidential clients with `private_key_jwt` keys, exact https redirect URIs on one host (the sector), reviewed name.
     static func registerOIDCClient(_ o: [String: JSONValue], commit: String, db: any Database, now: Date) async throws {
         let allowed: Set<String> = ["client_id", "tenant_id", "display_name", "redirect_uris", "post_logout_redirect_uris", "jwks", "id_token_signed_response_alg",
-                                    "require_acr", "require_biometric"]
+                                    "require_acr", "require_biometric", "business_id"]
         guard Set(o.keys).isSubset(of: allowed) else { throw Failure.invalid("unknown member") }
         let clientId = try string(o, "client_id", max: 64)
         guard clientId.hasPrefix("ocl_"), clientId.dropFirst(4).allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }), clientId.count >= 8 else {
@@ -100,7 +100,13 @@ public enum AuthorityAdmin {
         client.status = "active"
         client.changeCommit = commit
         client.createdAt = now
+        // Optional: the business whose `subject_ref` a `login_hint` must be (ADR-0024 §4 method 2). Without it no hint is ever accepted.
+        let business = try o["business_id"].map { _ in try string(o, "business_id", max: 64) }.map { raw -> UUID in
+            guard let id = UUID(uuidString: raw) else { throw Failure.invalid("business_id") }
+            return id
+        }
         try await client.create(on: db)
+        if let business { try await OIDCClientBusiness.set(clientId, businessId: business, db: db) }
     }
 
     static func registerLinkClient(_ o: [String: JSONValue], commit: String, db: any Database, now: Date) async throws {
@@ -136,8 +142,10 @@ public enum AuthorityAdmin {
         var out: [(UUID, [ImportedKey])] = []
         var seen = Set<String>()
         for item in accounts {
-            guard case .object(let a) = item, Set(a.keys) == ["account_id", "keys"], let accountId = a["account_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
-                  case .array(let keys)? = a["keys"], !keys.isEmpty, keys.count <= 10 else { throw Failure.invalid("account") }
+            // `passkeys` (optional) is parsed by `AuthorityPasskeyImport`; a passkey-only account has an empty `keys` list.
+            guard case .object(let a) = item, Set(a.keys).isSubset(of: ["account_id", "keys", "passkeys"]), a["keys"] != nil,
+                  let accountId = a["account_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+                  case .array(let keys)? = a["keys"], !keys.isEmpty || a["passkeys"] != nil, keys.count <= 10 else { throw Failure.invalid("account") }
             var parsed: [ImportedKey] = []
             for keyValue in keys {
                 guard case .object(let k) = keyValue, Set(k.keys).isSubset(of: ["public_key", "key_purpose", "hardware_attested"]),
@@ -166,6 +174,7 @@ public enum AuthorityAdmin {
                 if let existing = try await AuthorityKey.find(key.kid, on: db), existing.revokedAt == nil { throw Failure.invalid("key_in_use") }
             }
         }
+        try await AuthorityPasskeyImport.checkUnused(try AuthorityPasskeyImport.parse(o), db: db)
         let row = AuthorityKeylogImport()
         row.id = UUID()
         row.change = String(decoding: try CanonicalJSON.serialize(.object(o)), as: UTF8.self)
@@ -180,6 +189,7 @@ public enum AuthorityAdmin {
         for staged in pending {
             guard case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: Data(staged.change.utf8)) else { throw Failure.invalid("staged import") }
             let parsed = try parseImport(o)
+            let passkeys = try AuthorityPasskeyImport.parse(o)
             let commit = staged.changeCommit
             try await db.transaction { tx in
                 for (accountId, keys) in parsed {
@@ -212,6 +222,7 @@ public enum AuthorityAdmin {
                         try await AuthorityKeyLog.append(tx, accountRef: ref, type: "imported", kid: imported.kid, publicKey: imported.publicKey.base64URL,
                                                          keyPurpose: imported.purpose, detail: ["commit": .string(commit), "hardware_attested": .bool(imported.attested)], now: now)
                     }
+                    try await AuthorityPasskeyImport.apply(tx, passkeys: passkeys[accountId] ?? [], accountRef: ref, commit: commit, now: now)
                 }
                 try await AuthorityKeylogImport.query(on: tx).filter(\.$id == staged.id!).set(\.$appliedAt, to: now).update()
                 await AuthorityAudit.record(tx, "authority.keylog_import_applied", outcome: "success", caller: "authority", detail: "commit:\(commit)", at: now)

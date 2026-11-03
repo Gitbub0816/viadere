@@ -87,6 +87,8 @@ public final class APNSwiftSender: APNsSender, Sendable {
         var adl: String?
         /// Approve v2 request id on this device (`req`, ADR-0022 §5.5, F-15): the only custom member of an approval push.
         var req: String?
+        /// Authority challenge id of a `login_hint` sign-in push (`ach`, `viadere.oidc`): the only custom member of that push.
+        var ach: String?
     }
 
     /// The exact APNs payload: generic alert, `mutable-content`, category, `thread-id`, `interruption-level`, and a
@@ -102,7 +104,7 @@ public final class APNSwiftSender: APNsSender, Sendable {
             alert: .init(title: .raw(message.title), body: .raw(message.body)),
             expiration: .timeIntervalSince1970InSeconds(Int(Date().timeIntervalSince1970) + 3600),
             priority: message.highPriority ? .immediately : .consideringDevicePower,
-            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId, adl: message.authDeliveryId, req: message.approveRequestId),
+            topic: message.topic, payload: Custom(iid: message.interactionId, loopInstanceId: message.loopInstanceId, adl: message.authDeliveryId, req: message.approveRequestId, ach: message.oidcChallengeId),
             threadID: message.threadID, category: message.category, mutableContent: message.mutableContent ? 1 : 0, interruptionLevel: level)
         // `apns-collapse-id` (R23-05): a retried dispatch or a token registered twice replaces the alert instead of duplicating it.
         notification.collapseID = message.collapseID

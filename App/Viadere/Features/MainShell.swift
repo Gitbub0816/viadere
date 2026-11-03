@@ -94,6 +94,12 @@ struct MainShell: View {
                 .presentationDetents([.large])
                 .presentationBackground(ViadereColor.background)
         }
+        .sheet(item: $model.pendingOIDCSignIn) { pending in
+            // "Sign in with Viadere" (QR universal link `/o/{ach}` or a `login_hint` push): the authority-signed confirm screen.
+            OIDCSignInSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
         .sheet(item: $model.pendingVerificationSession) { pending in
             // A business's "Verify with Viadere" button or QR (`/v/…`).
             VerificationSessionSheet(pending: pending)

@@ -84,6 +84,8 @@ let package = Package(
                 .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
+                // The passkey method at /oidc/authorize: the authority verifies WebAuthn assertions itself (ADR-0023 §3a, ADR-0024 §4).
+                .product(name: "WebAuthn", package: "webauthn-swift"),
             ]
         ),
         .executableTarget(

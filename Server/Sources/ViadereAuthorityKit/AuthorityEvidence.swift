@@ -50,24 +50,18 @@ struct AuthorityChallengeService {
         challenge.createdAt = now
         challenge.expiresAt = now.addingTimeInterval(ctx.config.challengeLifetime)
         let display: JSONValue
+        var hintAccepted: Bool?
         switch request.purpose {
         case .oidcLogin:
             guard ctx.config.oidcEnabled else { throw Abort(.notFound) }
             guard let oidc = request.oidc, request.link == nil else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
-            guard let client = try await AuthorityOIDCClient.find(oidc.clientId, on: db), client.status == "active",
-                  OIDCClientRules.redirectURIs(client).contains(oidc.redirectURI) else {
-                // Re-validated here, whatever the api checked before (ADR-0024 §4).
-                throw Abort(.unprocessableEntity, reason: "invalid_client")
-            }
-            guard oidc.codeChallengeMethod == "S256", OIDCProfile.isValidCodeChallenge(oidc.codeChallenge) else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
-            guard (1...255).contains(oidc.nonce.utf8.count), oidc.nonce.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 0x21 && $0.value < 0x7F }) else {
-                throw Abort(.unprocessableEntity, reason: "invalid_request")
-            }
+            // Client, exact redirect URI, PKCE, nonce and acr values are re-validated here, whatever the api checked before (ADR-0024 §4).
+            let client = try await OIDCAuthorizationChecks.client(for: oidc, db: db)
             let acr = oidc.acrValues ?? []
-            guard acr.allSatisfy({ [OIDCProfile.acrApp, OIDCProfile.acrPasskey].contains($0) }) else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
             // A client (or request) that requires the passkey acr can never be satisfied by app approval: no app challenge is created for it.
             if client.requirePasskey || (!acr.isEmpty && !acr.contains(OIDCProfile.acrApp)) { throw Abort(.unprocessableEntity, reason: "passkey_required") }
             guard await ctx.bulkhead.admit(tenant: client.tenantId, now: now) else { throw Abort(.tooManyRequests, reason: "challenge_budget") }
+            hintAccepted = try await OIDCAuthorizationChecks.verifyHint(oidc, client: client, ctx: ctx, db: db)
             challenge.tenantId = client.tenantId
             challenge.clientId = client.id!
             challenge.targetURL = oidc.redirectURI
@@ -102,8 +96,12 @@ struct AuthorityChallengeService {
         let statement = try await StatementBuilder(kms: ctx.kms, keys: keys, environment: ctx.environment).sign(challenge)
         await AuthorityAudit.record(db, "authority.challenge_created", outcome: "success", tenant: challenge.tenantId, challengeId: challenge.id,
                                     caller: caller?.name, detail: challenge.purpose, at: now)
+        if let hintAccepted {
+            await AuthorityAudit.record(db, "authority.login_hint", outcome: hintAccepted ? "success" : "denied", tenant: challenge.tenantId,
+                                        challengeId: challenge.id, caller: caller?.name, at: now)
+        }
         return AuthorityChallengeCreateResponse(challengeId: challenge.id!, statement: statement, matchCode: challenge.matchCode,
-                                                expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970))
+                                                expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970), hintAccepted: hintAccepted)
     }
 }
 
@@ -272,27 +270,4 @@ struct EvidenceVerifier {
     }
 }
 
-/// Authorization codes for verified `oidc_login` evidence: 256-bit, stored only as a hash, 60 s, single use (ADR-0024 §6).
-struct OIDCCodeIssuer {
-    let ctx: AuthorityContext
-    let db: any Database
-
-    func issue(for evidence: VerifiedEvidence, challenge: AuthorityChallenge) async throws -> String {
-        let code = Base64URL.encode(SecureToken.randomBytes(32))
-        let row = AuthorityOIDCCode()
-        row.id = SecureToken.sha256Hex(Data(code.utf8))
-        row.clientId = challenge.clientId
-        row.redirectURI = challenge.targetURL
-        row.codeChallenge = challenge.codeChallenge ?? ""
-        row.nonce = challenge.oidcNonce ?? ""
-        row.acr = OIDCProfile.acrApp
-        row.amr = String(decoding: try JSONEncoder().encode(evidence.amr), as: UTF8.self)
-        row.authTime = ctx.now
-        row.accountId = evidence.accountId
-        row.accountRef = evidence.accountRef
-        row.kid = evidence.kid
-        row.expiresAt = ctx.now.addingTimeInterval(OIDCProfile.codeLifetime)
-        try await row.create(on: db)
-        return code
-    }
-}
+// `OIDCCodeIssuer` (app and passkey paths, with consent records) lives in `AuthorityOIDCMethods.swift`.

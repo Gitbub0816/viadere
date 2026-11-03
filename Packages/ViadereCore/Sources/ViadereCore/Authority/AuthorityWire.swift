@@ -49,23 +49,31 @@ public struct AuthorityChallengeCreateRequest: Codable, Sendable, Hashable {
         public var codeChallengeMethod: String
         public var nonce: String
         public var acrValues: [String]?
+        /// The RP's `login_hint` (the tenant's `subject_ref`, ADR-0024 §4 method 2) and the account the api resolved it to. The authority accepts
+        /// the pair only when `SubjectRefDeriver(business of the client, account) == login_hint`; the api never selects an account by it.
+        public var loginHint: String?
+        public var hintAccountId: UUID?
 
-        public init(clientId: String, redirectURI: String, codeChallenge: String, codeChallengeMethod: String, nonce: String, acrValues: [String]? = nil) {
+        public init(clientId: String, redirectURI: String, codeChallenge: String, codeChallengeMethod: String, nonce: String, acrValues: [String]? = nil,
+                    loginHint: String? = nil, hintAccountId: UUID? = nil) {
             self.clientId = clientId
             self.redirectURI = redirectURI
             self.codeChallenge = codeChallenge
             self.codeChallengeMethod = codeChallengeMethod
             self.nonce = nonce
             self.acrValues = acrValues
+            self.loginHint = loginHint
+            self.hintAccountId = hintAccountId
         }
 
         enum CodingKeys: String, CodingKey {
             case clientId = "client_id", redirectURI = "redirect_uri", codeChallenge = "code_challenge", codeChallengeMethod = "code_challenge_method", nonce
-            case acrValues = "acr_values"
+            case acrValues = "acr_values", loginHint = "login_hint", hintAccountId = "hint_account_id"
         }
 
         public init(from decoder: any Decoder) throws {
-            try authorityRequireOnly(decoder, ["client_id", "redirect_uri", "code_challenge", "code_challenge_method", "nonce", "acr_values"])
+            try authorityRequireOnly(decoder, ["client_id", "redirect_uri", "code_challenge", "code_challenge_method", "nonce", "acr_values", "login_hint",
+                                               "hint_account_id"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             clientId = try c.decode(String.self, forKey: .clientId)
             redirectURI = try c.decode(String.self, forKey: .redirectURI)
@@ -73,6 +81,8 @@ public struct AuthorityChallengeCreateRequest: Codable, Sendable, Hashable {
             codeChallengeMethod = try c.decode(String.self, forKey: .codeChallengeMethod)
             nonce = try c.decode(String.self, forKey: .nonce)
             acrValues = try c.decodeIfPresent([String].self, forKey: .acrValues)
+            loginHint = try c.decodeIfPresent(String.self, forKey: .loginHint)
+            hintAccountId = try c.decodeIfPresent(UUID.self, forKey: .hintAccountId)
         }
     }
 
@@ -134,15 +144,19 @@ public struct AuthorityChallengeCreateResponse: Codable, Sendable, Hashable {
     /// The number the browser page shows (app path); the device asks for it and never displays it.
     public var matchCode: String?
     public var expiresAt: Int64
+    /// `oidc_login` with a `login_hint`: true only when the authority verified the hint against the named account (only then may the api push to
+    /// that account's devices). Absent otherwise.
+    public var hintAccepted: Bool?
 
-    public init(challengeId: String, statement: String, matchCode: String?, expiresAt: Int64) {
+    public init(challengeId: String, statement: String, matchCode: String?, expiresAt: Int64, hintAccepted: Bool? = nil) {
         self.challengeId = challengeId
         self.statement = statement
         self.matchCode = matchCode
         self.expiresAt = expiresAt
+        self.hintAccepted = hintAccepted
     }
 
-    enum CodingKeys: String, CodingKey { case challengeId = "ach", statement, matchCode = "match_code", expiresAt = "expires_at" }
+    enum CodingKeys: String, CodingKey { case challengeId = "ach", statement, matchCode = "match_code", expiresAt = "expires_at", hintAccepted = "hint_accepted" }
 }
 
 /// `POST /v1/evidence`: a device factor JWS relayed unchanged. `account_id`, when the api names one, is checked against the signing key's

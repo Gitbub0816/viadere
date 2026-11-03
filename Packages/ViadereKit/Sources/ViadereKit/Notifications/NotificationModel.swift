@@ -48,7 +48,10 @@ public enum AuthNotificationCategory {
     public static let approve = "viadere.approve"
     public static let link = "viadere.auth.link"
     public static let code = "viadere.auth.code"
-    public static let all: Set<String> = [approve, link, code]
+    /// "Sign in with Viadere" `login_hint` push (`ach` only). Review opens the confirm screen; there is no inline answer (the factor needs the
+    /// approval key and the typed number).
+    public static let oidc = OIDCPushPayloadPolicy.category
+    public static let all: Set<String> = [approve, link, code, oidc]
 
     public static let reviewAction = "viadere.review"
     public static let openAction = "viadere.open"
@@ -70,7 +73,10 @@ public enum AuthNotificationCategory {
         NotificationActionModel(identifier: reportAction, title: AuthDeliveryCopy.notMe, style: .normal, requiresAuthentication: false, opensApp: false),
     ])
     public static let codeCategory = NotificationCategoryModel(identifier: code, actions: [])
-    public static let categories = [approveCategory, linkCategory, codeCategory]
+    public static let oidcCategory = NotificationCategoryModel(identifier: oidc, actions: [
+        NotificationActionModel(identifier: reviewAction, title: AuthDeliveryCopy.review, style: .normal, requiresAuthentication: true, opensApp: true),
+    ])
+    public static let categories = [approveCategory, linkCategory, codeCategory, oidcCategory]
 }
 
 /// Where a tapped authentication-delivery push goes (F-14, F-15): the request itself, never the Alerts list.
@@ -83,6 +89,8 @@ public enum NotificationTarget: Sendable, Equatable {
     case pendingRequests
     /// A legacy interaction (`iid`).
     case interaction(InteractionID)
+    /// An OIDC sign-in (`ach`, `viadere.oidc`).
+    case oidcSignIn(String)
 }
 
 extension PushPayload {
@@ -108,6 +116,9 @@ extension PushPayload {
         case AuthNotificationCategory.link, AuthNotificationCategory.code:
             if let id = deliveryId(from: userInfo) { return .authDelivery(id) }
             return .pendingRequests
+        case AuthNotificationCategory.oidc:
+            if let ach = userInfo[OIDCPushPayloadPolicy.challengeKey], AuthorityChallengeID.isValid(ach) { return .oidcSignIn(ach) }
+            return nil
         default:
             return userInfo[interactionKey].flatMap { InteractionID($0) }.map(NotificationTarget.interaction)
         }

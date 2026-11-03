@@ -43,5 +43,5 @@ extension APIRoutes {
     public static let oidcChallengeEvidence = Endpoint<OIDCDeviceEvidenceRequest, OIDCDeviceEvidenceResponse>(
         "oidc.challenge.evidence", .POST, "/v1/oidc/challenges/{challengeId}/evidence", auth: .deviceSignedBearer)
 
-    public static let oidcDeviceEndpoints: [AnyEndpoint] = [oidcChallengeGet.descriptor, oidcChallengeEvidence.descriptor]
+    public static let oidcDeviceEndpoints: [AnyEndpoint] = [oidcChallengeGet.descriptor, oidcChallengeEvidence.descriptor] + oidcConsentEndpoints
 }

@@ -35,6 +35,8 @@ public struct ViadereServices: Sendable {
     public var authDelivery: any AuthDeliveryAPI = UnavailableAuthDeliveryAPI()
     /// Posts the local "Deny not sent yet" notice (N-09). The app supplies the UserNotifications implementation.
     public var localSecurityNotices: any LocalSecurityNoticePosting = NoLocalSecurityNotices()
+    /// "Sign in with Viadere" on the device (ADR-0024): challenge statements, factor answers and the consent list. Fails closed when absent.
+    public var oidc: any OIDCDeviceAPI = UnavailableOIDCDeviceAPI()
     /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
 
@@ -114,6 +116,7 @@ public struct ViadereServices: Sendable {
         if !isAppClip {
             services.approveAPI = LiveApproveAPI(client: client)
             services.authDelivery = LiveAuthDeliveryAPI(client: client)
+            services.oidc = LiveOIDCDeviceAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)

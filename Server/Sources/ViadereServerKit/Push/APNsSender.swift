@@ -25,11 +25,14 @@ public struct PushMessage: Sendable, Equatable {
     public var authDeliveryId: String?
     /// Opaque Approve v2 request id on this device (`req`, ADR-0022 §5.5): the relay's lowercase delivery UUID. Never a business name or amount.
     public var approveRequestId: String?
+    /// Opaque authority challenge id of a `login_hint` sign-in push (`ach`, ADR-0024 §4 method 2). Never a client name, host or number.
+    public var oidcChallengeId: String?
 
     public init(deviceToken: String, environment: APNsTokenRegistration.Environment, topic: String, title: String, body: String,
                 category: String, threadID: String, interruptionLevel: String, mutableContent: Bool = true,
                 interactionId: String?, highPriority: Bool, collapseID: String? = nil, loopInstanceId: String? = nil, authDeliveryId: String? = nil,
-                approveRequestId: String? = nil) {
+                approveRequestId: String? = nil, oidcChallengeId: String? = nil) {
+        self.oidcChallengeId = oidcChallengeId
         self.authDeliveryId = authDeliveryId
         self.approveRequestId = approveRequestId
         self.deviceToken = deviceToken

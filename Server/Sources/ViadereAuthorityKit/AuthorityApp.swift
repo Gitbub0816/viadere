@@ -53,6 +53,7 @@ public enum AuthorityApplication {
             app.databases.use(.sqlite(.memory), as: .sqlite)
         }
         app.migrations.add(CreateAuthoritySchema())
+        app.migrations.add(CreateAuthorityOIDCMethodsSchema())
         if migrateInMemory {
             // Tests: a fresh schema every time (PostgreSQL test databases are reused between tests).
             try await app.autoRevert()
@@ -164,6 +165,8 @@ public enum AuthorityApplication {
             let revoked = try await AuthorityKeyLog.revoke(req.db, kid: body.kid, reason: body.reason, caller: req.authorityCaller, now: req.application.authority.now)
             return try json(["revoked": revoked], status: .ok)
         }
+        // Passkey method and consents (ADR-0023 §3a, ADR-0024 §4, §8).
+        AuthorityOIDCMethodRoutes.register(evidence: evidence, revocations: revocations)
     }
 
     static func decodeStrict<T: Decodable>(_ type: T.Type, _ req: Request) throws -> T {

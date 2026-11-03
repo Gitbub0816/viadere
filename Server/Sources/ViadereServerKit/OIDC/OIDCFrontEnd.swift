@@ -24,6 +24,8 @@ enum OIDCFrontEnd {
         app.get("oidc", "userinfo") { req in try await userinfo(req) }
         app.post("oidc", "userinfo") { req in try await userinfo(req) }
         app.get("oidc", "logout") { req in try await logout(req) }
+        // Passkey method, cancel, consents (ADR-0024 §4 method 1, §8).
+        OIDCMethodsFrontEnd.register(app)
 
         app.api(APIRoutes.oidcChallengeGet) { req in
             _ = try OIDCGate.require(req)
@@ -98,13 +100,15 @@ enum OIDCFrontEnd {
             .replacingOccurrences(of: "\"", with: "&quot;").replacingOccurrences(of: "'", with: "&#39;")
     }
 
-    static func page(_ title: String, _ body: String, status: HTTPResponseStatus = .ok, refresh: Bool = false) -> Response {
+    static func page(_ title: String, _ body: String, status: HTTPResponseStatus = .ok, refresh: Bool = false, script: Bool = false) -> Response {
         let meta = refresh ? "<meta http-equiv=\"refresh\" content=\"3\">" : ""
+        let tail = script ? "<script>\(OIDCPageAssets.script)</script>" : ""
         let html = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\(meta)"
-            + "<meta name=\"referrer\" content=\"no-referrer\"><title>\(escape(title))</title></head><body><main><h1>\(escape(title))</h1>\(body)</main></body></html>"
+            + "<meta name=\"referrer\" content=\"no-referrer\"><title>\(escape(title))</title><style>\(OIDCPageAssets.css)</style></head><body><main>"
+            + "<p class=\"brand\">viadere</p><h1>\(escape(title))</h1>\(body)</main>\(tail)</body></html>"
         let response = Response(status: status, body: .init(string: html))
         response.headers.contentType = .html
-        response.headers.replaceOrAdd(name: "Content-Security-Policy", value: pageCSP)
+        response.headers.replaceOrAdd(name: "Content-Security-Policy", value: OIDCPageAssets.csp(script: script))
         response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
         return response
     }
@@ -122,12 +126,17 @@ enum OIDCFrontEnd {
         return response
     }
 
+    /// UX_COPY OIDC-07.
     static func errorPage(_ status: HTTPResponseStatus = .badRequest) -> Response {
-        page("Sign-in request not valid", "<p>This sign-in link isn't valid. Go back to the website and try again.</p>", status: status)
+        page("Sign-in request not valid", "<p>This sign-in request isn't valid. Return to the app you came from. If you got here from a message, close this page.</p>",
+             status: status)
     }
 
+    /// UX_COPY OIDC-11.
+    static let tooManyText = "Too many sign-in attempts from here. Wait a minute and try again."
+
     static func tooMany() -> Response {
-        page("Too many sign-in attempts", "<p>Too many sign-in attempts. Wait a minute and try again.</p>", status: .tooManyRequests)
+        page("Too many sign-in attempts", "<p>\(tooManyText)</p>", status: .tooManyRequests)
     }
 
     // MARK: /oidc/authorize
@@ -176,16 +185,16 @@ enum OIDCFrontEnd {
         row.nonce = nonce
         row.codeChallenge = challenge
         row.acrValues = acr.isEmpty ? nil : acr.joined(separator: " ")
+        // `login_hint` is optional and advisory: only a well-formed `subject_ref` is kept, and only for the push path (ADR-0024 §4 method 2). It is
+        // never logged (S1-A10-2).
+        row.loginHint = q["login_hint"].flatMap { SubjectRef($0)?.rawValue }
         row.status = "pending"
         row.createdAt = now
         row.expiresAt = now.addingTimeInterval(req.ctx.config.oidc.authorizationLifetime)
         try await row.create(on: req.db)
-        let host = OIDCProfile.host(of: redirectURI) ?? ""
-        let response = page("Sign in to \(clientName)",
-            "<p>\(escape(clientName)) wants to confirm it's you. It gets an ID that only \(escape(clientName)) can use. It doesn't get your name, email or phone number, and other apps can't match it.</p>"
-            + "<p>Website: \(escape(host))</p>"
-            + "<form method=\"post\" action=\"/oidc/authorize/app\"><input type=\"hidden\" name=\"id\" value=\"\(row.id!.uuidString.lowercased())\">"
-            + "<input type=\"hidden\" name=\"csrf\" value=\"\(csrf)\"><button type=\"submit\">Continue with the Viadere app</button></form>")
+        let response = page(OIDCMethodsFrontEnd.heading(clientName),
+                            OIDCMethodsFrontEnd.methodsBody(row: row, csrf: csrf, offerApp: acr.isEmpty || acr.contains(OIDCProfile.acrApp)),
+                            script: true)
         response.headers.add(name: .setCookie, value: "\(cookieName)=\(binding); Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600")
         return response
     }
@@ -212,9 +221,13 @@ enum OIDCFrontEnd {
         guard await ctx.limiter.allow("oidc-authorize-ip", key: ip, rule: ctx.config.oidc.ipMinuteRate),
               await ctx.limiter.allow("oidc-authorize-ip-hour", key: ip, rule: ctx.config.oidc.ipHourRate),
               await ctx.limiter.allow("oidc-authorize-client", key: row.clientId, rule: ctx.config.oidc.clientRate) else { return tooMany() }
+        // `login_hint`: the api resolves the hint to its own relationship and names that account; the authority accepts the pair only if the hint is that
+        // account's `subject_ref` at the client's business. Without a verified hint there is no push (the QR still works).
+        let hinted = try await OIDCMethodsFrontEnd.resolveHint(row.loginHint, db: req.db)
         let request = AuthorityChallengeCreateRequest(purpose: .oidcLogin, oidc: .init(clientId: row.clientId, redirectURI: row.redirectURI, codeChallenge: row.codeChallenge,
                                                                                          codeChallengeMethod: "S256", nonce: row.nonce,
-                                                                                         acrValues: row.acrValues.map { $0.split(separator: " ").map(String.init) }))
+                                                                                         acrValues: row.acrValues.map { $0.split(separator: " ").map(String.init) },
+                                                                                         loginHint: hinted == nil ? nil : row.loginHint, hintAccountId: hinted))
         let created: (status: Int, response: AuthorityChallengeCreateResponse?)
         do { created = try await client.createChallenge(request) } catch {
             return page("Sign-in unavailable", "<p>Sign-in with Viadere is unavailable right now. Try again later.</p>", status: .serviceUnavailable)
@@ -227,6 +240,9 @@ enum OIDCFrontEnd {
         try await OIDCAuthorizationRecord.query(on: req.db).filter(\.$id == row.id!).filter(\.$status == "pending")
             .set(\.$status, to: "challenged").set(\.$challengeId, to: challenge.challengeId).set(\.$statement, to: challenge.statement)
             .set(\.$matchCode, to: challenge.matchCode).update()
+        if challenge.hintAccepted == true, let consumer = hinted {
+            await OIDCMethodsFrontEnd.pushHinted(req, consumerId: consumer, clientId: row.clientId, challengeId: challenge.challengeId)
+        }
         return statusRedirect(row)
     }
 
@@ -256,9 +272,7 @@ enum OIDCFrontEnd {
             try await row.delete(on: req.db)
             return redirect(row.redirectURI, [("error", "access_denied")], state: row.state, issuer: issuer)
         case "challenged":
-            let number = row.matchCode.map { "<p>Number to enter on your phone: <strong>\(escape($0))</strong></p>" } ?? ""
-            return page("Sign in to \(row.clientName)", "<p>Open the Viadere app on your phone and approve the sign-in to \(escape(row.clientName)).</p>" + number
-                        + "<p>Sign-in code for the app: \(escape(row.challengeId ?? ""))</p>", refresh: true)
+            return page(OIDCMethodsFrontEnd.heading(row.clientName), OIDCMethodsFrontEnd.appWaitingBody(row: row, linkDomain: req.ctx.config.linkDomain), refresh: true)
         default:
             return errorPage()
         }

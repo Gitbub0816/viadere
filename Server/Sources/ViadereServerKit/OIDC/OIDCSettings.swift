@@ -21,6 +21,8 @@ public struct OIDCProviderSettings: Sendable {
     public var ipMinuteRate: RateRule = .perMinute(10)
     public var ipHourRate: RateRule = .perHour(60)
     public var clientRate: RateRule = .perMinute(120, burst: 60)
+    /// `login_hint` pushes per (client, account) (ADR-0024 §4 method 2, ADR-0022 §5 fatigue rules); fail closed (`oidc-` namespace).
+    public var hintPushRate: RateRule = .perHour(6, burst: 3)
     /// A pending browser authorization lives at most this long.
     public var authorizationLifetime: TimeInterval = 600
 
@@ -84,7 +86,9 @@ final class OIDCAuthorizationRecord: Model, @unchecked Sendable {
     @Field(key: "nonce") var nonce: String
     @Field(key: "code_challenge") var codeChallenge: String
     @OptionalField(key: "acr_values") var acrValues: String?
-    /// `pending` → `challenged` → `approved` | `denied`.
+    /// The RP's `login_hint` when it is a well-formed `subject_ref` (`OIDC.v2`); used only for the push path, never logged.
+    @OptionalField(key: "login_hint") var loginHint: String?
+    /// `pending` → `challenged` (app) | `passkey` → `approved` | `denied`.
     @Field(key: "status") var status: String
     @OptionalField(key: "challenge_id") var challengeId: String?
     @OptionalField(key: "statement") var statement: String?

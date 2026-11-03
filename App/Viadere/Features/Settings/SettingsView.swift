@@ -743,6 +743,15 @@ struct SessionsView: View {
                     if index < vm.sessions.count - 1 { ViadereHairline() }
                 }
             }
+            // ADR-0024 §8: the consents the authority keeps for "Sign in with Viadere" (OIDC-09).
+            ViadereRowGroup {
+                NavigationLink {
+                    OIDCConsentsView(api: AppEnvironment.services.oidc)
+                } label: {
+                    ViadereRow(OIDCCopy.listTitle) { ViadereIconTile(systemName: "person.crop.square") }
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
