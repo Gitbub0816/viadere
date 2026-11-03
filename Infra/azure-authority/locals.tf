@@ -31,7 +31,10 @@ locals {
     runtime  = "viadere_authority"
     admin    = "viadere_authority_admin"
     migrator = "viadere_authority_migrator"
+    # SELECT on authority_sign_records, INSERT on authority_audit_events only (bootstrap/authority-database.sql).
+    reconcile = "viadere_authority_reconcile"
   }
+  reconcile = local.on == 1 && var.reconcile_job_enabled ? 1 : 0
 
   p = {
     kv_sku        = local.standard ? "premium" : "standard"
@@ -122,6 +125,7 @@ locals {
   app_name  = "ca-viadere-authority"
   admin_job = "job-viadere-authority-admin"
   migr_job  = "job-viadere-authority-migrate"
+  recon_job = "job-viadere-authority-reconcile"
 
   deploy_subject = var.oidc_subject_workflow_ref ? "repo:${var.github_repository}:environment:${var.deploy_environment}:job_workflow_ref:${var.github_repository}/.github/workflows/authority-deploy.yml@refs/heads/main" : "repo:${var.github_repository}:environment:${var.deploy_environment}"
   admin_subject  = var.oidc_subject_workflow_ref ? "repo:${var.github_repository}:environment:${var.admin_environment}:job_workflow_ref:${var.github_repository}/.github/workflows/authority-admin.yml@refs/heads/main" : "repo:${var.github_repository}:environment:${var.admin_environment}"

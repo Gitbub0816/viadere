@@ -286,6 +286,46 @@ paths:
       responses:
         "200": { description: The relay's view (`ApprovalRequestView`). }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/auth-links/redeem:
+    post:
+      tags: [Business]
+      operationId: redeemAuthLink
+      summary: Redeem a link-service code for the authority's grant (ADR-0021 §5.4, §6)
+      description: |
+        Scope `auth_deliveries:write`, behind `AUTH_DELIVERY_ENABLED` and `AUTH_LINK_SERVICE_ENABLED` (default off). Body (strict):
+        `link_client_id`, `code_verifier` (the PKCE verifier kept in the initiating browser session) and exactly one of `code` (same device: the
+        `vdr_code` fragment the page posted to your backend) or `ach` (cross device, after the person typed the number). The grant is signed by the
+        private authority only now: its `aud`, `tid` and `sub` come from the authority's records, never from this request. Verify it against the
+        static grant JWKS (`typ viadere-grant+jwt`, `iss`, `aud`, `cch`, `exp`) and consume its `jti` once. Every refusal is `400 bad_request`
+        with `details.error = invalid_grant`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [link_client_id, code_verifier]
+              properties:
+                link_client_id: { type: string, pattern: "^lcl_" }
+                code: { type: string, minLength: 43, maxLength: 43 }
+                ach: { type: string, pattern: "^ach_" }
+                code_verifier: { type: string, minLength: 43, maxLength: 128 }
+      responses:
+        "200":
+          description: The grant (single use, 60 s).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [grant, delivery_id]
+                properties:
+                  grant: { type: string }
+                  delivery_id: { type: string }
+        "400": { description: "`invalid_grant`: unknown, expired, used or foreign code, or wrong verifier." }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: The authority is unavailable (fail closed). }
   /v1/approve/requests/{approvalId}/deny:
     post:
       tags: [Device]

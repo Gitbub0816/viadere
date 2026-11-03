@@ -59,7 +59,6 @@ output "github_authority_admin" {
     AZURE_TENANT_ID           = var.tenant_id
     AZURE_SUBSCRIPTION_ID     = var.subscription_id
     AZURE_AUTH_RESOURCE_GROUP = azurerm_resource_group.auth[0].name
-    AZURE_AUTH_LOG_WORKSPACE  = azurerm_log_analytics_workspace.auth[0].workspace_id
   }
 }
 

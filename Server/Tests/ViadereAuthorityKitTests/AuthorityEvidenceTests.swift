@@ -137,7 +137,8 @@ final class AuthorityEvidenceTests: XCTestCase {
         await XCTAssertEqualAsync(try await h.submit(try await h.answer(challenge)).status, .unauthorized)
         // The revocation is a key-log entry (append-only chain).
         let entries = try await AuthorityKeylogEntry.query(on: h.app.db).sort(\.$seq).all()
-        XCTAssertEqual(entries.map(\.type), ["imported", "imported", "key_revoked"])
+        // The harness device confirmed its imported keys (ADR-0032 §1.4) before the revocation.
+        XCTAssertEqual(entries.map(\.type), ["imported", "imported", "enrollment_confirmed", "key_revoked"])
         XCTAssertEqual(entries.last?.kid, kid)
         XCTAssertEqual(entries[0].prevHash, AuthorityKeyLog.genesisHash)
         for i in 1..<entries.count { XCTAssertEqual(entries[i].prevHash, entries[i - 1].entryHash) }
@@ -231,7 +232,14 @@ final class AuthorityEvidenceTests: XCTestCase {
         let challenge = try await h.createLinkChallenge(crossDevice: true)
         let result = try await h.submit(try await h.answer(challenge), accountId: h.accountId)
         XCTAssertEqual(result.status, .ok)
-        let grant = try XCTUnwrap(result.response?.grant)
+        // ADR-0021 §5.3: the evidence answer carries no grant (the api never holds one); the business redeems it.
+        XCTAssertNil(result.response?.grant)
+        await XCTAssertEqualAsync(try await AuthorityGrantRecord.query(on: h.app.db).filter(\.$kind == "grant").count(), 0)
+        let redeemed = try await h.post(AuthorityKeyLogRoute.linkRedeem, ["link_client_id": .string(AuthorityHarness.linkClientId),
+                                                                          "business_id": .string(AuthorityHarness.businessId.uuidString),
+                                                                          "code_verifier": .string(AuthorityHarness.codeVerifier), "ach": .string(challenge.challengeId)])
+        XCTAssertEqual(redeemed.status, .ok)
+        let grant = try XCTUnwrap(redeemed.body["grant"]?.stringValue)
         let claims = try AuthorityGrantVerifier.verify(grant, keys: [JWKThumbprint.p256(h.grantKey): h.grantKey], issuer: AuthorityHarness.issuer + "/grant",
                                                        audience: AuthorityHarness.linkClientId, codeChallenge: AuthorityHarness.challenge(for: AuthorityHarness.codeVerifier),
                                                        now: h.clock.now)

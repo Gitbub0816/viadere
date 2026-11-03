@@ -162,6 +162,12 @@ variable "authority_env" {
   }
 }
 
+variable "reconcile_job_enabled" {
+  description = "Creates job-viadere-authority-reconcile (hourly Key Vault AuditEvent reconciliation against the authority's sign records, ADR-0023 section 6, condition C-11) with its own identity (Log Analytics Reader on the authority workspace, no Key Vault role). Default false: enable after the bootstrap SQL created the viadere_authority_reconcile role."
+  type        = bool
+  default     = false
+}
+
 variable "authority_flag_enabled" {
   description = "Value of AUTHORITY_ENABLED on the app. false (default): the process runs but refuses every grant route; the api then fails closed for link service and OIDC (ADR-0019 section 6). Flip only after the conditions C-1, C-11, C-15."
   type        = bool

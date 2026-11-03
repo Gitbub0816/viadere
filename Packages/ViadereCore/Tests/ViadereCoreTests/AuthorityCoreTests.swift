@@ -124,7 +124,8 @@ struct AuthorityCoreTests {
         let pinned = P256.Signing.PrivateKey()
         var payload = Self.statement().payload
         payload["account_ref"] = .string("acct_x")
-        #expect(throws: AuthorityJOSEError.claims("members")) {
+        // `account_ref` exists only on key-log statements (ADR-0033 §2); on an OIDC statement it is refused.
+        #expect(throws: AuthorityJOSEError.claims("account_ref")) {
             try AuthorityStatementVerifier.verifyChallenge(try Self.sign(payload, key: pinned), pinnedKeys: [pinned.publicKey], environment: .staging, now: Self.now)
         }
         let linkWithRedirect = Self.statement(purpose: .linkOpen, redirect: "https://rp.example.com/callback", returnURL: "https://shop.example.com/r",

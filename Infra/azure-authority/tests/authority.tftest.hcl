@@ -165,3 +165,38 @@ run "standby_grant_needs_a_change_file" {
 
   expect_failures = [azurerm_resource_group.auth]
 }
+
+run "reconcile_job_is_off_by_default" {
+  command = plan
+
+  variables {
+    authority_enabled        = true
+    image                    = "crmock.azurecr.io/viadere-authority@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    authority_entra_audience = "api://viadere-authority-staging"
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.reconcile) == 0 && length(azurerm_user_assigned_identity.authority_reconcile) == 0
+    error_message = "the reconciliation job exists only with reconcile_job_enabled = true"
+  }
+}
+
+run "reconcile_job_enabled_has_no_key_vault_role" {
+  command = plan
+
+  variables {
+    authority_enabled        = true
+    reconcile_job_enabled    = true
+    image                    = "crmock.azurecr.io/viadere-authority@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    authority_entra_audience = "api://viadere-authority-staging"
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.reconcile) == 1 && azurerm_container_app_job.reconcile[0].template[0].container[0].args == tolist(["reconcile"])
+    error_message = "the reconciliation job runs `ViadereAuthority reconcile`"
+  }
+  assert {
+    condition     = length(azurerm_role_assignment.reconcile_logs) == 1 && length(azurerm_role_assignment.authority_key) == 5
+    error_message = "the reconcile identity reads the workspace and gains no Key Vault role"
+  }
+}

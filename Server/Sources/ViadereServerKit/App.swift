@@ -121,7 +121,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     if let transport = overrides.authorityTransport {
         guard !config.isStrict else { throw ServerConfigError.invalid("an authority transport override in staging or production") }
         app.authorityTransport = transport
-    } else if config.oidc.enabled, let url = config.oidc.authorityURL, let audience = config.oidc.authorityAudience,
+    } else if config.oidc.enabled || config.authDelivery.linkServiceEnabled, let url = config.oidc.authorityURL, let audience = config.oidc.authorityAudience,
               let identity = AzureManagedIdentity.fromEnvironment(ProcessInfo.processInfo.environment) {
         app.authorityTransport = HTTPAuthorityTransport(baseURL: url, audience: audience, tokens: identity, http: StandaloneOutboundHTTP(guard: .fromEnvironment()))
     }

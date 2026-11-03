@@ -102,36 +102,71 @@ struct AuthorityKeyRing: Sendable {
 
 }
 
-/// The key inventory (ADR-0024 §7.3): one `VIADERE-KEY-INVENTORY {json}` line per configured key with its Key Vault `name`, `version` and public JWK
-/// (never private material), in the format `.github/scripts/key_inventory.py` parses. The serving authority prints it at every start, **before** the
-/// pin check: for a pinned key the pinned version, otherwise the current version (read only; signing never uses an unpinned version). The admin job
-/// holds no Key Vault role (AUTH-ADMIN-NO-KV), so this is the only process that can read the public halves; the first pins come from these lines.
+/// The reviewed key inventory (ADR-0024 §7.3, S6-06). **No process prints key material for CI to parse.** The inventory arrives as a reviewed change
+/// file (public JWKs read by the crypto-officer group through PIM, or the public half of a seal key) that the admin job records (`key-inventory-record`);
+/// the serving authority then checks every recorded row against its **own** source of truth, here: the Key Vault public key at exactly `name/version`
+/// (ES256 or RSA), or the `authority_seal_keys` row (whose private half it unwraps and checks at start). The outcome (`verified`, `mismatch`,
+/// `unavailable`) is stored; `key-inventory-check` (admin) exits non-zero unless every row of a change is `verified`, and `authority-admin.yml` attests
+/// the inventory only after that check succeeded. A wrong or substituted JWK in the change file therefore never reaches the attested inventory.
 enum AuthorityKeyInventory {
-    static let mark = "VIADERE-KEY-INVENTORY "
-
-    static func lines(kms: any KeyManagementService, config: AuthorityConfig, db: any Database) async -> [String] {
-        var names = [config.deviceStatementKeyName, config.grantKeyName]
-        if config.oidcEnabled { names += [config.oidcES256KeyName, config.oidcRS256KeyName] }
-        var out: [String] = []
-        for name in names {
-            let pinned = try? await AuthorityKeyPin.find(name, on: db)
-            var resolved = pinned.map { "\(name)/\($0.version)" }
-            if resolved == nil { resolved = try? await kms.resolveVersion(keyRef: name) }
-            guard let ref = resolved, let version = ref.split(separator: "/").last.map(String.init) else { continue }
-            let jwk: [String: JSONValue]
-            if name == config.oidcRS256KeyName {
-                guard let key = try? await kms.rsaPublicKey(keyRef: ref), let p = try? key.getKeyPrimitives() else { continue }
-                jwk = JWKThumbprint.rsaJWK(modulus: p.modulus, exponent: p.publicExponent)
-            } else {
-                guard let key = try? await kms.publicKey(keyRef: ref) else { continue }
-                jwk = JWKThumbprint.p256JWK(key)
-            }
-            let entry: JSONValue = .object(["name": .string(name), "version": .string(version), "seal_row": .null, "jwk": .object(jwk),
-                                            "pinned": .bool(pinned?.version == version)])
-            guard let text = try? CanonicalJSON.serialize(entry) else { continue }
-            out.append(mark + String(decoding: text, as: UTF8.self))
+    /// Verifies every `pending` row (at start, before the pin check, and from the maintenance loop). Returns the number of rows checked.
+    @discardableResult
+    static func verifyPending(kms: any KeyManagementService, db: any Database, now: Date) async throws -> Int {
+        let rows = try await AuthorityInventoryRow.query(on: db).filter(\.$status == "pending").all()
+        for row in rows {
+            let status = await check(row, kms: kms, db: db)
+            row.status = status
+            row.checkedAt = now
+            try await row.update(on: db)
+            await AuthorityAudit.record(db, "authority.key_inventory_check", outcome: status == "verified" ? "success" : "denied", reason: status == "verified" ? nil : status,
+                                        kid: row.thumbprint, caller: "authority", detail: "\(row.name)/\(row.version) commit:\(row.changeCommit)", at: now)
         }
-        return out
+        return rows.count
+    }
+
+    static func check(_ row: AuthorityInventoryRow, kms: any KeyManagementService, db: any Database) async -> String {
+        guard case .object(let jwk)? = try? JSONDecoder().decode(JSONValue.self, from: Data(row.jwk.utf8)) else { return "mismatch" }
+        switch row.source {
+        case "key_vault":
+            let ref = "\(row.name)/\(row.version)"
+            let actual: String
+            if jwk["kty"]?.stringValue == "RSA" {
+                guard let key = try? await kms.rsaPublicKey(keyRef: ref), let p = try? key.getKeyPrimitives() else { return "unavailable" }
+                actual = JWKThumbprint.rsa(modulus: p.modulus, exponent: p.publicExponent)
+            } else {
+                guard let key = try? await kms.publicKey(keyRef: ref) else { return "unavailable" }
+                actual = JWKThumbprint.p256(key)
+            }
+            return ConstantTime.equals(actual, row.thumbprint) ? "verified" : "mismatch"
+        case "seal_key":
+            guard let seal = try? await AuthoritySealKey.find(row.thumbprint, on: db), seal.state == "ready",
+                  ConstantTime.equals(Data(seal.publicJWK.utf8), (try? CanonicalJSON.serialize(.object(jwk))) ?? Data()) else { return "mismatch" }
+            return "verified"
+        default:
+            return "mismatch"
+        }
+    }
+}
+
+/// The active `recovery-seal` private key in authority memory (lean construction, ADR-0034 §5.2, residual R-23). Loaded once at start: the start writes
+/// a sign record (`unwrap`) before the Key Vault call (`RecordingKMS`), so the reconciliation expects exactly one `unwrapKey` per start.
+struct SealKeyHolder: Sendable {
+    let kid: String
+    let notAfter: Date
+    let privateKey: P256.KeyAgreement.PrivateKey
+
+    /// Unwraps the newest `ready` active seal key. Fails closed: a key whose public half differs from its row, or that is not app-pinned for the
+    /// environment (strict deployments; development pins otherwise), is never loaded.
+    static func load(kms: any KeyManagementService, db: any Database, pinnedKids: [String], now: Date) async throws -> SealKeyHolder? {
+        guard let row = try await AuthoritySealKey.query(on: db).filter(\.$role == "active").filter(\.$state == "ready").sort(\.$createdAt, .descending).first() else {
+            return nil
+        }
+        guard row.notAfter > now, pinnedKids.contains(row.id!), let wrapped = Base64URL.decode(row.wrappedPrivate) else { return nil }
+        var raw = try await kms.unwrap(keyRef: "\(row.kekName)/\(row.kekVersion)", ciphertext: wrapped)
+        defer { raw.resetBytes(in: 0..<raw.count) }
+        let key = try P256.KeyAgreement.PrivateKey(rawRepresentation: raw)
+        guard ConstantTime.equals(RecoverySeal.kid(key.publicKey), row.id!) else { throw AuthorityKeyError.thumbprintMismatch("recovery-seal") }
+        return SealKeyHolder(kid: row.id!, notAfter: row.notAfter, privateKey: key)
     }
 }
 
@@ -161,32 +196,79 @@ struct StatementBuilder {
     let keys: AuthorityKeyRing
     let environment: AuthorityEnvironment
 
-    func sign(_ challenge: AuthorityChallenge) async throws -> String {
+    /// `accountRef` and `kids` only for key-log purposes (ADR-0033 §2), from the authority's own records.
+    func sign(_ challenge: AuthorityChallenge, accountRef: String? = nil, kids: [String]? = nil) async throws -> String {
         guard let purpose = AuthorityPurpose(rawValue: challenge.purpose), let display = try? JSONDecoder().decode(JSONValue.self, from: Data(challenge.display.utf8)) else {
             throw AuthorityKeyError.keyUnavailable("statement")
         }
+        guard purpose.isKeyLog || (accountRef == nil && kids == nil) else { throw AuthorityKeyError.keyUnavailable("statement") }
         let statement = AuthorityChallengeStatement(environment: environment, challengeId: challenge.id!, nonce: challenge.nonce, purpose: purpose, display: display,
                                                     returnURL: purpose == .linkOpen ? challenge.targetURL : nil,
                                                     redirectURI: purpose == .oidcLogin ? challenge.targetURL : nil,
                                                     matchRequired: challenge.matchCode != nil,
-                                                    issuedAt: Int64(challenge.createdAt.timeIntervalSince1970), expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970))
+                                                    issuedAt: Int64(challenge.createdAt.timeIntervalSince1970), expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970),
+                                                    accountRef: accountRef, kids: kids)
         return try await KMSJWS.es256(kms: kms, key: keys.statement, typ: AuthorityChallengeStatement.type, payload: statement.payload)
+    }
+
+    /// `viadere-keylog-head+jws` (ADR-0033 §2) from a head the authority computed from its own log (`AuthorityHeads`).
+    func sign(head: AuthorityKeyLogHead) async throws -> String {
+        guard head.environment == environment else { throw AuthorityKeyError.keyUnavailable("statement") }
+        return try await KMSJWS.es256(kms: kms, key: keys.statement, typ: AuthorityKeyLogHead.type, payload: head.payload)
     }
 }
 
-/// `viadere-grant+jwt` (ADR-0023 §5) from verified evidence and the link-client record; `aud`, `tid` and the business id come from the record.
+/// Wraps the authority's KMS: every `sign`, `signRS256` and `unwrap` first writes an `authority_sign_records` row (key reference and operation, never
+/// the digest), and the call is refused when the row cannot be written. The Key Vault `AuditEvent` reconciliation (`AuthorityReconciliation`) matches
+/// every Key Vault operation against these rows; an operation without a row alerts (ADR-0023 §6, ADR-0028 §2, ADR-0034 §5.2).
+struct RecordingKMS: KeyManagementService {
+    let base: any KeyManagementService
+    let db: any Database
+    let clock: @Sendable () -> Date
+
+    private func record(_ keyRef: String, _ kind: String) async throws {
+        let row = AuthoritySignRecord()
+        row.keyRef = keyRef
+        row.kind = kind
+        row.at = clock()
+        try await row.create(on: db)
+    }
+
+    func sign(keyRef: String, digest: Data) async throws -> Data {
+        try await record(keyRef, "sign")
+        return try await base.sign(keyRef: keyRef, digest: digest)
+    }
+
+    func signRS256(keyRef: String, digest: Data) async throws -> Data {
+        try await record(keyRef, "sign")
+        return try await base.signRS256(keyRef: keyRef, digest: digest)
+    }
+
+    func unwrap(keyRef: String, ciphertext: Data) async throws -> Data {
+        try await record(keyRef, "unwrap")
+        return try await base.unwrap(keyRef: keyRef, ciphertext: ciphertext)
+    }
+
+    func publicKey(keyRef: String) async throws -> P256.Signing.PublicKey { try await base.publicKey(keyRef: keyRef) }
+    func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey { try await base.rsaPublicKey(keyRef: keyRef) }
+    func wrap(keyRef: String, plaintext: Data) async throws -> KMSWrappedKey { try await base.wrap(keyRef: keyRef, plaintext: plaintext) }
+    func resolveVersion(keyRef: String) async throws -> String { try await base.resolveVersion(keyRef: keyRef) }
+}
+
+/// `viadere-grant+jwt` (ADR-0023 §5) from a redeemed link code (`VerifiedLinkCode`, constructible only by the redemption) and the link-client record;
+/// `aud`, `tid` and the business id come from the record, `sub` from the account that owns the verified key. Signed only at redemption (ADR-0021 §5.4).
 struct GrantBuilder {
     let kms: any KeyManagementService
     let keys: AuthorityKeyRing
     let config: AuthorityConfig
 
-    func sign(evidence: VerifiedEvidence, client: AuthorityLinkClient, challenge: AuthorityChallenge, now: Date) async throws -> (compact: String, claims: AuthorityGrantClaims) {
-        let subject = SubjectRefDeriver(key: config.subjectRefKey).subjectRef(businessId: BusinessID(client.businessId), consumerId: ConsumerID(evidence.accountId)).rawValue
+    func sign(link: VerifiedLinkCode, client: AuthorityLinkClient, now: Date) async throws -> (compact: String, claims: AuthorityGrantClaims) {
+        let subject = SubjectRefDeriver(key: config.subjectRefKey).subjectRef(businessId: BusinessID(client.businessId), consumerId: ConsumerID(link.accountId)).rawValue
         let t = Int64(now.timeIntervalSince1970)
         let claims = AuthorityGrantClaims(issuer: config.issuer + "/grant", audience: client.id!, subject: subject, tenantId: client.tenantId,
-                                          transaction: challenge.deliveryId ?? "", purpose: challenge.linkPurpose ?? "sign_in", acr: OIDCProfile.acrApp,
-                                          amr: evidence.amr, authTime: t, issuedAt: t, expiresAt: t + AuthorityGrantClaims.lifetime,
-                                          jti: Base64URL.encode(SecureToken.randomBytes(16)), codeChallenge: challenge.codeChallenge ?? "")
+                                          transaction: link.deliveryId, purpose: link.purpose, acr: OIDCProfile.acrApp,
+                                          amr: link.amr, authTime: Int64(link.authTime.timeIntervalSince1970), issuedAt: t, expiresAt: t + AuthorityGrantClaims.lifetime,
+                                          jti: Base64URL.encode(SecureToken.randomBytes(16)), codeChallenge: link.codeChallenge)
         return (try await KMSJWS.es256(kms: kms, key: keys.grant, typ: AuthorityGrantClaims.type, payload: claims.payload), claims)
     }
 }

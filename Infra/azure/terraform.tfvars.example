@@ -30,6 +30,7 @@ app_env = {
   APPROVE_V2_ENABLED                       = "false"
   AUTH_DESTINATION_SIGNATURE_REQUIRED      = "true"  # ADR-0031: false is refused in staging and production
   AUTH_NUMBER_MATCHING_REQUIRED            = "false" # ADR-0019 section 6: true refuses the legacy approval route (422 number_match_required); default off
+  AUTH_LINK_SERVICE_ENABLED                = "false" # ADR-0021 section 5: link-service redemption through the authority; default off
   AUTH_DELIVERY_ENABLED                    = "false" # ADR-0019: off until the pilot gate; AUTH_SECRET_KEY is a secret, AUTH_LIVE_KEY_ASSURANCE defaults to mtls
   OIDC_PROVIDER_ENABLED                    = "false" # ADR-0024: staging only (refused in production); needs the authority (Infra/azure-authority) and the three below
   OIDC_ISSUER                              = ""      # https://id.<staging domain>, exact, no trailing slash

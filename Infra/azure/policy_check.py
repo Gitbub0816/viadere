@@ -34,7 +34,7 @@ exceptions table:
   * Any other resource with public network access enabled is a violation.
   * Authority tier (Infra/azure-authority, ADR-0028 section 5; fail in both profiles): AUTH-KEY-SCOPE, AUTH-NO-PUBLIC-INGRESS,
     AUTH-IDENTITY-SEPARATE, AUTH-DEPLOY-SEPARATE, AUTH-EGRESS, AUTH-KEY-BACKUP, AUTH-SIGNER-ROLE, AUTH-ADMIN-NO-KV, AUTH-STANDBY-ROLE,
-    AUTH-REVOCATIONS-ROLE; plus API-NO-NEW-KEYS (the api holds only the five exception keys), RESIDENCY-US (US regions only) and
+    AUTH-REVOCATIONS-ROLE, AUTH-INVENTORY-CHANNEL; plus API-NO-NEW-KEYS (the api holds only the five exception keys), RESIDENCY-US (US regions only) and
     GHCR-NO-PAT (the registry pull secret is the dedicated credential, not the owner's PAT). Recorded exceptions: AUTH-OIDC-SUBJECT
     (federated subject without job_workflow_ref) and ACR-AUTH-PUBLIC (lean Basic registry).
   * `--source DIR` adds static source checks (API-NO-NEW-KEYS in locals.tf, GHCR-NO-PAT, no Cloudflare file naming the authority).
@@ -640,6 +640,13 @@ def check_authority(resources: list[Resource], rep: Report, plan: dict) -> None:
                         tiers.setdefault(pr, set()).add("ordinary")
             if scopes & kv_scope:
                 _check_vault_assignment(r, rep, principals, rollover)
+            # S6-06: the admin workflow identity only starts the admin job and reads its status. The key inventory is a reviewed change file the
+            # serving authority verifies; it is never read from a log, so this identity holds no Log Analytics (or any other) role.
+            if "azurerm_user_assigned_identity.gh_authority_admin" in principals:
+                role = str(r.after.get("role_definition_name") or "").lower()
+                if "job starter" not in role or not scopes <= {"azurerm_container_app_job.admin"}:
+                    rep.violate("AUTH-INVENTORY-CHANNEL", r.address, "id-gh-authority-admin may hold only the job-starter role on the admin job "
+                                                                     "(no log reader: the key inventory is never read from a log)")
         if r.type in {"azurerm_container_app", "azurerm_container_app_job"}:
             _check_app(r, rep)
         if r.type == "azapi_resource" and azapi_type(r) == "microsoft.app/managedenvironments" and "-auth" in str(r.after.get("name", "")):

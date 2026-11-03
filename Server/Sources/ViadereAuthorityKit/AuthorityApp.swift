@@ -53,6 +53,7 @@ public enum AuthorityApplication {
             app.databases.use(.sqlite(.memory), as: .sqlite)
         }
         app.migrations.add(CreateAuthoritySchema())
+        app.migrations.add(CreateAuthorityKeyLogSchema())
         if migrateInMemory {
             // Tests: a fresh schema every time (PostgreSQL test databases are reused between tests).
             try await app.autoRevert()
@@ -61,7 +62,7 @@ public enum AuthorityApplication {
         if let prepare = overrides.prepare { try await prepare(app.db) }
 
         // KMS: Key Vault in staging and production; LocalKMS only in development and tests.
-        let kms: any KeyManagementService
+        var kms: any KeyManagementService
         if let override = overrides.kms {
             guard !config.deployment.isStrict else { throw AuthorityConfigError.refused("a KMS override in staging or production") }
             kms = override
@@ -72,6 +73,9 @@ public enum AuthorityApplication {
             guard !config.deployment.isStrict else { throw AuthorityConfigError.missing("AZURE_KEY_VAULT_URL") }
             kms = LocalKMS()
         }
+
+        // Every KMS sign and unwrap writes its sign record first (Key Vault AuditEvent reconciliation, ADR-0023 §6).
+        kms = RecordingKMS(base: kms, db: app.db, clock: clock)
 
         // Callers: Entra tokens; a verifier override only outside staging and production.
         let verifier: any AuthorityCallerVerifier
@@ -85,14 +89,19 @@ public enum AuthorityApplication {
 
         // Keys load only when enabled and only when serving (the migrate and admin jobs hold no Key Vault role).
         var keys: AuthorityKeyRing?
+        var seal: SealKeyHolder?
         if config.enabled, loadKeys {
-            for line in await AuthorityKeyInventory.lines(kms: kms, config: config, db: app.db) { app.logger.notice("\(line)") }
+            // The reviewed inventory is checked against Key Vault before the pin check, so the first pins can be reviewed (S6-06). Nothing is printed.
+            try await AuthorityKeyInventory.verifyPending(kms: kms, db: app.db, now: clock())
             // Reviewed key imports staged by the admin job need ACCOUNT_REF_KEY, which only the serving authority holds.
             try await AuthorityAdmin.applyPendingImports(db: app.db, config: config, now: clock())
             keys = try await AuthorityKeyRing.load(kms: kms, config: config, db: app.db)
+            if config.recoveryEnabled { seal = try await SealKeyHolder.load(kms: kms, db: app.db, pinnedKids: config.sealPins, now: clock()) }
+            if config.deployment != .testing { app.lifecycle.use(AuthorityMaintenanceLoop()) }
         }
-        app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock)
+        app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock, seal: seal)
         try routes(app, verifier: verifier)
+        try keyLogRoutes(app, verifier: verifier)
     }
 
     /// The complete route list (L-14: no debug endpoints; `AuthorityRouteListTests` pins it).

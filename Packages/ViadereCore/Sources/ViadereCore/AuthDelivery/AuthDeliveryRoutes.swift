@@ -67,7 +67,7 @@ extension APIRoutes {
         businessAuthDeliveryCreate.descriptor, businessAuthDeliveryGet.descriptor, businessAuthDeliveryCancel.descriptor, businessAuthDeliveryComplete.descriptor,
         businessWebhookUpdate.descriptor, businessAuthWebhookTest.descriptor,
         authDeliveries.descriptor, authDeliveryGet.descriptor, authDeliveryOpen.descriptor, authDeliveryDeny.descriptor,
-    ] + authApprovalEndpoints
+    ] + authApprovalEndpoints + [businessAuthLinkRedeem.descriptor]
 }
 
 /// What a push for an auth delivery may contain (ADR-0020 section 6.2, ST-PRIV-02): a generic alert, a category, an opaque thread id and the delivery id.

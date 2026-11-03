@@ -8,6 +8,7 @@ import ViadereAuthorityKit
 //   ViadereAuthority serve                                  (the app; keys load only with AUTHORITY_ENABLED=true)
 //   ViadereAuthority migrate --yes                          (job-viadere-authority-migrate)
 //   ViadereAuthority admin <command> --change-file <path> --commit <sha>   (job-viadere-authority-admin)
+//   ViadereAuthority reconcile                              (job-viadere-authority-reconcile: Key Vault AuditEvent reconciliation)
 
 // Process hardening (L-14, C-15): no core dumps and not dumpable, so key material, the pairwise key and HMAC keys in memory cannot be read from a dump
 // or by a same-user ptrace.
@@ -32,6 +33,7 @@ do {
     // Only `serve` loads keys; `migrate` and `admin` run as identities without any Key Vault role (AUTH-ADMIN-NO-KV).
     try await AuthorityApplication.configure(app, config: config, loadKeys: mode == "serve")
     app.asyncCommands.use(AuthorityAdminCommand(), as: "admin")
+    app.asyncCommands.use(AuthorityReconcileCommand(), as: "reconcile")
 } catch {
     // Configuration errors name variables, never values.
     FileHandle.standardError.write(Data("Authority startup failed: \(error)\n".utf8))

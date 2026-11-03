@@ -1,7 +1,9 @@
-# Publish the static discovery and JWKS documents under Site/content/id/ (ADR-0024 section 7). Publishing a key is equivalent to holding the
-# signing key, so this workflow is gated like an authority deploy: environment authority-publish-staging (required reviewers, "Prevent
-# self-review", branch main only), CODEOWNERS on Site/content/id/**, its OWN Cloudflare token scoped to the `id.` host's static assets, and NO
-# Azure credential. A JWK is admitted only if its RFC 7638 thumbprint is in the key inventory attested by authority-admin.yml.
+# Publish the static discovery and JWKS documents of the `id.` host (ADR-0024 section 7, ledger S6-10). Publishing a key is equivalent to
+# holding the signing key, so this workflow is gated like an authority deploy: environment authority-publish-staging (required reviewers,
+# "Prevent self-review", branch main only), its OWN Cloudflare token scoped to the `id.` host's static assets, and NO Azure credential.
+# The documents are GENERATED here from the inventory attested by authority-admin.yml (verified by the serving authority, S6-06): the discovery
+# document from the reviewed template that a Core test pins to OIDCProfile.discoveryDocument, the OIDC and grant JWKS from the inventory's
+# oidc-signing-* and grant-signing entries. Nothing hand-written is published; every JWK is re-checked against the attested inventory.
 name: Authority publish
 
 on:
@@ -9,6 +11,10 @@ on:
     inputs:
       inventory_run_id:
         description: "Run id of the authority-admin.yml run whose attested key inventory authorises this publication"
+        type: string
+        required: true
+      issuer:
+        description: "OIDC issuer, exactly as the api's OIDC_ISSUER (https://id.<staging domain>, no trailing slash)"
         type: string
         required: true
 
@@ -32,6 +38,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ inputs.inventory_run_id }}
+      ISSUER: ${{ inputs.issuer }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ID_HOST_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -42,20 +49,21 @@ jobs:
         run: |
           [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "publication runs from main only" >&2; exit 1; }
           [[ "${RUN_ID}" =~ ^[0-9]+$ ]] || { echo "inventory_run_id must be a run id" >&2; exit 1; }
+          [[ "${ISSUER}" =~ ^https://[a-z0-9.-]+$ ]] || { echo "issuer must be https://<host>" >&2; exit 1; }
       - name: Download the inventory and verify its attestation (signer must be authority-admin.yml on main)
         run: |
           gh run download "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name authority-key-inventory --dir "$RUNNER_TEMP/inv"
           gh attestation verify "$RUNNER_TEMP/inv/key-inventory.json" --repo "${GITHUB_REPOSITORY}" \
             --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/authority-admin.yml" --source-ref refs/heads/main
-      - name: Every JWK of every published set is in the attested inventory
+      - name: Generate the documents from the attested inventory, then check every JWK against it
         run: |
-          shopt -s nullglob
-          for set in Site/content/id/oidc/jwks.json Site/content/id/grant/jwks.json; do
-            [ -f "${set}" ] || continue
+          python3 -I .github/scripts/key_inventory.py --documents "$RUNNER_TEMP/inv/key-inventory.json" "${ISSUER}" \
+            Infra/azure-authority/publish/openid-configuration.template.json "$RUNNER_TEMP/id"
+          for set in "$RUNNER_TEMP/id/oidc/jwks.json" "$RUNNER_TEMP/id/grant/jwks.json"; do
             python3 -I .github/scripts/key_inventory.py --check "${set}" "$RUNNER_TEMP/inv/key-inventory.json"
           done
       - name: Upload the static assets of the id. host
         run: |
           [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "CLOUDFLARE_ID_HOST_TOKEN missing (AUTHORITY-OWNER-CHECKLIST.md)" >&2; exit 1; }
           # Site/deploy/upload.py is the repository's Workers Static Assets uploader (ADR-0004); the id. host is its own Worker.
-          python3 -I Site/deploy/upload.py --dist Site/content/id --script viadere-id
+          python3 -I Site/deploy/upload.py --dist "$RUNNER_TEMP/id" --script viadere-id

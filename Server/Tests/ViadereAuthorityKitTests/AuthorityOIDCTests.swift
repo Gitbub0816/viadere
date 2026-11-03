@@ -150,7 +150,7 @@ final class AuthorityOIDCTests: XCTestCase {
         XCTAssertNil(body.displayName)
         r = try await h.call(.GET, AuthorityRoute.oidcClientCheck + "?client_id=ocl_testclient&post_logout_redirect_uri=https%3A%2F%2Frp.example.com%2Fbye")
         XCTAssertTrue(try ViadereJSON.decode(AuthorityClientCheckResponse.self, from: r.body).valid)
-        await XCTAssertEqualAsync(try await AuthorityChallenge.query(on: h.app.db).count(), 0) // ST-OIDC-17
+        await XCTAssertEqualAsync(try await AuthorityChallenge.query(on: h.app.db).filter(\.$purpose == "oidc_login").count(), 0) // ST-OIDC-17
     }
 
     func testPublicKeysRouteServesOnlyTheOIDCKeys() async throws {
