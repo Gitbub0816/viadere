@@ -253,9 +253,15 @@ R-3 to R-5, and F-5 to F-9, are tracked with owners.
 
 **R-6 (Low, test): the PostgreSQL Keep-race test cannot fail.** `testOnPostgresAKeepThatCommitsWhileTheJobRunsIsNeverUndone` runs both transactions on `h.db`, which is bound to one event loop whose pool has one connection. So the job simply waits for the connection, and the test passes with the lock removed. The second test's doc comment says "UNLINK", but it races Keep, and no test races UNLINK or removal against the job. **Required:** run the keeper and the job on databases bound to different event loops (`app.databases.database(logger:on:)`), and add an UNLINK-versus-job case.
 
+> **Status: fixed (2026-11-03).** The race tests now run the Keep (or UNLINK) side and the job on databases bound to different event loops, and assert that the two handles are different PostgreSQL back-end pids. Mutation: with `lockNumber` removed from `completeTransfers`, `testOnPostgresAKeepThatCommitsWhileTheJobRunsIsNeverUndone` and `testOnPostgresRealKeepAndTheJobRunTogetherAlwaysLeaveOneConsistentOutcome` fail (`moved = 1`, pending row set back to `verified`); restored, both pass. The new UNLINK-versus-job case (`testOnPostgresAnUnlinkThatCommitsWhileTheJobRunsPausesTheHolderNotTheNewOwner`) stays green with the lock removed, because an UNLINK no longer rewrites a claim (R-8) and the job's first write waits on the UNLINK's row locks anyway; it pins the outcome, and the Keep test is the lock-sensitive one. Removal-versus-job is not added: it has the same shape as UNLINK.
+
 **R-7 (Medium, owner decision): a number held by the wrong account cannot be reclaimed by its owner.** UNLINK no longer releases a number. Suppose an attacker ever becomes the holder: a victim-induced text while the number is free, or any text while the indicator check is waived on staging. Then the real owner's link text becomes `pending_transfer` against the attacker, who presses Keep for ever. The attacker can also un-pause their link with another induced text (`bind` resume path). ADR-0027 §1.5 rev 4 records this residual but gives no remedy. Impact is bounded: the number receives only SMS-04 and on-ramp texts, and those reach the real phone. **Required before production:** an operator release path (support ticket with carrier evidence, audited) or a rule such as "a suspended holder cannot Keep against a requester whose text carried a `verified` indicator", recorded in ADR-0027.
 
+> **Status: open, owner decision.** Not changed in code. A remedy (operator release with carrier evidence and dual control, plus an indicator-based rule once O-2 closes) is recorded in ADR-0027 §1a as **proposed, pending owner**.
+
 **R-8 (Low): forged-UNLINK nuisances that remain.**
+
+> **Status: fixed (2026-11-03), first, second and fourth bullets.** UNLINK no longer withdraws `pending_transfer` rows (`testAForgedUnlinkDoesNotWithdrawAGenuinePendingTransfer`). The current holder's own text (resume, already linked) creates no row and skips the churn cap (`testTheHoldersResumeTextIsNotRefusedByTheChurnLimitAfterAForgedUnlink`; the cap still applies to another account's link). The stored and Kit copy now lead with "link it again" and say removing frees the number (`testTheUnlinkNoticeLeadsWithLinkingAgainAndSaysRemovingFreesTheNumber`, server and Kit); UX_COPY S-PH-08 and SECURITY.md §2.10 item 5 match. Third bullet (strict mode with `unsupported` adapters) unchanged, as noted: not a regression.
 - A forged UNLINK withdraws every `pending_transfer` of the number, so a forger can keep a legitimate requester (for example a recycled number's new owner) from ever completing. Each retry costs that person one of 2 churn slots a week.
 - An induced `pending_transfer` row counts toward the churn cap. The holder's resume text right after a forged UNLINK can therefore be refused for up to a day.
 - In strict mode with the current adapters, UNLINK (`unsupported`) is accepted while every resume text is refused. A forged UNLINK therefore pauses a legacy OTP-era link with no way back except removal. Before the fix it revoked the link, so this is not a regression.
@@ -263,10 +269,14 @@ R-3 to R-5, and F-5 to F-9, are tracked with owners.
 
 **R-9 (Low): "seen" is not status-quo.** The `seen` doc comment says it "changes nothing". In fact it is the condition that lets a transfer complete, and a device still in cool-down can set it. That includes a device enrolled by someone who took over the holder's account through recovery (recovery re-cools links but leaves pending transfers alone). The holder's other devices still get the notice and the push, so impact is low. **Change:** correct the comment. Either count `seen` only from a trusted device (Keep stays open to any live app device), or record the choice in ADR-0027.
 
+> **Status: fixed (2026-11-03).** `seen` still needs a live app device, but records `fetched_at` only when the device may manage the account (trusted, or the sole post-cool-down device of an account with no trusted one: the rule used for dismissing). A device in cool-down gets the same response and nothing is recorded; Keep stays open to it. Comment corrected, choice recorded in ADR-0027 §1.5 (`testADeviceInCoolDownCannotMarkTheTransferNoticeSeen`).
+
 **R-10 (Low, privacy SLO): the lease now gates the P-class sweep.** `purgeChallenges` runs only after `JobLease.acquire` succeeds. An acquire that throws, or a lease row written by an instance whose clock runs ahead, skips the sweep as well. That undoes F-3's isolation. **Change:** run the sweep before or outside the lease (it is an idempotent delete), and lease only the transfers.
 
+> **Status: fixed (2026-11-03).** `minute` runs `purgeChallenges` first and outside the lease; only the transfers are leased (`testTheChallengeSweepRunsEvenWhenTheMinuteLeaseIsTaken`).
+
 **Info.**
-- ADR-0027 §1.5 still carries the rev-3 sentence "revokes every link of the number", and S-PH-08 text, after the rev-4 note. Rewrite the paragraph.
+- *(Fixed 2026-11-03: ADR-0027 §1.5 rewritten, revision 5.)* ADR-0027 §1.5 still carried the rev-3 sentence "revokes every link of the number", and S-PH-08 text, after the rev-4 note. Rewrite the paragraph.
 - `PhoneLink` (list and status) does not expose `suspended_at`, so a paused number shows as linked in the app. Fold this into F-6.
 - `AppModel.lock()` sets the banner's covered flag through a detached `Task`. The ordering on the main actor makes a report from behind the lock unlikely, but nothing enforces it. Setting the flag synchronously would.
 
@@ -296,3 +306,13 @@ Agent review record: A2 + A10 independent code review of `b85033d` (SMS-authenti
 Re-check of `af78c34` (F-1/F-3/F-4 fix): verdict **APPROVE WITH CONDITIONS** (R-1, R-2, the forged-UNLINK composition, PostgreSQL run before phone linking is enabled). Reviewer: Claude Code agent, 2026-11-02.
 
 Re-check 2 of `a02dcbd` (F-4, R-1 to R-5 fix): F-4, R-1 to R-5 **closed**; new R-6 (vacuous PostgreSQL race test), R-7 (owner cannot reclaim a number held by the wrong account; owner decision), R-8 to R-10 (Low). Staging may enable phone linking once the F-2 condition is met; production stays off. Reviewer: Claude Code agent, 2026-11-03.
+
+### Fix of R-6, R-8 to R-10 (2026-11-03)
+
+| Suite | Result |
+|---|---|
+| Server (SQLite), full suite | 1124 tests, 6 skipped (PostgreSQL-only), 0 failures |
+| Server (PostgreSQL 18, `TEST_RATE_LIMIT_STORE=database`) `PhoneLinkHardeningTests`, `PhoneLinkMOTests`, security notices | 47 tests, 0 failures, none skipped (3 two-connection race tests run) |
+| Kit `SecurityNoticesTests` | 10 tests, pass |
+
+Each new test failed on the unfixed code first (SQLite run: 16 failures across the new and changed tests). R-7 is unchanged and still blocks production. The full PostgreSQL suite is still required before release (CLAUDE.md rule 6).

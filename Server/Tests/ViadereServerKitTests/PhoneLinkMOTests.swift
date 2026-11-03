@@ -474,7 +474,7 @@ final class PhoneLinkMOTests: XCTestCase {
             XCTAssertNotNil(link.suspendedAt)
             let second = try await h.enrollDevice(consumer)
             let notices = try await h.signed(second, .GET, "/v1/security-notices").json([SecurityNotice].self)
-            XCTAssertTrue(notices.contains { $0.topic == .phoneUnlinked && $0.message.contains("remove it in Viadere") })
+            XCTAssertTrue(notices.contains { $0.topic == .phoneUnlinked && $0.message.contains("link it again") })
             let unlinkAudit = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.suspended_by_text").all()
             XCTAssertFalse(unlinkAudit.isEmpty)
             // The holder releases it in the app. A second verified link the same day is refused (1 a day, 2 a week), without a reply.

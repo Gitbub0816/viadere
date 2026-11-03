@@ -72,7 +72,7 @@ struct SecurityNotices {
             case .phoneTransferRequested:
                 "Someone asked to link a phone number on your Viadere account to another Viadere account. If that number is still yours, keep it."
             case .phoneUnlinked:
-                "Someone texted UNLINK from your phone number, so Viadere stopped using it. It stays linked to your account until you remove it in Viadere settings."
+                "Someone texted UNLINK from your phone number, so Viadere paused it. If this wasn't you, link it again in Viadere with a text from that phone. If you remove it instead, the number is free for another account to link."
             case .phoneTransferred:
                 "Your phone number was moved to another Viadere account because you did not keep it. If that number is still yours, text UNLINK from it and link it again."
             case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
@@ -177,12 +177,16 @@ struct SecurityNotices {
             }
     }
 
-    /// The app displayed this notice (with its action, when it has one). A pending phone transfer waits for it (ADR-0027 section 1.3). Any live app
-    /// device of the account may say so, a phone still in cool-down included: it records a fact, it changes nothing.
+    /// The app displayed this notice (with its action, when it has one). **It is not harmless:** a pending phone transfer completes only after the
+    /// holder's app showed its notice (ADR-0027 section 1.3), so this report can let a number move. It therefore counts only from a device that may
+    /// manage the account (the rule that also governs dismissing: a trusted device, or the only kind of device a recovered account has once its own
+    /// cool-down ended). A live app device still in cool-down, for example one enrolled by someone who took the account over through recovery, gets the
+    /// same answer but nothing is recorded (R-9). Keep stays open to every live app device, because it only preserves the status quo.
     func seen(_ id: UUID, principal: ConsumerPrincipal) async throws {
-        try await DeviceTrust.requireActiveApp(principal, db: db, now: ctx.now)
+        let device = try await DeviceTrust.requireActiveApp(principal, db: db, now: ctx.now)
         guard let row = try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$consumerId == principal.consumerId.uuid).first()
         else { throw APIError.notFound }
+        guard try await DeviceTrust.mayManageAccount(device, db: db, now: ctx.now) else { return }
         // Conditional: the first sighting wins and later ones change nothing.
         try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$fetchedAt == nil).set(\.$fetchedAt, to: ctx.now).update()
         _ = row

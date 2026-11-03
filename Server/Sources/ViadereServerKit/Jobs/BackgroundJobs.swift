@@ -67,16 +67,20 @@ struct BackgroundJobs {
     /// Phone-link challenges are pending secrets (ADR-0026 class P): gone at expiry + 2 minutes, so this runs every minute (its own scheduled job on
     /// Azure; the in-process loop gates it to once a minute), isolated so an earlier failure elsewhere never skips it. Pending transfers complete here.
     ///
-    /// One run at a time (`job_leases`, R-2 of the SMS-removal re-check): a run that finds the lease taken does nothing, and a crashed run's lease
-    /// expires on its own before the next minute. The transfers stay correct without it (row locks), so the lease only saves duplicate work.
+    /// The challenge sweep is an idempotent delete and a privacy deadline, so it runs first and **outside** the lease (R-10, F-3): a taken lease, a
+    /// lease table that fails, or a lease row written by an instance whose clock runs ahead never skips it.
+    ///
+    /// Only the transfers are leased, one run at a time (`job_leases`, R-2 of the SMS-removal re-check): a run that finds the lease taken skips them,
+    /// and a crashed run's lease expires on its own before the next minute. The transfers stay correct without it (row locks), so the lease only
+    /// saves duplicate work.
     func minute(gated: Bool) async {
         guard await gate("phone-link-sweep", gated) else { return }
         let (db, ctx) = (app.db, app.ctx)
+        await guarded("phone-link-challenges") { _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now) }
         let holder = UUID()
         let leased = LeaseResult()
         await guarded("phone-link-lease") { leased.value = try await JobLease.acquire(Self.minuteLease, holder: holder, ttl: Self.minuteLeaseTTL, on: db, now: ctx.now) }
         guard leased.value else { return }
-        await guarded("phone-link-challenges") { _ = try await PhoneLinkService.purgeChallenges(on: db, now: ctx.now) }
         await guarded("phone-link-transfers") { _ = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers() }
         await guarded("phone-link-lease-release") { try await JobLease.release(Self.minuteLease, holder: holder, on: db) }
     }

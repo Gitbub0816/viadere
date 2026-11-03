@@ -98,6 +98,17 @@ struct SecurityNoticesTests {
         #expect(try decoder.decode(SecurityNotice.self, from: Data(json.utf8)).kind == .unknown)
     }
 
+    /// R-9: a holder who got a forged UNLINK must not be steered to "remove it", the one step that frees the number for an induced text.
+    @Test func theUnlinkNoticeLeadsWithLinkingAgainAndSaysRemovingFreesTheNumber() async {
+        let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: MockViadereAPI(seed: false)))
+        let text = model.headline(for: SecurityNotice(id: UUID(), rawKind: "phoneUnlinked", message: "m", createdAt: Date().addingTimeInterval(-7_200))).lowercased()
+        let again = text.range(of: "link it again"), remove = text.range(of: "remov")
+        #expect(again != nil && remove != nil)
+        if let again, let remove { #expect(again.lowerBound < remove.lowerBound) }
+        #expect(text.contains("free"))
+        #expect(!text.contains("remove it in settings"))
+    }
+
     @Test func transportFailureOnLoadKeepsBannerAbsent() async {
         let model = SecurityNoticesViewModel(services: await ViadereServices.mock(api: MockViadereAPI(seed: false)))
         await model.load()

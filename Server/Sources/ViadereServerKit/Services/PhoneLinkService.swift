@@ -185,7 +185,12 @@ struct PhoneLinkService {
             try await audit("phone_link.mo_refused", reason: "opted_out", number: sms.from, consumer: challenge.consumerId, on: tx)
             return .handled
         }
-        guard try await churnAllows(phoneHash: phoneHash, on: tx) else {
+        // The cap limits *new* links of a number. The current holder's own text (resume after an UNLINK, or "already linked") creates no row, so it
+        // never meets the cap: rows induced by someone else (a waiting transfer, a forged UNLINK in between) must not lock the holder out (R-8).
+        let holderTexted = try await PhoneLinkRecord.query(on: tx).filter(\.$verifiedPhoneHash == phoneHash).filter(\.$state == "verified")
+            .filter(\.$consumerId == challenge.consumerId).first() != nil
+        let withinCap = holderTexted ? true : try await churnAllows(phoneHash: phoneHash, on: tx)
+        guard withinCap else {
             try await audit("phone_link.mo_refused", reason: "churn", number: sms.from, consumer: challenge.consumerId, on: tx)
             ctx.logger.warning("phone link churn limit reached", metadata: ["phone": "\(sms.from.masked)"])
             return .handled
@@ -291,8 +296,9 @@ struct PhoneLinkService {
     /// transfer completes (section 1.3). So a forged UNLINK, which can be sent without being the number's owner, can only stop routing (fail-safe).
     /// It cannot open a dormant owner's number for a victim-induced text to bind fresh, which is how it used to get around section 1.3 (F-4).
     /// A positive spoof indicator is refused without an answer; `unsupported` and `notProvided` still work, because the real owner's safety valve
-    /// must keep working with the shipped adapters. Waiting claims on the number (`pending_transfer` rows) are withdrawn, which only ever
-    /// leaves the status quo.
+    /// must keep working with the shipped adapters. Waiting claims on the number (`pending_transfer` rows) are **left alone** (R-8): a forged UNLINK
+    /// could otherwise cancel a genuine requester's claim again and again, and every retry costs that person a slot of the per-number link cap. The
+    /// holder already has Keep, and a claim still completes only after the holder's trusted device showed the notice.
     func unlink(number: PhoneNumber, indicator: InboundSenderIndicator = .unsupported, on tx: any Database) async throws {
         let hash = ctx.hasher.phoneHash(number)
         guard indicator != .suspectedSpoof else {
@@ -301,16 +307,9 @@ struct PhoneLinkService {
         }
         try await Self.lockNumber(phoneHash: hash, on: tx)
         let now = ctx.now
-        let links = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == hash).filter(\.$state ~~ ["verified", Self.statePendingTransfer]).all()
+        let links = try await PhoneLinkRecord.query(on: tx).filter(\.$phoneHash == hash).filter(\.$state == "verified").all()
         var paused = 0
         for link in links {
-            if link.state == Self.statePendingTransfer {
-                link.state = "revoked"
-                try await link.update(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("phone_link.transfer_withdrawn_by_text", actor: AuditActor(kind: .gateway, id: number.masked),
-                    consumerId: ConsumerID(link.consumerId), subjectType: "phone_link", subjectId: link.id?.uuidString.lowercased(), metadata: ["phone": number.masked])
-                continue
-            }
             guard link.suspendedAt == nil else { continue }
             link.suspendedAt = now
             try await link.update(on: tx)

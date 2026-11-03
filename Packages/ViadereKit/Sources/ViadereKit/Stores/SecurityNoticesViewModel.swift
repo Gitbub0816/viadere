@@ -200,7 +200,7 @@ public final class SecurityNoticesViewModel {
         case .approvalKeyUnconfirmed: return "An approval key was never confirmed by the business, so it was removed \(when)."
         case .recoveryCredentialAdded: return "A passkey was added to your account \(when)."
         case .phoneTransferRequested: return "Someone asked to link your phone number to another Viadere account \(when). If that number is still yours, keep it."
-        case .phoneUnlinked: return "Someone texted UNLINK from your phone number, so Viadere stopped using it. Remove it in Settings to release it."
+        case .phoneUnlinked: return "Someone texted UNLINK from your phone number, so Viadere paused it. If this wasn't you, link it again in Viadere with a text from that phone. If you remove it instead, the number is free for another account to link."
         case .phoneTransferred: return "Your phone number was moved to another Viadere account \(when) because you did not keep it."
         case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
         case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."
