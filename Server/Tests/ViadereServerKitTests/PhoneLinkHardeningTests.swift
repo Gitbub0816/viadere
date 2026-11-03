@@ -1,6 +1,8 @@
 import Fluent
 import Foundation
+import NIOCore
 import NIOHTTP1
+import SQLKit
 import Vapor
 import ViadereCore
 import XCTest
@@ -112,7 +114,8 @@ final class PhoneLinkHardeningTests: XCTestCase {
             let second = try await h.enrollDevice(consumer)
             let list = try await notices(h, second)
             let notice = try XCTUnwrap(list.first { $0.topic == .phoneUnlinked })
-            XCTAssertTrue(notice.message.contains("remove it"), notice.message)
+            XCTAssertTrue(notice.message.contains("link it again"), notice.message)
+            XCTAssertFalse(notice.message.contains("remove it in Viadere settings"), "the copy must not lead the holder to remove the number")
             // Linking again by text resumes the same row, with a new waiting period.
             h.clock.advance(by: 25 * 3600)
             consumer = try await h.login(consumer)
@@ -171,7 +174,7 @@ final class PhoneLinkHardeningTests: XCTestCase {
         }
     }
 
-    func testADeviceStillInCoolDownCanSeeAndKeepTheNumber() async throws {
+    func testADeviceStillInCoolDownCanKeepTheNumber() async throws {
         try await withHarness { h in
             let oldOwner = try await h.readyConsumer(name: "Old")
             var newOwner = try await h.readyConsumer(name: "New")
@@ -182,7 +185,7 @@ final class PhoneLinkHardeningTests: XCTestCase {
             XCTAssertFalse(device.isTrusted(at: h.clock.now()), "precondition: the device is in cool-down")
             let list = try await notices(h, newPhone)
             let notice = try XCTUnwrap(list.first { $0.topic == .phoneTransferRequested })
-            try await eq(try await markSeen(h, newPhone, notice).status, .ok)
+            _ = try await markSeen(h, newPhone, notice)
             try await eq(try await h.signedPost(newPhone, "/v1/phone-links/\(ids.oldLink)/keep", EmptyBody()).status, .ok, "Keep only preserves the status quo")
             h.clock.advance(by: 72 * 3600 + 1)
             try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 0)
@@ -311,6 +314,128 @@ final class PhoneLinkHardeningTests: XCTestCase {
         }
     }
 
+    // MARK: R-8: a forged UNLINK is a nuisance, not a weapon
+
+    /// A forged UNLINK used to revoke every waiting transfer of the number, so a forger could keep a legitimate requester (a recycled number's new
+    /// owner) from ever completing. UNLINK now touches only the holder's link; the waiting claim stays and still needs the holder's app to show it.
+    func testAForgedUnlinkDoesNotWithdrawAGenuinePendingTransfer() async throws {
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            let ids = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            try await unlinkText(h)
+            let holder = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.oldLink.uuid, on: h.db))
+            XCTAssertNotNil(holder.suspendedAt, "the holder's link is paused")
+            XCTAssertEqual(holder.state, "verified")
+            let pending = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: h.db))
+            XCTAssertEqual(pending.state, "pending_transfer", "a text from the number's phone does not cancel the waiting claim")
+            let withdrawn = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.transfer_withdrawn_by_text").count()
+            XCTAssertEqual(withdrawn, 0)
+            // The claim still follows the normal rule: nothing moves until the holder's app showed the notice, and Keep still works.
+            oldOwner = try await h.login(oldOwner)
+            let list = try await notices(h, oldOwner)
+            let notice = try XCTUnwrap(list.first { $0.topic == .phoneTransferRequested })
+            h.clock.advance(by: 72 * 3600 + 1)
+            try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 0, "not seen: the number stays")
+            try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
+            try await eq(try await PhoneLinkService(db: h.db, ctx: h.ctx).completeTransfers(), 1)
+            newOwner = try await h.login(newOwner)
+            let moved = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: h.db))
+            XCTAssertEqual(moved.state, "verified")
+        }
+    }
+
+    /// An induced `pending_transfer` row counted toward the churn cap, so the holder's own resume text right after a forged UNLINK was refused
+    /// for up to a day. The holder's text creates no row, so it never meets the cap.
+    func testTheHoldersResumeTextIsNotRefusedByTheChurnLimitAfterAForgedUnlink() async throws {
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            let ids = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            // Two verified-or-waiting links of the number now exist inside the week: the cap is reached for any *new* link.
+            try await unlinkText(h)
+            oldOwner = try await h.login(oldOwner)
+            let again = try await h.beginPhoneLink(oldOwner, phone: phone).json(PhoneLinkMOBeginResponse.self)
+            try await h.textViadere(from: phone, again.prefill)
+            let resumed = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.oldLink.uuid, on: h.db))
+            XCTAssertNil(resumed.suspendedAt, "the holder is back without waiting for the churn window")
+            let refused = try await AuditEventRecord.query(on: h.db).filter(\.$action == "phone_link.mo_refused").all()
+            XCTAssertTrue(refused.isEmpty, "no refusal was recorded for the holder")
+            // A *new* account's link is still bound by the cap.
+            let third = try await h.readyConsumer(name: "Third")
+            let begin = try await h.beginPhoneLink(try await h.login(third), phone: phone).json(PhoneLinkMOBeginResponse.self)
+            try await h.textViadere(from: phone, begin.prefill)
+            let capped = try await PhoneLinkRecord.find(begin.phoneLinkId.uuid, on: h.db)
+            XCTAssertNil(capped, "the churn cap still applies to a link for another account")
+        }
+    }
+
+    // MARK: R-9: wording that does not steer the holder toward the one step that frees the number
+
+    func testTheUnlinkNoticeLeadsWithLinkingAgainAndSaysRemovingFreesTheNumber() {
+        for body in [SecurityNotices.Notice.phoneUnlinked.body] {
+            let lower = body.lowercased()
+            let link = lower.range(of: "link it again")
+            let remove = lower.range(of: "remov")
+            XCTAssertNotNil(link, body)
+            XCTAssertNotNil(remove, body)
+            if let link, let remove { XCTAssertLessThan(link.lowerBound, remove.lowerBound, "linking again comes first: \(body)") }
+            XCTAssertTrue(lower.contains("free") || lower.contains("release"), "says what removing does: \(body)")
+            XCTAssertFalse(lower.contains("remove it in viadere settings"), body)
+            XCTAssertFalse(body.contains("!"), body)
+        }
+    }
+
+    // MARK: R-9: a device in cool-down cannot mark a notice seen
+
+    /// "Seen" is the condition that lets a transfer complete, so it is not a harmless record. A device still in cool-down (for example one enrolled
+    /// by someone who took the account over through recovery) can Keep, but its report does not count; a trusted device's does.
+    func testADeviceInCoolDownCannotMarkTheTransferNoticeSeen() async throws {
+        try await withHarness { h in
+            let oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            let ids = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            let service = PhoneLinkService(db: h.db, ctx: h.ctx)
+            let coolingPhone = try await h.enrollDevice(try await h.login(oldOwner), name: "Unapproved phone")
+            let device = try await XCTUnwrapAsync(await DeviceRecord.find(coolingPhone.device!.id.uuid, on: h.db))
+            XCTAssertFalse(device.isTrusted(at: h.clock.now()), "precondition: the device is in cool-down")
+            let list = try await notices(h, coolingPhone)
+            let notice = try XCTUnwrap(list.first { $0.topic == .phoneTransferRequested })
+            _ = try await markSeen(h, coolingPhone, notice)
+            func fetchedAt() async throws -> Date? {
+                try await XCTUnwrapAsync(await SecurityNoticeRecord.find(notice.id, on: h.db)).fetchedAt
+            }
+            let afterCoolDown = try await fetchedAt()
+            XCTAssertNil(afterCoolDown, "a device in cool-down cannot say the holder saw the notice")
+            h.clock.advance(by: 72 * 3600 + 1)
+            try await eq(try await service.completeTransfers(), 0, "the number stays with the holder")
+            try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
+            // The holder's trusted phone shows it: that counts.
+            try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
+            let afterTrusted = try await fetchedAt()
+            XCTAssertNotNil(afterTrusted)
+            try await eq(try await service.completeTransfers(), 1)
+            _ = ids
+        }
+    }
+
+    // MARK: R-10: the lease never gates the P-class sweep
+
+    /// F-3 isolated the challenge sweep from every other task so a failure elsewhere never skips it. The lease sat in front of it: a lease that is
+    /// taken (or a lease table that fails, or a row written by an instance whose clock runs ahead) skipped the sweep too.
+    func testTheChallengeSweepRunsEvenWhenTheMinuteLeaseIsTaken() async throws {
+        try await withHarness { h in
+            let consumer = try await h.readyConsumer()
+            _ = try await h.beginPhoneLink(consumer, phone: phone)
+            try await eq(try await PhoneLinkMOChallengeRecord.query(on: h.db).count(), 1)
+            h.clock.advance(by: 3600)
+            let other = UUID()
+            try await eq(try await JobLease.acquire(BackgroundJobs.minuteLease, holder: other, ttl: 50, on: h.db, now: h.clock.now()), true)
+            try await BackgroundJobs(app: h.app).run(.minute)
+            try await eq(try await PhoneLinkMOChallengeRecord.query(on: h.db).count(), 0, "an expired challenge is gone although another run holds the lease")
+        }
+    }
+
     // MARK: R-2: PostgreSQL concurrency
 
     private func requirePostgres() throws {
@@ -319,9 +444,41 @@ final class PhoneLinkHardeningTests: XCTestCase {
         }
     }
 
-    /// A Keep that commits while the job already decided to move the number must win. The transaction below plays Keep: it takes the number's
-    /// row locks (as `keep` does), holds them, revokes the pending row, and commits late. `completeTransfers` started in the meantime must wait
-    /// for it and then see the revoked row, not overwrite it with `verified`.
+    /// Two databases on **different event loops**. Each event loop's pool holds its own connection, so these are two PostgreSQL sessions; two
+    /// handles of the same loop (what `h.db` gives, captured once) share one connection and make a race test vacuous (R-6). The back-end process
+    /// ids are compared, so the premise of every race test below is itself asserted.
+    private func twoConnections(_ h: TestHarness) async throws -> (first: any Database, second: any Database) {
+        let loops = Array(h.app.eventLoopGroup.makeIterator())
+        try XCTSkipIf(loops.count < 2, "needs an event loop group with at least two loops")
+        let first = try XCTUnwrap(h.app.databases.database(.psql, logger: h.app.logger, on: loops[0]))
+        let second = try XCTUnwrap(h.app.databases.database(.psql, logger: h.app.logger, on: loops[1]))
+        func pid(_ db: any Database) async throws -> Int {
+            let sql = try XCTUnwrap(db as? any SQLDatabase)
+            return try await XCTUnwrapAsync(await sql.raw("SELECT pg_backend_pid() AS pid").first(decodingColumn: "pid", as: Int.self))
+        }
+        let (a, b) = (try await pid(first), try await pid(second))
+        XCTAssertNotEqual(a, b, "the two handles must be two PostgreSQL connections, otherwise the race test proves nothing")
+        return (first, second)
+    }
+
+    /// Plays one side of a race: a transaction on its own connection that takes the number's row locks (as every real decision about a number
+    /// does), holds them for a while, runs `work` and commits late. The caller starts the other side meanwhile.
+    private func lateTransaction(on db: any Database, phoneHash: String, holding: LockedFlag, committed: LockedFlag,
+                                 _ work: @escaping @Sendable (any Database) async throws -> Void) -> Task<Void, any Error> {
+        Task {
+            try await db.transaction { tx in
+                try await PhoneLinkService.lockNumber(phoneHash: phoneHash, on: tx)
+                holding.set()
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                try await work(tx)
+                committed.set()
+            }
+        }
+    }
+
+    /// A Keep that commits while the job already decided to move the number must win. The Keep side runs on one connection and the job on
+    /// another, so the job really has to wait for the Keep's row lock; with `lockNumber` removed from `completeTransfers` this test fails (the
+    /// job moves the number first and the late Keep write is then lost or overwritten).
     func testOnPostgresAKeepThatCommitsWhileTheJobRunsIsNeverUndone() async throws {
         try requirePostgres()
         try await withHarness { h in
@@ -333,33 +490,66 @@ final class PhoneLinkHardeningTests: XCTestCase {
             let notice = try XCTUnwrap(noticeAll.first { $0.topic == .phoneTransferRequested })
             try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
             h.clock.advance(by: 72 * 3600 + 1)
-            let (db, ctx) = (h.db, h.ctx)
+            let (keeperDB, jobDB) = try await twoConnections(h)
+            let ctx = h.ctx
             let phoneHash = ctx.hasher.phoneHash(PhoneNumber(phone)!)
             let committed = LockedFlag()
             let holding = LockedFlag()
-            let keeper = Task {
-                try await db.transaction { tx in
-                    try await PhoneLinkService.lockNumber(phoneHash: phoneHash, on: tx)
-                    holding.set()
-                    try await Task.sleep(nanoseconds: 1_500_000_000)
-                    try await PhoneLinkRecord.query(on: tx).filter(\.$id == ids.pending.uuid).set(\.$state, to: "revoked").update()
-                    committed.set()
-                }
+            let keeper = lateTransaction(on: keeperDB, phoneHash: phoneHash, holding: holding, committed: committed) { tx in
+                try await PhoneLinkRecord.query(on: tx).filter(\.$id == ids.pending.uuid).set(\.$state, to: "revoked").update()
             }
             while !holding.value { try await Task.sleep(nanoseconds: 20_000_000) }
-            let moved = try await PhoneLinkService(db: db, ctx: ctx).completeTransfers()
+            let moved = try await PhoneLinkService(db: jobDB, ctx: ctx).completeTransfers()
             XCTAssertTrue(committed.value, "the job waited for the Keep transaction instead of racing it")
             try await keeper.value
             XCTAssertEqual(moved, 0)
-            let kept = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.oldLink.uuid, on: db))
+            let kept = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.oldLink.uuid, on: keeperDB))
             XCTAssertEqual(kept.state, "verified")
-            let pending = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: db))
+            let pending = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: keeperDB))
             XCTAssertEqual(pending.state, "revoked", "a committed Keep is not set back to verified")
             try await eq(try await h.gatewayConsumer(phone), oldOwner.id)
         }
     }
 
-    /// The same with UNLINK: a suspension committed during a transfer run is not undone and the number does not move to a requester.
+    /// UNLINK against the job on two connections (R-6 asked for the case). Unlike Keep, an UNLINK no longer rewrites the state of a waiting claim
+    /// (R-8), so a stale job cannot undo it; whether or not the lock is there, the job's first write waits for the UNLINK's row locks. This test pins the
+    /// outcome of that interleaving: the paused holder is the one that held the number, the waiting claim is not withdrawn, the number moves exactly
+    /// once and the new owner's link is not paused. It was checked to stay green with `lockNumber` removed from `completeTransfers`; the Keep test
+    /// above is the one that fails without the lock.
+    func testOnPostgresAnUnlinkThatCommitsWhileTheJobRunsPausesTheHolderNotTheNewOwner() async throws {
+        try requirePostgres()
+        try await withHarness { h in
+            var oldOwner = try await h.readyConsumer(name: "Old")
+            var newOwner = try await h.readyConsumer(name: "New")
+            let ids = try await pendingTransfer(h, oldOwner: oldOwner, newOwner: &newOwner)
+            oldOwner = try await h.login(oldOwner)
+            let noticeAll = try await notices(h, oldOwner)
+            let notice = try XCTUnwrap(noticeAll.first { $0.topic == .phoneTransferRequested })
+            try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
+            h.clock.advance(by: 72 * 3600 + 1)
+            let (unlinkDB, jobDB) = try await twoConnections(h)
+            let ctx = h.ctx
+            let number = PhoneNumber(phone)!
+            let phoneHash = ctx.hasher.phoneHash(number)
+            let committed = LockedFlag()
+            let holding = LockedFlag()
+            let unlinker = lateTransaction(on: unlinkDB, phoneHash: phoneHash, holding: holding, committed: committed) { tx in
+                try await PhoneLinkService(db: unlinkDB, ctx: ctx).unlink(number: number, indicator: .unsupported, on: tx)
+            }
+            while !holding.value { try await Task.sleep(nanoseconds: 20_000_000) }
+            let moved = try await PhoneLinkService(db: jobDB, ctx: ctx).completeTransfers()
+            XCTAssertTrue(committed.value, "the job waited for the UNLINK transaction instead of racing it")
+            try await unlinker.value
+            XCTAssertEqual(moved, 1, "an UNLINK does not withdraw the genuine waiting transfer (R-8)")
+            let old = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.oldLink.uuid, on: unlinkDB))
+            XCTAssertNotNil(old.suspendedAt, "the UNLINK paused the holder it found")
+            let new = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: unlinkDB))
+            XCTAssertEqual(new.state, "verified")
+            XCTAssertNil(new.suspendedAt, "the new owner's link was not paused by a text that arrived before the transfer")
+        }
+    }
+
+    /// Keep through the real endpoint and the job together always leave one consistent outcome, each job on its own connection.
     func testOnPostgresRealKeepAndTheJobRunTogetherAlwaysLeaveOneConsistentOutcome() async throws {
         try requirePostgres()
         try await withHarness { h in
@@ -372,13 +562,15 @@ final class PhoneLinkHardeningTests: XCTestCase {
             try await eq(try await markSeen(h, oldOwner, notice).status, .ok)
             h.clock.advance(by: 72 * 3600 + 1)
             oldOwner = try await h.login(oldOwner)  // the earlier session expired while the clock moved past the 72-hour window
-            let (db, ctx) = (h.db, h.ctx)
+            let (db1, db2) = try await twoConnections(h)
+            let ctx = h.ctx
             let owner = oldOwner
-            async let job: Int = PhoneLinkService(db: db, ctx: ctx).completeTransfers()
+            async let job: Int = PhoneLinkService(db: db1, ctx: ctx).completeTransfers()
             async let keep: HTTPResult = h.signedPost(owner, "/v1/phone-links/\(ids.oldLink)/keep", EmptyBody())
-            async let job2: Int = PhoneLinkService(db: db, ctx: ctx).completeTransfers()
+            async let job2: Int = PhoneLinkService(db: db2, ctx: ctx).completeTransfers()
             let (moved1, keepResult, moved2) = try await (job, keep, job2)
             XCTAssertTrue([HTTPResponseStatus.ok, .notFound].contains(keepResult.status), "Keep either won or found the number already moved: \(keepResult.text)")
+            let db = db1
             let holders = try await PhoneLinkRecord.query(on: db).filter(\.$verifiedPhoneHash == ctx.hasher.phoneHash(PhoneNumber(phone)!)).all()
             XCTAssertEqual(holders.count, 1, "exactly one holder")
             let pending = try await XCTUnwrapAsync(await PhoneLinkRecord.find(ids.pending.uuid, on: db))

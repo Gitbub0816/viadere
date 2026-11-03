@@ -183,7 +183,7 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | | Button | Copy text |
 | S-PH-07 | In-app notice to the current owner of a number (ADR-0027 §1.3) | Someone asked to link {masked number} to another Viadere account. If that number is still yours, keep it. |
 | | Buttons | Keep my number · Let it go |
-| S-PH-08 | Number unlinked by UNLINK | Your phone number was unlinked by a text from that number. |
+| S-PH-08 | Number paused by UNLINK (in-app notice; ADR-0027 §1.5 rev 5, R-8/R-9). Leads with the safe step; never invites removal, which frees the number | Someone texted UNLINK from your phone number, so Viadere paused it. If this wasn't you, link it again in Viadere with a text from that phone. If you remove it instead, the number is free for another account to link. |
 | SMS-01 | Gateway "get Viadere" (on-ramp) | Get the Viadere app to connect with businesses: https://{domain}/get |
 | SMS-02 | MT notice after a valid MO | Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages. |
 | SMS-03 | Reply to UNLINK | Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app. |
