@@ -18,7 +18,7 @@ struct AuthDeliveryDeviceService {
     }
 
     func record(_ id: AuthDeliveryID, principal: ConsumerPrincipal) async throws -> AuthDeliveryRecord {
-        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db), row.consumerId == principal.consumerId.uuid else { throw APIError.notFound }
+        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db), row.consumerId == principal.consumerId.uuid, !row.isPushApproval else { throw APIError.notFound }
         return row
     }
 
@@ -42,6 +42,7 @@ struct AuthDeliveryDeviceService {
     func list(principal: ConsumerPrincipal) async throws -> [AuthDeliveryDisplay] {
         _ = try await requireDevice(principal)
         let rows = try await AuthDeliveryRecord.query(on: db).filter(\.$consumerId == principal.consumerId.uuid).filter(\.$expiresAt > ctx.now)
+            .filter(\.$method != PushApprovalDelivery.method)
             .filter(\.$status ~~ [AuthDeliveryStatus.queued.rawValue, AuthDeliveryStatus.sent.rawValue, AuthDeliveryStatus.delivered.rawValue])
             .sort(\.$createdAt, .descending).limit(50).all()
         var out: [AuthDeliveryDisplay] = []

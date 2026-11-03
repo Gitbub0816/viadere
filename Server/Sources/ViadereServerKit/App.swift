@@ -117,6 +117,15 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     // Rate limits: the shared database store (global across instances) unless memory is requested (development, tests).
     let rateStore: any RateLimitStore = overrides.rateLimitStore
         ?? (config.rateLimitStore == .database ? DatabaseRateLimitStore.forApplication(app) : InMemoryRateLimitStore())
+    // The authority interface (OIDC front end): only when the flag is on; otherwise every OIDC route is 404 and nothing connects.
+    if let transport = overrides.authorityTransport {
+        guard !config.isStrict else { throw ServerConfigError.invalid("an authority transport override in staging or production") }
+        app.authorityTransport = transport
+    } else if config.oidc.enabled, let url = config.oidc.authorityURL, let audience = config.oidc.authorityAudience,
+              let identity = AzureManagedIdentity.fromEnvironment(ProcessInfo.processInfo.environment) {
+        app.authorityTransport = HTTPAuthorityTransport(baseURL: url, audience: audience, tokens: identity, http: StandaloneOutboundHTTP(guard: .fromEnvironment()))
+    }
+    _ = app.oidcVerificationKeys
     app.ctx = ServerContext(config: config, clock: clock, apns: apns, sms: sms, passkeys: passkeys, webhookTransport: transport,
                             rateLimitStore: rateStore, rcs: rcs,
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
@@ -232,6 +241,8 @@ public struct Overrides: Sendable {
     public var brandAssetStore: (any ObjectStore)?
     /// Authority-published tenant destination keys (ADR-0031). `nil` = none known (business-mode magic links fail closed until Stage 6).
     public var tenantDestinationKeys: (any TenantDestinationKeyDirectory)?
+    /// The private authority (ADR-0019 §4). `nil` = HTTPS to `AUTHORITY_URL` with a managed-identity token when OIDC is on; tests run the authority in process.
+    public var authorityTransport: (any AuthorityTransport)?
 
     public init(clock: (any ServerClock)? = nil, apns: (any APNsSender)? = nil, sms: (any SMSProvider)? = nil,
                 passkeys: (any PasskeyVerifier)? = nil, webhookTransport: (any WebhookTransport)? = nil,

@@ -49,7 +49,8 @@ struct AuthDeliveryService {
 
     /// The tenant's own delivery, or `404` (the same body for an unknown and for another tenant's id; the cross-tenant attempt is audited).
     func record(id: AuthDeliveryID, principal: BusinessPrincipal) async throws -> AuthDeliveryRecord {
-        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db) else { throw APIError.notFound }
+        // A mirrored `push_approval` row is read through `/v1/business/auth-approvals`, never through the delivery routes.
+        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db), !row.isPushApproval else { throw APIError.notFound }
         guard row.businessId == principal.businessId.uuid, row.livemode == principal.livemode else {
             if row.businessId != principal.businessId.uuid {
                 _ = try? await AuditService(db: db, ctx: ctx).record("auth_delivery.cross_tenant_refused", outcome: .denied,
@@ -329,8 +330,9 @@ struct AuthDeliveryService {
     func sweep() async throws -> Int {
         let now = ctx.now
         var changed = 0
+        // `push_approval` rows follow their Approve request (its expiry job), never this sweep.
         let due = try await AuthDeliveryRecord.query(on: db).filter(\.$status !~ AuthDeliveryStatus.allCases.filter(\.isTerminal).map(\.rawValue))
-            .filter(\.$expiresAt <= now).limit(500).all()
+            .filter(\.$method != PushApprovalDelivery.method).filter(\.$expiresAt <= now).limit(500).all()
         for row in due where try await expireIfDue(row) { changed += 1 }
         // P class: a secret never outlives its delivery (terminal, or past its own expiry).
         let expiredSecrets = try await AuthDeliverySecretRecord.query(on: db).filter(\.$expiresAt <= now).all()
@@ -381,6 +383,7 @@ struct AuthDeliveryGrouping {
         if row.purposeValue == .signIn, let handle {
             let open = try await AuthDeliveryRecord.query(on: db).filter(\.$businessId == row.businessId).filter(\.$consumerId == row.consumerId)
                 .filter(\.$purpose == AuthDeliveryPurpose.signIn.rawValue).filter(\.$sessionHandle == handle).filter(\.$id != row.id!)
+                .filter(\.$method != PushApprovalDelivery.method)
                 .filter(\.$status ~~ [AuthDeliveryStatus.queued.rawValue, AuthDeliveryStatus.sent.rawValue, AuthDeliveryStatus.delivered.rawValue]).all()
             for older in open { _ = try await AuthDeliveryService(db: db, ctx: ctx).transition(older, to: .cancelled, by: .api, reason: "superseded") }
         }
@@ -391,7 +394,7 @@ struct AuthDeliveryGrouping {
     /// operators, and does so at most once per group per hour. Never a refusal.
     func pressure(_ row: AuthDeliveryRecord) async throws {
         let open = try await AuthDeliveryRecord.query(on: db).filter(\.$businessId == row.businessId).filter(\.$consumerId == row.consumerId)
-            .filter(\.$expiresAt > ctx.now)
+            .filter(\.$expiresAt > ctx.now).filter(\.$method != PushApprovalDelivery.method)
             .filter(\.$status ~~ [AuthDeliveryStatus.queued.rawValue, AuthDeliveryStatus.sent.rawValue, AuthDeliveryStatus.delivered.rawValue]).count()
         guard open > MatchGroupPolicy.pressureThreshold,
               await ctx.limiter.allow("authdl-pressure", key: "\(row.businessId)|\(row.consumerId)", rule: .perHour(1, burst: 1)) else { return }

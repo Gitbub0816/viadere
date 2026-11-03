@@ -250,6 +250,57 @@ final class AuthApprovalTests: XCTestCase {
         }
     }
 
+    // MARK: The `push_approval` auth-delivery record (ADR-0022 §1, Stage 6)
+
+    func testEveryAuthApprovalHasAPushApprovalDeliveryRecordThatMirrorsIt() async throws {
+        try await withHarness { h in
+            let f = try await h.approveFixture()
+            func row(_ requestId: String) async throws -> AuthDeliveryRecord {
+                let approval = try unwrap(try await ApproveRequestRecord.query(on: h.db).filter(\.$requestId == requestId).first())
+                return try unwrap(try await AuthDeliveryRecord.find(approval.id!, on: h.db))
+            }
+            func events(_ record: AuthDeliveryRecord) async throws -> [String] {
+                try await AuthDeliveryEventRecord.query(on: h.db).filter(\.$deliveryId == record.id!).sort(\.$at).all().map(\.status)
+            }
+            // Approved: sent -> completed.
+            let approved = self.body(f, code: "41")
+            aeq(try await self.create(h, f, approved).status, .created)
+            var record = try await row(approved.requestId)
+            aeq(record.method, "push_approval")
+            aeq(record.status, "sent")
+            aeq(record.requestId, "push_approval#" + approved.requestId)
+            aeq(record.channels, "push")
+            let device = try unwrap(try await h.pendingRequests(f.phone.consumer).first { $0.requestId == approved.requestId })
+            aeq(try await h.submit(f.phone, deliveryId: device.id, result: try await self.answer(h, f, device, match: "41")).status, .ok)
+            record = try await row(approved.requestId)
+            aeq(record.status, "completed")
+            XCTAssertNotNil(record.endedAt)
+            aeq(try await events(record), ["created", "sent", "completed"])
+
+            // Internal in this stage: not in the device inbox, not readable or cancellable through the delivery routes, never swept by the delivery expiry.
+            let id = AuthDeliveryID(record.id!)
+            aeq(try await h.business(f.business, .GET, "/v1/business/auth-deliveries/\(id)").status, .notFound)
+            let inboxResult = try await h.signed(f.phone.consumer, .GET, "/v1/auth-deliveries")
+            XCTAssertEqual(inboxResult.status, .ok, inboxResult.text)
+            XCTAssertTrue(try inboxResult.json([AuthDeliveryDisplay].self).isEmpty)
+            aeq(try await h.signed(f.phone.consumer, .GET, "/v1/auth-deliveries/\(id)").status, .notFound)
+            // Reduce-only deny: denied. Expiry: expired.
+            let denied = self.body(f, code: "52")
+            aeq(try await self.create(h, f, denied).status, .created)
+            let deniedDevice = try unwrap(try await h.pendingRequests(f.phone.consumer).first { $0.requestId == denied.requestId })
+            aeq(try await h.signedPost(f.phone.consumer, "/v1/approve/requests/\(deniedDevice.id.uuidString.lowercased())/deny", ApproveDenyRequest()).status, .ok)
+            aeq(try await row(denied.requestId).status, "denied")
+            let expiring = self.body(f, code: "63")
+            aeq(try await self.create(h, f, expiring).status, .created)
+            h.clock.advance(by: 3600)
+            _ = try await ApproveRequestService(db: h.db, ctx: h.ctx).expireDue()
+            aeq(try await row(expiring.requestId).status, "expired")
+
+            // A request created through the plain Approve API gets no mirror row.
+            aeq(try await AuthDeliveryRecord.query(on: h.db).filter(\.$method == "push_approval").count(), 3)
+        }
+    }
+
     func testApprovePushPolicyRejectsTimeSensitiveAndBusinessText() {
         let good: [String: Any] = ["aps": ["alert": ["title": "Viadere", "body": "Action needed."], "category": "viadere.approve", "interruption-level": "active",
                                           "mutable-content": 1], "req": UUID().uuidString.lowercased()]

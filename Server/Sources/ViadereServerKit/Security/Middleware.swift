@@ -43,7 +43,13 @@ public struct RequestGuardMiddleware: AsyncMiddleware {
                 || request.headers.first(name: .transferEncoding) != nil
             // The dashboard and operator console post HTML forms; everything else is JSON-only.
             let isWebForm = request.url.path.hasPrefix(APIRoutes.Web.dashboardPrefix + "/") || request.url.path.hasPrefix(APIRoutes.Web.operatorPrefix + "/")
-            if hasBody && isWebForm {
+            // The OIDC browser pages and the token endpoint (RFC 6749 §4.1.3) take form encoding only (ADR-0024).
+            let isOIDCForm = request.url.path.hasPrefix(OIDCFrontEnd.pathPrefix)
+            if hasBody && isOIDCForm {
+                guard let type = request.headers.contentType, type.type == "application", type.subType == "x-www-form-urlencoded" else {
+                    throw APIError(.unsupportedMediaType, .badRequest, "Content-Type must be application/x-www-form-urlencoded.")
+                }
+            } else if hasBody && isWebForm {
                 // Multipart only on the one upload route (brand images, WP-2.2).
                 let multipartAllowed = request.url.path == ConsoleBrandStudio.uploadPath
                 guard let type = request.headers.contentType, (type.type == "application" && (type.subType == "json" || type.subType == "x-www-form-urlencoded"))

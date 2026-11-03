@@ -168,30 +168,6 @@ public struct VaporWebhookTransport: WebhookTransport {
     }
 
     static func resolve(host: String, port: Int) async throws -> [SocketAddress] {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                var hints = addrinfo()
-                hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
-                var result: UnsafeMutablePointer<addrinfo>?
-                guard getaddrinfo(host, String(port), &hints, &result) == 0, let first = result else {
-                    continuation.resume(throwing: WebhookTransportError.network)
-                    return
-                }
-                defer { freeaddrinfo(result) }
-                var out: [SocketAddress] = []
-                var cursor: UnsafeMutablePointer<addrinfo>? = first
-                while let info = cursor {
-                    if let addr = info.pointee.ai_addr {
-                        if info.pointee.ai_family == AF_INET {
-                            addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { out.append(SocketAddress($0.pointee, host: host)) }
-                        } else if info.pointee.ai_family == AF_INET6 {
-                            addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { out.append(SocketAddress($0.pointee, host: host)) }
-                        }
-                    }
-                    cursor = info.pointee.ai_next
-                }
-                continuation.resume(returning: out)
-            }
-        }
+        do { return try await HostResolver.resolve(host: host, port: port) } catch { throw WebhookTransportError.network }
     }
 }

@@ -84,7 +84,7 @@ struct TokenAuthPostgresConfiguration: DatabaseConfiguration {
 
 extension DatabaseConfigurationFactory {
     /// PostgreSQL whose connections authenticate with a fresh password (an Entra token) each.
-    static func postgresTokenAuth(_ source: TokenAuthPostgresConnectionSource) -> DatabaseConfigurationFactory {
+    public static func postgresTokenAuth(_ source: TokenAuthPostgresConnectionSource) -> DatabaseConfigurationFactory {
         .init { TokenAuthPostgresConfiguration(source: source) }
     }
 }

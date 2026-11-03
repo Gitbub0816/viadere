@@ -145,6 +145,7 @@ struct AuthApprovalService {
             guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
             try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil)
                 .set(\.$denyReason, to: report ? ApprovalDenyReason.notMe.rawValue : nil).update()
+            try await PushApprovalDelivery.mirror(on: tx, approvalId: request.id!, status: status, reason: "device_deny", actor: .device, now: now)
             try await AuthMatchGroups(db: tx, ctx: ctx).release(refId: request.id!)
             guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
             try await ApproveWebhooks(db: tx, ctx: ctx).requestDecided(decided)

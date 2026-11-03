@@ -182,6 +182,8 @@ public struct ServerConfig: Sendable {
     public var approve = ApproveSettings()
     /// Authentication delivery (ADR-0020; `AUTH_DELIVERY_ENABLED`, default off in staging and production).
     public var authDelivery = AuthDeliverySettings()
+    /// The staging OpenID provider front end (ADR-0024; `OIDC_PROVIDER_ENABLED`, off by default, refused in production).
+    public var oidc = OIDCProviderSettings()
     /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).
     public var verify = VerifySettings()
     /// Hosted Loops (WP-3.2..3.5): the `loop-publication` signing key and runtime limits.
@@ -384,6 +386,7 @@ public struct ServerConfig: Sendable {
         config.applyVaultEnvironment(env)
         try config.applyApproveEnvironment(env, production: production)
         try config.applyAuthDeliveryEnvironment(env, production: production)
+        try config.applyOIDCEnvironment(env, environment: environment)
         try config.applyLoopEnvironment(env, production: production)
         try config.applyVerifyEnvironment(env, production: production)
         try config.applyOperationsEnvironment(env, production: production)

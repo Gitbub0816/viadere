@@ -7,6 +7,8 @@ let package = Package(
     products: [
         .executable(name: "ViadereServer", targets: ["ViadereServer"]),
         .library(name: "ViadereServerKit", targets: ["ViadereServerKit"]),
+        // The private grant/OIDC authority (ADR-0019 §2): its own executable and image; it never links ViadereServerKit.
+        .executable(name: "ViadereAuthority", targets: ["ViadereAuthority"]),
     ],
     dependencies: [
         .package(path: "../Packages/ViadereCore"),
@@ -31,9 +33,23 @@ let package = Package(
         .package(url: "https://github.com/tayloraswift/swift-jpeg.git", from: "2.1.0"),
     ],
     targets: [
+        // Shared by the ordinary server and the authority: KMS, Azure managed identity, Key Vault, outbound guard, token-auth PostgreSQL.
+        .target(
+            name: "ViadereServiceSupport",
+            dependencies: [
+                .product(name: "ViadereCore", package: "ViadereCore"),
+                .product(name: "Vapor", package: "vapor"),
+                .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+            ]
+        ),
         .target(
             name: "ViadereServerKit",
             dependencies: [
+                "ViadereServiceSupport",
                 .product(name: "ViadereCore", package: "ViadereCore"),
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "Fluent", package: "fluent"),
@@ -55,11 +71,42 @@ let package = Package(
             name: "ViadereServer",
             dependencies: ["ViadereServerKit"]
         ),
+        // ADR-0019 §2: ViadereCore, Vapor, Fluent + PostgreSQL, swift-crypto, async-http-client (through ViadereServiceSupport). No APNs, email,
+        // SMS, Wallet, Didit or Service Bus code. SQLite only for development and tests (refused in staging and production by the config).
+        .target(
+            name: "ViadereAuthorityKit",
+            dependencies: [
+                "ViadereServiceSupport",
+                .product(name: "ViadereCore", package: "ViadereCore"),
+                .product(name: "Vapor", package: "vapor"),
+                .product(name: "Fluent", package: "fluent"),
+                .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
+                .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+            ]
+        ),
+        .executableTarget(
+            name: "ViadereAuthority",
+            dependencies: ["ViadereAuthorityKit"]
+        ),
+        .testTarget(
+            name: "ViadereAuthorityKitTests",
+            dependencies: [
+                "ViadereAuthorityKit",
+                "ViadereServiceSupport",
+                .product(name: "XCTVapor", package: "vapor"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+            ]
+        ),
         .testTarget(
             name: "ViadereServerKitTests",
             dependencies: [
                 "ViadereServerKit",
                 .product(name: "ViadereKit", package: "ViadereKit"),
+                // End-to-end OIDC tests run the authority in process behind the api's authority client (never linked into the api itself).
+                "ViadereAuthorityKit",
                 .product(name: "XCTVapor", package: "vapor"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
