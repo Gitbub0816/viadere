@@ -29,9 +29,11 @@ The other conditions are listed per finding.
 
 ## Findings
 
-Severity scale: Critical / High / Medium / Low / Info. Nothing is fixed in this review (read-only). "Verified" means reproduced with a test or traced line by line.
+Severity scale: Critical / High / Medium / Low / Info. Nothing was fixed in the review itself (read-only); each finding below carries a **Fixes** line with the 2026-11-03 follow-up. "Verified" means reproduced with a test or traced line by line.
 
-### S5-01 — High — OPEN (blocking) — a mixed 2-/3-digit group cannot be approved: cheap lockout of the victim's sign-in
+### S5-01 — High — FIXED — a mixed 2-/3-digit group cannot be approved: cheap lockout of the victim's sign-in
+
+**Fixes:** FIXED 2026-11-03. `NumberMatchRequirement` keeps each candidate's own length (`isWellFormed` checks every code against 2...field, `codeLengths`, `hasMixedLengths`); the field is as long as the longest code; Approve enables for an entry as long as **any** code of the group (`NumberMatcher.isComplete(_:requirement:)`), and a complete entry that matches nothing is the counted wrong entry. Deviation from the suggested "exact 2-digit hit selects": enabling Approve only on a hit would make the button an oracle that tells a guesser the digits without costing a wrong entry, so the button is enabled for any entry of a candidate's length and the comparison happens on tap. The helper line names no digit count for a mixed group. Tests: Kit `NumberMatchMixedGroupTests` (mixed group through `ApproveController`, the signed result and the verifier; approve of each length; wrong entry of each length; auto deny); server ST-MFA-10/11 now select the request with `NumberMatchApprovalViewModel` (`AuthApprovalTests.testCollisionsArePreventedAndTheVictimsRequestIsCompletable`, `AuthApprovalReviewS5Tests.testTheVictimsThreeDigitRequestIsCompletableAfterTheEscalationFromThirtyOpenCodes`; Kit is a test-only dependency of `Server/Package.swift`). SECURITY §2.102 corrected.
 
 - **Where:**
   - `Packages/ViadereKit/Sources/ViadereKit/AuthDelivery/NumberMatchApproval.swift:346` (the group requirement takes `digits = max(...)` over every request);
@@ -55,7 +57,9 @@ Severity scale: Critical / High / Medium / Low / Info. Nothing is fixed in this 
   - Add an end-to-end ST-MFA-11 test that goes through `NumberMatchApprovalViewModel`, not only through the harness signer.
   - Correct the ST-MFA-10/11 claim in SECURITY §2.102 until both tests exist.
 
-### S5-02 — Medium — OPEN (blocking) — a group Deny counts as N denials toward the pause
+### S5-02 — Medium — FIXED — a group Deny counts as N denials toward the pause
+
+**Fixes:** FIXED 2026-11-03. The device submits every result of one group Deny, report or automatic `number_mismatch` deny with one random `answer_group` (`SubmitApprovalResultRequest.answerGroup`, `ApprovalAnswerGroup`, kept for the screen so a retry after a partly sent answer still counts once; an approve carries none). The relay stores it (`approve_requests.answer_group`, migration `ApproveStage5Review.v1`) and `ApproveRequestService.promptRecords` counts distinct groups, and never counts `deny_reason = destination_unverified` (ADR-0022 §5.4). A malformed group id is `422`. Tests: `AuthApprovalReviewS5Tests` (`testOneGroupDenyOfThreeRequestsCountsOnceAndDoesNotPauseTheVictim`, which fails when the relay counts rows; `testWithoutAGroupIdEachDeniedRequestStillCountsAndAMalformedGroupIdIsRefused`; `testAGroupIdOnAnApproveIsIgnoredAndTwoGroupsCountTwice`; `testDestinationUnverifiedDenialsNeverPauseTheCustomer`); Kit `NumberMatchMixedGroupTests` (one group id on every result of a group deny). Limits: a compromised device can mark its own refusals as one group, which only makes its own pause rarer.
 
 - **Where:**
   - `NumberMatchApproval.swift:407` (`ApproveControllerAnswering.answer` signs and submits one result per request in the group);
@@ -69,13 +73,17 @@ Severity scale: Critical / High / Medium / Low / Info. Nothing is fixed in this 
   - Add a server test: 3 open requests, one group Deny, and the next request is **not** auto-denied.
   - Also exclude `deny_reason = destination_unverified` from the refusal count (ADR-0022 §5.4). The api does not count it today: `promptVerdict` ignores `deny_reason`. It is not reachable for approvals yet, because `LiveAuthDeliveryAPI.reduce` refuses it, but the v2 wire allows it.
 
-### S5-03 — Medium — OPEN — `AUTH_NUMBER_MATCHING_REQUIRED` does not exist: the legacy route still creates push approvals without a number
+### S5-03 — Medium — FIXED — `AUTH_NUMBER_MATCHING_REQUIRED` does not exist: the legacy route still creates push approvals without a number
+
+**Fixes:** FIXED 2026-11-03. `AUTH_NUMBER_MATCHING_REQUIRED` (`AuthDeliverySettings.numberMatchingRequired`), default **off** as the task asked (the review text said default on with approvals; ADR-0019 §6 lists it default off). On, `ApproveRequestService.create` without number matching (the legacy route, `auth.challenge` and `transaction.approve` alike, so a payment that the device could only deny is never delivered) answers `422 number_match_required` and stores nothing; `auth-approvals` is unaffected. Listed in `Server/.env.example` and `Infra/azure/terraform.tfvars.example`. Tests: `AuthApprovalReviewS5Tests.testTheLegacyRouteCreatesNumberlessApprovalsWhileTheFlagIsOffAndNothingWhileItIsOn`, `testTheFlagParsesFromTheEnvironmentAndDefaultsOff`.
 
 - **Where:** `ApproveRequestService.create` (the legacy `POST /v1/business/approve/requests` path); no `authNumberMatchingRequired` in `ServerConfig`. ADR-0022 Consequences and ADR-0019 §6 call for the flag ("default on when approvals are on").
 - **Issue:** With `auth-approvals` live, any API key with `approvals:manage` can still create `auth.challenge` approvals through the legacy route with no `number_match`. A fatigue attacker who triggers sign-ins at a business that has not migrated gets prompts with no number at all, so T-MFA-1 holds only by convention. The business-side verifier stays downgrade-proof only if the business passes `.required`. The relay has no policy to refuse a number-less authentication approval.
 - **Required change:** Add the flag (default on whenever `APPROVE_V2_ENABLED` is on). When it is on, the legacy create refuses `auth.challenge` (and `transaction.approve`) without number matching with `422 number_match_required`. Test both settings. Separately, a legacy v1 payment request is now unapprovable on the device, because `requiresNumber` is true for every transaction. That is fail-closed and acceptable, but the legacy route should refuse such a request at create time instead of delivering a prompt that can only be denied.
 
-### S5-04 — Low — OPEN — silence starts at 4 open requests, not "above 6 per hour", and the inbox line is missing
+### S5-04 — Low — FIXED — silence starts at 4 open requests, not "above 6 per hour", and the inbox line is missing
+
+**Fixes:** FIXED 2026-11-03. Auth approvals use the ADR threshold: open requests no longer silence the next one (`ApprovalPromptPolicy.evaluate(limitOpenRequests: false)`); more than 6 in the hour does. `silent` is derived inside the creating transaction under the relationship lock (not from the pre-transaction look), stored (`approve_requests.silent`) and returned as `silent` on the device request; the app lists such a request with INB-01 ("You have a pending sign-in from {Business}", `ApprovalPrompt.inboxLine`, `ApproveSettingsView`). The App views were checked with `swiftc -parse` only. Tests: `AuthApprovalReviewS5Tests.testOpenRequestsDoNotSilenceTheNextOneOnlyMoreThanSixAnHourDo`, `AuthApprovalTests.testOverBudgetRequestsAreCreatedSilently...` (now 6 pushes for 8 creates), Core `openRequestsOnlySilenceTheLegacyRouteNotAuthApprovals`, Kit `aSilentSignInCarriesTheInboxLine`.
 
 - **Where:** `ApproveRequestService.swift:117-118`, `:180`; `ApprovePrompt.swift:63` (`maxPending = 3`).
 - **Issue:**
@@ -84,13 +92,17 @@ Severity scale: Critical / High / Medium / Low / Info. Nothing is fixed in this 
   - `silent` is decided only on the pre-transaction verdict. A concurrent create that is over budget inside the transaction (`:180`) still pushes.
 - **Required change:** Use the ADR threshold for auth approvals, or record the stricter rule in the ADR. Write the inbox item for silent requests. Re-derive `silent` from the in-transaction verdict.
 
-### S5-05 — Low — OPEN — the reduce-only Deny endpoint is gated on `AUTH_DELIVERY_ENABLED`
+### S5-05 — Low — FIXED — the reduce-only Deny endpoint is gated on `AUTH_DELIVERY_ENABLED`
+
+**Fixes:** FIXED 2026-11-03. `approveRequestDeny` is gated on `ApproveGate` alone. Test: `AuthApprovalReviewS5Tests.testTheNotificationDenyWorksWithAuthDeliveryOffAndForLegacyApprovals` (auth delivery off, legacy approval denied from the notification; Approve off is still `404`).
 
 - **Where:** `Server/Sources/ViadereServerKit/Approve/AuthApprovalService.swift:43-46`, used by the `approveRequestDeny` route; `ApproveSupport.pushRequest` puts `req` on **every** Approve v2 push, legacy route included.
 - **Issue:** In an environment with `APPROVE_V2_ENABLED` on and `AUTH_DELIVERY_ENABLED` off, staging builds show Deny on every approval notification (`AuthDeliveryFlags.staging`), but the endpoint answers `404`. Every Lock Screen Deny then fails, and only N-09 is shown. This is the R4-03 failure mode again, in that configuration.
 - **Required change:** Gate the deny endpoint on `ApproveGate` alone, or drop the Deny action unless both flags are on.
 
-### S5-06 — Low — OPEN — wrong-entry counter: keyed by business-chosen `request_id`, pruned by any listing that omits the request, restored asynchronously
+### S5-06 — Low — FIXED — wrong-entry counter: keyed by business-chosen `request_id`, pruned by any listing that omits the request, restored asynchronously
+
+**Fixes:** FIXED 2026-11-03. The counter is keyed `businessId|requestId` (`ApproveRequestHandler.attemptRecorder(for:)`, `ApproveController.attemptRecorder(for:)`); a listing that omits the request no longer prunes it, entries are dropped 30 minutes after the last wrong entry (longer than any request lives) or when a terminal answer was accepted; `ApproveRequestHandler.answer` refuses an approve once the stored count is 3 (`wrong_entry_limit`), whatever the screen shows; the sheet holds Approve off until the stored count is loaded (`holdApproveUntilRestored`). Tests: Kit `NumberMatchStage5Tests` (`theApprovalStorePersistsWrongEntriesPerBusinessAndRequest`, `aListingThatOmitsTheRequestDoesNotResetTheThreeStrikes`, `nothingBelowTheScreenSignsAnApproveAfterThreeWrongEntries`, `approveStaysOffUntilTheStoredCountIsLoaded`). The sheet was checked with `swiftc -parse` only.
 
 - **Where:**
   - `ApproveRequestHandler.swift:95` and `:225` (keys `ApproveLocalState.matchAttempts` by `request_id`);
@@ -106,7 +118,9 @@ Severity scale: Critical / High / Medium / Low / Info. Nothing is fixed in this 
   - Prune only requests whose terminal state was observed (a `410` or `409` from the relay, or expiry), not those merely absent from one listing.
   - Load the count before presenting, and make `ApproveControllerAnswering` / `ApproveRequestHandler.answer` refuse `.approve` when the stored count is at least 3.
 
-### S5-07 — Low — OPEN — missing tests for the claimed controls
+### S5-07 — Low — FIXED — missing tests for the claimed controls
+
+**Fixes:** FIXED 2026-11-03. (1) `AuthApprovalReviewS5Tests.testTwoConcurrentCreatesOfTheSameCodeCannotBothSucceed` (four parallel creates, three rounds: one winner, three `409`); (2) `testTheRelayRequiresAV2ResultWithAMatchOfTheRightLengthForAnEndToEndApproval` (the `relayRequired` path: v1 and a wrong-length `match` refused and counted, the right length accepted); (3) `testTheRelayRegistersEveryAcceptedJtiAndRefusesOneItAlreadyHolds` (the `approval-jti:{business}` store is reached: an accepted result's `jti` is registered, a held `jti` is `409 replay_detected`); (4) `testTheDenyEndpointIsRateLimitedPerDevice`; (5) vectors `v1_result_for_a_request_that_asked_for_none` and `v2_approve_without_match_for_a_request_that_asked_for_none` in `approval-result-v2.json` (Core `theVectorsPinTheCompatibleSideOfTheDowngradeRule`, and the SDK suite reads the same file); (6) see S5-01 and S5-02. The concurrent-create test is the one to read on PostgreSQL.
 
 None of the following is covered by a test today:
 

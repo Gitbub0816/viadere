@@ -154,8 +154,12 @@ final class AuthApprovalTests: XCTestCase {
             XCTAssertEqual(created.status, .created, created.text)
             let extends = try await self.create(h, f, self.body(f, code: "470"))
             XCTAssertEqual(extends.errorCode, .matchCodeInUse, extends.text)
-            // The victim types 47: exactly one open request has it, and approving it supersedes the attacker's (no attacker request is approved).
-            let device = try unwrap(try await h.pendingRequests(f.phone.consumer).first { $0.requestId == victim.requestId })
+            // The victim types 47 on the phone's screen (Stage 5 review S5-01: the open group mixes 20 three-digit codes with the victim's two-digit one, and the screen
+            // logic, not the harness, selects the request): exactly one open request has it, and approving it supersedes the attacker's.
+            let typed = try await h.phoneSelects(f, digits: "47")
+            XCTAssertTrue(typed.canApprove)
+            let device = try XCTUnwrap(typed.selected)
+            aeq(device.requestId, victim.requestId)
             let ok = try await h.submit(f.phone, deliveryId: device.id, result: try await self.answer(h, f, device, match: "47"))
             XCTAssertEqual(ok.status, .ok, ok.text)
             let statuses = try await ApproveRequestRecord.query(on: h.db).filter(\.$businessId == f.business.id.uuid).all()
@@ -180,10 +184,10 @@ final class AuthApprovalTests: XCTestCase {
         try await withHarness { h in
             let f = try await h.approveFixture()
             try await self.registerPush(h, f)
-            // More than the legacy per-customer limits (3 open, 6 per hour): never `429`; the extra ones get no push.
+            // More than 6 requests in an hour (ADR-0022 §5.1; open requests do not count, S5-04): never `429`; the extra ones get no push.
             for i in 0..<8 { aeq(try await self.create(h, f, self.body(f, code: String(11 + i))).status, .created) }
             let pushes = h.push.sent.filter { $0.category == "viadere.approve" }.count
-            XCTAssertEqual(pushes, 3)
+            XCTAssertEqual(pushes, 6)
             // An attacker without the victim's session handle cancels nothing.
             let victim = self.body(f, code: "50", handle: "victim_session_handle_1")
             aeq(try await self.create(h, f, victim).status, .created)

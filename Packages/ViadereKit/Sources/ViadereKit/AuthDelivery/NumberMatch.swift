@@ -3,7 +3,9 @@ import Foundation
 /// What the phone needs to check a typed number (ADR-0022 §2, §5.2 item 2). The phone never displays the codes: they exist only so the
 /// typed entry can be compared. One code per open request of the business in the group; the typed number selects the request.
 public struct NumberMatchRequirement: Sendable, Equatable {
-    /// 2 for sign-in at low or medium risk, 3 for payments, high and critical requests, and whenever the business's request says 3.
+    /// The **field** length: the longest code in the group. Codes of one group may have different lengths (2 for sign-in at low or medium risk, 3 for
+    /// payments, high and critical requests, and for every new request once the api escalates at 30 open requests; ADR-0022 §5.2 item 6), so each
+    /// candidate is checked against its own length, never against this one (Stage 5 review S5-01).
     public var digits: Int
     /// One entry per open request in the group (`requestId`, `code`). Never rendered, never logged.
     public var candidates: [Candidate]
@@ -22,12 +24,19 @@ public struct NumberMatchRequirement: Sendable, Equatable {
         self.candidates = candidates
     }
 
-    /// A well-formed requirement: 2 or 3 digits, every code exactly `digits` ASCII digits without a leading zero, at least one candidate.
+    /// A well-formed requirement: a field of 2 or 3 digits, at least one candidate, and every code 2 or 3 ASCII digits (never longer than the field)
+    /// without a leading zero. A group may mix 2- and 3-digit codes.
     public var isWellFormed: Bool {
         (2...3).contains(digits) && !candidates.isEmpty && candidates.allSatisfy {
-            $0.code.utf8.count == digits && $0.code.utf8.allSatisfy { (0x30...0x39).contains($0) } && $0.code.utf8.first != 0x30
+            (2...digits).contains($0.code.utf8.count) && $0.code.utf8.allSatisfy { (0x30...0x39).contains($0) } && $0.code.utf8.first != 0x30
         }
     }
+
+    /// The distinct code lengths in the group.
+    public var codeLengths: Set<Int> { Set(candidates.map { $0.code.utf8.count }) }
+
+    /// More than one code length in the group: the helper line then names no digit count.
+    public var hasMixedLengths: Bool { codeLengths.count > 1 }
 
     /// Digits required for this request kind (ADR-0022 §2.1): 3 for payments, otherwise whatever the business drew (2 unless escalated).
     public static func digits(forPayment payment: Bool, requested: Int?) -> Int {
@@ -94,6 +103,13 @@ public enum NumberMatcher {
 
     public static func isComplete(_ entry: String, digits: Int) -> Bool {
         entry.utf8.count == digits && entry.utf8.allSatisfy { (0x30...0x39).contains($0) }
+    }
+
+    /// Whether the entry has reached the length of some code of the group (S5-01). It says nothing about whether the digits are right: Approve
+    /// enables for **any** entry of a candidate's length, so the button never reveals a hit and a miss at any length is a counted wrong entry.
+    public static func isComplete(_ entry: String, requirement: NumberMatchRequirement) -> Bool {
+        guard entry.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { return false }
+        return entry.utf8.count == requirement.digits || requirement.codeLengths.contains(entry.utf8.count)
     }
 }
 

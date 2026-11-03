@@ -95,7 +95,11 @@ public struct ApproveLocalState: Codable, Sendable, Equatable {
     public var decisions: [LocalDecision] = []
     /// Wrong number entries per open request id (Stage 4 review R4-02): survives a dismissal and a relaunch, pruned when the request leaves the open set.
     /// Optional so state written by older builds still decodes.
+    /// Keyed `businessId|requestId` (S5-06): `request_id` is unique only per business, so a bare id would share a counter between two businesses.
     public var matchAttempts: [String: Int]?
+    /// When each `matchAttempts` entry was last written. An entry is dropped only after the request it belongs to can no longer be open (S5-06): never because a
+    /// listing happened to omit the request, which a relay could do to reset the three-strikes rule.
+    public var matchAttemptStamps: [String: Date]?
     public init() {}
 
     /// Records a verified tree head **monotonically** (gate finding F4): the stored head only ever moves forward. Two refreshes can verify

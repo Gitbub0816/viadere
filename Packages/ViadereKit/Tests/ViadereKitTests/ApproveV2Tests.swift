@@ -28,6 +28,8 @@ actor FakeRelay: ApproveAPI {
     var keyRevoked = false
     var requests: [ApproveDeviceRequest] = []
     var submitted: [(UUID, String)] = []
+    /// The `answer_group` of each submission, in order (S5-02).
+    var submittedGroups: [String?] = []
     /// Attack switches.
     var substituteKey: SoftwareP256SigningKey?
     var serveHeadSize: Int?
@@ -133,7 +135,11 @@ actor FakeRelay: ApproveAPI {
     func requests() async throws -> [ApproveDeviceRequest] { requests }
     func request(id: UUID) async throws -> ApproveDeviceRequest { requests.first { $0.id == id }! }
     func submitResult(id: UUID, result: String) async throws -> SubmitApprovalResultResponse {
+        try await submitResult(id: id, result: result, appAttestAssertion: nil, answerGroup: nil)
+    }
+    func submitResult(id: UUID, result: String, appAttestAssertion: String?, answerGroup: String?) async throws -> SubmitApprovalResultResponse {
         submitted.append((id, result))
+        submittedGroups.append(answerGroup)
         return SubmitApprovalResultResponse(id: id, status: .approved)
     }
     func freezeState() async throws -> ApproveFreezeState { ApproveFreezeState(entries: []) }

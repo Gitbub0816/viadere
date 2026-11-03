@@ -100,7 +100,7 @@ public final class ApproveController {
     // MARK: Requests
 
     /// Where wrong number entries are persisted per request (R4-02): the approval store behind the request handler.
-    public var attemptRecorder: (any NumberMatchAttemptRecording)? { environment?.requests }
+    public func attemptRecorder(for prompt: ApprovalPrompt) -> (any NumberMatchAttemptRecording)? { environment?.requests.attemptRecorder(for: prompt.key.businessId) }
 
     /// The open prompts of `prompt`'s business that are answered together on one number-match screen (ADR-0022 §5.2 item 2).
     public func numberMatchGroup(for prompt: ApprovalPrompt) -> [ApprovalPrompt] {
@@ -113,12 +113,13 @@ public final class ApproveController {
     /// - Parameter dismissOnSuccess: `false` keeps the sheet up so it can show what happened ("Approved. Your answer was sent to {Business}.",
     ///   shown only after the relay accepted the signed result); the sheet then calls `finishPresented()`.
     @discardableResult
-    public func answer(_ prompt: ApprovalPrompt, _ decision: ApprovalDecision, dismissOnSuccess: Bool = true, numberMatch: ApprovalNumberMatchAnswer? = nil) async -> Bool {
+    public func answer(_ prompt: ApprovalPrompt, _ decision: ApprovalDecision, dismissOnSuccess: Bool = true, numberMatch: ApprovalNumberMatchAnswer? = nil,
+                        answerGroup: String? = nil) async -> Bool {
         guard let env = environment else { return false }
         phase = .working
         defer { phase = .idle }
         do {
-            _ = try await env.requests.answer(prompt, decision: decision, numberMatch: numberMatch)
+            _ = try await env.requests.answer(prompt, decision: decision, numberMatch: numberMatch, answerGroup: answerGroup)
             prompts.removeAll { $0.id == prompt.id }
             if dismissOnSuccess {
                 if presented?.id == prompt.id { presented = nil }

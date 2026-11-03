@@ -25,10 +25,14 @@ struct ApproveRequestSheet: View {
         // R4-04: the number requirement comes from the verified prompts (signed policy), one screen per business group; the typed `match`, the
         // `deny_reason` and the wrong-entry count go inside the signed v2 result. R4-02: wrong entries persist per request in the approval store.
         let group = controller.numberMatchGroup(for: prompt)
-        _model = State(initialValue: NumberMatchApprovalViewModel(
+        // S5-06: the counter is keyed by business and request id, and Approve stays off until the stored count is loaded (`.task` below).
+        let recorder = controller.attemptRecorder(for: prompt)
+        let model = NumberMatchApprovalViewModel(
             context: NumberMatchApprovalContext(group: group),
-            answering: ApproveControllerAnswering(controller: controller, group: group, attempts: controller.attemptRecorder),
-            attempts: controller.attemptRecorder))
+            answering: ApproveControllerAnswering(controller: controller, group: group, attempts: recorder),
+            attempts: recorder)
+        model.holdApproveUntilRestored()
+        _model = State(initialValue: model)
     }
 
     private var isBusy: Bool { model.phase == .submitting || controller.phase == .working }
@@ -77,8 +81,10 @@ struct ApproveRequestSheet: View {
         // After a wrong entry a swipe cannot dismiss: the handle asks "Leave this request?" (R4-02).
         .interactiveDismissDisabled(isBusy || model.confirmsBeforeLeaving)
         .task {
-            if let recorder = controller.attemptRecorder {
+            if let recorder = controller.attemptRecorder(for: prompt) {
                 model.restoreWrongEntries(await recorder.wrongEntries(requestIds: model.context.groupRequestIds))
+            } else {
+                model.restoreWrongEntries(0)
             }
         }
         .onChange(of: capture.isCaptured, initial: true) { _, captured in model.isScreenCaptured = captured }

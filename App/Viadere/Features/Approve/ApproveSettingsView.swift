@@ -113,7 +113,7 @@ struct ApproveSettingsView: View {
                 ViadereRowGroup {
                     ForEach(controller.prompts) { prompt in
                         Button { controller.present(prompt) } label: {
-                            ViadereRow(prompt.business.safeName, subtitle: prompt.promptReason) { ViadereAvatar(name: prompt.business.safeName, size: 36, isVerified: prompt.business.isVerified) }
+                            ViadereRow(prompt.business.safeName, subtitle: prompt.inboxLine ?? prompt.promptReason) { ViadereAvatar(name: prompt.business.safeName, size: 36, isVerified: prompt.business.isVerified) }
                         }
                         .buttonStyle(.plain)
                         ViadereHairline(inset: 50)

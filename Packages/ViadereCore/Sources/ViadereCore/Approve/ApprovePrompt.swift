@@ -53,14 +53,18 @@ public struct ApprovalPromptPolicy: Sendable, Hashable {
     }
 
     /// The verdict for a **new** request given the relationship's history.
-    public func evaluate(history: [Record], now: Date) -> Verdict {
+    ///
+    /// - Parameter limitOpenRequests: `true` (the legacy route) refuses a new request while `maxPending` are open. `auth-approvals` pass `false`
+    ///   (ADR-0022 §5.1, Stage 5 review S5-04): open requests never silence the next one, only the hourly count does ("above 6 per hour"), so three
+    ///   attacker requests cannot make the person's own genuine request silent.
+    public func evaluate(history: [Record], now: Date, limitOpenRequests: Bool = true) -> Verdict {
         let recent = history.filter { now.timeIntervalSince($0.createdAt) < window && $0.createdAt <= now }
         let refusals = recent.filter { $0.decision == .deny || $0.decision == .report }
         if refusals.count >= denialsBeforePause, let last = refusals.map(\.createdAt).max() {
             let until = last.addingTimeInterval(pauseDuration)
             if until > now { return .autoDeny(until: until) }
         }
-        if history.filter(\.isOpen).count >= maxPending { return .rateLimited(retryAfter: 30) }
+        if limitOpenRequests, history.filter(\.isOpen).count >= maxPending { return .rateLimited(retryAfter: 30) }
         if recent.count >= maxRequests, let oldest = recent.map(\.createdAt).min() {
             return .rateLimited(retryAfter: max(1, oldest.addingTimeInterval(window).timeIntervalSince(now)))
         }

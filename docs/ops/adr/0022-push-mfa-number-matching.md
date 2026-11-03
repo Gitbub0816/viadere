@@ -102,6 +102,8 @@ Classification: watch = **W0 "notification surface"**, never an authenticator; i
 
 - Businesses must display the code on their own screen; the SDKs return it from the create call.
 - `ApprovalResult` v2 is a Core wire change; old devices that cannot do number matching get requests without it only if the business did not require it; `AUTH_NUMBER_MATCHING_REQUIRED` makes the server refuse approvals without `number_match` for auth capabilities.
+- `AUTH_NUMBER_MATCHING_REQUIRED` defaults to **off** (owner decision at the Stage 5 review, S5-03): on, the legacy `POST /v1/business/approve/requests` answers `422 number_match_required` for every capability.
+- A group Deny, report or automatic deny counts as one refusal because the device submits all its results with one `answer_group` (16 random bytes, not part of the signed result); the relay counts distinct groups, and never counts `destination_unverified` (Stage 5 review S5-02, SECURITY §2.102).
 - Opening Approve v2 in staging still needs the Phase 2 gate evidence in SECURITY §2.58.
 
 ## Threat assumptions changed

@@ -37,6 +37,8 @@ struct ApproveRequestService {
             throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
         }
         guard ApproveIdentifiers.isValidRequestId(body.requestId) else { throw APIError.validation("request_id is invalid.", details: ["request_id": "invalid"]) }
+        // S5-03: the legacy route has no number; with `AUTH_NUMBER_MATCHING_REQUIRED` on it creates no approval at all.
+        if authApproval == nil { try AuthApprovalService.requireNumberMatching(ctx) }
         // The registered action (spec v4 A4) fixes the allowed lifetime; a capability without one is never an approval.
         guard let action = ActionRegistry.approval(for: body.capability), action.isLive else {
             throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
@@ -111,11 +113,12 @@ struct ApproveRequestService {
         // again inside the transaction that inserts the request, under a per-relationship lock (gate finding F5), so concurrent requests cannot all
         // pass a count that none of them has yet changed.
         let now = ctx.now
-        let early = try await promptVerdict(relationshipId: relationship.id!, now: now)
+        let isAuth = authApproval != nil
+        let early = try await promptVerdict(relationshipId: relationship.id!, now: now, authApproval: isAuth)
         // `auth-approvals` (ADR-0022 §5.1, S1-A2-6): per-customer budgets limit **alerting, not availability**. Over budget the request is still created and
-        // reachable from the app, but delivered silently (no push); only the per-tenant rate refuses. The legacy route keeps its `429`.
-        var silent = false
-        if case .rateLimited(let retry) = early { if authApproval == nil { throw Self.rateLimited(retry) } else { silent = true } }
+        // reachable from the app, but delivered silently (no push); only the per-tenant rate refuses. The legacy route keeps its `429`. Whether it is silent is
+        // decided again inside the transaction, under the relationship lock (S5-04).
+        if case .rateLimited(let retry) = early, !isAuth { throw Self.rateLimited(retry) }
         // Number-match allocation (ADR-0020 §2a): refused with a `409` before anything is stored; repeated under the row lock inside the transaction.
         if let authApproval {
             try await AuthMatchGroups(db: db, ctx: ctx).check(businessId: principal.businessId.uuid, consumerId: relationship.consumerId, members: authApproval.tags)
@@ -174,13 +177,15 @@ struct ApproveRequestService {
                 // Serialize requests per relationship (`SELECT ... FOR UPDATE` on PostgreSQL; SQLite serializes writers), then decide on the history
                 // as it is now, including every request that committed while this one waited.
                 try await DB.lockForUpdate(tx, table: RelationshipRecord.schema, id: relationship.id!)
-                let verdict = try await ApproveRequestService(db: tx, ctx: service.ctx).promptVerdict(relationshipId: relationship.id!, now: now)
+                let verdict = try await ApproveRequestService(db: tx, ctx: service.ctx).promptVerdict(relationshipId: relationship.id!, now: now, authApproval: isAuthApproval)
                 var denied = false
+                var overBudget = false
                 switch verdict {
-                case .rateLimited(let retry): if !isAuthApproval { throw Self.rateLimited(retry) }
+                case .rateLimited(let retry): if !isAuthApproval { throw Self.rateLimited(retry) } else { overBudget = true }
                 case .autoDeny: denied = true
                 case .allow: break
                 }
+                record.silent = isAuthApproval && overBudget ? true : nil
                 record.status = denied ? ApprovalRequestStatus.denied.rawValue : ApprovalRequestStatus.pending.rawValue
                 record.reason = denied ? "auto_denied" : nil
                 record.delivered = denied ? 0 : targets.count
@@ -223,7 +228,7 @@ struct ApproveRequestService {
         if record.reason == "auto_denied" {
             await pauseNotice(relationship: relationship)
         } else {
-            if !silent { await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: deliveryRows) }
+            if record.silent != true { await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: deliveryRows) }
             if authApproval != nil { await AuthApprovalService(db: db, ctx: ctx).pressure(businessId: record.businessId, consumerId: record.consumerId) }
         }
         return (try view(record), true)
@@ -235,16 +240,26 @@ struct ApproveRequestService {
         APIError(.tooManyRequests, .rateLimited, "Too many approval requests for this customer.", headers: ["Retry-After": String(Int(retry.rounded(.up)))])
     }
 
-    func promptVerdict(relationshipId: UUID, now: Date) async throws -> ApprovalPromptPolicy.Verdict {
+    /// - Parameter authApproval: an `auth-approvals` create. Open requests then never make the next one silent; only the hourly count does (S5-04).
+    func promptVerdict(relationshipId: UUID, now: Date, authApproval: Bool = false) async throws -> ApprovalPromptPolicy.Verdict {
         let policy = ctx.config.approve.prompt
         let since = now.addingTimeInterval(-max(policy.window, policy.pauseDuration))
         let rows = try await ApproveRequestRecord.query(on: db).filter(\.$relationshipId == relationshipId).filter(\.$createdAt > since).all()
-        let records = rows.map { row -> ApprovalPromptPolicy.Record in
-            // An auto-denied request is not a decision of the customer: it must not extend the pause.
-            let decision = row.reason == "auto_denied" ? nil : row.decision.flatMap(ApprovalDecision.init(rawValue:))
+        return policy.evaluate(history: Self.promptRecords(rows, now: now), now: now, limitOpenRequests: !authApproval)
+    }
+
+    /// The history the pause counts (ADR-0022 §5.2 item 2, §5.4, S5-02):
+    /// - an auto-denied request is not a decision of the customer and must not extend the pause;
+    /// - one group Deny, "This wasn't me" or automatic `number_mismatch` deny closes N requests with one `answer_group` and counts as **one** refusal;
+    /// - a `destination_unverified` denial is an integrity signal about the business's link, not the customer's answer, and is never counted.
+    static func promptRecords(_ rows: [ApproveRequestRecord], now: Date) -> [ApprovalPromptPolicy.Record] {
+        var counted = Set<String>()
+        return rows.sorted { $0.createdAt < $1.createdAt }.map { row -> ApprovalPromptPolicy.Record in
+            var decision = row.reason == "auto_denied" ? nil : row.decision.flatMap(ApprovalDecision.init(rawValue:))
+            if row.denyReason == ApprovalDenyReason.destinationUnverified.rawValue { decision = nil }
+            if decision == .deny || decision == .report, let group = row.answerGroup, !counted.insert(row.consumerId.uuidString + "|" + group).inserted { decision = nil }
             return ApprovalPromptPolicy.Record(createdAt: row.createdAt, decision: decision, isOpen: row.statusValue == .pending && row.expiresAt > now)
         }
-        return policy.evaluate(history: records, now: now)
     }
 
     private func pauseNotice(relationship: RelationshipRecord) async {
@@ -358,7 +373,8 @@ struct ApproveRequestService {
                                     kid: key.kid, protection: request.protectionValue, status: request.statusValue, createdAt: request.createdAt, expiresAt: request.expiresAt,
                                     envelope: envelope, challenge: request.challenge, transaction: stored?.transaction, authentication: stored?.authentication,
                                     requestsInWindow: requests, showFatigueWarning: warn, alert: alert,
-                                    numberMatch: request.matchDigits.map { AuthApprovalNumberMatch(digits: $0, code: stored?.numberMatchCode) })
+                                    numberMatch: request.matchDigits.map { AuthApprovalNumberMatch(digits: $0, code: stored?.numberMatchCode) },
+                                    silent: request.silent == true ? true : nil)
     }
 
     /// Pending requests for the calling device's active keys.
@@ -426,6 +442,8 @@ struct ApproveRequestService {
         let now = ctx.now
         guard let delivery = try await ApproveDeliveryRecord.find(deliveryId, on: db), delivery.deviceId == deviceId.uuid, delivery.consumerId == principal.consumerId.uuid,
               let request = try await ApproveRequestRecord.find(delivery.requestId, on: db) else { throw APIError.notFound }
+        // A malformed group id is a malformed request, not a way to skip the count (S5-02).
+        if let group = body.answerGroup, !ApprovalAnswerGroup.isValid(group) { throw APIError.validation("The request failed validation.", details: ["answer_group": "invalid"]) }
         let audit = AuditService(db: db, ctx: ctx)
         func reject(_ reason: String, _ error: APIError) async throws -> Never {
             _ = try? await audit.record("approve.decision_rejected", outcome: .denied, principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",
@@ -535,7 +553,7 @@ struct ApproveRequestService {
                                                                                ("amr", verified.claims.amr.rawValue), ("result_ref", resultRef), ("result_jws", body.result)])
             guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
             try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil)
-                .set(\.$denyReason, to: verified.claims.denyReason?.rawValue).update()
+                .set(\.$denyReason, to: verified.claims.denyReason?.rawValue).set(\.$answerGroup, to: decision == .approve ? nil : body.answerGroup).update()
             try await AuthMatchGroups(db: tx, ctx: ctx).release(refId: request.id!)
             guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
             if decision == .approve { try await AuthApprovalService(db: tx, ctx: ctx).closeGroup(after: decided) }

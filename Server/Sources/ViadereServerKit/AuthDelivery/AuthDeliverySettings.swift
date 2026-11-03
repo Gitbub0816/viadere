@@ -10,6 +10,10 @@ import ViadereCore
 /// stored rows are untouched. Turning it off is also the kill switch.
 public struct AuthDeliverySettings: Sendable {
     public var enabled = true
+    /// `AUTH_NUMBER_MATCHING_REQUIRED` (ADR-0019 §6, Stage 5 review S5-03), default **off**: when on, the legacy `POST /v1/business/approve/requests` route creates no
+    /// approval (`422 number_match_required`); push approvals then exist only through `POST /v1/business/auth-approvals`, which always carries a number. Off keeps
+    /// the legacy route working for businesses that have not migrated.
+    public var numberMatchingRequired = false
     /// `AUTH_DESTINATION_SIGNATURE_REQUIRED` (ADR-0031 section 5): business-mode links need a business-signed destination statement. `false` exists only so the
     /// unit tests can exercise both paths; staging and production refuse it.
     public var destinationSignatureRequired = true
@@ -46,13 +50,18 @@ public struct AuthDeliverySettings: Sendable {
 }
 
 extension ServerConfig {
-    /// `AUTH_DELIVERY_ENABLED`, `AUTH_DESTINATION_SIGNATURE_REQUIRED`, `AUTH_LIVE_KEY_ASSURANCE`, `AUTH_SECRET_KEY`.
+    /// `AUTH_DELIVERY_ENABLED`, `AUTH_NUMBER_MATCHING_REQUIRED`, `AUTH_DESTINATION_SIGNATURE_REQUIRED`, `AUTH_LIVE_KEY_ASSURANCE`, `AUTH_SECRET_KEY`.
     mutating func applyAuthDeliveryEnvironment(_ env: [String: String], production: Bool) throws {
         switch env["AUTH_DELIVERY_ENABLED"] {
         case "true": authDelivery.enabled = true
         case "false": authDelivery.enabled = false
         case nil, "": authDelivery.enabled = !production
         default: throw ServerConfigError.invalid("AUTH_DELIVERY_ENABLED (true or false)")
+        }
+        switch env["AUTH_NUMBER_MATCHING_REQUIRED"] {
+        case "true": authDelivery.numberMatchingRequired = true
+        case "false", nil, "": authDelivery.numberMatchingRequired = false
+        default: throw ServerConfigError.invalid("AUTH_NUMBER_MATCHING_REQUIRED (true or false)")
         }
         switch env["AUTH_DESTINATION_SIGNATURE_REQUIRED"] {
         case "true", nil, "": authDelivery.destinationSignatureRequired = true

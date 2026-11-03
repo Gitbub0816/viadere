@@ -290,7 +290,7 @@ paths:
     post:
       tags: [Device]
       operationId: denyApprovalReduceOnly
-      summary: Reduce-only Deny from the notification action (request key, no unlock; ADR-0022 §5.5)
+      summary: Reduce-only Deny from the notification action (request key, no unlock; ADR-0022 §5.5; behind `APPROVE_V2_ENABLED` only)
       security:
         - deviceSignedBearer: []
       parameters:

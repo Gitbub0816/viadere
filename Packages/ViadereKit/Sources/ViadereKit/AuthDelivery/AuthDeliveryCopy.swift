@@ -74,6 +74,12 @@ public enum AuthDeliveryCopy {
         }
         return "Enter the \(digits)-digit number on the \(iso(business)) screen where you're signing in. No number there, or someone gave it to you? Tap Deny."
     }
+    /// INB-01: the line under a request that was delivered silently (over the hourly budget, no alert push), so a person who is signing in finds it (ADR-0022 §5.1).
+    public static func silentPendingSignIn(business: String) -> String { "You have a pending sign-in from \(iso(business))." }
+    /// The helper line for a group whose codes have different lengths (some 2, some 3 digits): no digit count, so the person types the number they see.
+    public static func numberHelperAnyLength(business: String) -> String {
+        "Enter the number on the \(iso(business)) screen where you're signing in. No number there, or someone gave it to you? Tap Deny."
+    }
     public static func requestedAt(_ time: String) -> String { "Requested at \(time)" }
     public static let wrongNumber = "That number doesn't match. Check the screen where you're signing in. Don't type a number someone gave you."
     public static func wrongNumberAutoDeny(business: String) -> String {
