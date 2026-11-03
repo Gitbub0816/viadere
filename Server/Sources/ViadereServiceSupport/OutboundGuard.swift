@@ -23,9 +23,9 @@ public struct OutboundDestinationGuard: Sendable {
     public enum Refusal: Error, Sendable, Equatable { case identityEndpoint, unresolvable }
 
     /// Lowercased host names refused outright (the identity endpoint's host).
-    let refusedHosts: Set<String>
+    package let refusedHosts: Set<String>
     /// Whether every loopback address is refused (the identity endpoint lives on loopback).
-    let refuseLoopback: Bool
+    package let refuseLoopback: Bool
     /// Resolves a host to its addresses (injectable so tests can model DNS rebinding without a network).
     let resolve: @Sendable (_ host: String, _ port: Int) async throws -> [SocketAddress]
 
@@ -39,7 +39,7 @@ public struct OutboundDestinationGuard: Sendable {
         }
         refusedHosts = hosts
         refuseLoopback = loopback
-        self.resolve = resolve ?? { host, port in try await VaporWebhookTransport.resolve(host: host, port: port) }
+        self.resolve = resolve ?? { host, port in try await HostResolver.resolve(host: host, port: port) }
     }
 
     /// The guard for this process: built from `IDENTITY_ENDPOINT` (Container Apps) or `MSI_ENDPOINT` (older App Service style), if present.
@@ -62,7 +62,7 @@ public struct OutboundDestinationGuard: Sendable {
     }
 
     /// Whether a resolved address is refused.
-    func isRefused(_ address: SocketAddress) -> Bool {
+    package func isRefused(_ address: SocketAddress) -> Bool {
         guard let ip = address.ipAddress?.lowercased() else { return true }
         if refusedHosts.contains(ip) { return true }
         switch address {
@@ -88,7 +88,7 @@ public struct OutboundDestinationGuard: Sendable {
         }
     }
 
-    static func isLoopbackLiteral(_ host: String) -> Bool {
+    package static func isLoopbackLiteral(_ host: String) -> Bool {
         host == "::1" || host.hasPrefix("127.") || host == "0:0:0:0:0:0:0:1"
     }
 }
@@ -125,6 +125,39 @@ public struct GuardedClient: Client {
             guard let url = URL(string: request.url.string) else { throw OutboundDestinationGuard.Refusal.unresolvable }
             try await destinationGuard.check(url)
             return try await base.send(request).get()
+        }
+    }
+}
+
+/// `getaddrinfo` off the event loop: every address a host name (or literal) resolves to.
+public enum HostResolver {
+    public struct Failure: Error, Sendable {}
+
+    public static func resolve(host: String, port: Int) async throws -> [SocketAddress] {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                var hints = addrinfo()
+                hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
+                var result: UnsafeMutablePointer<addrinfo>?
+                guard getaddrinfo(host, String(port), &hints, &result) == 0, let first = result else {
+                    continuation.resume(throwing: Failure())
+                    return
+                }
+                defer { freeaddrinfo(result) }
+                var out: [SocketAddress] = []
+                var cursor: UnsafeMutablePointer<addrinfo>? = first
+                while let info = cursor {
+                    if let addr = info.pointee.ai_addr {
+                        if info.pointee.ai_family == AF_INET {
+                            addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { out.append(SocketAddress($0.pointee, host: host)) }
+                        } else if info.pointee.ai_family == AF_INET6 {
+                            addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { out.append(SocketAddress($0.pointee, host: host)) }
+                        }
+                    }
+                    cursor = info.pointee.ai_next
+                }
+                continuation.resume(returning: out)
+            }
         }
     }
 }

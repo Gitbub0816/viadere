@@ -7,22 +7,6 @@ import ViadereCore
 
 // MARK: - Outbound HTTP (cloud APIs)
 
-/// A tiny HTTP seam for the Azure data-plane REST calls (Key Vault, Blob Storage, Service Bus). Replaceable in tests (`Overrides.outboundHTTP`);
-/// the real one uses Vapor's client over TLS behind the identity-endpoint guard.
-public protocol OutboundHTTP: Sendable {
-    func send(method: NIOHTTP1.HTTPMethod, url: String, headers: [String: String], body: Data?) async throws -> (status: Int, body: Data)
-    /// The same call, also returning the response headers (lowercased names). Service Bus answers a receive with the lock `Location` and the
-    /// `BrokerProperties` in headers.
-    func sendReturningHeaders(method: NIOHTTP1.HTTPMethod, url: String, headers: [String: String], body: Data?) async throws -> (status: Int, headers: [String: String], body: Data)
-}
-
-extension OutboundHTTP {
-    public func sendReturningHeaders(method: NIOHTTP1.HTTPMethod, url: String, headers: [String: String], body: Data?) async throws -> (status: Int, headers: [String: String], body: Data) {
-        let response = try await send(method: method, url: url, headers: headers, body: body)
-        return (response.status, [:], response.body)
-    }
-}
-
 struct VaporOutboundHTTP: OutboundHTTP {
     let client: any Client
     /// Refuses the managed-identity endpoint and the metadata services (SSRF, SECURITY.md §1).

@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+#
+# The private grant / OIDC authority (ADR-0019 §2): its own image `viadere-authority`, built by release.yml and deployed only by
+# authority-deploy.yml. It contains ONLY the ViadereAuthority executable (no static web assets, no login shell): no APNs, email, SMS, Wallet, Didit or
+# Service Bus code is linked. The build context must be the REPOSITORY ROOT:
+#
+#   docker build -f Server/Dockerfile.authority -t viadere-authority .
+#
+# Infra/azure-authority/containerapps.tf runs `/app/ViadereAuthority` (serve), `migrate --yes` and `admin <command> --change-file ...`.
+#
+# ---- build ----------------------------------------------------------------
+FROM swift:6.4.1-resolute AS build
+WORKDIR /build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libssl-dev zlib1g-dev ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY Packages/ViadereCore ./Packages/ViadereCore
+COPY Server/Package.swift Server/Package.resolved ./Server/
+WORKDIR /build/Server
+# SwiftPM requires every declared target's directory to exist, even when only one product is built.
+COPY Server/Sources ./Sources
+COPY Server/Tests ./Tests
+RUN --mount=type=cache,id=viadere-authority-build,target=/build/Server/.build \
+    swift package resolve \
+ && swift build -c release --product ViadereAuthority --static-swift-stdlib \
+ && mkdir -p /staging \
+ && cp "$(swift build -c release --show-bin-path)/ViadereAuthority" /staging/ViadereAuthority
+
+# ---- runtime --------------------------------------------------------------
+FROM ubuntu:26.04 AS runtime
+
+# Unprivileged user with no login shell. ca-certificates for Entra, Key Vault and PostgreSQL TLS; tzdata for the clock.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 10001 viadere \
+ && useradd --system --uid 10001 --gid viadere --no-create-home --shell /usr/sbin/nologin viadere
+
+WORKDIR /app
+COPY --from=build --chown=root:root --chmod=0555 /staging/ViadereAuthority /app/ViadereAuthority
+
+ENV ENVIRONMENT=production \
+    BIND_HOST=0.0.0.0 \
+    PORT=8080 \
+    AUTHORITY_ENABLED=false
+
+USER viadere:viadere
+EXPOSE 8080
+
+ENTRYPOINT ["/app/ViadereAuthority"]
+CMD ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]

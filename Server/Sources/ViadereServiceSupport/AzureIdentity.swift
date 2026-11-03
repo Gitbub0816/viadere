@@ -31,7 +31,7 @@ public protocol AccessTokenSource: Sendable {
 public actor AzureManagedIdentity: AccessTokenSource {
     /// Pinned version of the identity endpoint protocol.
     public static let apiVersion = "2019-08-01"
-    static let refreshMargin: TimeInterval = 300
+    package static let refreshMargin: TimeInterval = 300
 
     let endpoint: String
     let identityHeader: String
@@ -56,6 +56,23 @@ public actor AzureManagedIdentity: AccessTokenSource {
         return AzureManagedIdentity(endpoint: endpoint, identityHeader: header, clientId: client, http: http)
     }
 
+    private var audienceCache: [String: (token: String, expiresAt: Date)] = [:]
+
+    /// A token for an Entra **application** audience (the private authority's `api://viadere-authority-<env>`, ADR-0019 §4.2). The audience must be
+    /// an `api://` application id URI or a GUID; Azure resource audiences go through `token(for:)`.
+    public func token(audience: String) async throws -> String {
+        guard Self.isApplicationAudience(audience) else { throw AzureIdentityError.notConfigured }
+        if let cached = audienceCache[audience], now() < cached.expiresAt.addingTimeInterval(-Self.refreshMargin) { return cached.token }
+        let (token, expiresAt) = try await fetch(resourceString: audience)
+        audienceCache[audience] = (token, expiresAt)
+        return token
+    }
+
+    public static func isApplicationAudience(_ audience: String) -> Bool {
+        guard audience.utf8.count <= 200, !audience.contains("?"), !audience.contains("#"), !audience.contains("&") else { return false }
+        return audience.hasPrefix("api://") || UUID(uuidString: audience) != nil
+    }
+
     public func token(for resource: AzureResource) async throws -> String {
         if let cached = cache[resource], now() < cached.expiresAt.addingTimeInterval(-Self.refreshMargin) { return cached.token }
         if let running = inflight[resource] { return try await running.value.0 }
@@ -67,11 +84,13 @@ public actor AzureManagedIdentity: AccessTokenSource {
         return token
     }
 
-    private func fetch(_ resource: AzureResource) async throws -> (String, Date) {
+    private func fetch(_ resource: AzureResource) async throws -> (String, Date) { try await fetch(resourceString: resource.rawValue) }
+
+    private func fetch(resourceString: String) async throws -> (String, Date) {
         var components = URLComponents(string: endpoint)
         var items = components?.queryItems ?? []
         items.append(URLQueryItem(name: "api-version", value: Self.apiVersion))
-        items.append(URLQueryItem(name: "resource", value: resource.rawValue))
+        items.append(URLQueryItem(name: "resource", value: resourceString))
         items.append(URLQueryItem(name: "client_id", value: clientId))
         components?.queryItems = items
         guard let url = components?.string else { throw AzureIdentityError.notConfigured }
@@ -92,10 +111,12 @@ public actor AzureManagedIdentity: AccessTokenSource {
 
 /// The only HTTP client allowed to reach the identity endpoint: it sends exclusively to the configured endpoint (same scheme, host, port and path)
 /// and to nothing else, so it cannot be turned into a general client.
-struct IdentityEndpointHTTP: OutboundHTTP {
+package struct IdentityEndpointHTTP: OutboundHTTP {
     let endpoint: String
 
-    func send(method: NIOHTTP1.HTTPMethod, url: String, headers: [String: String], body: Data?) async throws -> (status: Int, body: Data) {
+    package init(endpoint: String) { self.endpoint = endpoint }
+
+    package func send(method: NIOHTTP1.HTTPMethod, url: String, headers: [String: String], body: Data?) async throws -> (status: Int, body: Data) {
         guard let configured = URLComponents(string: endpoint), let target = URLComponents(string: url),
               configured.scheme == target.scheme, configured.host == target.host, configured.port == target.port, configured.path == target.path,
               method == .GET else { throw AzureIdentityError.notConfigured }

@@ -1,4 +1,5 @@
 @preconcurrency import Crypto
+import _CryptoExtras
 import Foundation
 import NIOHTTP1
 import ViadereCore
@@ -15,13 +16,14 @@ public actor AzureKeyVaultKMS: KeyManagementService {
     /// Pinned data-plane version: the newest GA version of the Key Vault keys REST API on 2026-10-30 (Microsoft Learn, "sign", default moniker
     /// `rest-keyvault-keys-2025-07-01`). Tracked in CLAUDE.md "Current versions".
     public static let apiVersion = "2025-07-01"
-    static let currentVersionTTL: TimeInterval = 600
+    package static let currentVersionTTL: TimeInterval = 600
 
     let vaultURL: String
     let tokens: any AccessTokenSource
     let http: any OutboundHTTP
     let now: @Sendable () -> Date
     private var publicKeys: [String: P256.Signing.PublicKey] = [:]          // "name/version"
+    private var rsaPublicKeys: [String: _RSA.Signing.PublicKey] = [:]       // "name/version"
     private var current: [String: (version: String, fetchedAt: Date)] = [:] // name
 
     public init(vaultURL: String, tokens: any AccessTokenSource, http: any OutboundHTTP, now: @escaping @Sendable () -> Date = { Date() }) throws {
@@ -69,14 +71,14 @@ public actor AzureKeyVaultKMS: KeyManagementService {
     }
 
     /// `https://<vault>/keys/<name>/<version>` → (name, version).
-    static func parseKid(_ kid: String) -> (name: String, version: String)? {
+    package static func parseKid(_ kid: String) -> (name: String, version: String)? {
         guard let url = URL(string: kid) else { return nil }
         let parts = url.path.split(separator: "/").map(String.init)
         guard parts.count == 3, parts[0] == "keys", KMSKeyRef.isName(parts[1]), !parts[2].isEmpty, parts[2].allSatisfy({ $0.isHexDigit }) else { return nil }
         return (parts[1], parts[2].lowercased())
     }
 
-    static func ecPublicKey(_ jwk: [String: Any]) -> P256.Signing.PublicKey? {
+    package static func ecPublicKey(_ jwk: [String: Any]) -> P256.Signing.PublicKey? {
         guard (jwk["kty"] as? String)?.hasPrefix("EC") == true, jwk["crv"] as? String == "P-256",
               let x = (jwk["x"] as? String).flatMap(Base64URL.decode), let y = (jwk["y"] as? String).flatMap(Base64URL.decode),
               x.count == 32, y.count == 32 else { return nil }
@@ -114,6 +116,38 @@ public actor AzureKeyVaultKMS: KeyManagementService {
         guard let signature = try? P256.Signing.ECDSASignature(rawRepresentation: raw),
               expected.isValidSignature(signature, for: SHA256Digest(bytes: digest)) else { throw KMSError.signatureMismatch }
         return raw
+    }
+
+    package static func rsaPublicKey(_ jwk: [String: Any]) -> _RSA.Signing.PublicKey? {
+        guard (jwk["kty"] as? String)?.hasPrefix("RSA") == true, let n = (jwk["n"] as? String).flatMap(Base64URL.decode),
+              let e = (jwk["e"] as? String).flatMap(Base64URL.decode), n.count >= 256 else { return nil }
+        return try? _RSA.Signing.PublicKey(n: n, e: e)
+    }
+
+    public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey {
+        let (name, version) = try await resolve(keyRef)
+        if let cached = rsaPublicKeys["\(name)/\(version)"] { return cached }
+        let object = try await call(.GET, "keys/\(name)/\(version)", body: nil)
+        guard let key = object["key"] as? [String: Any], let kid = key["kid"] as? String, let parsed = Self.parseKid(kid), parsed.name == name,
+              parsed.version == version else { throw KMSError.unknownKey }
+        guard let rsa = Self.rsaPublicKey(key) else { throw KMSError.wrongKeyType }
+        rsaPublicKeys["\(name)/\(version)"] = rsa
+        return rsa
+    }
+
+    /// `POST keys/{name}/{version}/sign` with `RS256`; the response `kid` must name that version and the signature must verify against that
+    /// version's public key before it is used (the same verify-after-sign rule as ES256, ADR-0028 §2).
+    public func signRS256(keyRef: String, digest: Data) async throws -> Data {
+        guard digest.count == 32 else { throw KMSError.invalidDigest }
+        let (name, version) = try await resolve(keyRef)
+        let expected = try await rsaPublicKey(keyRef: "\(name)/\(version)")
+        let object = try await call(.POST, "keys/\(name)/\(version)/sign", body: ["alg": "RS256", "value": Base64URL.encode(digest)])
+        guard let kid = object["kid"] as? String, let parsed = Self.parseKid(kid), parsed.name == name, parsed.version == version,
+              let value = (object["value"] as? String).flatMap(Base64URL.decode), !value.isEmpty else { throw KMSError.signatureMismatch }
+        guard expected.isValidSignature(_RSA.Signing.RSASignature(rawRepresentation: value), for: SHA256Digest(bytes: digest), padding: .insecurePKCS1v1_5) else {
+            throw KMSError.signatureMismatch
+        }
+        return value
     }
 
     public func wrap(keyRef: String, plaintext: Data) async throws -> KMSWrappedKey {

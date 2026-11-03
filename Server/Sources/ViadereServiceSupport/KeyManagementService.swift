@@ -21,6 +21,17 @@ public protocol KeyManagementService: Sendable {
     func unwrap(keyRef: String, ciphertext: Data) async throws -> Data
     /// The explicit `name/version` that `keyRef` means now (so a signature can record the exact key version that verifies it).
     func resolveVersion(keyRef: String) async throws -> String
+    /// RS256 (RSASSA-PKCS1-v1_5 with SHA-256) over a 32-byte SHA-256 `digest` with an RSA signing key (the authority's `oidc-signing-rs256`,
+    /// ADR-0028 §2). Implementations verify the signature against `rsaPublicKey(keyRef:)` before returning it, like `sign`.
+    func signRS256(keyRef: String, digest: Data) async throws -> Data
+    /// The public half of an RSA signing key (the version `keyRef` names).
+    func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey
+}
+
+extension KeyManagementService {
+    /// Services without RSA signing keys refuse.
+    public func signRS256(keyRef: String, digest: Data) async throws -> Data { throw KMSError.wrongKeyType }
+    public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey { throw KMSError.wrongKeyType }
 }
 
 /// A wrapped value and the versioned key reference that unwraps it.
@@ -60,7 +71,7 @@ public enum KMSKeyRef {
         return (parts[0], nil)
     }
 
-    static func isName(_ name: String) -> Bool {
+    package static func isName(_ name: String) -> Bool {
         (1...127).contains(name.count) && name.unicodeScalars.allSatisfy { ($0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains($0))) || $0 == "-" }
     }
 }
@@ -72,59 +83,13 @@ extension KeyManagementService {
     }
 }
 
-/// A `DeviceSigningKey` whose private half lives in the KMS (the key-directory log key, `kd-log-signing`): the public key is fetched once at boot and
-/// every signature is checked against it before use.
-public struct KMSSigningKey: DeviceSigningKey {
-    public let kms: any KeyManagementService
-    public let keyRef: String
-    public let publicKey: DevicePublicKey
-
-    /// Resolves the public key now, so a missing or wrong key fails the boot instead of the first signature.
-    public static func load(kms: any KeyManagementService, keyRef: String) async throws -> KMSSigningKey {
-        KMSSigningKey(kms: kms, keyRef: keyRef, publicKey: DevicePublicKey(try await kms.publicKey(keyRef: keyRef)))
-    }
-
-    public func signature(for data: Data) async throws -> P256.Signing.ECDSASignature {
-        let raw = try await kms.sign(keyRef: keyRef, message: data)
-        let signature = try P256.Signing.ECDSASignature(rawRepresentation: raw)
-        guard try publicKey.signingKey().isValidSignature(signature, for: data) else { throw KMSError.signatureMismatch }
-        return signature
-    }
-}
-
-/// Signs canonical statements (`ViadereSignedStatement`) with a server signing key: the `link-descriptor` key (WP-C1, SECURITY.md §2.59), held in
-/// Key Vault on Azure (`KMSSigningKey`) or supplied as an environment secret elsewhere (`SoftwareP256SigningKey`). The signature over
-/// `domain ‖ payload` is normalized to low-S and **verified locally against the key's public half** before it is used, so a misbehaving key service
-/// (or a stand-in that should never sign) cannot hand out a statement that does not verify.
-struct KMSStatementSigner {
-    let key: any DeviceSigningKey
-
-    func kid() throws -> String { KeyIdentifier.make(try key.publicKey.signingKey()) }
-
-    func sign(payload: Data, domain: String) async throws -> ViadereSignedStatement {
-        let message = Data(domain.utf8) + payload
-        let produced = try await key.signature(for: message)
-        guard let signature = try? P256.Signing.ECDSASignature(rawRepresentation: ViadereSignatureEncoding.normalizedRaw(produced.rawRepresentation)),
-              try key.publicKey.signingKey().isValidSignature(signature, for: message) else { throw KMSError.signatureMismatch }
-        return ViadereSignedStatement(kid: try kid(), payload: Base64URL.encode(payload), signature: ViadereSignatureEncoding.encode(signature))
-    }
-}
-
-/// A signing key that refuses to sign: what a process holds for a key it must never use (the queue worker's key-directory log key), so a code
-/// path that reaches it fails instead of signing with a throwaway key whose signatures nobody could verify.
-public struct UnavailableSigningKey: DeviceSigningKey {
-    public struct Refused: Error {}
-    public let publicKey = SoftwareP256SigningKey().publicKey
-    public init() {}
-    public func signature(for data: Data) async throws -> P256.Signing.ECDSASignature { throw Refused() }
-}
-
 /// Software KMS for development and tests: P-256 signing keys and RSA-3072 key-encryption keys held in memory, with versions, so the same code paths
 /// (versioned references, wrong-version failures) run without Azure. `ServerConfig` refuses it in staging and production.
 public final class LocalKMS: KeyManagementService, @unchecked Sendable {
     private let lock = NSLock()
     private var signing: [String: [(version: String, key: P256.Signing.PrivateKey)]] = [:]
     private var wrapping: [String: [(version: String, key: _RSA.Encryption.PrivateKey)]] = [:]
+    private var rsaSigning: [String: [(version: String, key: _RSA.Signing.PrivateKey)]] = [:]
 
     public init() {}
 
@@ -145,7 +110,33 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
         return version
     }
 
-    static func newVersion() -> String { Hex.encode(SecureToken.randomBytes(16)) }
+    /// Adds a new version of an RSA signing key (3072 bits unless a key is given) and returns its version.
+    @discardableResult
+    public func createRSASigningKey(_ name: String, key: _RSA.Signing.PrivateKey? = nil) throws -> String {
+        let version = Self.newVersion()
+        let material = try key ?? _RSA.Signing.PrivateKey(keySize: .bits3072)
+        lock.withLock { rsaSigning[name, default: []].append((version, material)) }
+        return version
+    }
+
+    private func rsaSigningKey(_ ref: String) throws -> _RSA.Signing.PrivateKey {
+        guard let (name, version) = KMSKeyRef.parse(ref) else { throw KMSError.unknownKey }
+        return try lock.withLock {
+            guard let versions = rsaSigning[name], !versions.isEmpty else { throw KMSError.unknownKey }
+            if let version { guard let match = versions.first(where: { $0.version == version }) else { throw KMSError.unknownKey }; return match.key }
+            return versions.last!.key
+        }
+    }
+
+    public func signRS256(keyRef: String, digest: Data) async throws -> Data {
+        guard digest.count == 32 else { throw KMSError.invalidDigest }
+        let key = try rsaSigningKey(keyRef)
+        return try key.signature(for: SHA256Digest(bytes: digest), padding: .insecurePKCS1v1_5).rawRepresentation
+    }
+
+    public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey { try rsaSigningKey(keyRef).publicKey }
+
+    package static func newVersion() -> String { Hex.encode(SecureToken.randomBytes(16)) }
 
     private func signingKey(_ ref: String) throws -> P256.Signing.PrivateKey {
         guard let (name, version) = KMSKeyRef.parse(ref) else { throw KMSError.unknownKey }
@@ -181,6 +172,7 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
         return try lock.withLock {
             if let last = signing[name]?.last { return "\(name)/\(last.version)" }
             if let last = wrapping[name]?.last { return "\(name)/\(last.version)" }
+            if let last = rsaSigning[name]?.last { return "\(name)/\(last.version)" }
             throw KMSError.unknownKey
         }
     }
@@ -200,7 +192,7 @@ extension SHA256Digest {
     /// A digest computed elsewhere (the KMS signs digests, not messages). Only 32-byte inputs are accepted by callers.
     /// swift-crypto has no public initializer from bytes; the digest is a plain 32-byte value type, so it is loaded from the bytes (the
     /// LocalKMS tests verify every signature against the message, which would catch any layout change).
-    init(bytes: Data) {
+    package init(bytes: Data) {
         precondition(bytes.count == 32 && MemoryLayout<SHA256Digest>.size == 32)
         self = bytes.withUnsafeBytes { $0.loadUnaligned(as: SHA256Digest.self) }
     }
