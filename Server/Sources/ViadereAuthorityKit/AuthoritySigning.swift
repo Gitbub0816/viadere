@@ -100,17 +100,38 @@ struct AuthorityKeyRing: Sendable {
 
     var grantPublicJWKs: [JSONValue] { [.object(JWKThumbprint.p256JWK(grant.publicKey))] }
 
-    /// One structured inventory line per key (ADR-0024 §7.3): `name/version` and the public JWK, never private material.
-    func inventoryLines() throws -> [String] {
-        var entries: [(String, String, [String: JSONValue])] = [
-            ("grant-signing", grant.keyRef, JWKThumbprint.p256JWK(grant.publicKey)),
-            ("device-statement-signing", statement.keyRef, JWKThumbprint.p256JWK(statement.publicKey)),
-        ]
-        if let es = oidcES256 { entries.append(("oidc-signing-es256", es.keyRef, JWKThumbprint.p256JWK(es.publicKey))) }
-        if let rs = oidcRS256 { entries.append(("oidc-signing-rs256", rs.keyRef, JWKThumbprint.rsaJWK(modulus: rs.modulus, exponent: rs.exponent))) }
-        return try entries.map { family, ref, jwk in
-            String(decoding: try CanonicalJSON.serialize(.object(["authority_key_inventory": .integer(1), "family": .string(family), "key": .string(ref), "jwk": .object(jwk)])), as: UTF8.self)
+}
+
+/// The key inventory (ADR-0024 §7.3): one `VIADERE-KEY-INVENTORY {json}` line per configured key with its Key Vault `name`, `version` and public JWK
+/// (never private material), in the format `.github/scripts/key_inventory.py` parses. The serving authority prints it at every start, **before** the
+/// pin check: for a pinned key the pinned version, otherwise the current version (read only; signing never uses an unpinned version). The admin job
+/// holds no Key Vault role (AUTH-ADMIN-NO-KV), so this is the only process that can read the public halves; the first pins come from these lines.
+enum AuthorityKeyInventory {
+    static let mark = "VIADERE-KEY-INVENTORY "
+
+    static func lines(kms: any KeyManagementService, config: AuthorityConfig, db: any Database) async -> [String] {
+        var names = [config.deviceStatementKeyName, config.grantKeyName]
+        if config.oidcEnabled { names += [config.oidcES256KeyName, config.oidcRS256KeyName] }
+        var out: [String] = []
+        for name in names {
+            let pinned = try? await AuthorityKeyPin.find(name, on: db)
+            var resolved = pinned.map { "\(name)/\($0.version)" }
+            if resolved == nil { resolved = try? await kms.resolveVersion(keyRef: name) }
+            guard let ref = resolved, let version = ref.split(separator: "/").last.map(String.init) else { continue }
+            let jwk: [String: JSONValue]
+            if name == config.oidcRS256KeyName {
+                guard let key = try? await kms.rsaPublicKey(keyRef: ref), let p = try? key.getKeyPrimitives() else { continue }
+                jwk = JWKThumbprint.rsaJWK(modulus: p.modulus, exponent: p.publicExponent)
+            } else {
+                guard let key = try? await kms.publicKey(keyRef: ref) else { continue }
+                jwk = JWKThumbprint.p256JWK(key)
+            }
+            let entry: JSONValue = .object(["name": .string(name), "version": .string(version), "seal_row": .null, "jwk": .object(jwk),
+                                            "pinned": .bool(pinned?.version == version)])
+            guard let text = try? CanonicalJSON.serialize(entry) else { continue }
+            out.append(mark + String(decoding: text, as: UTF8.self))
         }
+        return out
     }
 }
 

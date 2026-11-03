@@ -210,12 +210,17 @@ final class AuthorityControlTests: XCTestCase {
 
     func testInventoryLinesCarryPublicJWKsOnly() async throws {
         let h = try await AuthorityHarness.make()
-        let lines = try XCTUnwrap(h.app.authority.keys).inventoryLines()
+        let lines = await AuthorityKeyInventory.lines(kms: h.kms, config: h.config, db: h.app.db)
         XCTAssertEqual(lines.count, 4)
         for line in lines {
-            XCTAssertTrue(line.contains("\"authority_key_inventory\":1"))
-            XCTAssertFalse(line.contains("\"d\":"))
+            XCTAssertTrue(line.hasPrefix("VIADERE-KEY-INVENTORY {"))
+            XCTAssertTrue(line.contains("\"pinned\":true"))
+            for member in ["\"d\":", "\"p\":", "\"q\":", "\"dp\":"] { XCTAssertFalse(line.contains(member)) }
         }
+        // Without a pin the current version is listed (unpinned), so the first pin can be reviewed from the attested inventory.
+        try await AuthorityKeyPin.query(on: h.app.db).filter(\.$id == "grant-signing").delete()
+        let unpinned = await AuthorityKeyInventory.lines(kms: h.kms, config: h.config, db: h.app.db)
+        XCTAssertEqual(unpinned.filter { $0.contains("\"pinned\":false") }.count, 1)
         try await h.shutdown()
     }
 
@@ -264,6 +269,30 @@ final class AuthorityControlTests: XCTestCase {
                                                                       "keys": .array([.object(["public_key": .string(h.biometricKey.publicKey.base64URL), "key_purpose": .string("approvalBiometric")])])])])])
         do {
             try await AuthorityAdmin.run(command: "keylog-import", changeFile: try CanonicalJSON.serialize(change), commit: AuthorityHarness.commit, db: h.app.db, config: h.config)
+            XCTFail("one account per key")
+        } catch is AuthorityAdmin.Failure {}
+        try await h.shutdown()
+    }
+
+    func testKeyImportsAreStagedByTheAdminJobAndAppliedByTheServingAuthority() async throws {
+        let h = try await AuthorityHarness.make()
+        let newKey = SoftwareP256SigningKey(), account = UUID()
+        let change: JSONValue = .object(["accounts": .array([.object(["account_id": .string(account.uuidString),
+                                                                      "keys": .array([.object(["public_key": .string(newKey.publicKey.base64URL), "key_purpose": .string("approvalBiometric")])])])])])
+        try await AuthorityAdmin.run(command: "keylog-import", changeFile: try CanonicalJSON.serialize(change), commit: AuthorityHarness.commit, db: h.app.db, config: h.config)
+        let kid = KeyIdentifier.make(try newKey.publicKey.signingKey())
+        await XCTAssertEqualAsync(try await AuthorityKey.find(kid, on: h.app.db) == nil, true)
+        try await AuthorityAdmin.applyPendingImports(db: h.app.db, config: h.config, now: h.clock.now)
+        let key = try await AuthorityKey.find(kid, on: h.app.db)
+        XCTAssertEqual(key?.accountRef, OIDCProfile.accountRef(key: h.config.accountRefKey, accountId: account))
+        // Applied once.
+        await XCTAssertEqualAsync(try await AuthorityKeylogImport.query(on: h.app.db).filter(\.$appliedAt == nil).count(), 0)
+        // The same key in two accounts of one file is refused at staging.
+        let shared = try SoftwareP256SigningKey(rawRepresentation: Data(repeating: 1, count: 32)).publicKey.base64URL
+        let twice: JSONValue = .object(["accounts": .array([UUID(), UUID()].map { id in .object(["account_id": .string(id.uuidString),
+            "keys": .array([.object(["public_key": .string(shared), "key_purpose": .string("approvalBiometric")])])]) })])
+        do {
+            try await AuthorityAdmin.run(command: "keylog-import", changeFile: try CanonicalJSON.serialize(twice), commit: AuthorityHarness.commit, db: h.app.db, config: h.config)
             XCTFail("one account per key")
         } catch is AuthorityAdmin.Failure {}
         try await h.shutdown()

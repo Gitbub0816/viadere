@@ -171,6 +171,17 @@ final class AuthorityKeyPin: Model, @unchecked Sendable {
     init() {}
 }
 
+/// A reviewed `keylog-import` change file staged by the admin job (which holds no `ACCOUNT_REF_KEY`), applied by the serving authority.
+final class AuthorityKeylogImport: Model, @unchecked Sendable {
+    static let schema = "authority_keylog_imports"
+    @ID(key: .id) var id: UUID?
+    @Field(key: "change") var change: String
+    @Field(key: "change_commit") var changeCommit: String
+    @Field(key: "created_at") var createdAt: Date
+    @OptionalField(key: "applied_at") var appliedAt: Date?
+    init() {}
+}
+
 /// Authority audit events (append-only): every decision, allow or deny, with reason; never a secret, nonce, code or token.
 final class AuthorityAuditEvent: Model, @unchecked Sendable {
     static let schema = "authority_audit_events"
@@ -246,6 +257,10 @@ struct CreateAuthoritySchema: AsyncMigration {
             .field("name", .string, .identifier(auto: false))
             .field("version", .string, .required).field("thumbprint", .string, .required).field("change_commit", .string, .required)
             .field("pinned_at", .datetime, .required).create()
+        try await db.schema(AuthorityKeylogImport.schema)
+            .id()
+            .field("change", .string, .required).field("change_commit", .string, .required).field("created_at", .datetime, .required)
+            .field("applied_at", .datetime).create()
         try await db.schema(AuthorityAuditEvent.schema)
             .id()
             .field("event", .string, .required).field("outcome", .string, .required).field("reason", .string).field("tenant_id", .string)
@@ -280,7 +295,7 @@ struct CreateAuthoritySchema: AsyncMigration {
     }
 
     func revert(on db: any Database) async throws {
-        for table in [AuthorityAuditEvent.schema, AuthorityKeyPin.schema, AuthorityReplayRecord.schema, AuthorityGrantRecord.schema, AuthorityOIDCCode.schema,
+        for table in [AuthorityAuditEvent.schema, AuthorityKeylogImport.schema, AuthorityKeyPin.schema, AuthorityReplayRecord.schema, AuthorityGrantRecord.schema, AuthorityOIDCCode.schema,
                       AuthorityLinkClient.schema, AuthorityOIDCClient.schema, AuthorityChallenge.schema, AuthorityKey.schema, AuthorityKeylogEntry.schema,
                       AuthorityAccount.schema] {
             try await db.schema(table).delete()

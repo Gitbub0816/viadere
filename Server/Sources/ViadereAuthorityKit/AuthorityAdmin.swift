@@ -128,45 +128,93 @@ public enum AuthorityAdmin {
         try await client.create(on: db)
     }
 
-    /// The one-time reviewed import of pre-existing device keys (ADR-0023 §4 migration, residual R-16). One account per key: a `kid` already in a
-    /// non-revoked entry of any account is refused (`key_in_use`).
-    static func importKeys(_ o: [String: JSONValue], commit: String, db: any Database, config: AuthorityConfig, now: Date) async throws {
+    struct ImportedKey { let publicKey: DevicePublicKey; let kid: String; let purpose: String; let attested: Bool }
+
+    /// Strict parse of a `keylog-import` change file.
+    static func parseImport(_ o: [String: JSONValue]) throws -> [(accountId: UUID, keys: [ImportedKey])] {
         guard Set(o.keys) == ["accounts"], case .array(let accounts)? = o["accounts"], !accounts.isEmpty, accounts.count <= 10_000 else { throw Failure.invalid("accounts") }
-        try await db.transaction { tx in
-            for item in accounts {
-                guard case .object(let a) = item, Set(a.keys) == ["account_id", "keys"], let accountId = a["account_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
-                      case .array(let keys)? = a["keys"], !keys.isEmpty, keys.count <= 10 else { throw Failure.invalid("account") }
-                let ref = OIDCProfile.accountRef(key: config.accountRefKey, accountId: accountId)
-                if try await AuthorityAccount.find(accountId, on: tx) == nil {
-                    let account = AuthorityAccount()
-                    account.id = accountId
-                    account.accountRef = ref
-                    account.origin = "imported"
-                    account.frozen = false
-                    account.createdAt = now
-                    try await account.create(on: tx)
+        var out: [(UUID, [ImportedKey])] = []
+        var seen = Set<String>()
+        for item in accounts {
+            guard case .object(let a) = item, Set(a.keys) == ["account_id", "keys"], let accountId = a["account_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
+                  case .array(let keys)? = a["keys"], !keys.isEmpty, keys.count <= 10 else { throw Failure.invalid("account") }
+            var parsed: [ImportedKey] = []
+            for keyValue in keys {
+                guard case .object(let k) = keyValue, Set(k.keys).isSubset(of: ["public_key", "key_purpose", "hardware_attested"]),
+                      let publicText = k["public_key"]?.stringValue, let publicKey = try? DevicePublicKey(base64URL: publicText),
+                      let purpose = k["key_purpose"]?.stringValue,
+                      [DeviceKeyPurpose.approvalBiometric.rawValue, DeviceKeyPurpose.approvalUserPresence.rawValue].contains(purpose) else { throw Failure.invalid("key") }
+                var attested = false
+                if let raw = k["hardware_attested"] { guard case .bool(let value) = raw else { throw Failure.invalid("hardware_attested") }; attested = value }
+                let kid = KeyIdentifier.make(try publicKey.signingKey())
+                // One account per key, inside the file as well (ADR-0023 §4, S3-A2-4).
+                guard seen.insert(kid).inserted else { throw Failure.invalid("key_in_use") }
+                parsed.append(ImportedKey(publicKey: publicKey, kid: kid, purpose: purpose, attested: attested))
+            }
+            out.append((accountId, parsed))
+        }
+        return out
+    }
+
+    /// `keylog-import` (admin job): the one-time reviewed import of pre-existing device keys (ADR-0023 §4 migration, residual R-16). The admin job holds no
+    /// Key Vault role and no `ACCOUNT_REF_KEY` (AUTH-ADMIN-NO-KV), so it **stages** the validated file in `authority_keylog_imports`; the serving authority
+    /// applies it at its next start (`applyPendingImports`). A key already in use is refused here and again when applied.
+    static func importKeys(_ o: [String: JSONValue], commit: String, db: any Database, config: AuthorityConfig, now: Date) async throws {
+        let parsed = try parseImport(o)
+        for (_, keys) in parsed {
+            for key in keys {
+                if let existing = try await AuthorityKey.find(key.kid, on: db), existing.revokedAt == nil { throw Failure.invalid("key_in_use") }
+            }
+        }
+        let row = AuthorityKeylogImport()
+        row.id = UUID()
+        row.change = String(decoding: try CanonicalJSON.serialize(.object(o)), as: UTF8.self)
+        row.changeCommit = commit
+        row.createdAt = now
+        try await row.create(on: db)
+    }
+
+    /// Applies staged imports (the serving authority, which holds `ACCOUNT_REF_KEY`). Each file applies in one transaction or not at all.
+    static func applyPendingImports(db: any Database, config: AuthorityConfig, now: Date) async throws {
+        let pending = try await AuthorityKeylogImport.query(on: db).filter(\.$appliedAt == nil).sort(\.$createdAt).all()
+        for staged in pending {
+            guard case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: Data(staged.change.utf8)) else { throw Failure.invalid("staged import") }
+            let parsed = try parseImport(o)
+            let commit = staged.changeCommit
+            try await db.transaction { tx in
+                for (accountId, keys) in parsed {
+                    let ref = OIDCProfile.accountRef(key: config.accountRefKey, accountId: accountId)
+                    if let existing = try await AuthorityAccount.find(accountId, on: tx) {
+                        guard existing.accountRef == ref else { throw Failure.invalid("account_ref mismatch (ACCOUNT_REF_KEY changed?)") }
+                    } else {
+                        let account = AuthorityAccount()
+                        account.id = accountId
+                        account.accountRef = ref
+                        account.origin = "imported"
+                        account.frozen = false
+                        account.createdAt = now
+                        try await account.create(on: tx)
+                    }
+                    for imported in keys {
+                        if let existing = try await AuthorityKey.find(imported.kid, on: tx) {
+                            guard existing.revokedAt != nil else { throw Failure.invalid("key_in_use") }
+                            throw Failure.invalid("revoked key re-imported")
+                        }
+                        let key = AuthorityKey()
+                        key.id = imported.kid
+                        key.accountRef = ref
+                        key.publicKey = imported.publicKey.base64URL
+                        key.keyPurpose = imported.purpose
+                        key.hardwareAttested = imported.attested
+                        key.grantCapable = true
+                        key.usableFrom = now
+                        try await key.create(on: tx)
+                        try await AuthorityKeyLog.append(tx, accountRef: ref, type: "imported", kid: imported.kid, publicKey: imported.publicKey.base64URL,
+                                                         keyPurpose: imported.purpose, detail: ["commit": .string(commit), "hardware_attested": .bool(imported.attested)], now: now)
+                    }
                 }
-                for keyValue in keys {
-                    guard case .object(let k) = keyValue, Set(k.keys).isSubset(of: ["public_key", "key_purpose", "hardware_attested"]),
-                          let publicText = k["public_key"]?.stringValue, let publicKey = try? DevicePublicKey(base64URL: publicText),
-                          let purpose = k["key_purpose"]?.stringValue,
-                          [DeviceKeyPurpose.approvalBiometric.rawValue, DeviceKeyPurpose.approvalUserPresence.rawValue].contains(purpose) else { throw Failure.invalid("key") }
-                    var attested = false
-                    if let raw = k["hardware_attested"] { guard case .bool(let value) = raw else { throw Failure.invalid("hardware_attested") }; attested = value }
-                    let kid = KeyIdentifier.make(try publicKey.signingKey())
-                    if let existing = try await AuthorityKey.find(kid, on: tx), existing.revokedAt == nil { throw Failure.invalid("key_in_use") }
-                    let key = AuthorityKey()
-                    key.id = kid
-                    key.accountRef = ref
-                    key.publicKey = publicKey.base64URL
-                    key.keyPurpose = purpose
-                    key.hardwareAttested = attested
-                    key.grantCapable = true
-                    key.usableFrom = now
-                    try await key.create(on: tx)
-                    try await AuthorityKeyLog.append(tx, accountRef: ref, type: "imported", kid: kid, publicKey: publicKey.base64URL, keyPurpose: purpose,
-                                                     detail: ["commit": .string(commit), "hardware_attested": .bool(attested)], now: now)
-                }
+                try await AuthorityKeylogImport.query(on: tx).filter(\.$id == staged.id!).set(\.$appliedAt, to: now).update()
+                await AuthorityAudit.record(tx, "authority.keylog_import_applied", outcome: "success", caller: "authority", detail: "commit:\(commit)", at: now)
             }
         }
     }

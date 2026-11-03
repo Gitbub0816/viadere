@@ -86,8 +86,10 @@ public enum AuthorityApplication {
         // Keys load only when enabled and only when serving (the migrate and admin jobs hold no Key Vault role).
         var keys: AuthorityKeyRing?
         if config.enabled, loadKeys {
+            for line in await AuthorityKeyInventory.lines(kms: kms, config: config, db: app.db) { app.logger.notice("\(line)") }
+            // Reviewed key imports staged by the admin job need ACCOUNT_REF_KEY, which only the serving authority holds.
+            try await AuthorityAdmin.applyPendingImports(db: app.db, config: config, now: clock())
             keys = try await AuthorityKeyRing.load(kms: kms, config: config, db: app.db)
-            for line in try keys!.inventoryLines() { app.logger.notice("\(line)") }
         }
         app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock)
         try routes(app, verifier: verifier)

@@ -31,6 +31,8 @@ public struct DatabaseRateLimitStore: RateLimitStore {
         "redemption-consume", "reward-redeem", "wallet-auth-fail", "wallet-scan", "wallet-update",
         // Authentication delivery (ADR-0020 section 8): the tenant flood limit, the per-subject budgets, open and deny per device, link redemption, request-signature nonces.
         "authdl-", "authlink-", "bizsig-", "authority-",
+        // The staging OpenID provider (ADR-0024 section 4): challenge creation per client IP and per client, device evidence.
+        "oidc-",
     ]
 
     let database: @Sendable () -> (any Database)?
