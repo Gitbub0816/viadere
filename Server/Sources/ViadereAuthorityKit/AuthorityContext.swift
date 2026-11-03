@@ -11,12 +11,15 @@ public final class AuthorityContext: Sendable {
     let keys: AuthorityKeyRing?
     let clock: @Sendable () -> Date
     let bulkhead: ChallengeBulkhead
+    /// The active recovery-seal key in memory (`AUTHORITY_RECOVERY_ENABLED` only; ADR-0034 §5.2). `nil`: recovery routes fail closed.
+    let seal: SealKeyHolder?
 
-    init(config: AuthorityConfig, kms: any KeyManagementService, keys: AuthorityKeyRing?, clock: @escaping @Sendable () -> Date) {
+    init(config: AuthorityConfig, kms: any KeyManagementService, keys: AuthorityKeyRing?, clock: @escaping @Sendable () -> Date, seal: SealKeyHolder? = nil) {
         self.config = config
         self.kms = kms
         self.keys = keys
         self.clock = clock
+        self.seal = seal
         bulkhead = ChallengeBulkhead(perTenantPerMinute: config.challengeBudgetPerTenantPerMinute)
     }
 

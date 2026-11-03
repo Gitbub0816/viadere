@@ -9,7 +9,8 @@ import ViadereCore
 ///
 ///     ViadereAuthority admin <command> --change-file <path> --commit <sha>
 ///
-/// Commands: `client-register` (OIDC relying party), `link-client-register`, `keylog-import` (the one-time reviewed import, R-16), `key-version-pin`.
+/// Commands: `client-register` (OIDC relying party), `link-client-register`, `keylog-import` (the one-time reviewed import, R-16), `key-version-pin`,
+/// `key-inventory-record` / `key-inventory-check` (the reviewed inventory, S6-06), `seal-key-create` and `seal-key-exposed` (ADR-0034 §5.1, §8.2).
 public enum AuthorityAdmin {
     public enum Failure: Error, Sendable, Equatable, CustomStringConvertible {
         case unknownCommand(String)
@@ -22,9 +23,11 @@ public enum AuthorityAdmin {
         }
     }
 
-    public static let commands = ["client-register", "link-client-register", "keylog-import", "key-version-pin"]
+    public static let commands = ["client-register", "link-client-register", "keylog-import", "key-version-pin", "key-inventory-record", "key-inventory-check",
+                                  "seal-key-create", "seal-key-exposed"]
 
-    public static func run(command: String, changeFile: Data, commit: String, db: any Database, config: AuthorityConfig, now: Date = Date()) async throws {
+    public static func run(command: String, changeFile: Data, commit: String, db: any Database, config: AuthorityConfig, now: Date = Date(),
+                           executionId: String? = ProcessInfo.processInfo.environment["CONTAINER_APP_JOB_EXECUTION_NAME"]) async throws {
         guard commit.count == 40, commit.allSatisfy({ $0.isHexDigit }) else { throw Failure.invalid("--commit must be the 40-character commit of the change file") }
         guard case .object(let change)? = try? JSONDecoder().decode(JSONValue.self, from: changeFile) else { throw Failure.invalid("not a JSON object") }
         switch command {
@@ -32,6 +35,10 @@ public enum AuthorityAdmin {
         case "link-client-register": try await registerLinkClient(change, commit: commit, db: db, now: now)
         case "keylog-import": try await importKeys(change, commit: commit, db: db, config: config, now: now)
         case "key-version-pin": try await pinKeyVersion(change, commit: commit, db: db, now: now)
+        case "key-inventory-record": try await recordInventory(change, commit: commit, db: db, now: now)
+        case "key-inventory-check": try await checkInventory(change, db: db)
+        case "seal-key-create": try await createSealKey(change, commit: commit, db: db, config: config, executionId: executionId, now: now)
+        case "seal-key-exposed": try await sealKeyExposed(change, db: db, now: now)
         default: throw Failure.unknownCommand(command)
         }
         await AuthorityAudit.record(db, "authority.admin.\(command)", outcome: "success", caller: "admin", detail: "commit:\(commit)", at: now)
@@ -142,10 +149,10 @@ public enum AuthorityAdmin {
         var out: [(UUID, [ImportedKey])] = []
         var seen = Set<String>()
         for item in accounts {
-            // `passkeys` (optional) is parsed by `AuthorityPasskeyImport`; a passkey-only account has an empty `keys` list.
+            // `passkeys` (optional) is parsed by `AuthorityPasskeyImport`; keyless accounts (no device key) stay allowed and never grant-capable.
             guard case .object(let a) = item, Set(a.keys).isSubset(of: ["account_id", "keys", "passkeys"]), a["keys"] != nil,
                   let accountId = a["account_id"]?.stringValue.flatMap(UUID.init(uuidString:)),
-                  case .array(let keys)? = a["keys"], !keys.isEmpty || a["passkeys"] != nil, keys.count <= 10 else { throw Failure.invalid("account") }
+                  case .array(let keys)? = a["keys"], keys.count <= 10 else { throw Failure.invalid("account") }
             var parsed: [ImportedKey] = []
             for keyValue in keys {
                 guard case .object(let k) = keyValue, Set(k.keys).isSubset(of: ["public_key", "key_purpose", "hardware_attested"]),
@@ -200,7 +207,8 @@ public enum AuthorityAdmin {
                         let account = AuthorityAccount()
                         account.id = accountId
                         account.accountRef = ref
-                        account.origin = "imported"
+                        // Keyless accounts are never grant-capable: no logged key can prove anything for them (ADR-0032 §1.6).
+                        account.origin = keys.isEmpty ? "imported_keyless" : "imported"
                         account.frozen = false
                         account.createdAt = now
                         try await account.create(on: tx)
@@ -216,9 +224,15 @@ public enum AuthorityAdmin {
                         key.publicKey = imported.publicKey.base64URL
                         key.keyPurpose = imported.purpose
                         key.hardwareAttested = imported.attested
-                        key.grantCapable = true
+                        // Grant-capable only after this device verified a head containing its keys and confirmed them (ADR-0032 §1.4, §1.6).
+                        key.grantCapable = false
                         key.usableFrom = now
                         try await key.create(on: tx)
+                        let meta = AuthorityKeyEntry()
+                        meta.id = imported.kid
+                        meta.entryType = "imported"
+                        meta.entryGroup = "imp_" + ref
+                        try await meta.create(on: tx)
                         try await AuthorityKeyLog.append(tx, accountRef: ref, type: "imported", kid: imported.kid, publicKey: imported.publicKey.base64URL,
                                                          keyPurpose: imported.purpose, detail: ["commit": .string(commit), "hardware_attested": .bool(imported.attested)], now: now)
                     }

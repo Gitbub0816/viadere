@@ -67,6 +67,8 @@ final class AuthorityHarness: @unchecked Sendable {
         var wrongThumbprintFor: String?
         var clientExtras: [String: JSONValue] = [:]
         var idTokenAlg = "RS256"
+        var confirmImportedKeys = true
+        var mutateConfig: (@Sendable (inout AuthorityConfig) -> Void)?
     }
 
     static func make(_ options: Options = Options()) async throws -> AuthorityHarness {
@@ -79,6 +81,7 @@ final class AuthorityHarness: @unchecked Sendable {
         config.enabled = options.enabled
         config.oidcEnabled = options.oidc
         config.issuer = Self.issuer
+        options.mutateConfig?(&config)
         if let url = ProcessInfo.processInfo.environment["TEST_AUTHORITY_DATABASE_URL"], !url.isEmpty { config.databaseURL = url }
         app = try await Application.make(.testing)
         try kms.createRSASigningKey("oidc-signing-rs256", key: try _RSA.Signing.PrivateKey(keySize: .bits2048))
@@ -143,6 +146,11 @@ final class AuthorityHarness: @unchecked Sendable {
         }
         do {
             try await AuthorityApplication.configure(app, config: config, overrides: overrides, migrateInMemory: true)
+            // Imported keys become grant-capable only after the device verified a head containing them and confirmed it (ADR-0032 §1.4, §1.6).
+            if options.enabled, options.confirmImportedKeys, options.skipPin == nil, options.wrongThumbprintFor == nil {
+                let confirmed = try await confirmEnrollment(keys: [biometricKey, presenceKey], accountId: accountId)
+                guard confirmed.status == .ok else { throw Abort(.internalServerError, reason: "harness enrollment: \(confirmed.body)") }
+            }
         } catch {
             try? await app.asyncShutdown()
             throw error

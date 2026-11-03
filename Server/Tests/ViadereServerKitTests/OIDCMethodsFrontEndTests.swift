@@ -82,6 +82,10 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
         }
         let app = try await Application.make(.testing)
         try await AuthorityApplication.configure(app, config: config, overrides: overrides, migrateInMemory: true)
+        // Imported keys (and with them the account's imported passkey) produce nothing until the device confirmed the log (ADR-0032 §1.4, §1.6).
+        for (account, key) in deviceKeys {
+            try await AuthorityEnrollment.confirm(app: app, statementKey: statementKey, accountId: account, keys: [key], now: Self.now)
+        }
         return Authority(app: app, statementKey: statementKey, clientKey: clientKey, deviceKeys: deviceKeys, passkey: passkey)
     }
 

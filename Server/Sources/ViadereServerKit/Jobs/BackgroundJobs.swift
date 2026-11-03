@@ -139,6 +139,8 @@ struct BackgroundJobs {
         if try await staleCeremonies.count() > 0 {
             try await PasskeyCeremonyRecord.query(on: db).filter(\.$expiresAt < now.addingTimeInterval(-3600)).delete()
         }
+        // OIDC browser authorizations (class T; they can hold an authorization code): deleted at expiry, whether or not anyone authorizes again.
+        try await OIDCRetention.purge(on: db, now: now)
         return report
     }
 

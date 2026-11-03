@@ -316,3 +316,63 @@ resource "azurerm_container_app_job" "migrate" {
 
   depends_on = [azurerm_role_assignment.acr_pull]
 }
+
+# ---- Reconciliation job (ADR-0023 section 6, ADR-0028 section 2, ADR-0034 section 5.2; condition C-11): hourly, independent of the worker. Every
+# Key Vault sign and unwrap in the AuditEvent rows must match a sign record the authority wrote before the call; any unmatched operation fails
+# the execution (alert in monitoring.tf). No Key Vault role, no AUTHORITY_ENABLED. -----------------------------------------------------------
+resource "azurerm_container_app_job" "reconcile" {
+  count                        = local.reconcile
+  name                         = local.recon_job
+  location                     = var.location
+  resource_group_name          = azurerm_resource_group.auth[0].name
+  container_app_environment_id = azapi_resource.cae[0].id
+  workload_profile_name        = "Consumption"
+  replica_timeout_in_seconds   = 600
+  replica_retry_limit          = 0
+  tags                         = local.tags
+
+  schedule_trigger_config {
+    cron_expression          = "17 * * * *"
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.authority_reconcile[0].id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.auth[0].login_server
+    identity = azurerm_user_assigned_identity.authority_reconcile[0].id
+  }
+
+  template {
+    container {
+      name    = "reconcile"
+      image   = var.image
+      cpu     = local.p.app_cpu
+      memory  = local.p.app_memory
+      command = ["/app/ViadereAuthority"]
+      args    = ["reconcile"]
+
+      dynamic "env" {
+        for_each = merge(local.authority_base_env, {
+          AZURE_CLIENT_ID              = azurerm_user_assigned_identity.authority_reconcile[0].client_id
+          DATABASE_USER                = local.db_roles.reconcile
+          AUTHORITY_AUDIT_WORKSPACE_ID = azurerm_log_analytics_workspace.auth[0].workspace_id
+        })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
+  depends_on = [azurerm_role_assignment.reconcile_acr_pull, azurerm_role_assignment.reconcile_logs]
+}

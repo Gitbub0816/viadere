@@ -45,6 +45,11 @@ public struct AuthorityConfig: Sendable {
     public var enabled = false
     /// `AUTHORITY_OIDC_ENABLED` (default **off**; refused with `ENVIRONMENT=production` until a new ADR and owner approval, ADR-0024 §1).
     public var oidcEnabled = false
+    /// `AUTHORITY_KEYLOG_ENABLED` (default **off**): genesis, enrollment confirmation, device add and signed heads (ADR-0032 §1, ADR-0033). Off: those routes answer `404`.
+    public var keylogEnabled = false
+    /// `AUTHORITY_RECOVERY_ENABLED` (default **off**; refused with `ENVIRONMENT=production` until the HSM seal construction ships, ADR-0034 §9, C-16):
+    /// sealed code sets, recovery starts, cancel and activation. Needs `RECOVERY_VERIFIER_KEY` and an app-pinned, unwrapped seal key.
+    public var recoveryEnabled = false
     /// `OIDC_ISSUER`: the exact issuer string (`https://id.<staging domain>`, no trailing slash). Grants use `<issuer>/grant`.
     public var issuer = "https://id.viadere.test"
     /// `AUTHORITY_WEBAUTHN_RP_ID`: the existing Viadere WebAuthn RP id (so existing account passkeys work at `/oidc/authorize`, ADR-0024 §4 method 1).
@@ -71,6 +76,8 @@ public struct AuthorityConfig: Sendable {
     public var oidcPairwiseKey = SymmetricKey(size: .bits256)
     public var accountRefKey = SymmetricKey(size: .bits256)
     public var subjectRefKey = SymmetricKey(size: .bits256)
+    /// `RECOVERY_VERIFIER_KEY`: HMAC key of the authority recovery-code verifiers only (ADR-0032 §4, ADR-0034 §4.6).
+    public var recoveryVerifierKey = SymmetricKey(size: .bits256)
 
     // Database.
     public var databaseURL: String?
@@ -78,6 +85,8 @@ public struct AuthorityConfig: Sendable {
 
     /// Development and tests only: statement-key thumbprints accepted in place of the app-pinned Core constants (refused when strict).
     public var developmentStatementPins: [String] = []
+    /// Development and tests only: seal-key thumbprints accepted in place of the app-pinned Core constants (refused when strict).
+    public var developmentSealPins: [String] = []
 
     /// Challenge lifetime and the per-tenant challenge-signing bulkhead (ADR-0033 §2).
     public var challengeLifetime: TimeInterval = 120
@@ -98,6 +107,8 @@ public struct AuthorityConfig: Sendable {
         var config = AuthorityConfig(deployment: .testing)
         config.enabled = true
         config.oidcEnabled = true
+        config.keylogEnabled = true
+        config.recoveryEnabled = true
         return config
     }
 
@@ -117,6 +128,12 @@ public struct AuthorityConfig: Sendable {
         if let raw = env["BIND_HOST"], !raw.isEmpty { config.bindHost = raw }
         config.enabled = try flag("AUTHORITY_ENABLED")
         config.oidcEnabled = try flag("AUTHORITY_OIDC_ENABLED")
+        config.keylogEnabled = try flag("AUTHORITY_KEYLOG_ENABLED")
+        config.recoveryEnabled = try flag("AUTHORITY_RECOVERY_ENABLED")
+        if config.recoveryEnabled, deployment == .production {
+            throw AuthorityConfigError.refused("AUTHORITY_RECOVERY_ENABLED is refused with ENVIRONMENT=production until the HSM seal construction ships (ADR-0034 section 9, C-16)")
+        }
+        if config.recoveryEnabled, !config.keylogEnabled { throw AuthorityConfigError.refused("AUTHORITY_RECOVERY_ENABLED needs AUTHORITY_KEYLOG_ENABLED") }
         if config.oidcEnabled, deployment == .production {
             throw AuthorityConfigError.refused("AUTHORITY_OIDC_ENABLED is refused with ENVIRONMENT=production (ADR-0024 §1: staging only until a new ADR and owner approval)")
         }
@@ -173,8 +190,13 @@ public struct AuthorityConfig: Sendable {
         if let key = try secret("OIDC_PAIRWISE_KEY") { config.oidcPairwiseKey = key }
         if let key = try secret("ACCOUNT_REF_KEY") { config.accountRefKey = key }
         if let key = try secret("SUBJECT_REF_KEY") { config.subjectRefKey = key }
-        let distinct = Set([config.oidcPairwiseKey, config.accountRefKey, config.subjectRefKey].map { $0.withUnsafeBytes { Data($0) } })
-        guard distinct.count == 3 else { throw AuthorityConfigError.refused("OIDC_PAIRWISE_KEY, ACCOUNT_REF_KEY and SUBJECT_REF_KEY must be different values") }
+        if let raw = env["RECOVERY_VERIFIER_KEY"], !raw.isEmpty {
+            config.recoveryVerifierKey = try secret("RECOVERY_VERIFIER_KEY") ?? config.recoveryVerifierKey
+        } else if strict && config.recoveryEnabled {
+            throw AuthorityConfigError.missing("RECOVERY_VERIFIER_KEY")
+        }
+        let distinct = Set([config.oidcPairwiseKey, config.accountRefKey, config.subjectRefKey, config.recoveryVerifierKey].map { $0.withUnsafeBytes { Data($0) } })
+        guard distinct.count == 4 else { throw AuthorityConfigError.refused("OIDC_PAIRWISE_KEY, ACCOUNT_REF_KEY, SUBJECT_REF_KEY and RECOVERY_VERIFIER_KEY must be different values") }
 
         switch (env["DATABASE_AUTH"] ?? "").lowercased() {
         case "entra":
@@ -195,6 +217,10 @@ public struct AuthorityConfig: Sendable {
         if let raw = env["AUTHORITY_DEV_STATEMENT_PINS"], !raw.isEmpty {
             guard !strict else { throw AuthorityConfigError.refused("AUTHORITY_DEV_STATEMENT_PINS is development only") }
             config.developmentStatementPins = raw.split(separator: ",").map(String.init)
+        }
+        if let raw = env["AUTHORITY_DEV_SEAL_PINS"], !raw.isEmpty {
+            guard !strict else { throw AuthorityConfigError.refused("AUTHORITY_DEV_SEAL_PINS is development only") }
+            config.developmentSealPins = raw.split(separator: ",").map(String.init)
         }
         return config
     }
@@ -226,5 +252,10 @@ public struct AuthorityConfig: Sendable {
     /// The app-pinned statement keys for this deployment (Core constants), or the development override.
     public var statementPins: [String] {
         deployment.isStrict ? AuthorityPinnedKeys.deviceStatementKids(deployment.statementEnvironment) : developmentStatementPins
+    }
+
+    /// The app-pinned seal keys for this deployment (Core constants), or the development override. The authority loads only a seal key in this list.
+    public var sealPins: [String] {
+        deployment.isStrict ? AuthorityPinnedKeys.sealKids(deployment.statementEnvironment) : developmentSealPins
     }
 }

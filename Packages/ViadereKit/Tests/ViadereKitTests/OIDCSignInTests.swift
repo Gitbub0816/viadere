@@ -230,18 +230,10 @@ struct OIDCSignInTests {
         #expect(watch == .ignored)
     }
 
-    @Test func statementKeysMustBeInTheBuildAndInCore() {
-        let key = P256.Signing.PrivateKey().publicKey
-        let encoded = Base64URL.encode(key.x963Representation)
-        #expect(AuthorityStatementKeyPins.parse(encoded).count == 1)
-        #expect(AuthorityStatementKeyPins.parse(encoded + ",broken").isEmpty)
-        #expect(AuthorityStatementKeyPins.parse("$(VIADERE_AUTHORITY_STATEMENT_KEYS)").isEmpty)
-        #expect(AuthorityStatementKeyPins.parse(encoded + "," + encoded).isEmpty)
-        #expect(AuthorityStatementKeyPins.effective([key], pinnedKids: []).isEmpty)
-        #expect(AuthorityStatementKeyPins.effective([key], pinnedKids: [JWKThumbprint.p256(key)]).count == 1)
-        // Core pins nothing yet: every build fails closed until the attested inventory is pinned (S6-06).
-        var configuration = ViadereConfiguration.local
-        configuration.authorityStatementKeys = [encoded]
-        #expect(AuthorityStatementKeyPins.effective(configuration: configuration).isEmpty == AuthorityPinnedKeys.deviceStatementKids(.staging).isEmpty)
+    @Test func statementKeysComeOnlyFromTheCoreSlots() {
+        // Owner placeholders today: the app path fails closed until the slots are filled from the verified inventory (S6-06).
+        let configuration = ViadereConfiguration.local
+        #expect(AuthorityStatementKeyPins.effective(configuration: configuration).map(JWKThumbprint.p256)
+                == AuthorityPinnedKeys.deviceStatementKids(configuration.authorityEnvironment))
     }
 }

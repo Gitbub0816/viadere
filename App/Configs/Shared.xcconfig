@@ -25,9 +25,6 @@ VIADERE_LINK_DESCRIPTOR_KEYS =
 // Release and Staging archives refuse empty or malformed values (Scripts/check-release-pins.sh). Placeholders until the owner sets them.
 VIADERE_BRAND_MANIFEST_KEYS =
 VIADERE_LOOP_PUBLICATION_KEYS =
-// The authority's device-statement-signing public keys (base64url X9.63, comma separated). Used only where their RFC 7638 thumbprint is also in
-// Core's AuthorityPinnedKeys; empty until the first attested key inventory (ledger S6-06), so authority-backed screens fail closed.
-VIADERE_AUTHORITY_STATEMENT_KEYS =
 // Which APNs environment the app registers its push token for (`sandbox` | `production`; read from Info.plist `ViadereAPNsEnvironment`).
 // It must equal the server's APNS_ENVIRONMENT. ViadereConfiguration honours `sandbox` only for a host other than the production API.
 VIADERE_APNS_ENVIRONMENT = production

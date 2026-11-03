@@ -14,6 +14,9 @@ public struct AuthDeliverySettings: Sendable {
     /// approval (`422 number_match_required`); push approvals then exist only through `POST /v1/business/auth-approvals`, which always carries a number. Off keeps
     /// the legacy route working for businesses that have not migrated.
     public var numberMatchingRequired = false
+    /// `AUTH_LINK_SERVICE_ENABLED` (ADR-0019 §6, ADR-0021 §5), default **off** everywhere: the link-service redemption
+    /// `POST /v1/business/auth-links/redeem` answers `404` while off. On, it relays to the authority (`AUTHORITY_URL`) and fails closed (`503`) without one.
+    public var linkServiceEnabled = false
     /// `AUTH_DESTINATION_SIGNATURE_REQUIRED` (ADR-0031 section 5): business-mode links need a business-signed destination statement. `false` exists only so the
     /// unit tests can exercise both paths; staging and production refuse it.
     public var destinationSignatureRequired = true
@@ -62,6 +65,11 @@ extension ServerConfig {
         case "true": authDelivery.numberMatchingRequired = true
         case "false", nil, "": authDelivery.numberMatchingRequired = false
         default: throw ServerConfigError.invalid("AUTH_NUMBER_MATCHING_REQUIRED (true or false)")
+        }
+        switch env["AUTH_LINK_SERVICE_ENABLED"]?.lowercased() {
+        case "true": authDelivery.linkServiceEnabled = true
+        case "false", nil, "": authDelivery.linkServiceEnabled = false
+        default: throw ServerConfigError.invalid("AUTH_LINK_SERVICE_ENABLED (true or false)")
         }
         switch env["AUTH_DESTINATION_SIGNATURE_REQUIRED"] {
         case "true", nil, "": authDelivery.destinationSignatureRequired = true

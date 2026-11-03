@@ -208,19 +208,49 @@ final class AuthorityControlTests: XCTestCase {
         }
     }
 
-    func testInventoryLinesCarryPublicJWKsOnly() async throws {
+    /// S6-06: the inventory is a reviewed change file the serving authority verifies against Key Vault; `key-inventory-check` (the exit status the
+    /// workflow waits for) succeeds only for verified rows. A substituted JWK is `mismatch` and never passes the check. No source prints inventory lines.
+    func testReviewedInventoryIsVerifiedByTheServingAuthorityNotReadFromALog() async throws {
         let h = try await AuthorityHarness.make()
-        let lines = await AuthorityKeyInventory.lines(kms: h.kms, config: h.config, db: h.app.db)
-        XCTAssertEqual(lines.count, 4)
-        for line in lines {
-            XCTAssertTrue(line.hasPrefix("VIADERE-KEY-INVENTORY {"))
-            XCTAssertTrue(line.contains("\"pinned\":true"))
-            for member in ["\"d\":", "\"p\":", "\"q\":", "\"dp\":"] { XCTAssertFalse(line.contains(member)) }
+        let version = String(try await h.kms.resolveVersion(keyRef: "grant-signing").split(separator: "/")[1])
+        let genuine: [String: JSONValue] = ["keys": .array([.object(["name": .string("grant-signing"), "version": .string(version),
+                                                                     "jwk": .object(JWKThumbprint.p256JWK(h.grantKey))])])]
+        let forged: [String: JSONValue] = ["keys": .array([.object(["name": .string("grant-signing"), "version": .string(version),
+                                                                    "jwk": .object(JWKThumbprint.p256JWK(P256.Signing.PrivateKey().publicKey))])])]
+        for change in [genuine, forged] {
+            try await AuthorityAdmin.run(command: "key-inventory-record", changeFile: try CanonicalJSON.serialize(.object(change)), commit: AuthorityHarness.commit,
+                                         db: h.app.db, config: h.config, now: h.clock.now)
+            // Recorded, not yet verified: the check fails.
+            do {
+                try await AuthorityAdmin.run(command: "key-inventory-check", changeFile: try CanonicalJSON.serialize(.object(change)), commit: AuthorityHarness.commit,
+                                             db: h.app.db, config: h.config, now: h.clock.now)
+                XCTFail("an unverified inventory must not pass the check")
+            } catch is AuthorityAdmin.Failure {}
         }
-        // Without a pin the current version is listed (unpinned), so the first pin can be reviewed from the attested inventory.
-        try await AuthorityKeyPin.query(on: h.app.db).filter(\.$id == "grant-signing").delete()
-        let unpinned = await AuthorityKeyInventory.lines(kms: h.kms, config: h.config, db: h.app.db)
-        XCTAssertEqual(unpinned.filter { $0.contains("\"pinned\":false") }.count, 1)
+        await XCTAssertEqualAsync(try await AuthorityKeyInventory.verifyPending(kms: h.app.authority.kms, db: h.app.db, now: h.clock.now), 2)
+        try await AuthorityAdmin.run(command: "key-inventory-check", changeFile: try CanonicalJSON.serialize(.object(genuine)), commit: AuthorityHarness.commit,
+                                     db: h.app.db, config: h.config, now: h.clock.now)
+        do {
+            try await AuthorityAdmin.run(command: "key-inventory-check", changeFile: try CanonicalJSON.serialize(.object(forged)), commit: AuthorityHarness.commit,
+                                         db: h.app.db, config: h.config, now: h.clock.now)
+            XCTFail("a JWK that is not the Key Vault key must never pass")
+        } catch is AuthorityAdmin.Failure {}
+        await XCTAssertEqualAsync(try await AuthorityInventoryRow.query(on: h.app.db).filter(\.$status == "mismatch").count(), 1)
+        // Private members are refused at record time.
+        var withPrivate = JWKThumbprint.p256JWK(h.grantKey)
+        withPrivate["d"] = .string("AAAA")
+        do {
+            try await AuthorityAdmin.run(command: "key-inventory-record", changeFile: try CanonicalJSON.serialize(.object(["keys": .array([.object([
+                "name": .string("grant-signing"), "version": .string(version), "jwk": .object(withPrivate)])])])), commit: AuthorityHarness.commit,
+                                         db: h.app.db, config: h.config, now: h.clock.now)
+            XCTFail("private JWK members must be refused")
+        } catch is AuthorityAdmin.Failure {}
+        // Nothing in the module prints inventory lines for CI to parse any more.
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/ViadereAuthorityKit")
+        for file in try FileManager.default.contentsOfDirectory(atPath: sources.path) where file.hasSuffix(".swift") {
+            XCTAssertFalse(try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8).contains("VIADERE-KEY-INVENTORY"), file)
+        }
         try await h.shutdown()
     }
 
@@ -319,8 +349,13 @@ final class AuthorityControlTests: XCTestCase {
         let h = try await AuthorityHarness.make()
         let routes = Set(h.app.routes.all.map { "\($0.method.rawValue) /" + $0.path.map(\.description).joined(separator: "/") })
         XCTAssertEqual(routes, ["GET /healthz", "GET /readyz", "POST /v1/challenges", "POST /v1/evidence", "GET /v1/oidc/client-check", "POST /v1/oidc/token",
-                                "GET /v1/oidc/keys", "POST /v1/revocations", "POST /v1/oidc/passkey/challenges", "POST /v1/oidc/passkey/evidence",
-                                "POST /v1/oidc/consents", "POST /v1/oidc/consents/revoke"])
+                                "GET /v1/oidc/keys", "POST /v1/revocations",
+                                // Key log, recovery and link service (S6-04, S6-05).
+                                "POST /v1/keylog/nonces", "POST /v1/keylog/genesis", "POST /v1/keylog/head", "POST /v1/keylog/challenges",
+                                "POST /v1/keylog/device-added", "POST /v1/keylog/evidence", "POST /v1/keylog/recovery/start",
+                                "POST /v1/keylog/recovery/legacy-start", "POST /v1/link/redeem",
+                                // Passkey method and consents (S6-01, S6-02).
+                                "POST /v1/oidc/passkey/challenges", "POST /v1/oidc/passkey/evidence", "POST /v1/oidc/consents", "POST /v1/oidc/consents/revoke"])
         try await h.shutdown()
     }
 

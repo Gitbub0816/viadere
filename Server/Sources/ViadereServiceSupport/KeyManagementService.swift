@@ -134,7 +134,13 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
         return try key.signature(for: SHA256Digest(bytes: digest), padding: .insecurePKCS1v1_5).rawRepresentation
     }
 
-    public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey { try rsaSigningKey(keyRef).publicKey }
+    /// The public half of an RSA signing key, or of a key-encryption key (Key Vault returns the public JWK of either; the authority reads a KEK's to
+    /// verify a reviewed inventory row).
+    public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey {
+        if let key = try? rsaSigningKey(keyRef) { return key.publicKey }
+        let (_, wrappingKey) = try wrappingKey(keyRef)
+        return try _RSA.Signing.PublicKey(derRepresentation: wrappingKey.publicKey.derRepresentation)
+    }
 
     package static func newVersion() -> String { Hex.encode(SecureToken.randomBytes(16)) }
 

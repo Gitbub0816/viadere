@@ -274,9 +274,14 @@ struct PasskeyEvidenceVerifier {
         // 3. The passkey is in the authority's own log, not revoked, grant-capable; its account exists and is not frozen.
         guard let passkey = try await AuthorityPasskey.find(credentialId, on: db), passkey.revokedAt == nil else { throw await refuse("unknown_passkey") }
         auditAccount = passkey.accountRef
-        guard passkey.grantCapable else { throw await refuse("not_grant_capable") }
         guard let account = try await AuthorityAccount.query(on: db).filter(\.$accountRef == passkey.accountRef).first(), let accountId = account.id else {
             throw await refuse("unknown_account")
+        }
+        // An imported passkey is usable only once a device of its account confirmed the log: the account then holds a grant-capable device key.
+        if !passkey.grantCapable {
+            let confirmed = try await AuthorityKey.query(on: db).filter(\.$accountRef == passkey.accountRef).filter(\.$grantCapable == true)
+                .filter(\.$revokedAt == nil).count()
+            guard confirmed > 0 else { throw await refuse("not_grant_capable") }
         }
         guard !account.frozen else { throw await refuse("account_frozen") }
 
@@ -501,7 +506,9 @@ enum AuthorityPasskeyImport {
             row.publicKey = Base64URL.encode(imported.publicKey)
             row.signCount = imported.signCount
             row.hardwareBound = imported.hardwareBound
-            row.grantCapable = true
+            // Like imported device keys (ADR-0032 §1.6): nothing imported produces a grant or a code until a device of the account confirmed the
+            // log (`enrollment_confirmed`). The passkey then counts as confirmed through its account (`PasskeyEvidenceVerifier` step 3).
+            row.grantCapable = false
             row.createdAt = now
             try await row.create(on: tx)
             try await AuthorityKeyLog.append(tx, accountRef: accountRef, type: "imported", kid: "passkey:" + imported.credentialId, publicKey: row.publicKey,

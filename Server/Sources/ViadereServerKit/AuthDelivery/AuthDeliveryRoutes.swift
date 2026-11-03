@@ -89,6 +89,7 @@ enum AuthDeliveryRoutes {
                                                                                                type: WebhookEventType(rawValue: body.type))
             return try req.jsonResponse(AuthWebhookTestResponse(eventId: eventId))
         }
+        AuthLinkRedemption.register(routes)
 
         // MARK: Devices
         routes.api(APIRoutes.authDeliveries) { req in

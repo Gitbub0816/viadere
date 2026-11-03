@@ -83,6 +83,17 @@ class KeyCustody(unittest.TestCase):
         assign(plan, 'azurerm_role_assignment.z["k"]', "viadere authority signer (stg)", [ADMIN], [KEY], "workload:authority-admin: sign")
         self.assertIn("AUTH-ADMIN-NO-KV", rules(policy_check.evaluate(plan)))
 
+    def test_admin_workflow_identity_reads_no_log(self):
+        # S6-06: the key inventory is never read from a log; the admin workflow identity holds only the job-starter role on the admin job.
+        gh_admin = "azurerm_user_assigned_identity.gh_authority_admin"
+        plan = base()
+        assign(plan, "azurerm_role_assignment.gh_authority_admin_start", "viadere container apps job starter (stg)", [gh_admin + "[0].principal_id", gh_admin],
+               ["azurerm_container_app_job.admin[0].id", "azurerm_container_app_job.admin"], "deploy:gh-authority-admin: start the admin job")
+        self.assertNotIn("AUTH-INVENTORY-CHANNEL", rules(policy_check.evaluate(plan)))
+        assign(plan, "azurerm_role_assignment.gh_authority_admin_logs", "Log Analytics Reader", [gh_admin + "[0].principal_id", gh_admin],
+               ["azurerm_log_analytics_workspace.auth[0].id", "azurerm_log_analytics_workspace.auth"], "deploy:gh-authority-admin: read logs")
+        self.assertIn("AUTH-INVENTORY-CHANNEL", rules(policy_check.evaluate(plan)))
+
     def test_signer_role_with_extra_data_actions(self):
         plan = base()
         plan["resource_changes"][-2]["change"]["after"]["permissions"][0]["data_actions"].append("Microsoft.KeyVault/vaults/keys/decrypt/action")

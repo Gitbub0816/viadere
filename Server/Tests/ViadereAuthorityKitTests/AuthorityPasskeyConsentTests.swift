@@ -68,7 +68,8 @@ final class AuthorityPasskeyConsentTests: XCTestCase {
         XCTAssertEqual(challenge.relyingPartyId, Self.rpId)
         XCTAssertTrue(AuthorityNonce.isValid(challenge.challenge))
         // Nothing was signed for a passkey challenge, and it is not an app challenge.
-        let appChallenges = try await AuthorityChallenge.query(on: h.app.db).count()
+        // (The harness's own enrollment confirmation is an `enrollment_confirmed` challenge.)
+        let appChallenges = try await AuthorityChallenge.query(on: h.app.db).filter(\.$purpose == AuthorityPurpose.oidcLogin.rawValue).count()
         XCTAssertEqual(appChallenges, 0)
 
         let result = try await submit(challenge.challengeId, try assertion(challenge: challenge.challenge))
@@ -165,6 +166,21 @@ final class AuthorityPasskeyConsentTests: XCTestCase {
         await XCTAssertEqualAsync(try await h.submit(factor, accountId: h.accountId).status, .unauthorized)
         let passkeyState = try await challengeState(passkey.challengeId)
         XCTAssertEqual(passkeyState, "pending")
+    }
+
+    /// Imported keys need the device's confirmation before they produce a grant or a code (ADR-0032 §1.4, §1.6); an imported passkey follows its
+    /// account: refused until a device of the account confirmed the log.
+    func testImportedPasskeyIsRefusedUntilADeviceConfirmedTheAccount() async throws {
+        try await h.shutdown()
+        var options = AuthorityHarness.Options()
+        options.confirmImportedKeys = false
+        h = try await AuthorityHarness.make(options)
+        let challenge = try unwrapped(try await passkeyChallenge().response)
+        await XCTAssertEqualAsync(try await submit(challenge.challengeId, try assertion(challenge: challenge.challenge)).status, .unauthorized)
+        let reasons = try await AuthorityAuditEvent.query(on: h.app.db).filter(\.$event == "authority.passkey_evidence").all().compactMap(\.reason)
+        XCTAssertEqual(reasons, ["not_grant_capable"])
+        let state = try await challengeState(challenge.challengeId)
+        XCTAssertEqual(state, "pending")
     }
 
     func testPasskeyChallengeIsSingleUseAndExpires() async throws {
@@ -349,11 +365,8 @@ final class AuthorityPasskeyConsentTests: XCTestCase {
         do { try await run(try change(.array([.object(["credential_id": .string(other), "public_key": .string(Base64URL.encode(Data(rs256)))])]))); XCTFail("alg") } catch {}
         do { try await run(try change(.array([.object(["credential_id": .string(other), "public_key": .string(Base64URL.encode(cose)), "aaguid": .string("x")])]))); XCTFail("member") } catch {}
         do { try await run(try change(.array([]))); XCTFail("empty") } catch {}
-        // No keys and no passkeys: still refused.
-        do {
-            try await run(try CanonicalJSON.serialize(.object(["accounts": .array([.object(["account_id": .string(UUID().uuidString), "keys": .array([])])])])))
-            XCTFail("keyless account without passkeys")
-        } catch {}
+        // The imported passkey of an account no device has confirmed produces nothing (like imported keys, ADR-0032 §1.6).
+        XCTAssertEqual(stored?.grantCapable, false)
     }
 
     func testPasskeyConfigurationIsStrict() throws {

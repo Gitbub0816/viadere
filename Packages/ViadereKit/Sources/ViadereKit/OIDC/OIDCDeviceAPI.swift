@@ -151,33 +151,11 @@ public struct DeviceKeyFactorSigner: AuthorityFactorSigning {
 
 // MARK: Pinned statement keys
 
-/// The authority's `device-statement-signing` public keys this build trusts (ADR-0033 §3). Build setting `VIADERE_AUTHORITY_STATEMENT_KEYS`
-/// (Info.plist `ViadereAuthorityStatementKeys`): base64url X9.63 P-256 keys, comma separated (active, standby). A key is used only if its RFC 7638
-/// thumbprint is also one of Core's `AuthorityPinnedKeys.deviceStatementKids` for the environment, so the two pins must agree. **All-or-nothing**:
-/// one malformed entry rejects the list. An empty result fails every statement closed.
+/// The authority's `device-statement-signing` keys this build trusts (ADR-0033 §3.1): Core's `AuthorityPinnedKeys` statement slots for the build's
+/// environment, nothing from the network or the build settings. Owner placeholders resolve to an empty list, which fails every statement closed.
 public enum AuthorityStatementKeyPins {
-    public static func parse(_ raw: String?) -> [P256.Signing.PublicKey] {
-        guard let raw else { return [] }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return [] }
-        var keys: [P256.Signing.PublicKey] = []
-        for entry in trimmed.split(separator: ",", omittingEmptySubsequences: false) {
-            guard let bytes = Base64URL.decode(entry.trimmingCharacters(in: .whitespaces)), bytes.count == 65,
-                  let key = try? P256.Signing.PublicKey(x963Representation: bytes) else { return [] }
-            guard !keys.contains(where: { JWKThumbprint.p256($0) == JWKThumbprint.p256(key) }) else { return [] }
-            keys.append(key)
-        }
-        return keys
-    }
-
-    /// The build keys narrowed to those whose thumbprint Core pins for `environment`.
-    public static func effective(_ keys: [P256.Signing.PublicKey], pinnedKids: [String]) -> [P256.Signing.PublicKey] {
-        keys.filter { pinnedKids.contains(JWKThumbprint.p256($0)) }
-    }
-
     public static func effective(configuration: ViadereConfiguration) -> [P256.Signing.PublicKey] {
-        effective(parse(configuration.authorityStatementKeys.joined(separator: ",")),
-                  pinnedKids: AuthorityPinnedKeys.deviceStatementKids(configuration.authorityEnvironment))
+        AuthorityPinnedKeys.deviceStatementKeys(configuration.authorityEnvironment)
     }
 }
 

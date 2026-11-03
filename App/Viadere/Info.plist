@@ -100,8 +100,6 @@
 	<string>$(VIADERE_BRAND_MANIFEST_KEYS)</string>
 	<key>ViadereLoopPublicationKeys</key>
 	<string>$(VIADERE_LOOP_PUBLICATION_KEYS)</string>
-	<key>ViadereAuthorityStatementKeys</key>
-	<string>$(VIADERE_AUTHORITY_STATEMENT_KEYS)</string>
 	<key>ViadereKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.viadere.shared</string>
 	<key>ViadereVaultKeychainAccessGroup</key>

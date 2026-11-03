@@ -42,7 +42,5 @@ extension ViadereConfiguration {
     mutating func applyManifestKeyPins(from info: [String: Any]) {
         brandManifestKeys = ManifestKeyPins.parse(info["ViadereBrandManifestKeys"] as? String)
         loopPublicationKeys = ManifestKeyPins.parse(info["ViadereLoopPublicationKeys"] as? String)
-        let statementKeys = (info["ViadereAuthorityStatementKeys"] as? String) ?? ""
-        authorityStatementKeys = AuthorityStatementKeyPins.parse(statementKeys).isEmpty ? [] : statementKeys.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 }

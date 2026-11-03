@@ -13,9 +13,14 @@ public enum AuthorityPurpose: String, Sendable, Codable, CaseIterable, Hashable 
     case recoveryCancel = "recovery_cancel"
     case recoveryCodesSet = "recovery_codes_set"
     case enrollmentConfirmed = "enrollment_confirmed"
+    /// The sealed recovery start (ADR-0032 §3.2): the challenge whose nonce the envelope and every new key's PoP commit to. No factor JWS answers it.
+    case recoveryStarted = "recovery_started"
 
     /// Purposes whose evidence yields a grant or a token: the signing key must be grant-capable (ADR-0023 §3 step 2).
     public var yieldsGrant: Bool { self == .linkOpen || self == .oidcLogin }
+
+    /// Key-log and recovery purposes: only their statements may carry `account_ref` and `kids` (ADR-0033 §2).
+    public var isKeyLog: Bool { !(self == .linkOpen || self == .oidcLogin) }
 }
 
 /// Authority challenge ids: `ach_` + 22 base64url characters (16 random bytes).
@@ -79,9 +84,15 @@ public struct AuthorityChallengeStatement: Sendable, Hashable {
     public var matchRequired: Bool
     public var issuedAt: Int64
     public var expiresAt: Int64
+    /// Key-log purposes only: the account the challenge is about (an approving device requires it to equal its own, ADR-0033 §2).
+    public var accountRef: String?
+    /// Key-log purposes only: the keys of the entry being proved (a new device requires them to be exactly its own, ADR-0033 §4.1).
+    public var kids: [String]?
 
     public init(environment: AuthorityEnvironment, challengeId: String, nonce: String, purpose: AuthorityPurpose, display: JSONValue, returnURL: String? = nil,
-                redirectURI: String? = nil, matchRequired: Bool, issuedAt: Int64, expiresAt: Int64) {
+                redirectURI: String? = nil, matchRequired: Bool, issuedAt: Int64, expiresAt: Int64, accountRef: String? = nil, kids: [String]? = nil) {
+        self.accountRef = accountRef
+        self.kids = kids
         self.environment = environment
         self.challengeId = challengeId
         self.nonce = nonce
@@ -102,6 +113,8 @@ public struct AuthorityChallengeStatement: Sendable, Hashable {
         ]
         if let returnURL { o["return_url"] = .string(returnURL) }
         if let redirectURI { o["redirect_uri"] = .string(redirectURI) }
+        if let accountRef { o["account_ref"] = .string(accountRef) }
+        if let kids { o["kids"] = .array(kids.map { .string($0) }) }
         return o
     }
 
@@ -121,7 +134,7 @@ public enum AuthorityStatementVerifier {
         let o = parts.payload
         let keys = Set(o.keys)
         guard AuthorityChallengeStatement.required.isSubset(of: keys),
-              keys.isSubset(of: AuthorityChallengeStatement.required.union(["return_url", "redirect_uri"])) else { throw AuthorityJOSEError.claims("members") }
+              keys.isSubset(of: AuthorityChallengeStatement.required.union(["return_url", "redirect_uri", "account_ref", "kids"])) else { throw AuthorityJOSEError.claims("members") }
         guard o["v"]?.authorityInteger == 1, o["iss"]?.stringValue == environment.authorityURN, o["aud"]?.stringValue == AuthorityAudience.device,
               o["env"]?.stringValue == environment.rawValue else { throw AuthorityJOSEError.claims("issuer") }
         guard let ach = o["ach"]?.stringValue, AuthorityChallengeID.isValid(ach), let nonce = o["nonce"]?.stringValue, AuthorityNonce.isValid(nonce),
@@ -133,22 +146,99 @@ public enum AuthorityStatementVerifier {
         guard display.objectValue?["purpose"]?.stringValue == purpose.rawValue else { throw AuthorityJOSEError.claims("display") }
         let returnURL = o["return_url"]?.stringValue, redirectURI = o["redirect_uri"]?.stringValue
         guard (returnURL != nil) == (purpose == .linkOpen), (redirectURI != nil) == (purpose == .oidcLogin) else { throw AuthorityJOSEError.claims("url") }
+        // `account_ref` and `kids` belong to key-log purposes only.
+        var accountRef: String?
+        var kids: [String]?
+        if let raw = o["account_ref"] {
+            guard purpose.isKeyLog, let value = raw.stringValue, AuthorityKeyLogFormat.isAccountRef(value) else { throw AuthorityJOSEError.claims("account_ref") }
+            accountRef = value
+        }
+        if let raw = o["kids"] {
+            guard purpose.isKeyLog, case .array(let items) = raw, (1...8).contains(items.count) else { throw AuthorityJOSEError.claims("kids") }
+            let values = items.compactMap(\.stringValue)
+            guard values.count == items.count, values.allSatisfy(KeyIdentifier.isValid), Set(values).count == values.count else { throw AuthorityJOSEError.claims("kids") }
+            kids = values
+        }
         let t = Int64(now.timeIntervalSince1970)
         guard iat <= t + skew else { throw AuthorityJOSEError.notYetValid }
         guard t <= exp + skew else { throw AuthorityJOSEError.expired }
         return AuthorityChallengeStatement(environment: environment, challengeId: ach, nonce: nonce, purpose: purpose, display: display, returnURL: returnURL,
-                                           redirectURI: redirectURI, matchRequired: matchRequired, issuedAt: iat, expiresAt: exp)
+                                           redirectURI: redirectURI, matchRequired: matchRequired, issuedAt: iat, expiresAt: exp, accountRef: accountRef, kids: kids)
     }
 }
 
-/// The statement keys the app pins per environment (ADR-0033 §3.1): `[active, standby]` as RFC 7638 thumbprints. Empty until the attested key
-/// inventory of the first authority deploy supplies them (KEY-ROTATION.md): with an empty list every statement fails closed on the device, and the
-/// authority refuses to start with grant routes enabled outside development (ADR-0028 §2 startup check).
+/// The authority keys the app pins per environment (ADR-0033 §3.1, ADR-0034 §5.4): `VIADERE_AUTHORITY_DEVICE_KEYS = [active, standby]`
+/// (`device-statement-signing`, ES256) and `VIADERE_AUTHORITY_SEAL_KEYS = [active, standby]` (`recovery-seal`, HPKE P-256), as the public JWK
+/// coordinates `x`, `y` (base64url). The `kid` of each is its RFC 7638 thumbprint.
+///
+/// **The values come from the owner** (KEY-ROTATION.md): only public halves that the authority itself verified against Key Vault (statement keys)
+/// or against its unwrapped seal key (seal keys) in the reviewed key inventory (`key-inventory-record` / `key-inventory-check`, SECURITY §2.103)
+/// may be copied here, in a reviewed change. Until then every slot holds `placeholder`, which never parses as a key: the list resolves to **empty**,
+/// every statement fails closed on the device, the device refuses to seal, and a strict authority refuses to start (ADR-0028 §2 startup check).
+/// A list resolves all-or-nothing: one placeholder or invalid slot, a duplicate, or a key that is also pinned for the other environment empties it.
 public enum AuthorityPinnedKeys {
-    public static func deviceStatementKids(_ environment: AuthorityEnvironment) -> [String] {
-        switch environment {
-        case .staging: []
-        case .production: []
+    /// The value of a slot the owner has not filled yet (never a valid base64url coordinate).
+    public static let placeholder = "OWNER-SUPPLIED-PUBLIC-KEY-REQUIRED"
+
+    /// One pinned public key: the `x` and `y` members of its JWK (EC P-256).
+    public struct Slot: Sendable, Hashable {
+        public let x: String
+        public let y: String
+        public init(x: String, y: String) {
+            self.x = x
+            self.y = y
         }
+        public static let unfilled = Slot(x: placeholder, y: placeholder)
+    }
+
+    // OWNER: replace each `.unfilled` with `Slot(x: "<x>", y: "<y>")` from the verified inventory. Order: [active, standby].
+    static let deviceStatementSlots: [AuthorityEnvironment: [Slot]] = [
+        .staging: [.unfilled, .unfilled],
+        .production: [.unfilled, .unfilled],
+    ]
+    static let sealSlots: [AuthorityEnvironment: [Slot]] = [
+        .staging: [.unfilled, .unfilled],
+        .production: [.unfilled, .unfilled],
+    ]
+
+    /// The raw 64-byte `x ‖ y` of every slot, or `nil` when any slot is unfilled or invalid, or two slots are equal (all-or-nothing).
+    public static func resolve(_ slots: [Slot]) -> [Data]? {
+        guard !slots.isEmpty, slots.count <= 2 else { return nil }
+        var out: [Data] = []
+        for slot in slots {
+            guard slot.x != placeholder, slot.y != placeholder, Base64URL.isValid(slot.x, minLength: 43, maxLength: 43), Base64URL.isValid(slot.y, minLength: 43, maxLength: 43),
+                  let x = Base64URL.decode(slot.x), let y = Base64URL.decode(slot.y), x.count == 32, y.count == 32,
+                  (try? P256.Signing.PublicKey(rawRepresentation: x + y)) != nil else { return nil }
+            out.append(x + y)
+        }
+        return Set(out).count == out.count ? out : nil
+    }
+
+    /// Resolves the table for `environment`, refusing any key that is also pinned for the other environment (ADR-0034 §10.4: a production build never
+    /// carries a staging key).
+    static func resolved(_ table: [AuthorityEnvironment: [Slot]], _ environment: AuthorityEnvironment) -> [Data] {
+        guard let own = table[environment].flatMap(resolve) else { return [] }
+        let others = AuthorityEnvironment.allCases.filter { $0 != environment }.flatMap { table[$0].flatMap(resolve) ?? [] }
+        return own.contains(where: others.contains) ? [] : own
+    }
+
+    /// Statement keys `[active, standby]`; empty (fail closed) while any slot is a placeholder.
+    public static func deviceStatementKeys(_ environment: AuthorityEnvironment) -> [P256.Signing.PublicKey] {
+        resolved(deviceStatementSlots, environment).compactMap { try? P256.Signing.PublicKey(rawRepresentation: $0) }
+    }
+
+    /// RFC 7638 thumbprints of `deviceStatementKeys` (the authority's startup reference set, ADR-0033 §3.7).
+    public static func deviceStatementKids(_ environment: AuthorityEnvironment) -> [String] { deviceStatementKeys(environment).map(JWKThumbprint.p256) }
+
+    /// Seal keys `[active, standby]`; empty (the device refuses to seal) while any slot is a placeholder.
+    public static func sealKeys(_ environment: AuthorityEnvironment) -> [P256.KeyAgreement.PublicKey] {
+        resolved(sealSlots, environment).compactMap { try? P256.KeyAgreement.PublicKey(rawRepresentation: $0) }
+    }
+
+    public static func sealKids(_ environment: AuthorityEnvironment) -> [String] { sealKeys(environment).map(RecoverySeal.kid) }
+
+    /// True once both lists of `environment` resolve (the release check for a build that enables authority flows).
+    public static func isProvisioned(_ environment: AuthorityEnvironment) -> Bool {
+        deviceStatementKeys(environment).count == 2 && sealKeys(environment).count == 2
     }
 }

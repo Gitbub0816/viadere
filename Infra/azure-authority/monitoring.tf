@@ -138,3 +138,37 @@ resource "azurerm_monitor_activity_log_alert" "auth_network" {
     action_group_id = azurerm_monitor_action_group.auth[0].id
   }
 }
+
+# A failed reconciliation execution means a Key Vault sign or unwrap without an authority record (or a reconciliation that could not run): high
+# priority (ADR-0034 section 5.2). Verify the system-log column names against the first execution (ContainerAppSystemLogs_CL).
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "reconcile_failed" {
+  count                = local.reconcile == 1 && var.alert_email != "" ? 1 : 0
+  name                 = "alert-viadere-${local.env}-auth-reconcile-failed"
+  resource_group_name  = azurerm_resource_group.auth[0].name
+  location             = var.location
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+  scopes               = [azurerm_log_analytics_workspace.auth[0].id]
+  severity             = 0
+  description          = "job-viadere-authority-reconcile failed: an unmatched Key Vault sign/unwrap on kv-vdr-auth, or the reconciliation could not run."
+  tags                 = local.tags
+
+  criteria {
+    query                   = <<-KQL
+      ContainerAppSystemLogs_CL
+      | where JobName_s == "${local.recon_job}"
+      | where Reason_s in ("BackOff", "Failed", "ReplicaFailed") or Log_s has "failed"
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.auth[0].id]
+  }
+}

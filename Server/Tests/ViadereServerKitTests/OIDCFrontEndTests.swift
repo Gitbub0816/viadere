@@ -87,6 +87,8 @@ final class OIDCFrontEndTests: XCTestCase {
         }
         let app = try await Application.make(.testing)
         try await AuthorityApplication.configure(app, config: config, overrides: overrides, migrateInMemory: true)
+        // Imported keys become grant-capable only after the device confirmed a head containing them (ADR-0032 §1.4, §1.6).
+        try await AuthorityEnrollment.confirm(app: app, statementKey: statementKey, accountId: accountId, keys: [deviceKey], now: Date(timeIntervalSince1970: 1_800_000_000))
         return Authority(app: app, statementKey: statementKey, clientKey: clientKey, deviceKey: deviceKey)
     }
 
@@ -289,6 +291,6 @@ enum AuthorityChallengeCount {
     static func count(_ db: any Database) async throws -> Int {
         guard let sql = db as? any SQLDatabase else { return -1 }
         struct Row: Decodable { let n: Int }
-        return try await sql.raw("SELECT COUNT(*) AS n FROM authority_challenges").first(decoding: Row.self)?.n ?? -1
+        return try await sql.raw("SELECT COUNT(*) AS n FROM authority_challenges WHERE purpose = 'oidc_login'").first(decoding: Row.self)?.n ?? -1
     }
 }

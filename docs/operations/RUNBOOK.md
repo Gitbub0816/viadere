@@ -38,7 +38,7 @@
 | Authority revision never ready | database role missing (bootstrap `authority-database.sql`), pinned key version unknown to the authority, NSG denied a service tag (check Learn "Securing a Virtual Network in Azure Container Apps" and add the tag via IaC), image not in the authority registry |
 | Image pull fails | the image was not imported (`authority-deploy.yml` imports by digest), the identity lacks AcrPull, or the registry name variable is wrong |
 | api cannot reach the authority | private DNS zone of the authority environment not linked to the VNet, NSG inbound from `snet-cae`, token audience/role (`Authority.Evidence.Submit`) |
-| `authority-admin.yml` job succeeds but inventory step finds no lines | Log Analytics ingestion delay (wait), job logged nothing allow-listed, or the Log Analytics Reader role is missing on the authority workspace |
+| `authority-admin.yml` `key-inventory-record` never passes `key-inventory-check` | the serving authority is not running (it verifies rows at start and every minute), a row is `mismatch` (the change file's JWK is not the Key Vault key at that version: fix the change file) or `unavailable` (the authority has no read role on that key, e.g. a standby) |
 | `authority-publish.yml` refuses a JWK | its thumbprint is not in the attested inventory: run the admin `key-inventory` command first; never paste a key by hand |
 | Policy check fails on the authority plan | read the `VIOLATION` line; never weaken `policy_check.py`; a deliberate exception needs a CLAUDE.md row and the owner's decision |
 | Entra token refused by the authority | audience `api://viadere-authority-<env>`, app role assignment, `authority_caller_object_ids` allow-list |

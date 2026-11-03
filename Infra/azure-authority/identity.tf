@@ -19,6 +19,15 @@ resource "azurerm_user_assigned_identity" "authority_admin" {
   tags                = local.tags
 }
 
+# Reads the authority workspace (Key Vault AuditEvent rows) and the authority's sign records; holds no Key Vault role (ADR-0023 section 6).
+resource "azurerm_user_assigned_identity" "authority_reconcile" {
+  count               = local.reconcile
+  name                = "id-viadere-authority-reconcile"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.auth[0].name
+  tags                = local.tags
+}
+
 resource "azurerm_user_assigned_identity" "authority_migrator" {
   count               = local.on
   name                = "id-viadere-authority-migrator"
@@ -144,17 +153,8 @@ resource "azurerm_role_assignment" "gh_authority_admin_start" {
   description                      = "deploy:gh-authority-admin: start job-viadere-authority-admin (reviewer-gated workflow authority-admin.yml)"
 }
 
-# Reads the admin job's execution log to attest the printed key inventory (ADR-0024 section 7.3). Workspace scope; Azure RBAC cannot limit it
-# to one table without table-level RBAC, so the workspace holds only authority data (its own workspace, monitoring.tf).
-resource "azurerm_role_assignment" "gh_authority_admin_logs" {
-  count                            = local.on
-  scope                            = azurerm_log_analytics_workspace.auth[0].id
-  role_definition_name             = "Log Analytics Reader"
-  principal_id                     = azurerm_user_assigned_identity.gh_authority_admin[0].principal_id
-  principal_type                   = "ServicePrincipal"
-  skip_service_principal_aad_check = true
-  description                      = "deploy:gh-authority-admin: read the admin job execution log of the authority workspace to attest the key inventory"
-}
+# No log reader (ledger S6-06, policy rule AUTH-INVENTORY-CHANNEL): the key inventory is a reviewed change file that the serving authority
+# verifies against Key Vault; authority-admin.yml reads only the exit status of `key-inventory-check`, never a log.
 
 # ---- Registry pull (lean ACR Basic / standard ACR Premium in the authority group; never GHCR) -------------------------------------
 resource "azurerm_role_assignment" "acr_pull" {
@@ -180,4 +180,26 @@ resource "azurerm_role_assignment" "telemetry" {
   principal_type                   = "ServicePrincipal"
   skip_service_principal_aad_check = true
   description                      = "workload:authority: send telemetry with an Entra token"
+}
+
+# ---- Reconciliation job identity: AcrPull and Log Analytics Reader on the authority workspace; no Key Vault role --------------------------
+resource "azurerm_role_assignment" "reconcile_acr_pull" {
+  count                            = local.reconcile
+  scope                            = azurerm_container_registry.auth[0].id
+  role_definition_name             = "AcrPull"
+  principal_id                     = azurerm_user_assigned_identity.authority_reconcile[0].principal_id
+  principal_type                   = "ServicePrincipal"
+  skip_service_principal_aad_check = true
+  description                      = "workload:authority-reconcile: pull the authority image from the authority registry"
+}
+
+# The reconciliation reads Key Vault AuditEvent rows of kv-vdr-auth from the authority's own workspace (it holds only authority data).
+resource "azurerm_role_assignment" "reconcile_logs" {
+  count                            = local.reconcile
+  scope                            = azurerm_log_analytics_workspace.auth[0].id
+  role_definition_name             = "Log Analytics Reader"
+  principal_id                     = azurerm_user_assigned_identity.authority_reconcile[0].principal_id
+  principal_type                   = "ServicePrincipal"
+  skip_service_principal_aad_check = true
+  description                      = "workload:authority-reconcile: read Key Vault AuditEvent rows of the authority workspace"
 }

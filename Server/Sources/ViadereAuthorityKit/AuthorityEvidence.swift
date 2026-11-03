@@ -119,7 +119,7 @@ struct EvidenceVerifier {
     let db: any Database
 
     func submit(_ request: AuthorityEvidenceRequest, caller: AuthorityCaller?) async throws -> AuthorityEvidenceResponse {
-        let keys = try ctx.requireKeys()
+        _ = try ctx.requireKeys()
         let now = ctx.now
         var auditKid: String?
         var auditChallenge: String?
@@ -230,21 +230,10 @@ struct EvidenceVerifier {
             let code = try await OIDCCodeIssuer(ctx: ctx, db: db).issue(for: evidence, challenge: challenge)
             return AuthorityEvidenceResponse(challengeId: challenge.id!, decision: .approve, code: code)
         case .linkOpen:
-            guard let client = try await AuthorityLinkClient.find(challenge.clientId, on: db) else { throw Abort.evidenceInvalid }
-            let (grant, grantClaims) = try await GrantBuilder(kms: ctx.kms, keys: keys, config: ctx.config).sign(evidence: evidence, client: client, challenge: challenge, now: now)
-            let record = AuthorityGrantRecord()
-            record.id = grantClaims.jti
-            record.kind = "grant"
-            record.kid = keys.grant.kid
-            record.clientId = client.id!
-            record.accountRef = evidence.accountRef
-            record.subHash = SecureToken.sha256Hex(Data(grantClaims.subject.utf8))
-            record.acr = grantClaims.acr
-            record.policyVersion = evidence.policyVersion
-            record.challengeId = evidence.challengeId
-            record.createdAt = now
-            try await record.create(on: db)
-            return AuthorityEvidenceResponse(challengeId: challenge.id!, decision: .approve, grant: grant)
+            // ADR-0021 §5.3: no grant here (the api would hold it). The authority records the link code; the grant is signed only when the
+            // business redeems it with its PKCE verifier (`POST /v1/link/redeem`).
+            try await AuthorityLinkService(ctx: ctx, db: db).registerCode(evidence: evidence, challenge: challenge, codeHash: claims.codeHash)
+            return AuthorityEvidenceResponse(challengeId: challenge.id!, decision: .approve)
         default:
             throw Abort.evidenceInvalid
         }
