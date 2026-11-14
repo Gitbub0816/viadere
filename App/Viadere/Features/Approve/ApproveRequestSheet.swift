@@ -178,11 +178,20 @@ struct ApproveRequestSheet: View {
     /// The outcome, shown only after the relay accepted the signed answer.
     @ViewBuilder private var result: some View {
         if let line = model.resultLine {
-            Text(line).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+            ViadereOutcome(resultKind, line)
         }
         if model.offersPause {
             Button(model.pauseTitle) { Task { _ = await model.pauseRequests() } }
                 .buttonStyle(.viadere(.secondary))
+        }
+    }
+
+    /// Success only for an approval the relay accepted; a refusal the person chose is neutral; a stopped or expired request is a caution.
+    private var resultKind: ViadereOutcome.Kind {
+        switch model.phase {
+        case .approved: .success
+        case .denied, .reported: .neutral
+        default: .caution
         }
     }
 

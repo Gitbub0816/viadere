@@ -265,7 +265,7 @@ private final class SessionBox: @unchecked Sendable {
 ///
 /// The decoder is C++ working on camera pixels, so its reach is kept small: it sees only the luma of frames this app's own camera session
 /// produced, at most `maxFramesPerSecond`, one frame at a time (late frames are dropped by AVFoundation), and only while the scanner is on
-/// screen. What it returns is treated as hostile text: Profile 0 only, valid UTF-8 text only, at most `ScannedCodePolicy.maxPayloadBytes`,
+/// screen. What it returns is treated as hostile text: Profile 0 in the standard layout only, valid UTF-8 text only, at most `ScannedCodePolicy.maxPayloadBytes`,
 /// and a payload refused once is not offered again for `repeatInterval`, so a hostile code in view cannot flood the main thread.
 private final class CKeyFrameReader: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     static let maxFramesPerSecond = 12.0
@@ -291,7 +291,7 @@ private final class CKeyFrameReader: NSObject, AVCaptureVideoDataOutputSampleBuf
         let now = CACurrentMediaTime()
         guard now - lastFrame >= 1.0 / Self.maxFramesPerSecond, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastFrame = now
-        guard let result = CKeyDecoder.decode(pixelBuffer: pixels), result.profile == .scalable, let text = result.text,
+        guard let result = CKeyDecoder.decode(pixelBuffer: pixels), result.profile == .scalable, result.layout == .standard, let text = result.text,
               !text.isEmpty, text.utf8.count <= ScannedCodePolicy.maxPayloadBytes else { return }
         if text == lastPayload, now - lastPayloadTime < Self.repeatInterval { return }
         lastPayload = text
@@ -337,7 +337,7 @@ final class CodeScannerViewController: UIViewController {
 
         // CKeys: luma frames to the CKey decoder, on its own queue; a frame that arrives while one is being read is dropped.
         let reader = CKeyFrameReader { [weak self] text in
-            DispatchQueue.main.async { self?.offer(text, .ckey) }
+            Task { @MainActor in self?.offer(text, .ckey) }
         }
         let video = AVCaptureVideoDataOutput()
         video.alwaysDiscardsLateVideoFrames = true
@@ -360,7 +360,9 @@ final class CodeScannerViewController: UIViewController {
         layer.frame = view.bounds
         view.layer.addSublayer(layer)
         previewLayer = layer
-        onTorchAvailability?(device.hasTorch && device.isTorchAvailable)
+        // After this layout pass: the answer changes SwiftUI state.
+        let hasTorch = device.hasTorch && device.isTorchAvailable
+        Task { @MainActor [weak self] in self?.onTorchAvailability?(hasTorch) }
     }
 
     /// One place for both symbologies, on the main thread. After an accepted code nothing more is offered.
