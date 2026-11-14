@@ -34,4 +34,26 @@ export {
   type WebhookReplayStore,
   type WebhookRequest,
   type WebhookVerifierOptions,
+  decodeOpaqueEnvelope,
 } from "./webhooks.js";
+export * from "./crypto.js";
+export * from "./statements.js";
+export * from "./approval.js";
+export * from "./webhooks-v1.js";
+export * as schemas from "./schemas.js";
+export { assertValidRequest, validateRequest, pathParameter, MAX_REQUEST_BODY_BYTES, type Problem } from "./validation.js";
+export { LINK_STEP_UP_WINDOW_MS } from "./client.js";
+export type {
+  ApprovalEnrollmentInvitation,
+  AuthApprovalDraft,
+  ConfirmedEnrollment,
+  ConfirmedLink,
+  CreateAuthApprovalOptions,
+  Created,
+  CreatedAuthApproval,
+  IdempotencyOption,
+  LinkSasCheck,
+  LinkSessionInvitation,
+  LinkSessionReview,
+  VerifiedVerificationSession,
+} from "./client.js";

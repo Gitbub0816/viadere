@@ -1,6 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { WebhookVerificationError } from "./errors.js";
-import { ENVELOPE_VERSION, WEBHOOK_EVENT_TYPES, type AuthDeliveryEnvelope, type WebhookEventType } from "./types.js";
+import { OpaqueWebhookEnvelope as OpaqueEnvelopeSchema } from "./schemas.js";
+import { ENVELOPE_VERSION, WEBHOOK_EVENT_TYPES, type AuthDeliveryEnvelope, type OpaqueWebhookEnvelope, type WebhookEventType } from "./types.js";
+import { validateRequest } from "./validation.js";
 
 // Webhook signature v2 (ADR-0025, `docs/protocol/vectors/webhook-v2.json`).
 //
@@ -237,7 +239,28 @@ export class InMemoryReplayStore implements WebhookReplayStore {
 
 export type HeaderBag = Headers | Readonly<Record<string, string | readonly string[] | undefined>>;
 
-function headerValue(headers: HeaderBag, name: string): string | undefined {
+/**
+ * Decodes the opaque envelope of an `approve.*`, `interaction.*`, `link.*` or `verification.completed` delivery strictly (no unknown member,
+ * version `2026-10-27`) and requires the convenience headers to agree with the signed body. The envelope names **what** happened and **where** to
+ * fetch it (`result_ref`); it carries no decision, amount or personal data, and a status in it would not be trusted anyway.
+ */
+export function decodeOpaqueEnvelope(body: Uint8Array, headers: HeaderBag): OpaqueWebhookEnvelope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    throw new WebhookVerificationError("malformed_body");
+  }
+  if (validateRequest(OpaqueEnvelopeSchema, parsed).length > 0) throw new WebhookVerificationError("malformed_body");
+  const envelope = parsed as OpaqueWebhookEnvelope;
+  const id = headerValue(headers, HEADERS.eventId);
+  const type = headerValue(headers, "Viadere-Event-Type");
+  const version = headerValue(headers, HEADERS.webhookVersion);
+  if ((id !== undefined && id !== envelope.id) || (type !== undefined && type !== envelope.type) || (version !== undefined && version !== envelope.version)) throw new WebhookVerificationError("header_body_mismatch");
+  return envelope;
+}
+
+export function headerValue(headers: HeaderBag, name: string): string | undefined {
   if (typeof Headers !== "undefined" && headers instanceof Headers) return headers.get(name) ?? undefined;
   const wanted = name.toLowerCase();
   let found: string | undefined;
@@ -340,6 +363,19 @@ export class WebhookVerifier {
     const verified = this.#verifySignature(request);
     const envelope = this.#decodeEnvelope(verified.body, verified.eventId);
     // Recorded last: only a delivery that verified and decoded burns an event id, so a forged one cannot, and a malformed one stays retryable.
+    await this.#record(verified.eventId);
+    return { ...verified, envelope };
+  }
+
+  /**
+   * Verifies a signature-v2 delivery of the opaque envelope for the other event families (`approve.*`, `interaction.*`, `link.*`,
+   * `verification.completed`): the same signature checks, then a strict envelope whose `id` is the signed `Viadere-Event-Id` and whose
+   * `tenant_id` is yours. Fetch what `result_ref` names (`getApprovalResult`, `getVerificationResult`) and verify that.
+   */
+  async verifyOpaqueEnvelope(request: WebhookRequest): Promise<VerifiedWebhook & { envelope: OpaqueWebhookEnvelope }> {
+    const verified = this.#verifySignature(request);
+    const envelope = decodeOpaqueEnvelope(verified.body, request.headers);
+    if (envelope.id !== verified.eventId || envelope.tenant_id !== this.#tenantId) throw new WebhookVerificationError("header_body_mismatch");
     await this.#record(verified.eventId);
     return { ...verified, envelope };
   }
