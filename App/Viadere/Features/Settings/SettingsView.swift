@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var confirmingDelete = false
     @State private var deleteError: String?
     @State private var device: DeviceRecord?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel) {
         self.model = model
@@ -55,7 +56,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.bottom, ViadereSpace.xl)
-                .animation(ViadereMotion.quick, value: query.isEmpty)
+                .viadereAnimation(ViadereMotion.quick, value: query.isEmpty)
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
@@ -167,7 +168,7 @@ struct SettingsView: View {
             } label: {
                 ViadereSummaryCard(symbol: "lock", headline: posture.headline, detail: posture.detail, status: status(posture.level), showsChevron: true)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.viaderePressable)
             .accessibilityHint(Text("Opens the setting this summary is about"))
             if let notice = model.securityNotices.current {
                 SecurityNoticeBanner(vm: model.securityNotices, notice: notice) { path = [.settings(.devices)] }
@@ -194,7 +195,7 @@ struct SettingsView: View {
             Button { path.append(.settings(destination.screen ?? destination)) } label: {
                 ViadereRow(destination.title, subtitle: summary(destination)) { ViadereIconTile(systemName: destination.symbol) }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.viaderePressable)
         }
     }
 
@@ -245,10 +246,7 @@ struct SettingsView: View {
     @ViewBuilder private var searchResults: some View {
         let results = SettingsCatalog.search(query, available: availability)
         if results.isEmpty {
-            Text("No setting matches \u{201C}\(query)\u{201D}.")
-                .font(ViadereType.body)
-                .foregroundStyle(ViadereColor.textSecondary)
-                .padding(.top, ViadereSpace.m)
+            ViadereNoResults(FeedbackCopy.noMatch(query, in: "setting")) { query = "" }
         } else {
             ViadereRowGroup {
                 ForEach(Array(results.enumerated()), id: \.element) { index, destination in
@@ -260,7 +258,7 @@ struct SettingsView: View {
                                 ViadereIconTile(systemName: destination.symbol)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                     }
                     if index < results.count - 1 { ViadereHairline(inset: 50) }
                 }
@@ -277,9 +275,12 @@ struct SettingsView: View {
             if confirmingSignOut {
                 confirmCard(title: "Sign out of Viadere?",
                             message: "This erases Viadere's keys and sign-in from this iPhone. Your account and connections stay.",
-                            action: "Sign out", destructive: false) { Task { await model.signOut() } } cancel: { confirmingSignOut = false }
+                            action: "Sign out", destructive: false) { Task { await model.signOut() } } cancel: {
+                    withViadereAnimation(reduceMotion: reduceMotion) { confirmingSignOut = false }
+                }
+                .transition(.opacity)
             } else {
-                Button("Sign out") { withAnimation(ViadereMotion.standard) { confirmingSignOut = true } }.buttonStyle(.viadere(.secondary))
+                Button("Sign out") { withViadereAnimation(reduceMotion: reduceMotion) { confirmingSignOut = true } }.buttonStyle(.viadere(.secondary))
             }
             if confirmingDelete {
                 confirmCard(title: "Delete your account?",
@@ -290,12 +291,17 @@ struct SettingsView: View {
                             deleteError = (error as? APIError)?.userMessage ?? "We couldn't delete your account. Please try again."
                         }
                     }
-                } cancel: { confirmingDelete = false }
+                } cancel: { withViadereAnimation(reduceMotion: reduceMotion) { confirmingDelete = false } }
+                .transition(.opacity)
                 if let deleteError { ViadereNotice(deleteError, kind: .danger) }
             } else {
-                Button("Delete account") { withAnimation(ViadereMotion.standard) { confirmingDelete = true } }.buttonStyle(.viadere(.destructive))
+                Button("Delete account") { withViadereAnimation(reduceMotion: reduceMotion) { confirmingDelete = true } }.buttonStyle(.viadere(.destructive))
             }
         }
+        // Asking to sign out or delete is felt once, when the confirmation appears; the confirm buttons themselves stay silent.
+        .sensoryFeedback(.warning, trigger: confirmingDelete) { _, now in now }
+        .sensoryFeedback(.impact(weight: .light), trigger: confirmingSignOut) { _, now in now }
+        .sensoryFeedback(.error, trigger: deleteError) { _, now in now != nil }
     }
 
     private func confirmCard(title: String, message: String, action: String, destructive: Bool,
@@ -333,6 +339,7 @@ struct NotificationSettingsView: View {
     let vm: SecuritySettingsViewModel
     let openBusiness: (BusinessID) -> Void
     @State private var expanded: BusinessID? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         SubScreen(title: "Notifications", subtitle: "Viadere only interrupts when action is required.") {
@@ -359,7 +366,7 @@ struct NotificationSettingsView: View {
                                 ViadereIconTile(systemName: SettingsDestination.loops.symbol)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         ViadereHairline(inset: 50)
                     }
                     Button {
@@ -374,7 +381,7 @@ struct NotificationSettingsView: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                 }
             }
         }
@@ -426,12 +433,14 @@ struct NotificationSettingsView: View {
                     .disabled(settings.isSaving)
                 }
                 .padding(.top, ViadereSpace.xs)
+                .transition(.opacity)
             }
             Text(settings.quietHoursCaption + " " + NotificationSettingsViewModel.securityNote)
                 .font(ViadereType.footnote)
                 .foregroundStyle(ViadereColor.textTertiary)
                 .padding(.top, ViadereSpace.s)
         }
+        .viadereAnimation(ViadereMotion.standard, value: settings.quietHoursEnabled)
         .task { await settings.syncTimeZone() }
     }
 
@@ -465,7 +474,7 @@ struct NotificationSettingsView: View {
         let isOpen = expanded == entry.business.id
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
             Button {
-                withAnimation(ViadereMotion.standard) { expanded = isOpen ? nil : entry.business.id }
+                withViadereAnimation(reduceMotion: reduceMotion) { expanded = isOpen ? nil : entry.business.id }
             } label: {
                 ViadereRow(entry.business.safeName, subtitle: entry.preferences.levelSummary(accountDefault: accountDefault, at: now)) {
                     ViadereAvatar(name: entry.business.safeName, size: 36, isVerified: entry.business.isVerified)
@@ -479,7 +488,7 @@ struct NotificationSettingsView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.viaderePressable)
             .accessibilityHint(Text(isOpen ? "Hides the levels" : "Shows the levels"))
             if isOpen {
                 ViadereLevelPicker("Interruptions from \(entry.business.safeName)",
@@ -573,6 +582,8 @@ struct DevicesView: View {
                     if index < vm.devices.count - 1 { ViadereHairline() }
                 }
             }
+            // Asking to remove a device is felt once, when the confirmation appears.
+            .sensoryFeedback(.warning, trigger: confirming) { _, now in now != nil }
             Text("A new device can't approve high-risk requests until you approve it here with Face ID on a device you already trust. Waiting doesn't change that. Removing a device stops it from approving requests immediately.")
                 .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary)
         }
@@ -750,7 +761,7 @@ struct SessionsView: View {
                 } label: {
                     ViadereRow(OIDCCopy.listTitle) { ViadereIconTile(systemName: "person.crop.square") }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
             }
         }
     }

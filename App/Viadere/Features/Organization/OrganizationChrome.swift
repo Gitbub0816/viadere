@@ -22,7 +22,7 @@ struct OrganizationContextHeader: View {
                     .transition(.opacity)
             }
         }
-        .animation(ViadereMotion.quick, value: store.effective)
+        .viadereAnimation(ViadereMotion.quick, value: store.effective)
         .sheet(isPresented: $choosing) {
             ContextSelectorSheet(model: model) { choosing = false }
                 .presentationDetents([.medium, .large])

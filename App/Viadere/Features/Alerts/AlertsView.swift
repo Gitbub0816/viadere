@@ -25,9 +25,11 @@ struct AlertsView: View {
                         $0 == .needsYou ? "Needs you" : "History"
                     }
                     .padding(.bottom, ViadereSpace.s)
-                    if alerts.isOffline || alerts.errorMessage != nil {
+                    // A first load that failed has its own state below (with a retry); the notice is for a failed refresh and offline.
+                    if alerts.isOffline || (alerts.errorMessage != nil && !alerts.isEmpty) {
                         ViadereNotice(alerts.errorMessage ?? "You're offline.", kind: alerts.isOffline ? .info : .warning)
                             .padding(.bottom, ViadereSpace.s)
+                            .transition(.opacity)
                     }
                     switch alerts.segment {
                     case .needsYou: needsYou
@@ -36,6 +38,8 @@ struct AlertsView: View {
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.bottom, ViadereSpace.xl)
+                .viadereAnimation(ViadereMotion.gentle, value: model.securityNotices.notices.count)
+                .viadereAnimation(ViadereMotion.gentle, value: alerts.isOffline)
             }
             .scrollIndicators(.hidden)
             .viadereScreenBackground()
@@ -65,9 +69,10 @@ struct AlertsView: View {
         if context == .all, let notice = model.securityNotices.current {
             SecurityNoticeBanner(vm: model.securityNotices, notice: notice) { model.reviewDevices() }
                 .padding(.bottom, ViadereSpace.m)
+                .transition(.opacity)
         } else if context == .all, let message = model.securityNotices.message {
             // The outcome of "Cancel recovery" / "Cancel" stays visible after its notice is gone.
-            ViadereNotice(message, kind: .info).padding(.bottom, ViadereSpace.s)
+            ViadereNotice(message, kind: .info).padding(.bottom, ViadereSpace.s).transition(.opacity)
         }
         if let notice = model.home.coolDownNotice {
             ViadereNotice("\(notice) \(CoolDownPolicy.stillAvailable)", kind: .info).padding(.bottom, ViadereSpace.s)
@@ -78,8 +83,13 @@ struct AlertsView: View {
 
     @ViewBuilder private var needsYou: some View {
         let items = alerts.needsYou(context: context)
-        if alerts.isLoading && alerts.isEmpty {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+        let state = ScreenLoadState.resolve(isLoading: alerts.isLoading, isEmpty: alerts.isEmpty,
+                                            errorMessage: alerts.isOffline ? nil : alerts.errorMessage)
+        if state == .loading {
+            ViadereSkeleton(.cards(2), label: "Loading alerts")
+        } else if case .failed(let message) = state {
+            ViadereErrorState("Couldn't load alerts", message: message) { await alerts.refresh() }
+                .padding(.top, ViadereSpace.m)
         } else if items.isEmpty {
             emptyNeedsYou.padding(.top, ViadereSpace.xl)
         } else {
@@ -218,7 +228,7 @@ struct AlertCard: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.viaderePressable)
         .disabled(!canAct && entry.source != .securityNotice)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("\(AlertPresentation.kindLabel(entry)) from \(AlertPresentation.issuer(entry))\(entry.business?.isVerified == true ? ", verified business" : ""). \(AlertPresentation.title(entry))\(entry.unread ? ". New" : "")"))
