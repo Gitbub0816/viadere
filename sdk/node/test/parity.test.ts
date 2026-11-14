@@ -139,3 +139,273 @@ describe("contract parity: webhook envelope", () => {
     assert.deepEqual(display.properties.status.enum, [...STATUSES]);
   });
 });
+
+// =============================================================================================================================================
+// The business API of `docs/openapi.yaml`, and coverage of the Swift SDK.
+
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+  ACTION_ROLES,
+  ADDITIONAL_WEBHOOK_EVENT_TYPES,
+  APPROVAL_CAPABILITIES,
+  APPROVAL_ENROLLMENT_STATUSES,
+  APPROVAL_REQUEST_STATUSES,
+  APPROVE_DEVICE_POLICIES,
+  BUSINESS_RISK_TIERS,
+  BUSINESS_ROUTES,
+  BUSINESS_WEBHOOK_EVENT_TYPES,
+  CAPABILITIES,
+  DECISIONS,
+  DECISION_ASSURANCES,
+  INTERACTION_CHANNELS,
+  INTERACTION_KINDS,
+  INTERACTION_PRIORITIES,
+  INTERACTION_PURPOSES,
+  INTERACTION_STATUSES,
+  LINKABLE_CAPABILITIES,
+  LINK_SESSION_STATUSES,
+  OPAQUE_ENVELOPE_EVENT_TYPES,
+  OPERATIONS_NOT_OFFERED,
+  REWARD_KINDS,
+  SENSITIVITIES,
+  VERIFICATION_CAPABILITIES,
+  VERIFICATION_SESSION_STATUSES,
+  ViadereClient,
+  WALLET_PASS_KINDS,
+  schemas,
+} from "../src/index.js";
+import { REPO_ROOT } from "./helpers.js";
+
+const api = readRepoFile("docs/openapi.yaml").split("\n");
+const apiSchemas = block(api, /^ {2}schemas:$/, 2);
+
+function apiSchema(name: string): string[] {
+  return block(apiSchemas, new RegExp(`^ {4}${name}:$`), 4);
+}
+
+function operations(lines: string[]): Record<string, { method: string; path: string }> {
+  const found: Record<string, { method: string; path: string }> = {};
+  let path = "";
+  let method = "";
+  let inPaths = false;
+  for (const line of lines) {
+    if (/^[a-z]+:$/.test(line)) inPaths = line === "paths:"; // `webhooks:` entries are deliveries to you, not operations
+    if (!inPaths) continue;
+    const p = /^ {2}(\/\S+):$/.exec(line);
+    if (p) path = p[1]!;
+    const m = /^ {4}(get|post|patch|put|delete):$/.exec(line);
+    if (m) method = m[1]!.toUpperCase();
+    const o = /^ {6}operationId: (\w+)$/.exec(line);
+    if (o) found[o[1]!] = { method, path };
+  }
+  return found;
+}
+
+/** The client method that implements each operation. An operation without an entry here fails the test below. */
+const METHOD_OF: Record<keyof typeof BUSINESS_ROUTES | keyof typeof ROUTES, string> = {
+  getCapabilities: "getCapabilities",
+  createProfileRequest: "createProfileRequest",
+  getProfileRequest: "getProfileRequest",
+  getProfile: "getProfile",
+  issueInteraction: "issueInteraction",
+  getInteractionOutcome: "getInteractionOutcome",
+  cancelInteraction: "cancelInteraction",
+  sendMessage: "sendMessage",
+  updateStatus: "updateStatus",
+  createSandboxRelationship: "createSandboxRelationship",
+  createApprovalEnrollment: "createApprovalEnrollment",
+  getApprovalEnrollment: "getApprovalEnrollment",
+  confirmApprovalEnrollment: "confirmApprovalEnrollment", // and `confirmApprovalEnrollmentRaw`
+  cancelApprovalEnrollment: "cancelApprovalEnrollment",
+  listApprovalKeys: "listApprovalKeys",
+  revokeApprovalKey: "revokeApprovalKey",
+  createApprovalRequest: "createApprovalRequest",
+  getApprovalRequest: "getApprovalRequest",
+  cancelApprovalRequest: "cancelApprovalRequest",
+  getApprovalResult: "getApprovalResult",
+  freezeApprovals: "freezeApprovals",
+  getApprovalFreeze: "getApprovalFreeze",
+  getApproveSettings: "getApproveSettings",
+  putApproveSettings: "putApproveSettings",
+  createLinkSession: "createLinkSession",
+  getLinkSession: "getLinkSession",
+  confirmLinkSession: "confirmLinkSession", // and `confirmLinkSessionRaw`
+  cancelLinkSession: "cancelLinkSession",
+  createVerificationSession: "createVerificationSession",
+  getVerificationSession: "getVerificationSession", // and `getVerifiedVerificationSession`
+  cancelVerificationSession: "cancelVerificationSession",
+  publishKeyEntry: "publishKeyEntry",
+  listKeyEntries: "listKeyEntries",
+  listWebhooks: "listWebhooks",
+  createWebhook: "createWebhook",
+  deleteWebhook: "deleteWebhook",
+  rotateWebhookSecret: "rotateWebhookSecret",
+  verifyWebhook: "verifyWebhook",
+  sendWebhookTestEvent: "testWebhook",
+  pauseWebhook: "pauseWebhook",
+  resumeWebhook: "resumeWebhook",
+  getLoyaltyProgram: "getLoyaltyProgram",
+  saveLoyaltyProgram: "saveLoyaltyProgram",
+  adjustLoyaltyPoints: "adjustLoyaltyPoints",
+  listRewards: "listRewards",
+  createReward: "createReward",
+  revokeReward: "revokeReward",
+  consumeRedemption: "consumeRedemption",
+  issueWalletPass: "issueWalletPass",
+  listWalletPasses: "listWalletPasses",
+  updateWalletPass: "updateWalletPass",
+  voidWalletPass: "voidWalletPass",
+  scanWalletPass: "scanWalletPass",
+  createVerificationRequest: "createVerificationRequest",
+  getVerificationRequest: "getVerificationRequest",
+  getVerificationResult: "getVerificationResult",
+  createAuthDelivery: "createAuthDelivery",
+  getAuthDelivery: "getAuthDelivery",
+  cancelAuthDelivery: "cancelAuthDelivery",
+  completeAuthDelivery: "completeAuthDelivery",
+  updateWebhook: "updateWebhook",
+  testAuthWebhook: "testAuthWebhook",
+  createAuthApproval: "createAuthApproval",
+  getAuthApproval: "getAuthApproval",
+  redeemAuthLink: "redeemAuthLink",
+};
+
+describe("business API parity: operations", () => {
+  const documented = operations(api);
+
+  it("the extraction sees the whole document", () => {
+    assert.equal(Object.keys(documented).length, api.filter((l) => /^ {6}operationId: /.test(l)).length);
+    assert.ok(Object.keys(documented).length >= 59);
+    assert.deepEqual(documented.updateWalletPass, { method: "PATCH", path: "/v1/business/wallet/passes/{passId}" });
+  });
+
+  it("every operation of docs/openapi.yaml is offered with the same method and path, or is on the commented allow-list", () => {
+    // Fails when the document gains an operation the SDK does not have, when a method or path drifts, and when an allow-listed
+    // operation disappears from the document (so the list cannot rot).
+    assert.deepEqual(documented, { ...BUSINESS_ROUTES, ...OPERATIONS_NOT_OFFERED });
+    assert.deepEqual(Object.keys(OPERATIONS_NOT_OFFERED).filter((op) => op in BUSINESS_ROUTES), []);
+    // Everything deliberately not offered is public and unauthenticated: no API-key operation is ever skipped.
+    for (const route of Object.values(OPERATIONS_NOT_OFFERED)) assert.ok(!route.path.startsWith("/v1/business/"), route.path);
+  });
+
+  it("every offered operation has a client method", () => {
+    const routes = { ...BUSINESS_ROUTES, ...ROUTES };
+    assert.deepEqual(Object.keys(METHOD_OF).sort(), Object.keys(routes).sort());
+    for (const [operation, method] of Object.entries(METHOD_OF)) {
+      assert.equal(typeof (ViadereClient.prototype as unknown as Record<string, unknown>)[method], "function", `${operation} -> ViadereClient.${method}`);
+    }
+  });
+
+  it("every route the Swift SDK calls is a route of the Node SDK", () => {
+    // The Swift SDK names its routes `APIRoutes.<name>.descriptor`; `ViadereCore` defines each as `Endpoint<...>("id", .METHOD, "/path", ...)`.
+    const walk = (dir: string): string[] => readdirSync(join(REPO_ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith(".swift") ? [`${dir}/${e.name}`] : []));
+    const defined: Record<string, { method: string; path: string }> = {};
+    for (const file of walk("Packages/ViadereCore/Sources/ViadereCore")) {
+      for (const m of readRepoFile(file).matchAll(/static let (\w+) = Endpoint<[^>]*(?:<[^>]*>[^>]*)*>\(\s*"[^"]+", \.(GET|POST|PUT|PATCH|DELETE), "([^"]+)"/g)) defined[m[1]!] = { method: m[2]!, path: m[3]! };
+    }
+    const used = new Set<string>();
+    for (const file of walk("Packages/ViadereBusinessSDK/Sources/ViadereBusinessSDK")) {
+      for (const m of readRepoFile(file).matchAll(/APIRoutes\.(\w+)\.descriptor/g)) used.add(m[1]!);
+    }
+    assert.ok(used.size >= 60, `the Swift SDK uses ${used.size} routes`);
+    const offered = new Set(Object.values({ ...BUSINESS_ROUTES, ...ROUTES }).map((r) => `${r.method} ${r.path}`));
+    const missing: string[] = [];
+    for (const name of used) {
+      const route = defined[name];
+      assert.ok(route, `APIRoutes.${name} is not defined in ViadereCore (the extraction is stale)`);
+      if (!offered.has(`${route.method} ${route.path}`)) missing.push(`${name}: ${route.method} ${route.path}`);
+    }
+    assert.deepEqual(missing, []);
+  });
+});
+
+describe("business API parity: schemas", () => {
+  const topLevel = (lines: string[], pattern: RegExp) => lines.find((l) => pattern.test(l));
+
+  for (const schema of schemas.OPENAPI_SCHEMAS) {
+    it(`${schema.name}: members, required list and additionalProperties`, () => {
+      const lines = apiSchema(schema.name);
+      assert.deepEqual(Object.keys(schema.properties).sort(), propertyNames(lines, 6).sort());
+      const requiredLine = topLevel(lines, /^ {6}required: \[/);
+      assert.deepEqual([...schema.required].sort(), (requiredLine ? inlineList(/required: \[(.*)\]/.exec(requiredLine)![1]!) : []).sort());
+      assert.equal(schema.closed, topLevel(lines, /^ {6}additionalProperties: false$/) !== undefined, "additionalProperties: false");
+      const anyOf = lines.filter((l) => /^ {8}- required: \[/.test(l)).map((l) => /required: \[(.*)\]/.exec(l)![1]!);
+      if (anyOf.length > 0) assert.deepEqual(schema.oneOfRequired, anyOf);
+      else if (schema.name !== "BusinessIssueWalletPassRequest") assert.equal(schema.oneOfRequired, undefined); // prose only in the document
+    });
+  }
+
+  it("the table covers every object schema of the document, except the ones listed here", () => {
+    const names = apiSchemas.filter((l) => /^ {4}[A-Za-z0-9]+:$/.test(l)).map((l) => l.trim().slice(0, -1));
+    const objects = names.filter((n) => apiSchema(n).some((l) => /^ {6}(properties|allOf):$/.test(l)));
+    const covered = new Set(schemas.OPENAPI_SCHEMAS.map((s) => s.name));
+    const notInTable = objects.filter((n) => !covered.has(n));
+    assert.deepEqual(notInTable.sort(), [
+      "BusinessLoyaltyProgram", // an `allOf`, checked below
+      "ConsistencyProofResponse", // answer of a public route that is not offered (`OPERATIONS_NOT_OFFERED`)
+      "ErrorResponse", // `ViadereApiError`
+      "SignedDecision", // never sent to a business ("there is no `signedDecision`")
+    ]);
+  });
+
+  it("BusinessLoyaltyProgram is the upsert request plus memberCount and updatedAt", () => {
+    const lines = apiSchema("BusinessLoyaltyProgram");
+    assert.ok(lines.some((l) => /\$ref: "#\/components\/schemas\/UpsertLoyaltyProgramRequest"/.test(l)));
+    const extra = inlineList(/required: \[(.*)\]/.exec(lines.find((l) => /required: \[/.test(l))!)![1]!);
+    assert.deepEqual([...schemas.BusinessLoyaltyProgram.required].sort(), [...schemas.UpsertLoyaltyProgramRequest.required, ...extra].sort());
+    assert.deepEqual(Object.keys(schemas.BusinessLoyaltyProgram.properties).sort(), [...Object.keys(schemas.UpsertLoyaltyProgramRequest.properties), ...extra].sort());
+  });
+
+  it("the inline redeem body and the prose auth-approval body of the auth-delivery contract", () => {
+    const redeem = block(yaml, /^ {2}\/v1\/business\/auth-links\/redeem:$/, 2);
+    const requestBody = block(redeem, /^ {6}requestBody:$/, 6);
+    assert.deepEqual(propertyNames(requestBody, 14), Object.keys(schemas.AuthLinkRedeemRequest.properties));
+    assert.deepEqual(required(requestBody), [...schemas.AuthLinkRedeemRequest.required]);
+    const response = block(redeem, /^ {6}responses:$/, 6);
+    assert.deepEqual(required(response), [...schemas.AuthLinkRedeemResponse.required]);
+    // The contract names the extra members of the approval body in prose; `ViadereCore` is the definition.
+    const prose = block(yaml, /^ {2}\/v1\/business\/auth-approvals:$/, 2).join(" ");
+    for (const member of ["number_match", "match_tag", "match_prefix_tag", "risk", "session_handle"]) assert.ok(prose.includes("`" + member), member);
+    const swift = readRepoFile("Packages/ViadereCore/Sources/ViadereCore/AuthDelivery/AuthApprovalDTOs.swift");
+    const codingKeys = /enum CodingKeys: String, CodingKey, CaseIterable \{([\s\S]*?)\n {4}\}/.exec(swift)![1]!;
+    const wire = [...codingKeys.matchAll(/(\w+)(?: = "(\w+)")?(?=,|\n|$)/g)].map((m) => m[2] ?? m[1]!).filter((n) => n !== "case");
+    assert.deepEqual(wire.sort(), Object.keys(schemas.AuthApprovalCreateRequest.properties).sort());
+  });
+});
+
+describe("business API parity: enums", () => {
+  const inline = (lines: string[], property?: string) => {
+    const line = lines.find((l) => (property === undefined ? /^\s*enum: \[/.test(l) : new RegExp(`^\\s*${property}: \\{.*enum: \\[`).test(l)));
+    assert.ok(line, `enum ${property ?? ""}`);
+    return inlineList(/enum: \[([^\]]*)\]/.exec(line)![1]!);
+  };
+  it("the named enums", () => {
+    const named: Record<string, readonly string[]> = {
+      InteractionKind: INTERACTION_KINDS, InteractionPurpose: INTERACTION_PURPOSES, InteractionPriority: INTERACTION_PRIORITIES, Sensitivity: SENSITIVITIES, Channel: INTERACTION_CHANNELS,
+      ActionRole: ACTION_ROLES, Decision: DECISIONS, DecisionAssurance: DECISION_ASSURANCES, InteractionStatus: INTERACTION_STATUSES, RewardKind: REWARD_KINDS, WalletPassKind: WALLET_PASS_KINDS,
+      Capability: CAPABILITIES, BusinessRiskTier: BUSINESS_RISK_TIERS, WebhookEventType: BUSINESS_WEBHOOK_EVENT_TYPES,
+    };
+    for (const [name, values] of Object.entries(named)) assert.deepEqual(inline(apiSchema(name)), [...values], name);
+  });
+  it("the inline enums of the snake_case schemas", () => {
+    assert.deepEqual(inline(apiSchema("CreateApprovalRequest"), "capability"), [...APPROVAL_CAPABILITIES]);
+    assert.deepEqual(inline(apiSchema("CreateApprovalEnrollmentRequest"), "capability"), [...APPROVAL_CAPABILITIES]);
+    assert.deepEqual(inline(apiSchema("ApprovalEnrollmentView"), "status"), [...APPROVAL_ENROLLMENT_STATUSES]);
+    assert.deepEqual(inline(apiSchema("ApprovalRequestView"), "status"), [...APPROVAL_REQUEST_STATUSES]);
+    assert.deepEqual(inline(apiSchema("ApproveBusinessSettings"), "device_policy"), [...APPROVE_DEVICE_POLICIES]);
+    assert.deepEqual(inline(apiSchema("CreateLinkSessionRequest"), "capabilities"), [...LINKABLE_CAPABILITIES]);
+    assert.deepEqual(inline(apiSchema("LinkSessionView"), "status"), [...LINK_SESSION_STATUSES]);
+    assert.deepEqual(inline(apiSchema("CreateVerificationSessionRequest"), "capability"), [...VERIFICATION_CAPABILITIES]);
+    assert.deepEqual(inline(apiSchema("CreateVerificationRequest"), "capability"), [...VERIFICATION_CAPABILITIES]);
+    assert.deepEqual(inline(apiSchema("VerificationSessionView"), "status"), [...VERIFICATION_SESSION_STATUSES]);
+    assert.deepEqual(inline(apiSchema("WebhookEnvelopeV2"), "type"), [...OPAQUE_ENVELOPE_EVENT_TYPES]);
+  });
+  it("the event types the Swift SDK defines beyond the document's enum exist in ViadereCore", () => {
+    const core = ["Verify/VerificationDTOs.swift", "Profile/ProfileDTOs.swift", "Approve/ApproveDTOs.swift"].map((f) => readRepoFile(`Packages/ViadereCore/Sources/ViadereCore/${f}`)).join("\n");
+    for (const type of ADDITIONAL_WEBHOOK_EVENT_TYPES.filter((t) => t !== "webhook.test")) {
+      assert.ok(core.includes(`WebhookEventType(rawValue: "${type}")`), type);
+      assert.ok(!(BUSINESS_WEBHOOK_EVENT_TYPES as readonly string[]).includes(type));
+    }
+  });
+});
