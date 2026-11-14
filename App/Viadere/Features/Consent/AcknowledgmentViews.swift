@@ -5,6 +5,7 @@ import ViadereKit
 /// The `acknowledge` request inside the approval sheet: the document summary, its version, who sent it, and plain
 /// copy that this records a reading, not a legal signature.
 struct AcknowledgmentBody: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let envelope: InteractionEnvelope
     let payload: AcknowledgePayload
     let now: Date
@@ -27,7 +28,7 @@ struct AcknowledgmentBody: View {
                     .foregroundStyle(ViadereColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if AcknowledgmentPresentation.isTruncated(payload) {
-                    Button(expanded ? "Show less" : "Read the full text") { withAnimation(ViadereMotion.standard) { expanded.toggle() } }
+                    Button(expanded ? "Show less" : "Read the full text") { withViadereAnimation(reduceMotion: reduceMotion) { expanded.toggle() } }
                         .buttonStyle(.viadere(.quiet, fullWidth: false))
                 }
             }

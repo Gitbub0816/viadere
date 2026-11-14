@@ -15,6 +15,7 @@ import MessageUI
 struct PhoneLinkFlowView: View {
     let vm: PhoneLinkViewModel
     @State private var composing = false
+    @State private var copies = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.m) {
@@ -40,9 +41,13 @@ struct PhoneLinkFlowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                     Button(PhoneLinkViewModel.copyTextTitle) {
-                        if let body = vm.composeRequest?.body { UIPasteboard.general.string = body }
+                        if let body = vm.composeRequest?.body {
+                            UIPasteboard.general.string = body
+                            copies += 1
+                        }
                     }
                     .buttonStyle(.viadere(.secondary))
+                    .sensoryFeedback(.success, trigger: copies)
                 } else {
                     Button(PhoneLinkViewModel.writeTextTitle) { openCompose() }
                         .buttonStyle(.viadere(.secondary))
@@ -50,9 +55,9 @@ struct PhoneLinkFlowView: View {
                 Button("Use a different number") { vm.startOver() }
                     .buttonStyle(.viadere(.quiet, fullWidth: false))
             case .linked:
-                ViadereNotice(vm.statusText ?? "", kind: .info)
+                ViadereOutcome(.success, vm.statusText ?? "")
             case .notReceived:
-                ViadereNotice(vm.statusText ?? "", kind: .warning)
+                ViadereOutcome(.caution, vm.statusText ?? "")
                 Button("Try again") { vm.startOver() }
                     .buttonStyle(.viadere(.primary))
             }

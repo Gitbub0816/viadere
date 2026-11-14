@@ -8,6 +8,7 @@ import ViadereKit
 /// disconnect and block. Quieting changes how notifications interrupt, never whether a request reaches Alerts, and never applies to
 /// security checks or anything that needs an answer.
 struct BusinessDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let relationship: Relationship
     let model: AppModel
     @State private var vm: BusinessDetailViewModel
@@ -203,10 +204,10 @@ struct BusinessDetailView: View {
                         ViadereIconTile(systemName: "person.text.rectangle")
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
                 if !vm.history.isEmpty {
                     ViadereHairline(inset: 50)
-                    Button { withAnimation(ViadereMotion.standard) { showingAllHistory.toggle() } } label: {
+                    Button { withViadereAnimation(reduceMotion: reduceMotion) { showingAllHistory.toggle() } } label: {
                         ViadereRow("History", subtitle: historySubtitle) {
                             ViadereIconTile(systemName: "clock")
                         } trailing: {
@@ -216,7 +217,7 @@ struct BusinessDetailView: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     if showingAllHistory {
                         ForEach(vm.history.prefix(10), id: \.id) { envelope in
                             ViadereHairline(inset: 50)
@@ -281,7 +282,7 @@ struct BusinessDetailView: View {
                             message: "You'll stop receiving sign-in checks and notices from them. You can reconnect any time.",
                             action: "Disconnect") { Task { await vm.disconnect() } } cancel: { confirmingDisconnect = false }
             } else {
-                Button("Disconnect") { withAnimation(ViadereMotion.standard) { confirmingDisconnect = true } }
+                Button("Disconnect") { withViadereAnimation(reduceMotion: reduceMotion) { confirmingDisconnect = true } }
                     .buttonStyle(.viadere(.destructive))
             }
             // Block: ends the connection like Disconnect and also refuses new connections, links and SMS threads until unblocked.
@@ -290,7 +291,7 @@ struct BusinessDetailView: View {
                             message: "You'll be disconnected, its waiting requests are cancelled, and it can't connect to you again until you unblock it in Businesses.",
                             action: "Block") { Task { await prefs.block() } } cancel: { confirmingBlock = false }
             } else {
-                Button("Block \(name)") { withAnimation(ViadereMotion.standard) { confirmingBlock = true } }
+                Button("Block \(name)") { withViadereAnimation(reduceMotion: reduceMotion) { confirmingBlock = true } }
                     .buttonStyle(.viadere(.quiet))
             }
         }

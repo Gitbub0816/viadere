@@ -19,6 +19,7 @@ struct ProfileView: View {
     @State private var vm: ProfileEditorViewModel
     @State private var editing: ProfileFieldDefinition?
     @State private var verifying = false
+    @State private var toast: String?
     @Environment(\.dismiss) private var dismiss
 
     init(api: any ProfileAPI) {
@@ -49,7 +50,10 @@ struct ProfileView: View {
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .viadereToast($toast)
+        .sensoryFeedback(.warning, trigger: vm.errorMessage) { _, now in now != nil }
         .task { await vm.load() }
+        .refreshable { await vm.load() }
         .sheet(item: $editing) { definition in
             ProfileFieldEditor(definition: definition, vm: vm)
                 .presentationDetents([.medium, .large])
@@ -82,9 +86,12 @@ struct ProfileView: View {
                         .foregroundStyle(ViadereColor.textPrimary)
                 }
                 .accessibilityElement(children: .combine)
-                Button("Save name") { Task { await vm.savePublicName() } }
-                    .buttonStyle(.viadere(.secondary))
-                    .disabled(vm.publicNameIssue != nil || vm.isSaving)
+                Button(vm.isSaving ? "Saving…" : "Save name") {
+                    // Confirmed only when the server kept it; otherwise the reason shows in the notice below.
+                    Task { if await vm.savePublicName() { toast = FeedbackCopy.saved } }
+                }
+                .buttonStyle(.viadere(.secondary))
+                .disabled(vm.publicNameIssue != nil || vm.isSaving)
             }
         }
     }
@@ -127,7 +134,7 @@ struct ProfileView: View {
                     Button { editing = field } label: {
                         ViadereRow(field.title, subtitle: subtitle(for: field))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     .accessibilityHint("Edit \(field.title)")
                     if index < fields.count - 1 { ViadereHairline() }
                 }

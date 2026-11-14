@@ -9,6 +9,7 @@ struct ActivityView: View {
     @Bindable var model: AppModel
     @State private var path: [String] = []
     @State private var showEarlier = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var vm: ActivityViewModel { model.activity }
 
@@ -46,7 +47,7 @@ struct ActivityView: View {
         ScrollView(.horizontal) {
             HStack(spacing: ViadereSpace.xs) {
                 ForEach(ActivityCategory.Filter.allCases, id: \.self) { filter in
-                    ViadereChip(filter.title, isSelected: vm.filter == filter) { withAnimation(ViadereMotion.quick) { vm.filter = filter } }
+                    ViadereChip(filter.title, isSelected: vm.filter == filter) { withViadereAnimation(ViadereMotion.quick, reduceMotion: reduceMotion) { vm.filter = filter } }
                 }
             }
             .padding(.vertical, ViadereSpace.xs)
@@ -58,7 +59,7 @@ struct ActivityView: View {
         let current = vm.visible.filtered(.all, includePast: false)
         let earlier = vm.visible.allItems.filter { $0.phase == .past }
         if vm.phase == .loading {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+            ViadereSkeleton(.rows(4), label: "Loading activity").padding(.top, ViadereSpace.m)
         } else if current.isEmpty && earlier.isEmpty {
             ViadereEmptyState(ActivityPresentation.emptyTitle, message: ActivityPresentation.emptyMessage)
                 .padding(.top, ViadereSpace.xxl)
@@ -68,7 +69,7 @@ struct ActivityView: View {
             }
             if !earlier.isEmpty {
                 Button(showEarlier ? "Hide earlier" : "Show earlier · \(earlier.count)") {
-                    withAnimation(ViadereMotion.standard) { showEarlier.toggle() }
+                    withViadereAnimation(reduceMotion: reduceMotion) { showEarlier.toggle() }
                 }
                 .buttonStyle(.viadere(.quiet, fullWidth: false))
                 .padding(.top, ViadereSpace.m)
@@ -76,7 +77,7 @@ struct ActivityView: View {
                     ViadereRowGroup {
                         ForEach(Array(earlier.enumerated()), id: \.element.id) { index, item in
                             Button { path.append(item.id) } label: { ActivityRow(item: item, now: model.services.clock()) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.viaderePressable)
                             if index < earlier.count - 1 { ViadereHairline(inset: 50) }
                         }
                     }
@@ -99,7 +100,7 @@ struct ActivityGroupSection: View {
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                     VStack(alignment: .leading, spacing: 0) {
                         Button { open(item) } label: { ActivityRow(item: item, now: model.services.clock()) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                         if item.phase == .needsYou, !item.actions.isEmpty {
                             ActivityActionBar(item: item, model: model)
                                 .padding(.leading, 50)

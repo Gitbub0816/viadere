@@ -9,6 +9,7 @@ import ViadereKit
 /// Wiring: the app's model is `ViadereThemeRuntime.model` (already applied on the root view by `ViadereApp` with
 /// `.viadereAppearance(_:)`); Settings pushes `AppearanceSettingsView(model: ViadereThemeRuntime.model)`.
 struct AppearanceSettingsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppearanceModel
     @Environment(\.dismiss) private var dismiss
 
@@ -34,7 +35,7 @@ struct AppearanceSettingsView: View {
                               spacing: ViadereSpace.s) {
                         ForEach(AppearancePairing.all) { pairing in
                             PairingCard(pairing: pairing, isSelected: selection.pairing == pairing, follow: selection.follow) {
-                                withAnimation(ViadereMotion.standard) { model.select(pairing) }
+                                withViadereAnimation(reduceMotion: reduceMotion) { model.select(pairing) }
                             }
                         }
                     }
@@ -48,7 +49,7 @@ struct AppearanceSettingsView: View {
                 VStack(alignment: .leading, spacing: ViadereSpace.s) {
                     ViadereSectionHeader("Show")
                     ViadereSegmented(selection: Binding(get: { selection.follow }, set: { next in
-                        withAnimation(ViadereMotion.standard) { model.setFollow(next) }
+                        withViadereAnimation(reduceMotion: reduceMotion) { model.setFollow(next) }
                     }), options: AppearanceFollow.allCases, title: \.title)
                     Text(followCaption)
                         .font(ViadereType.footnote)
@@ -99,7 +100,7 @@ struct AppearanceSettingsView: View {
                 HStack(spacing: ViadereSpace.s) {
                     ForEach(AppearanceTheme.all(side)) { theme in
                         ThemeCard(theme: theme, isSelected: (side == .light ? selection.light : selection.dark) == theme.id) {
-                            withAnimation(ViadereMotion.standard) { model.setTheme(theme.id) }
+                            withViadereAnimation(reduceMotion: reduceMotion) { model.setTheme(theme.id) }
                         }
                     }
                 }
