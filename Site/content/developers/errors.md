@@ -12,7 +12,11 @@ wide: true
 |---|---|---|
 | 400 | `bad_request` | Malformed body, or `Idempotency-Key` header not equal to the body `idempotencyKey`. Fix the request. |
 | 401 | `unauthorized` | Missing, unknown, revoked or expired key. |
-| 403 | `forbidden` | The key lacks the scope, or your business is not active (pending or suspended). |
+| 403 | `forbidden` | Your business is not active (pending or suspended), or the key's mode does not match the relationship. |
+| 403 | `insufficient_scope` | The key lacks the route scope or the capability the request needs, for example a messaging key issuing an `authorize`. |
+| 403 | `not_entitled` | Your business does not hold the capability, or no longer holds it. |
+| 403 | `capability_disabled` | Viadere has switched the capability off. |
+| 403 | `policy_denied` | A policy rule or evidence requirement denies the request. See `error.details.reason`. |
 | 403 | `consent_required` | The customer has not consented to this `purpose`. Do not retry. |
 | 404 | `not_found` | Unknown id, or it belongs to another business (indistinguishable by design). |
 | 409 | `conflict` | State conflict, for example the customer is not connected to you. |

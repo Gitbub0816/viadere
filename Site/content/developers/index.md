@@ -16,7 +16,7 @@ actions:
 ::: section
 ::: prose-wide
 ::: callout
-**API version `{{api-version}}`.** Messaging and Approve are in beta, so interfaces may still change. Changes are recorded in the [changelog](/developers/changelog/). This reference is generated from the OpenAPI contract, `docs/openapi.yaml`.
+**API version `{{api-version}}`.** Messaging and Approve are in beta, so interfaces may still change. Changes are recorded in the [changelog](/developers/changelog/). This portal is generated from two OpenAPI contracts: the [Business API](/developers/api/), from `docs/openapi.yaml`, and [authentication delivery](/developers/auth-delivery/), a staging pilot that is off by default, from `contracts/openapi/auth-delivery-v1.yaml`.
 :::
 :::
 
@@ -50,7 +50,7 @@ One error shape, explicit limits and safe retries. [Errors](/developers/errors/)
 :::
 ::: card
 ### {icon:code} SDKs
-A Swift SDK with typed client and webhook verification. [SDKs](/developers/sdks/)
+Swift, TypeScript and Kotlin, each with its real status. [SDKs](/developers/sdks/)
 :::
 :::
 :::

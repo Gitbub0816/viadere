@@ -6,7 +6,9 @@ wide: true
 ---
 ## 1. Get access
 
-Apply and get verified at the [onboarding](/businesses/onboarding/) page. Create a `vdk_test_` key in the dashboard with `interactions:write`, `interactions:read` and `webhooks:manage`.
+Apply at the [onboarding](/businesses/onboarding/) page. Sandbox work opens as soon as your domain is verified: you can then create a `vdk_test_` key in the dashboard with `interactions:write`, `interactions:read` and `webhooks:manage`. Live keys need the approved application and the go-live review.
+
+Add a webhook endpoint and [verify it](/developers/webhooks/#endpoint-verification). An endpoint receives no events, not even test events, until it has proved it holds the signing secret.
 
 ## 2. Create a sandbox relationship
 
@@ -63,7 +65,8 @@ See [SDKs](/developers/sdks/).
 
 ## Go-live checklist
 
-- [ ] Organization verified; handle and code issued.
+- [ ] Organization verified (domain, legal entity, agreements accepted at their current versions); handle and code issued; go-live approved; a security contact is set.
+- [ ] Webhook endpoint verified, and a test event received.
 - [ ] Live key stored in a secrets manager and scoped to what the integration needs; test key used in CI.
 - [ ] Webhook endpoint verifies signatures on the raw body, rejects stale timestamps, deduplicates on `Viadere-Event-Id` and answers `2xx` quickly.
 - [ ] Every `POST` carries a deterministic idempotency key, stored before sending.
