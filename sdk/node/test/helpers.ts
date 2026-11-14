@@ -1,4 +1,24 @@
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { base64urlEncode, canonicalJson, p256PublicKeyOf, signEs256, softwareSigner, type Es256Signer, type JsonValue } from "../src/index.js";
+
+export const BUSINESS_ID = "b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd";
+export const UUID_1 = "11111111-2222-4333-8444-555555555555";
+export const UUID_2 = "5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c";
+
+/** A fresh P-256 key with its wire public key, key id and a signer. */
+export function newKey(): { privateKey: KeyObject; publicKey: string; kid: string; signer: Es256Signer } {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const pub = p256PublicKeyOf(privateKey);
+  return { privateKey, publicKey: pub.base64url, kid: pub.kid, signer: softwareSigner(privateKey) };
+}
+
+/** Plays a device or Viadere: signs a canonical-JSON statement under `domain`. */
+export async function signStatement(object: Record<string, JsonValue>, domain: string, signer: Es256Signer): Promise<{ kid: string; payload: string; signature: string }> {
+  const bytes = Buffer.from(canonicalJson(object), "utf8");
+  const { signature, key } = await signEs256(signer, Buffer.concat([Buffer.from(domain, "utf8"), bytes]));
+  return { kid: key.kid, payload: base64urlEncode(bytes), signature };
+}
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
