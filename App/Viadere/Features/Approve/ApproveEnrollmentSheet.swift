@@ -19,7 +19,7 @@ struct ApproveEnrollmentSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     Text("Set up approvals").font(ViadereType.display).foregroundStyle(ViadereColor.textPrimary)
-                    if let digits = controller.enrollmentVerificationCode { verification(digits) } else if let offer = controller.offer { offerContent(offer) } else if controller.phase == .working { ViadereLoading() } else { failure }
+                    if let digits = controller.enrollmentVerificationCode { verification(digits) } else if let offer = controller.offer { offerContent(offer) } else if controller.phase == .working { ViadereLoading().frame(maxWidth: .infinity).padding(.vertical, ViadereSpace.xl) } else { failure }
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.top, ViadereSpace.m)
@@ -28,6 +28,9 @@ struct ApproveEnrollmentSheet: View {
             .scrollIndicators(.hidden)
         }
         .background(ViadereColor.background)
+        // Feedback only: the key was created (the number to type appears), or something stopped the setup.
+        .sensoryFeedback(.success, trigger: controller.enrollmentVerificationCode) { _, now in now != nil }
+        .sensoryFeedback(.warning, trigger: controller.message) { _, now in now != nil }
         .task { await controller.lookup(code: code, expectedRootKid: rootKid, secret: secret, checkCode: checkCode) }
         .onDisappear { controller.cancelOffer() }
     }

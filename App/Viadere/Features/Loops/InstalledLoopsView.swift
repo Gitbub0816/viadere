@@ -24,7 +24,7 @@ struct InstalledLoopsView: View {
                     } label: {
                         ViadereRow("Browse Loops", subtitle: "Reviewed by Viadere", leading: { ViadereIconTile(systemName: "square.grid.2x2") })
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                 }
             }
             .padding(.horizontal, ViadereSpace.screen)
@@ -48,7 +48,7 @@ struct InstalledLoopsList: View {
     var body: some View {
         if library.loops.isEmpty {
             if library.isLoading && !library.hasLoaded {
-                ViadereLoading()
+                ViadereSkeleton(.rows(2), label: "Loading your Loops")
             } else if showsEmptyState {
                 ViadereEmptyState("No Loops yet", message: "Add Loops from the directory, a business's page or a link a business shares.")
             }
@@ -64,7 +64,7 @@ struct InstalledLoopsList: View {
                                        leading: { LoopIcon(business: loop.business, brand: model.services.brandKits, size: 40) },
                                        trailing: { EmptyView() })
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         .accessibilityLabel(Text("\(LoopLibraryViewModel.title(loop)). \(LoopLibraryViewModel.subtitle(loop))"))
                         if loop.isStartable || !loop.openInstances.isEmpty {
                             Button(loop.openInstances.isEmpty ? "Open" : "Resume") {

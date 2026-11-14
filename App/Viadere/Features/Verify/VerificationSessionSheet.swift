@@ -45,8 +45,7 @@ struct VerificationSessionSheet: View {
                     }
             case .failed(let message):
                 VStack(spacing: ViadereSpace.l) {
-                    Text("Can't continue").font(ViadereType.title)
-                    Text(message).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary).multilineTextAlignment(.center)
+                    ViadereOutcome(.caution, "Can't continue", detail: message)
                     Button("Close") { dismiss() }.buttonStyle(.viadere(.secondary))
                 }
                 .padding(ViadereSpace.screen)

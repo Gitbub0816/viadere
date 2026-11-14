@@ -31,7 +31,7 @@ struct LoopDetailView: View {
                 if let backTitle { ViadereBackButton(backTitle) { dismiss() } }
                 switch detail.status {
                 case .loading:
-                    ViadereLoading()
+                    ViadereLoadingState("Loading this Loop…")
                 case .unavailable:
                     ViadereEmptyState("Not available", message: "This Loop isn't available to you right now.")
                     // A paused or withdrawn Loop can still be removed from Your Loops.
@@ -40,9 +40,7 @@ struct LoopDetailView: View {
                             .buttonStyle(.viadere(.quiet))
                     }
                 case .failed(let message):
-                    ViadereNotice(message, kind: .warning)
-                    Button("Try again") { Task { await detail.load() } }
-                        .buttonStyle(.viadere(.secondary))
+                    ViadereErrorState("Couldn't load this Loop", message: message) { await detail.load() }
                 case .ready:
                     if let entry = detail.entry { ready(entry) }
                 }
@@ -53,6 +51,7 @@ struct LoopDetailView: View {
         .scrollIndicators(.hidden)
         .viadereScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .sensoryFeedback(.warning, trigger: detail.errorMessage) { _, now in now != nil }
         .task {
             if model.loopConsent.status == nil { await model.loopConsent.load() }
             await detail.load()

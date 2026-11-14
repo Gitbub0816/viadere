@@ -20,7 +20,7 @@ struct BusinessRewardsView: View {
         SubScreen(title: vm.program?.programName ?? "Rewards", subtitle: business.safeName, backTitle: "Back") {
             switch vm.phase {
             case .idle, .loading:
-                ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+                ViadereSkeleton(.cards(1), label: "Loading rewards")
             case .noProgram:
                 ViadereEmptyState("No rewards program", message: "\(business.safeName) doesn't offer a rewards program in Viadere.")
             case .failed(let message):
@@ -72,7 +72,7 @@ struct BusinessRewardsView: View {
                     Button { selection = RewardSelection(id: entry.id) } label: {
                         RewardRow(entry: entry, presentation: vm.presentation(for: entry))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     if index < section.entries.count - 1 { ViadereHairline(inset: 50) }
                 }
             }
@@ -129,13 +129,13 @@ struct BusinessRewardsEntry: View {
                                 ViadereRow(program.programName, subtitle: summary(account),
                                            leading: { ViadereIconTile(systemName: "star") })
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                         } else {
                             Button { joining = true } label: {
                                 ViadereRow("Join \(program.programName)", subtitle: program.summary,
                                            leading: { ViadereIconTile(systemName: "star") })
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                         }
                     }
                 }
@@ -161,6 +161,7 @@ struct BusinessRewardsEntry: View {
 
 /// Join a program, optionally linking an existing membership. The person sees which terms version they accept.
 struct LoyaltyEnrollSheet: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let vm: BusinessRewardsViewModel
     let onDone: () -> Void
     @State private var reference = ""
@@ -198,7 +199,7 @@ struct LoyaltyEnrollSheet: View {
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                     } else {
-                        Button("I already have a membership") { withAnimation(ViadereMotion.standard) { linking = true } }
+                        Button("I already have a membership") { withViadereAnimation(reduceMotion: reduceMotion) { linking = true } }
                             .buttonStyle(.viadere(.quiet, fullWidth: false))
                     }
                     if case .failed(let message) = vm.enrollment { ViadereNotice(message, kind: .danger) }

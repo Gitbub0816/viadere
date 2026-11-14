@@ -44,20 +44,21 @@ struct RewardsView: View {
 
     @ViewBuilder private var content: some View {
         if vm.phase == .loading {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+            ViadereSkeleton(.rows(4), label: "Loading your rewards")
         } else if vm.accounts.isEmpty, vm.overview.rewards.isEmpty, vm.phase == .loaded {
             ViadereEmptyState("No rewards yet", message: "Join a business's program from its page and your points and perks show up here.")
         } else {
             if !vm.accounts.isEmpty {
                 ViadereSectionHeader("Your memberships")
                 VStack(spacing: ViadereSpace.s) {
-                    ForEach(vm.accounts) { account in
+                    ForEach(Array(vm.accounts.enumerated()), id: \.element.id) { index, account in
                         NavigationLink {
                             BusinessRewardsView(business: account.business, model: model)
                         } label: {
                             LoyaltyAccountCard(account: account)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
+                        .viadereEntrance(index)
                     }
                 }
             }
@@ -68,7 +69,7 @@ struct RewardsView: View {
                         Button { selection = RewardSelection(id: entry.id) } label: {
                             RewardRow(entry: entry, presentation: vm.presentation(for: entry), showsBusiness: true)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         if index < section.entries.count - 1 { ViadereHairline(inset: 50) }
                     }
                 }
@@ -114,6 +115,9 @@ struct LoyaltyAccountCard: View {
                         .font(ViadereType.display)
                         .foregroundStyle(ViadereColor.textPrimary)
                         .monospacedDigit()
+                        // The balance rolls to its new value when points are earned or spent (not with Reduce Motion).
+                        .contentTransition(.numericText())
+                        .viadereAnimation(ViadereMotion.standard, value: account.pointsBalance)
                     Text("points").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
                     Spacer()
                     ViadereChevron()
@@ -206,10 +210,16 @@ struct RewardDetailSheet: View {
             } else if let entry = lookup(entryId) {
                 detail(entry)
             } else {
-                VStack { ViadereGrabber(); Spacer(); ViadereLoading(); Spacer() }
+                VStack { ViadereGrabber(); Spacer(); ViadereLoadingState("Loading this reward\u{2026}"); Spacer() }
             }
         }
         .background(ViadereColor.background)
+        // The footer swaps between "checking" and the action without a jump; one haptic says whether a claim went through.
+        .viadereAnimation(ViadereMotion.quick, value: busy)
+        .sensoryFeedback(trigger: message) { _, now in
+            guard let now else { return nil }
+            return now.hasPrefix("Claimed") ? .success : .warning
+        }
         .task { await onRefresh() }
     }
 
@@ -243,7 +253,7 @@ struct RewardDetailSheet: View {
                     statusLine(p)
                     facts(entry)
                     if let pass = entry.reward.walletPass { WalletPassAction(pass: pass, wallet: wallet) }
-                    if let message { ViadereNotice(message, kind: message.hasPrefix("Claimed") ? .info : .warning) }
+                    if let message { ViadereNotice(message, kind: message.hasPrefix("Claimed") ? .info : .warning).transition(.opacity) }
                     Text("Viadere never decides who qualifies. \(entry.business.safeName) does, and it's checked again when you use this.")
                         .font(ViadereType.footnote)
                         .foregroundStyle(ViadereColor.textTertiary)

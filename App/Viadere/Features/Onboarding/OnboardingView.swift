@@ -47,8 +47,11 @@ struct OnboardingView: View {
             case .phone, .done: PhoneStep(vm: vm)
             }
         }
-        .animation(ViadereMotion.gentle, value: vm.step)
+        .viadereAnimation(ViadereMotion.gentle, value: vm.step)
         .transition(.opacity)
+        // Each step forward is felt once; a step that could not complete gives a warning instead.
+        .sensoryFeedback(.selection, trigger: vm.step)
+        .sensoryFeedback(.warning, trigger: vm.errorMessage) { _, now in now != nil }
         .viadereScreenBackground()
         .passkeyExplanation(vm.passkeyGate)
         .task { if vm.step == .recovery { await vm.resumeRecoveryIfPending() } }

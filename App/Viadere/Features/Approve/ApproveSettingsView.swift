@@ -115,7 +115,7 @@ struct ApproveSettingsView: View {
                         Button { controller.present(prompt) } label: {
                             ViadereRow(prompt.business.safeName, subtitle: prompt.inboxLine ?? prompt.promptReason) { ViadereAvatar(name: prompt.business.safeName, size: 36, isVerified: prompt.business.isVerified) }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         ViadereHairline(inset: 50)
                     }
                     ForEach(controller.rejected) { item in

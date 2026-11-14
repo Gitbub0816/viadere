@@ -25,7 +25,9 @@ struct AuthenticatorView: View {
                 ViadereNotice("Authenticator isn't available on this build.", kind: .warning)
             }
         }
-        .overlay(alignment: .bottom) { if let toast { ViadereToast(toast).transition(.opacity) } }
+        .viadereToast($toast)
+        // Unlocking is felt once.
+        .sensoryFeedback(.success, trigger: model?.phase) { was, now in was == .locked && now == .ready }
         .task { await model?.load() }
         .task(id: model?.phase) {
             // The codes tick once a second while the list is on screen.
@@ -70,7 +72,7 @@ struct AuthenticatorView: View {
         if let message = model.message { ViadereNotice(message, kind: .warning) }
         switch model.phase {
         case .loading:
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xl)
+            ViadereSkeleton(.rows(3), label: "Loading Authenticator")
         case .failed(let text):
             ViadereNotice(text, kind: .danger)
         case .empty:
@@ -133,7 +135,7 @@ struct AuthenticatorView: View {
         } label: {
             ViadereRow("Sync and devices", subtitle: syncSubtitle(model), leading: { ViadereIconTile(systemName: "arrow.triangle.2.circlepath") })
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.viaderePressable)
         .padding(.top, ViadereSpace.s)
         Toggle(isOn: Binding(get: { AuthenticatorPreferences.suggestInAutoFill }, set: { newValue in
             AuthenticatorPreferences.suggestInAutoFill = newValue
@@ -159,10 +161,7 @@ struct AuthenticatorView: View {
 
     private func codeRow(_ row: AuthenticatorViewModel.Row, model: AuthenticatorViewModel) -> some View {
         Button {
-            guard let code = model.codeToCopy(row.id), !capture.isCaptured else { return }
-            SecurePasteboard.copy(code)
-            withAnimation { toast = "Copied. It clears from the clipboard in a minute." }
-            Task { try? await Task.sleep(nanoseconds: 2_500_000_000); withAnimation { toast = nil } }
+            copy(row, model: model)
         } label: {
             HStack(spacing: ViadereSpace.m) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -172,6 +171,9 @@ struct AuthenticatorView: View {
                         .font(.system(size: 30, weight: .medium, design: .monospaced))
                         .foregroundStyle(ViadereColor.textPrimary)
                         .privacySensitive()
+                        // The digits roll over when the code changes (not with Reduce Motion).
+                        .contentTransition(.numericText())
+                        .viadereAnimation(ViadereMotion.standard, value: row.spacedCode)
                 }
                 Spacer(minLength: 0)
                 if let remaining = row.secondsRemaining, let period = row.period {
@@ -181,9 +183,19 @@ struct AuthenticatorView: View {
             .padding(.vertical, ViadereSpace.s)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.viaderePressable)
         .accessibilityHint(Text("Copies the code"))
-        .contextMenu { Button("Delete", role: .destructive) { deleting = row } }
+        .contextMenu {
+            Button { copy(row, model: model) } label: { Label("Copy code", systemImage: "doc.on.doc") }
+            Button(role: .destructive) { deleting = row } label: { Label("Delete", systemImage: "trash") }
+        }
+    }
+
+    /// Copies the current code (never while the screen is recorded) and says so; the toast clears itself.
+    private func copy(_ row: AuthenticatorViewModel.Row, model: AuthenticatorViewModel) {
+        guard let code = model.codeToCopy(row.id), !capture.isCaptured else { return }
+        SecurePasteboard.copy(code)
+        toast = "Copied. It clears from the clipboard in a minute."
     }
 
     private func joinCard(_ model: AuthenticatorViewModel) -> some View {
@@ -193,7 +205,7 @@ struct AuthenticatorView: View {
             ViadereRow("Already use Authenticator on another device?", subtitle: "Add this device, or restore with your recovery key",
                        leading: { ViadereIconTile(systemName: "iphone.and.arrow.forward") })
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.viaderePressable)
         .padding(.top, ViadereSpace.l)
     }
 
