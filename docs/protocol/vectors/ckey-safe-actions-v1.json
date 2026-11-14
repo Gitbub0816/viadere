@@ -1,0 +1,215 @@
+{
+  "schema": 1,
+  "description": "Safe Action envelopes from an independent implementation, with the verdict a conforming reader must reach. expect: ok, integrity (bad signature), expired (out of time or too long-lived), invalid (malformed).",
+  "vectors": [
+    {
+      "name": "valid same-device action",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "ok",
+      "fields": {
+        "scope": 0,
+        "issuer": "citeory.com",
+        "app": "com.viadere",
+        "action": "open.library",
+        "key_id": "2026-11",
+        "request_id": "r_8f3K2pQ7xZ",
+        "issued_at": 1793999970,
+        "expires_at": 1794000090,
+        "params": "{\"item\":\"apa-7\"}"
+      }
+    },
+    {
+      "name": "valid cross-device sign-in, no params",
+      "payload": "ckey-action:1:AQELY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUOc2lnbmluLnJlcXVlc3QHMjAyNi0xMRJzZXNzLTQxZmQwYTliZTJjNzQAAAAAau5EYgAAAABq7kTaAAACHa8IJgHKEekWl1IdGliWpiUHh2XxNxnxhSm2S6cTYMkSroRnqeoR2B1OOzpEervNy2wJgYYKO5vXooio3S0L",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "ok",
+      "fields": {
+        "scope": 1,
+        "issuer": "citeory.com",
+        "app": "com.viadere",
+        "action": "signin.request",
+        "key_id": "2026-11",
+        "request_id": "sess-41fd0a9be2c74",
+        "issued_at": 1793999970,
+        "expires_at": 1794000090,
+        "params": ""
+      }
+    },
+    {
+      "name": "signed by a different key",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifRcUEq3OLdOYH_aQw6IwV6C2n0cPc17jT-tPM6xDcjpDIYpu4wx5TenxpeFDvjFjBideoMfHT67ZOSH71pYNVA0",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "action name changed after signing",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMbnBlbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "receiving app changed after signing",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmYMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "expired",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000091,
+      "max_lifetime": 600,
+      "expect": "expired"
+    },
+    {
+      "name": "valid for longer than the app allows",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5SkAAQeyJpdGVtIjoiYXBhLTcifTKTROd_zuzaD1T1ZAdd7t5573KyV7vUtr2r-5zwWpLaQNOJO2rRuWrBnU1PkFV6skebiOpqUy5uRoRr0TcDlwA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "expired"
+    },
+    {
+      "name": "issued in the future beyond clock tolerance",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRawAAAAAau5GEAAQeyJpdGVtIjoiYXBhLTcifSq0kkXXokfIAK8JJeaJqTX6-DGFmGlr44SS32ZoxpuR5VIjJjjyJg84dJOusCzPjy2lNdQxHit2dicnNJg2ngE",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "expired"
+    },
+    {
+      "name": "within clock tolerance",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruROQAAAAAau5FSAAQeyJpdGVtIjoiYXBhLTcifT7Zf5gadvrMrBg3coy9Aq1ngYj-hYIziW7Bg-zMHtsuOSUcAa8MyOWnW96yasvxX1jz6s9Qbuh_GMjpZSWTOAE",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "ok",
+      "fields": {
+        "scope": 0,
+        "issuer": "citeory.com",
+        "app": "com.viadere",
+        "action": "open.library",
+        "key_id": "2026-11",
+        "request_id": "r_8f3K2pQ7xZ",
+        "issued_at": 1794000100,
+        "expires_at": 1794000200,
+        "params": "{\"item\":\"apa-7\"}"
+      }
+    },
+    {
+      "name": "expires before it is issued",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRIAAAAAAau5EfwAQeyJpdGVtIjoiYXBhLTciffZlrEin6_YuNg3Zwgy9_tNh0RTvlQNrAv7aIGTEvn3vG65KuAVjp89YyF8EcHwNkD6u4NQQ4eKpgvTBYvWO9QY",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "expired"
+    },
+    {
+      "name": "not a Safe Action",
+      "payload": "https://citeory.com/",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "wrong version prefix",
+      "payload": "ckey-action:2:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "not base64url",
+      "payload": "ckey-action:1:abc+/def",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "non-canonical base64url tail",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQB",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid_or_integrity"
+    },
+    {
+      "name": "upper-case issuer",
+      "payload": "ckey-action:1:AQALQ2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifbC5642suTO16XVGUn7yIPyNOAZLYeKXcKDuC2gLtVv8x4oLZ6vFuQa9WuQoOdroUg_F2Uwsj-yojLYeujN4pQg",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "issuer without a dot",
+      "payload": "ckey-action:1:AQAJbG9jYWxob3N0C2NvbS52aWFkZXJlDG9wZW4ubGlicmFyeQcyMDI2LTExDHJfOGYzSzJwUTd4WgAAAABq7kRiAAAAAGruRNoAEHsiaXRlbSI6ImFwYS03In3yqB6s_H7O1jVNNisnTtVQcQ7YEo0DJaQCd8mWXW0u33kfzTufVO4Ht35NgxqP2BHthzSl4Qh39B1OGmWsO7wG",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "request ID too short",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEDYWJjAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifUa6CQInHvHwJUKa748Et4_W0I7EhyeUyKuBghtcSbEiC4E0JTLl0MgAsqNNSo1EEAkacZhzBFPhVEXnjyhEagA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "unknown scope",
+      "payload": "ckey-action:1:AQILY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifUFNnfvTV1IJ78YxsCznB7O5NzIT7kYX7b0SwfupgNMUYtNFLeu7gVxIyFYhZlxjIZav_dKHubHXia77wwkZlA8",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "unsupported envelope version",
+      "payload": "ckey-action:1:AgALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifTphcQ1pBNG-ViwhmntunbvGfYJg-1_LFmmwYBChc8DPOhO3CO9mMPLh1Zn95lL6AlLRUljwt-WK1O3dHG1kWQE",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "extra byte after the signature",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQAA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "truncated",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5Bw",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "non-canonical signature scalar (S + L)",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufU6-0aqIQy7T8-w1h_QcenwIYNE2hSgaJ8Z5nr6BdRRA",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    }
+  ]
+}
