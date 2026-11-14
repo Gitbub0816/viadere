@@ -1,7 +1,7 @@
 {
   "name": "@viadere/server",
   "version": "0.1.0",
-  "description": "Server-side SDK for the Viadere authentication-delivery business API: typed client, webhook signature v2 verification, replay store and per-requester throttle. Zero runtime dependencies.",
+  "description": "Server-side SDK for the Viadere business API: typed client for every business operation, ApprovalResult and signed-statement verification, webhook signature v1 and v2 verification, replay stores and the per-requester throttle. Zero runtime dependencies.",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
