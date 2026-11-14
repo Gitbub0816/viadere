@@ -23,7 +23,7 @@ Dependency direction: `Server` → `ViadereCore`, `ViadereBusinessSDK` → `Viad
 | Identifiers | `BusinessCode`, `BusinessHandle`, `TypedID<Tag>` (`BusinessID`, `ConsumerID`, …), `ConnectLink`, `PhoneNumber` | Normalization and validation of codes and handles, typed UUIDs, strict `https://viadere.com/c/{CODE}` parsing with an HMAC-signed context |
 | Interaction protocol | `Interaction`, `InteractionPayload`, `InteractionKind`, `InteractionValidation`, `MoneyAmount` | Versioned envelope (schema v1), typed payloads per kind, and an unknown-kind fallback |
 | Assurance | `AssurancePolicy`, `RequiredAssurance`, `ProvidedAssurance`, `DecisionAssurance` | Pure rules for which channel and evidence can satisfy an interaction |
-| Rendering | `ChannelRenderer`, `SMSEncoding` | Interaction → SMS (numbered, GSM-7 aware), RCS suggestions, and native notification categories. Sensitive interactions get a secure handoff instead |
+| Rendering | `ChannelRenderer`, `SMSEncoding` | Interaction → SMS (numbered, GSM-7 aware), RCS suggestions, and native notification categories. Sensitive interactions get an "Open the Viadere app" notice instead (no link, no code) |
 | Security | `RequestSigner`/`RequestVerifier`, `DecisionSigner`/`DecisionVerifier`, `WebhookSignature`, `SecureToken`, `ReplayGuard`, `DeviceSigningKey` | Device request signing, signed decisions, webhook HMAC, tokens, replay protection |
 | SMS gateway | `SMSGatewayEngine`, `ConversationContext`, `GatewayEffect`, `DirectoryLookup`, `GatewayCopy` | A pure, deterministic state machine that returns the next state plus effects |
 | Models / DTOs | `BusinessProfile`, `Relationship`, `ConsentGrant`, `Device`, `ConversationMessage`, `Reward`, `RewardEntry`/`RewardEligibility`, `LoyaltyAccount`, `HouseholdGrant`, `DelegationStepUpProof`/`DelegationScopePolicy`, `AcknowledgmentRecord`, `LiveActivityStatus`, `AuditEvent`, `DelegationGrant`, request/response types | Shared wire types. Always encode them with `ViadereJSON` |
@@ -79,7 +79,7 @@ Server: RequestVerifier (+ReplayGuard) → DecisionVerifier.verify(… replayGua
 Server ──webhook interaction.decided (Viadere-Signature: t=…,v1=…)──▶ Business (remains authoritative)
 ```
 
-Stale, replayed, wrong-device, wrong-challenge and under-assured decisions are all rejected. If the interaction is sent over SMS or RCS, `ChannelRenderer` produces a secure handoff link and never a YES/NO.
+Stale, replayed, wrong-device, wrong-challenge and under-assured decisions are all rejected. If the interaction is sent over SMS or RCS, `ChannelRenderer` produces an "Open the Viadere app" notice (no link, no code) and never a YES/NO.
 
 ## Data flow: SMS routing
 
@@ -115,12 +115,12 @@ Server (one transaction): store interaction + challenge, meter usage, write a ch
         (needs: verified phone link, not opted out, text-channel consent for non-essential purposes)
 Worker (ChannelRouter.deliverDue):
    rcs preferred? → capability(phone) cached 24 h ─┬─ capable → ChannelRenderer.rcs
-                                                   │     sensitive / not inline → secure handoff link (/h/{token}), no chips
+                                                   │     sensitive / not inline → "Open the Viadere app" notice, no link, no chips
                                                    │     else → suggested replies, one opaque signed single-use token each,
                                                    │            endpoint.active_menu_version += 1 (CAS), older menus revoked
                                                    │     → RCSProvider.send; transient errors retry, then fall back
                                                    └─ not capable / provider error → SMS (same interaction):
-                                                         needs an answer or sensitive → handoff link; informational → plain text
+                                                         needs an answer or sensitive → "Open the app" notice; informational → plain text
 Provider ──POST /v1/providers/rcs/inbound (X-RCS-Signature)──▶ Server
    postback: token well-formed (MAC) → row found → same phone → open → menu version current and unexpired
              → interaction pending, business verified, phone belongs to the interaction's consumer

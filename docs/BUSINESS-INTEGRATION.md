@@ -246,11 +246,12 @@ Every `POST` that creates something takes an `Idempotency-Key` header **equal to
 
 | Interaction | Native app | RCS | SMS |
 |---|---|---|---|
-| `authenticate`, `authorize`, unknown kinds, `high`/`critical` sensitivity | Device-signed approval (Face ID / passcode) | Secure handoff link only | Secure handoff link only |
-| `confirm`, `choose` (single), `reply` with suggested replies, `acknowledge` at `low`/`standard` sensitivity | Notification actions / in-app | Suggested replies (a tap is an *unauthenticated reply*) | Handoff link (numbered replies are not wired for interactions) |
+| `authenticate`, `authorize`, unknown kinds, `high`/`critical` sensitivity | Device-signed approval (Face ID / passcode) | "Open the Viadere app" notice only | "Open the Viadere app" notice only |
+| `confirm`, `choose` (single), `reply` with suggested replies, `acknowledge` at `low`/`standard` sensitivity | Notification actions / in-app | Suggested replies (a tap is an *unauthenticated reply*) | "Open the Viadere app" notice (numbered replies are not wired for interactions) |
 | `status`, `message` | Notification / Live Activity | Text | Text |
 
 * List `rcs` and/or `sms` in `allowedChannels` to permit them; `rcs` implies SMS fallback. The default is `[nativePush, inApp]`.
+* The notice carries no link and no code (decision 9, ADR-0027): "A sign-in request needs your review. Open the Viadere app to review it. Viadere never asks you to approve by text." (`ChannelRenderer.secureHandoffText`).
 * Viadere checks RCS capability per phone and falls back to SMS for the *same* interaction. A sensitive interaction is **never** downgraded to a yes/no text.
 * Text you send by SMS or RCS is rendered as a single line after your `[Name]:` attribution (line breaks become spaces, and a leading `Viadere` or `[` is neutralised), so it cannot forge a second speaker or a menu.
 * The customer's text thread is shared by every business. While it is connected to *another* business, an interaction you send by SMS is replaced by a content-free notice ("new message from you in the Viadere app"); the content is in the app.
