@@ -101,19 +101,22 @@ public final class BusinessesViewModel {
         }
     }
 
-    /// Optimistic favorite toggle, rolled back when the server refuses.
-    public func setFavorite(_ id: BusinessID, _ favorite: Bool) async {
-        guard let api, let index = directory.firstIndex(where: { $0.business.id == id }) else { return }
+    /// Optimistic favorite toggle, rolled back when the server refuses. True when the server kept the change.
+    @discardableResult
+    public func setFavorite(_ id: BusinessID, _ favorite: Bool) async -> Bool {
+        guard let api, let index = directory.firstIndex(where: { $0.business.id == id }) else { return false }
         let previous = directory[index].preferences
         directory[index].preferences.favorite = favorite
         directory = BusinessDirectoryRules.ordered(directory)
         do {
             let saved = try await api.updatePreferences(business: id, BusinessPreferencesUpdate(favorite: favorite))
             apply(saved)
+            return true
         } catch {
             if let i = directory.firstIndex(where: { $0.business.id == id }) { directory[i].preferences = previous }
             directory = BusinessDirectoryRules.ordered(directory)
             errorMessage = message(for: error, "Couldn't save that change.")
+            return false
         }
     }
 
