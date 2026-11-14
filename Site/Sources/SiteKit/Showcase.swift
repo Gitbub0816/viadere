@@ -62,7 +62,7 @@ public enum Showcase {
     static func device(_ screen: String, label: String, screen screenClass: String, concept: Bool = false, extra: String = "") -> String {
         let time: String? = screenClass == "screen-lock" ? nil : "9:41"
         return """
-        <figure class="device\(concept ? " is-concept" : "")\(extra.isEmpty ? "" : " " + extra)">\(concept ? "<span class=\"concept-tag\">Planned · design concept</span>" : "")<div class="phone" role="img" aria-label="\(e(label))"><div class="screen \(screenClass)"><span class="island" aria-hidden="true"></span>\(statusBar(time: time))\(screen)<span class="home-ind" aria-hidden="true"></span></div></div><figcaption class="device-cap">\(caption)</figcaption></figure>
+        <figure class="device\(concept ? " is-concept" : "")\(extra.isEmpty ? "" : " " + extra)">\(concept ? "<span class=\"concept-tag\">Not released · illustration</span>" : "")<div class="phone" role="img" aria-label="\(e(label))"><div class="screen \(screenClass)"><span class="island" aria-hidden="true"></span>\(statusBar(time: time))\(screen)<span class="home-ind" aria-hidden="true"></span></div></div><figcaption class="device-cap">\(caption)</figcaption></figure>
         """
     }
 
@@ -126,7 +126,7 @@ public enum Showcase {
         """
     }
 
-    static let verifyLabel = "Design concept for Verify, which is planned and not available: Riverbend Cellars asks to confirm your age. The result reads Over 21, confirmed. Only the over-21 answer is shared; your date of birth, name, address and ID number are not shared."
+    static let verifyLabel = "Illustration for Verify, which is built but not released: Riverbend Cellars asks to confirm your age. The result reads Over 21, confirmed. Only the over-21 answer is shared; your date of birth, name, address and ID number are not shared."
     static let verifyScreen = """
     <div class="vfy"><div class="vfy-head">\(logo(riverbend))<span class="nt-who">\(name(riverbend))<span class="nt-kind">wants to confirm your age</span></span></div>
     <div class="vfy-result"><span class="vfy-check">\(Icons.svg("check"))</span><span class="vfy-big">Over 21</span><span class="vfy-ok">Confirmed</span></div>
@@ -134,7 +134,7 @@ public enum Showcase {
     <div class="vfy-btns"><span class="ub ub-pri">Share “over 21”</span><span class="ub">Decline</span></div></div>
     """
 
-    static let authenticatorLabel = "Design concept for Authenticator, which is planned and not available: a vault listing passkeys for Northwind Air and Fernhill Market and one-time codes for Larkspur Bank and Juniper Coffee."
+    static let authenticatorLabel = "Illustration for Authenticator, which is built but not released: a vault listing passkeys for Northwind Air and Fernhill Market and one-time codes for Larkspur Bank and Juniper Coffee."
     static let authenticatorScreen = """
     <div class="vault"><div class="va-title">Authenticator</div><div class="va-search">\(Icons.svg("eye"))Search accounts</div>
     <span class="va-sec">Passkeys</span>
@@ -171,7 +171,7 @@ public enum Showcase {
     <li class="fnode"><span class="fn-ic">\(Icons.svg("store"))</span><span class="fn-step">01 · Business</span><b>Ask</b><span class="fn-txt">A verified business issues one structured request: who, what, why and for how long.</span><code>POST /v1/business/interactions</code></li>
     <li class="fnode fn-via"><span class="fn-ic"><svg viewBox="0 0 321.71 146" aria-hidden="true" focusable="false"><use href="#mark-dark"/></svg></span><span class="fn-step">02 · Viadere</span><b>Check and route</b><span class="fn-txt">Confirms the business is verified and has consent for this purpose, then picks the right channel.</span><code>verify · consent · route</code></li>
     <li class="fnode"><span class="fn-ic">\(Icons.svg("phone"))</span><span class="fn-step">03 · Customer</span><b>Decide</b><span class="fn-txt">The phone shows the verified name and the exact context. The customer answers with Face ID.</span><code>approve · deny · not me</code></li>
-    <li class="fnode"><span class="fn-ic">\(Icons.svg("seal"))</span><span class="fn-step">04 · Business</span><b>Verify</b><span class="fn-txt">A signed result returns by webhook. The business checks the device signature against the request it created.</span><code>ES256 · single-use challenge</code></li>
+    <li class="fnode"><span class="fn-ic">\(Icons.svg("seal"))</span><span class="fn-step">04 · Business</span><b>Verify</b><span class="fn-txt">A signed webhook returns the decision. With Approve v2, which is not released, the business also checks the device signature itself.</span><code>ES256 · single-use challenge</code></li>
     </ol><div class="flow-return" aria-hidden="true"><span class="fr-line"></span><span class="fr-label">\(Icons.svg("arrow-back"))Signed result returns to the business</span></div></div>
     """
 
@@ -181,7 +181,7 @@ public enum Showcase {
     <div class="ps-code"><span class="pc-l"><span class="tok-p">"sub"</span>: <span class="tok-s">"sub_k3JxQ…"</span></span><span class="pc-l"><span class="tok-p">"decision"</span>: <span class="tok-s">"approve"</span></span><span class="pc-l"><span class="tok-p">"amr"</span>: <span class="tok-s">"biometric"</span></span><span class="pc-l"><span class="tok-p">"request_id"</span>: <span class="tok-s">"req_8f2c…"</span></span><span class="pc-l"><span class="tok-p">"txn_digest"</span>: <span class="tok-s">"5e1a…"</span></span></div>
     <ul class="ps-list"><li>\(Icons.svg("split"))A pseudonym made for this one business</li><li>\(Icons.svg("check"))Your decision and how you confirmed it</li><li>\(Icons.svg("signature"))Proof tied to the exact request it sent</li></ul></div>
     <div class="ps ps-you"><span class="ps-h">\(Icons.svg("eye-off"))What stays with you</span>
-    <ul class="ps-list ps-keep"><li>\(Icons.svg("phone"))Your phone number</li><li>\(Icons.svg("user"))Your Viadere account identity</li><li>\(Icons.svg("store"))Which other businesses you use</li><li>\(Icons.svg("chip"))Your signing keys, held in the Secure Enclave</li><li>\(Icons.svg("id"))Your date of birth, when Verify ships (planned)</li></ul></div>
+    <ul class="ps-list ps-keep"><li>\(Icons.svg("phone"))Your phone number</li><li>\(Icons.svg("user"))Your Viadere account identity</li><li>\(Icons.svg("store"))Which other businesses you use</li><li>\(Icons.svg("chip"))Your signing keys, held in the Secure Enclave</li><li>\(Icons.svg("id"))Your date of birth, with Verify (not released)</li></ul></div>
     </div>
     """
 
@@ -196,7 +196,7 @@ public enum Showcase {
     <div class="sr"><span class="k">txn_digest</span><span class="v">5e1a…c09f</span><span class="n">What you saw</span></div>
     <div class="sr"><span class="k">exp</span><span class="v">iat + 300 s</span><span class="n">Short-lived</span></div>
     </div><div class="sres-foot">\(Icons.svg("seal"))Signed on the device with a key that never leaves it</div></div>
-    <figcaption class="fig-note">Illustrative values. The business verifies the signature with the key it enrolled for this customer.</figcaption></figure>
+    <figcaption class="fig-note">Illustrative values for Approve v2, which is built and not released. The business verifies the signature with the key it enrolled for this customer.</figcaption></figure>
     """
 
     static let stage = """
@@ -216,7 +216,7 @@ public enum Showcase {
     <div class="chan">
     <div class="chan-c is-app"><span class="chan-ic">\(Icons.svg("phone"))</span><b>Viadere app</b><span class="chan-tag">Push and in-app</span><span class="chan-txt">Everything, including device-signed approvals, structured choices and Live Activities for ongoing orders and trips.</span></div>
     <div class="chan-c"><span class="chan-ic">\(Icons.svg("message"))</span><b>RCS</b><span class="chan-tag">Text with suggested replies</span><span class="chan-txt">Good for confirmations and support. A tap is an unauthenticated reply, so it never approves anything sensitive.</span></div>
-    <div class="chan-c"><span class="chan-ic">\(Icons.svg("sms"))</span><b>SMS</b><span class="chan-tag">Plain text and secure links</span><span class="chan-txt">Reaches every phone. Ordinary SMS is not end-to-end encrypted, so sensitive requests become a secure link to the app.</span></div>
+    <div class="chan-c"><span class="chan-ic">\(Icons.svg("sms"))</span><b>SMS</b><span class="chan-tag">Plain text</span><span class="chan-txt">Reaches every phone. Ordinary SMS is not end-to-end encrypted, so a sensitive request becomes a notice to open the Viadere app, with no link and no code.</span></div>
     </div>
     """
 
@@ -258,7 +258,7 @@ public enum Showcase {
         return "<svg class=\"qr\" viewBox=\"-1 -1 27 27\" shape-rendering=\"crispEdges\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"-1\" y=\"-1\" width=\"27\" height=\"27\" fill=\"#fff\"/><path fill=\"#1F1E1C\" fill-rule=\"evenodd\" d=\"\(d)\"/></svg>"
     }
 
-    /// Icons for the four products, used by the product cards.
+    /// Default icons for the product cards. A product page can name another with front matter `icon:`.
     public static func productIcon(_ url: String) -> String {
         if url.contains("messaging") { return "message" }
         if url.contains("approve") { return "faceid" }

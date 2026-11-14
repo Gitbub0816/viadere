@@ -3,6 +3,11 @@ import Foundation
 /// Renders the developer portal reference from `docs/openapi.yaml` so the docs cannot drift from the contract.
 public struct OpenAPI: Sendable {
     public let spec: YAML
+    /// Where this contract's reference lives on the site: tag pages are `{basePath}{tag-slug}/` and data types
+    /// `{schemasPath}#schema-{Name}`. The Business API keeps the defaults; every other contract (`references:` in
+    /// site.yaml) gets its own pair, so a link never crosses from one contract into another.
+    public var basePath = "/developers/api/"
+    public var schemasPath = "/developers/schemas/"
     public init(spec: YAML) { self.spec = spec }
     public init(contentsOf url: URL) throws { self.spec = try YAMLParser.parse(try String(contentsOf: url, encoding: .utf8)) }
 
@@ -18,7 +23,12 @@ public struct OpenAPI: Sendable {
     public var title: String { spec["info"]?["title"]?.string ?? "API" }
     public var version: String { spec["info"]?["version"]?.string ?? "" }
     public var serverURL: String { spec["servers"]?.array?.first?["url"]?.string ?? "" }
-    public var tags: [String] { (spec["tags"]?.array ?? []).compactMap { $0["name"]?.string } }
+    /// Declared tags in contract order, then any tag an operation uses without declaring it, so no operation goes unrendered.
+    public var tags: [String] {
+        var out = (spec["tags"]?.array ?? []).compactMap { $0["name"]?.string }
+        for o in operations where !out.contains(o.tag) { out.append(o.tag) }
+        return out
+    }
 
     public var operations: [Operation] {
         var out: [Operation] = []
@@ -64,7 +74,7 @@ public struct OpenAPI: Sendable {
     // MARK: Schema helpers
 
     func typeLabel(_ s: YAML) -> String {
-        if let n = refName(s) { return "<a href=\"/developers/schemas/#schema-\(HTML.escape(n))\">\(HTML.escape(n))</a>" }
+        if let n = refName(s) { return "<a href=\"\(schemasPath)#schema-\(HTML.escape(n))\">\(HTML.escape(n))</a>" }
         if let all = s["allOf"]?.array { return all.map(typeLabel).joined(separator: " + ") }
         if let one = s["oneOf"]?.array ?? s["anyOf"]?.array { return one.map(typeLabel).joined(separator: " | ") }
         if let c = s["const"]?.string { return "<code>\(HTML.escape(c))</code>" }
@@ -155,7 +165,7 @@ public struct OpenAPI: Sendable {
 
     public func renderOperation(_ o: Operation) -> String {
         var out = "<section class=\"op\" id=\"op-\(HTML.escape(o.id))\" aria-labelledby=\"op-\(HTML.escape(o.id))-h\">\n"
-        out += "<h3 id=\"op-\(HTML.escape(o.id))-h\">\(HTML.escape(o.summary))</h3>\n"
+        out += "<h3 id=\"op-\(HTML.escape(o.id))-h\">\(inl(o.summary))</h3>\n"
         out += "<p class=\"endpoint\"><span class=\"method method-\(o.method.lowercased())\">\(o.method)</span> <code>\(HTML.escape(o.path))</code>"
         if let s = scope(o.op) { out += " <span class=\"chip\">scope <code>\(HTML.escape(s))</code></span>" }
         out += "</p>\n"
@@ -207,7 +217,7 @@ public struct OpenAPI: Sendable {
             if ops.isEmpty { continue }
             out += "<h2 id=\"\(Self.tagSlug(tag))\">\(HTML.escape(tag))</h2>\n<div class=\"table-wrap\" role=\"region\" tabindex=\"0\" aria-label=\"\(HTML.escape(tag)) endpoints\"><table>\n<thead><tr><th scope=\"col\">Method</th><th scope=\"col\">Path</th><th scope=\"col\">Summary</th></tr></thead>\n<tbody>\n"
             for o in ops {
-                out += "<tr><td><span class=\"method method-\(o.method.lowercased())\">\(o.method)</span></td><td><a href=\"/developers/api/\(Self.tagSlug(tag))/#op-\(HTML.escape(o.id))\"><code>\(HTML.escape(o.path))</code></a></td><td>\(inl(o.summary))</td></tr>\n"
+                out += "<tr><td><span class=\"method method-\(o.method.lowercased())\">\(o.method)</span></td><td><a href=\"\(basePath)\(Self.tagSlug(tag))/#op-\(HTML.escape(o.id))\"><code>\(HTML.escape(o.path))</code></a></td><td>\(inl(o.summary))</td></tr>\n"
             }
             out += "</tbody></table></div>\n"
         }

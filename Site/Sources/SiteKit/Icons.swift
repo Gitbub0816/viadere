@@ -42,6 +42,7 @@ public enum Icons {
         "leaf": "<path d=\"M5 19c0-8 5-13 14-14 0 9-5 14-13 14z\"/><path d=\"M5 19l7.5-7.5\"/>",
         "grape": "<circle cx=\"9\" cy=\"10\" r=\"2.3\"/><circle cx=\"14\" cy=\"10\" r=\"2.3\"/><circle cx=\"11.5\" cy=\"14.2\" r=\"2.3\"/><circle cx=\"11.5\" cy=\"18.5\" r=\"2\"/><path d=\"M11.5 7.5V4M11.5 5c1.5-1.5 3.5-1.5 5-.5\"/>",
         "bank": "<path d=\"M3.5 9.5L12 4l8.5 5.5z\"/><path d=\"M5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 20h17\"/>",
+        "scan": "<path d=\"M4 8.5V6.5A2.5 2.5 0 0 1 6.5 4h2M15.5 4h2A2.5 2.5 0 0 1 20 6.5v2M20 15.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M8.5 20h-2A2.5 2.5 0 0 1 4 17.5v-2\"/><rect x=\"8.5\" y=\"8.5\" width=\"3\" height=\"3\" rx=\".6\"/><rect x=\"13.5\" y=\"12.5\" width=\"2\" height=\"3\" rx=\".5\"/><path d=\"M14.5 8.5h1M8.5 14.5h2.5\"/>",
     ]
 
     public static var names: [String] { paths.keys.sorted() }

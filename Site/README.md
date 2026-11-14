@@ -7,7 +7,7 @@ third-party requests, deployed to Cloudflare Workers Static Assets (ADR-04).
 ```
 Site/
   Package.swift              viadere-site (executable) + SiteKit (library) + tests
-  site.yaml                  base URL, allowed link hosts, security.txt values (placeholders)
+  site.yaml                  base URL, allowed link hosts, OpenAPI contracts (`openapi`, `references`), security.txt values (placeholders)
   content/                   Markdown + front matter, one file per page (URL = path)
   static/assets/site.css     hand-written CSS (tokens match Design/README.md, light + dark)
   static/assets/fonts/       Outfit woff2 (OFL) from Design/tools/fonts
@@ -27,7 +27,8 @@ swift build && swift test && swift run viadere-site          # same as: viadere-
 swift run viadere-site lint --dist dist                       # what CI runs after build
 ```
 
-`build` loads `content/`, generates the developer reference from `../docs/openapi.yaml`, runs the integrity lint,
+`build` loads `content/`, generates the developer references from `../docs/openapi.yaml` and from every contract under
+`references:` in `site.yaml` (today `../contracts/openapi/auth-delivery-v1.yaml`), runs the integrity lint,
 renders `dist/`, then checks the output (no external resources, scripts or inline styles; every internal link and
 anchor resolves) and exits non-zero on any problem. `lint --dist DIR` re-runs the content lint (integrity rules, legal
 metadata, legal lock) and the link and output checks against an existing build. Other commands: `check-links` and
@@ -64,7 +65,9 @@ Create `content/<section>/<page>.md` (or `<dir>/index.md`); the URL follows the 
 |---|---|
 | `title`, `description` | `description` is the lede and meta description |
 | `order`, `nav_title` | sidebar order and label |
-| `status: live\|beta\|planned` | **required** on `/products/<name>/` pages; renders the badge |
+| `status: live\|beta\|planned` | **required** on `/products/<name>/` pages; renders the badge. `beta` = built and in pre-release testing, not generally available. `planned` = not available, which includes anything built but held behind a release gate or enabled in staging only (the page says which) |
+| `icon` | icon of the product card (a name from `Icons.swift`) |
+| `api: <key>` | the page reads the contract of that `references:` entry instead of the Business API |
 | `disclosures: [key]` | the page must contain the spec section 11.5 text verbatim (`mfa`, `business_verification`, `identity_verification`, `age_verification`, `encryption`, `device_custody`) |
 | `claims:` | approved exceptions to the lint: `phrase`, `feature`, `evidence` (repo path), `approved_by` |
 | `pricing: true` | the page must disclose per-message, verification, carrier, provider and overage fees |
@@ -84,7 +87,15 @@ Generated blocks: `{{ generate: product-cards }}`, `api-index`, `api-tag <Tag>`,
 `mockup <name>` (CSS-drawn product illustrations from `Showcase.swift`: `signin`, `payment`, `conversation`, `wallet`,
 `verify`, `authenticator`, `lineup`, `contrast`, `flow`, `privacy`, `signed-result`, `stage`, `pillars`, `channels`,
 `curl`). Every device mockup uses fictional businesses and is captioned as an illustration; its text is linted with the
-page. `{{api-version}}` inserts the contract version. API tag pages (`/developers/api/<tag>/`) come from `openapi.yaml`.
+page. `{{api-version}}` inserts the contract version and `{{api-server}}` its first server URL. API tag pages
+(`/developers/api/<tag>/`) come from `openapi.yaml`; a tag that operations use without declaring it is rendered too.
+
+A second contract is a `references:` entry in `site.yaml` (`key`, `openapi`, `base`, `label`, `order`). Its tag pages are
+generated under `base` (`/developers/auth-delivery/<tag>/`), a content file at the same URL replaces a generated one, and
+every page with `api: <key>` (index, schemas, hand-written tag pages) expands `api-index`, `api-tag`, `schemas` and
+`info-section` from that contract. Links to its data types go to `<base>schemas/`, never into the Business API pages. A
+configured contract that is missing fails the build. The YAML reader has one leniency for hand-written contracts: in a
+flow map, a bare segment with no `key:` continues the previous text value (`{ description: Unknown, or not yours. }`).
 
 Layouts: `layout: home` (the dark hero with `static/assets/media/viadere-mark-reveal.webp`, screen-blended on black,
 and `viadere-mark-final.webp` for `prefers-reduced-motion`), `layout: marketing` (page hero, section sub-navigation,

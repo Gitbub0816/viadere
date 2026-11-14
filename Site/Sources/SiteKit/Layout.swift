@@ -113,8 +113,8 @@ public struct Layout {
         <footer class="site-footer dark"><div class="wrap">
         <div class="foot-grid">
         <div class="foot-brand"><a href="/" class="foot-logo" aria-label="Viadere, home">\(lockupOnDark())</a><p class="caps">\(e(config.tagline))</p><p>Verified, privacy-conscious connections between businesses and the people they serve.</p></div>
-        \(col("Products", [("Messaging", "/products/messaging/"), ("Approve", "/products/approve/"), ("Verify", "/products/verify/"), ("Authenticator", "/products/authenticator/"), ("All products", "/products/")]))
-        \(col("Build", [("Developers", "/developers/"), ("Quickstart", "/developers/quickstart/"), ("API reference", "/developers/api/"), ("Webhooks", "/developers/webhooks/"), ("Changelog", "/developers/changelog/"), ("Status", "/status/")]))
+        \(col("Products", [("Messaging", "/products/messaging/"), ("Approve", "/products/approve/"), ("Wallet and rewards", "/products/wallet/"), ("Verify", "/products/verify/"), ("Authenticator", "/products/authenticator/"), ("All products", "/products/")]))
+        \(col("Build", [("Developers", "/developers/"), ("Quickstart", "/developers/quickstart/"), ("API reference", "/developers/api/"), ("Webhooks", "/developers/webhooks/"), ("SDKs", "/developers/sdks/"), ("Changelog", "/developers/changelog/"), ("Status", "/status/")]))
         \(col("Trust", [("Security overview", "/security/"), ("Architecture", "/security/architecture/"), ("Report a vulnerability", "/security/disclosure/"), ("Verification badges", "/security/verification-badges/"), ("Privacy Center", "/privacy/")]))
         \(col("Company", [("About", "/company/"), ("Contact", "/company/contact/"), ("Legal", "/legal/"), ("Privacy Notice", "/legal/privacy-notice/"), ("Accessibility", "/legal/accessibility-statement/"), ("Cookie Notice", "/legal/cookie-notice/")]))
         </div>

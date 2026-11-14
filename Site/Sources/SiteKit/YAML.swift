@@ -345,6 +345,7 @@ public struct YAMLParser {
                 ws()
                 guard i < c.count else { throw YAMLError(line: line, message: "unterminated {") }
                 if c[i] == "}" { i += 1; break }
+                let quoted = c[i] == "\"" || c[i] == "'"
                 let k = try flowScalarText(&c, &i, stops: [":", ",", "}"], line: line)
                 ws()
                 var v: YAML = .null
@@ -352,6 +353,14 @@ public struct YAMLParser {
                     i += 1
                     ws()
                     v = try flow(&c, &i, line: line)
+                } else if !quoted, let last = entries.last, case let .string(text) = last.value {
+                    // Leniency for hand-written contracts: `{ description: Unknown, or not yours. }` has an unquoted comma in
+                    // its text. A bare segment with no `key:` continues the previous text value; it is never dropped or
+                    // turned into a key of its own, so the reference shows the whole sentence.
+                    entries[entries.count - 1].value = .string(text + ", " + k)
+                    ws()
+                    if i < c.count, c[i] == "," { i += 1 }
+                    continue
                 }
                 entries.append((try scalar(k, line: line).string ?? k, v))
                 ws()

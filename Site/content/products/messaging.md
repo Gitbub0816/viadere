@@ -44,7 +44,7 @@ Customers without the app can reach a business through a Viadere number, with th
 :::
 
 ::: callout
-**Beta.** Messaging works today for approved businesses. Interfaces, limits and fees may change, and no uptime commitment has been published.
+**Beta.** Messaging is built and in pre-release testing. It is not generally available. Interfaces, limits and fees may change, and no uptime commitment has been published.
 :::
 :::
 
@@ -60,6 +60,8 @@ Points, status levels, perks and single-use redemption codes, with Apple Wallet 
 
 - {icon:check} **Normal priority.** Marketing and rewards never exceed normal priority; urgent is reserved for security sign-in and authorization requests.
 - {icon:check} **Separate consent.** Marketing and rewards are separate purposes from security and service messages.
+
+[Wallet and rewards](/products/wallet/){.more}
 :::
 ::: feature-art
 {{ generate: mockup wallet }}
@@ -88,7 +90,7 @@ Points, status levels, perks and single-use redemption codes, with Apple Wallet 
 ::: prose
 ## SMS fallback
 
-When the app or RCS is not available, a request can fall back to SMS. Ordinary SMS is not end-to-end encrypted, and carriers and providers can see message content. Viadere's relay also handles delivery metadata. Security-sensitive requests are never approved by SMS or RCS reply: a text channel receives a secure link to the app instead.
+When the app or RCS is not available, a request can fall back to SMS. Ordinary SMS is not end-to-end encrypted, and carriers and providers can see message content. Viadere's relay also handles delivery metadata. Security-sensitive requests are never approved by SMS or RCS reply: a text channel receives a notice to open the Viadere app instead, with no link and no code.
 
 ::: disclosure
 Certain sensitive Viadere features may use end-to-end encryption. Ordinary SMS, operational metadata, and other features may have different protection models, as described in our Security Overview.

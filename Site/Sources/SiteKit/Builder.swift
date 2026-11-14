@@ -31,8 +31,24 @@ public struct SiteBuilder {
 
     // MARK: Pipeline
 
-    public func loadPages(config: SiteConfig, openapi: OpenAPI?) throws -> [Page] {
+    public func loadPages(config: SiteConfig, openapi: OpenAPI?, references: [String: OpenAPI] = [:]) throws -> [Page] {
         var pages = try ContentLoader(root: options.siteRoot.appendingPathComponent("content")).load()
+        // One generated page per tag of every further contract, unless a content file already owns the URL.
+        for ref in config.references {
+            guard let api = references[ref.key] else { continue }
+            for (i, tag) in api.tags.enumerated() where !api.operations(tag: tag).isEmpty {
+                let url = ref.base + OpenAPI.tagSlug(tag) + "/"
+                if pages.contains(where: { $0.url == url }) { continue }
+                var p = Page(sourcePath: "(generated from \(ref.openapiPath))", url: url,
+                             front: .map([("title", .string("\(tag) endpoints")),
+                                          ("description", .string("Reference for the \(tag.lowercased()) operations of the \(api.title), generated from its OpenAPI contract.")),
+                                          ("nav_title", .string("\(ref.label): \(tag)")), ("order", .int(ref.order + 1 + i)),
+                                          ("eyebrow", .string("\(ref.label) reference")), ("api", .string(ref.key))]),
+                             body: "{{ generate: api-tag \(tag) }}\n")
+                p.generated = true
+                pages.append(p)
+            }
+        }
         if let api = openapi {
             for (i, tag) in api.tags.enumerated() where !api.operations(tag: tag).isEmpty {
                 let slug = OpenAPI.tagSlug(tag)
@@ -70,11 +86,34 @@ public struct SiteBuilder {
         return try OpenAPI(contentsOf: url)
     }
 
+    /// The further contracts named under `references:` in site.yaml, by key. A configured contract that is missing fails
+    /// the build: a reference must never silently disappear from the portal.
+    func loadReferences(_ config: SiteConfig) throws -> [String: OpenAPI] {
+        var out: [String: OpenAPI] = [:]
+        for ref in config.references {
+            let url = URL(fileURLWithPath: ref.openapiPath, relativeTo: options.siteRoot).standardizedFileURL
+            guard FileManager.default.fileExists(atPath: url.path) else { throw SiteError("site.yaml: reference \(ref.key): \(ref.openapiPath) was not found") }
+            var api = try OpenAPI(contentsOf: url)
+            api.basePath = ref.base
+            api.schemasPath = ref.base + "schemas/"
+            out[ref.key] = api
+        }
+        return out
+    }
+
     /// Expands `{{ generate: … }}` directives. Generated HTML is stored as raw blocks addressed by placeholder.
-    func expand(_ page: Page, pages: [Page], api: OpenAPI?, md: inout Markdown) throws -> String {
+    /// A page with front matter `api: <key>` reads the contract of that reference instead of the Business API.
+    func expand(_ page: Page, pages: [Page], api mainAPI: OpenAPI?, references: [String: OpenAPI] = [:], md: inout Markdown) throws -> String {
         var out: [String] = []
         var n = 0
-        for line in page.body.replacingOccurrences(of: "{{api-version}}", with: api?.version ?? "unversioned").components(separatedBy: "\n") {
+        var api = mainAPI
+        if let key = page.front["api"]?.string {
+            guard let selected = references[key] else { throw SiteError("\(page.sourcePath): api \"\(key)\" is not a reference in site.yaml") }
+            api = selected
+        }
+        let body = page.body.replacingOccurrences(of: "{{api-version}}", with: api?.version ?? "unversioned")
+            .replacingOccurrences(of: "{{api-server}}", with: api?.serverURL ?? "")
+        for line in body.components(separatedBy: "\n") {
             let t = line.trimmed
             guard t.hasPrefix("{{ generate:"), t.hasSuffix("}}") else { out.append(line); continue }
             let spec = String(t.dropFirst(12).dropLast(2)).trimmed
@@ -114,7 +153,7 @@ public struct SiteBuilder {
         var out = "<div class=\"pcards\">\n"
         for p in products {
             let s = p.status
-            out += "<div class=\"pcard\(s == .planned ? " is-planned" : "")\"><div class=\"pcard-top\"><span class=\"pcard-ic\">\(Icons.svg(Showcase.productIcon(p.url)))</span>"
+            out += "<div class=\"pcard\(s == .planned ? " is-planned" : "")\"><div class=\"pcard-top\"><span class=\"pcard-ic\">\(Icons.svg(p.front["icon"]?.string.flatMap { Icons.paths[$0] == nil ? nil : $0 } ?? Showcase.productIcon(p.url)))</span>"
                 + (s.map { "<span class=\"badge badge-\($0.rawValue)\">\($0.label)</span>" } ?? "") + "</div>"
                 + "<h3><a href=\"\(p.url)\">\(HTML.escape(p.title))</a></h3><p>\(HTML.escape(p.front["tagline"]?.string ?? p.description))</p>"
                 + "<span class=\"more\" aria-hidden=\"true\">Learn more\(Icons.svg("arrow"))</span></div>\n"
@@ -162,7 +201,8 @@ public struct SiteBuilder {
     public func lintContent() throws -> [LintFinding] {
         let config = try SiteConfig.load(from: options.siteRoot.appendingPathComponent("site.yaml"))
         let api = try loadOpenAPI(config)
-        let pages = try loadPages(config: config, openapi: api)
+        let references = try loadReferences(config)
+        let pages = try loadPages(config: config, openapi: api, references: references)
         var findings: [LintFinding] = []
         if let text = try? String(contentsOf: options.siteRoot.appendingPathComponent("legal-lock.json"), encoding: .utf8) {
             findings += LegalLock.check(lock: LegalLock.decode(text), pages: pages)
@@ -170,7 +210,7 @@ public struct SiteBuilder {
         let lint = IntegrityLint(repoRoot: options.repoRoot)
         for p in pages {
             var md = Markdown()
-            let expanded = try expand(p, pages: pages, api: api, md: &md)
+            let expanded = try expand(p, pages: pages, api: api, references: references, md: &md)
             findings += lint.check(p, assembledText: Self.assembledText(p, expanded: expanded, md: md), allPages: pages)
         }
         return findings
@@ -193,7 +233,8 @@ public struct SiteBuilder {
         let fm = FileManager.default
         let config = try SiteConfig.load(from: options.siteRoot.appendingPathComponent("site.yaml"))
         let api = try loadOpenAPI(config)
-        let pages = try loadPages(config: config, openapi: api)
+        let references = try loadReferences(config)
+        let pages = try loadPages(config: config, openapi: api, references: references)
 
         // Duplicate URLs.
         var seenURLs = Set<String>()
@@ -212,7 +253,7 @@ public struct SiteBuilder {
         var rendered: [(Page, RenderedMarkdown)] = []
         for p in pages + permalinks(for: pages) {
             var md = Markdown()
-            let expanded = try expand(p, pages: pages, api: api, md: &md)
+            let expanded = try expand(p, pages: pages, api: api, references: references, md: &md)
             let assembled = Self.assembledText(p, expanded: expanded, md: md)
             if !p.legalPermalink { report.findings += lint.check(p, assembledText: assembled, allPages: pages) }
             rendered.append((p, md.render(expanded)))
