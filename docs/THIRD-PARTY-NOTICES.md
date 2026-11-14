@@ -8,6 +8,9 @@ licence files; this file covers what is written into or pinned by the repository
 - **Ported:** `Packages/ViadereCore/Sources/ViadereCore/OpticalCode/CKeySymbol.swift` and `CKeySVG.swift` are a Swift port of the CKey Profile 0
   encoder and styled SVG renderer (`src/core_internal.inc`, `src/api_codec.inc`, `src/api_render.inc`) at tag `v0.1.0-build.85`
   (commit `ede38f57aa1a20c456b1858f4fccd919e98ef269`). `docs/protocol/vectors/ckey-profile0-v1.json` was produced by that build.
+  `Server/Public/verify-button/v2/viadere-verify.js` (the "Verify with Viadere" web button) contains a JavaScript port of the same encoder and
+  of the "concept" preset of the renderer, made from the Swift port and checked against the same vectors
+  (`Server/Tests/browser/test_verify_button_v2.py`); the file carries the copyright and permission notice, because it is served to integrators' pages on its own.
 - **Linked (iOS app only):** the `CKeyScanner` product of the same commit (`App/project.yml`).
 - **Name and mark:** "CKey" is governed by the trademark policy at openckey.org/trademark. Viadere says that it reads and draws CKey codes;
   it does not claim CKey Safe Actions support or openckey.org certification.

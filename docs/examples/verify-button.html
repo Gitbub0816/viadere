@@ -3,18 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<!-- Example integration of the "Verify with Viadere" button (docs/VERIFY-BUTTON.md). Served by YOUR site, with a CSP like:
+<!-- Example integration of the "Verify with Viadere" button, version 2 (docs/VERIFY-BUTTON.md): on a computer the panel shows the Viadere
+     code first and the QR code one control away. (Version 1, QR code first: verify-button-v1.html.) Served by YOUR site, with a CSP like:
      Content-Security-Policy: default-src 'none'; script-src https://viadere.com; style-src 'self' https://viadere.com;
                               base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'
      No inline script or style is needed. Your server renders `link` and `expires-at` from the ticket it created a moment ago
      (POST /v1/business/verification-sessions) and keeps the session id with this visitor's session. -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Northwind Spirits · Checkout</title>
-<link rel="stylesheet" href="https://viadere.com/verify-button/v1/viadere-verify.css"
-      integrity="sha384-7B8nwhugpRQh8Dv3bHED/l1CVZzyssS+AABdibXE3TEPHKXRjPLLq4v2VxPDYhDP" crossorigin="anonymous">
+<link rel="stylesheet" href="https://viadere.com/verify-button/v2/viadere-verify.css"
+      integrity="sha384-BteUm7aQSLF2Ek2xJ+BYvB/ivROSiKgRcugzSitw9y3qqInXs/tlBjwzCi616sG1" crossorigin="anonymous">
 <link rel="stylesheet" href="/static/shop.css">
-<script src="https://viadere.com/verify-button/v1/viadere-verify.js" defer
-        integrity="sha384-vT7Sg9sIvngk1wVF56Jez/Zj9uoaJRKxrxbv76xNd8qG7oQqjvm/blG5iyeezM+Y" crossorigin="anonymous"></script>
+<script src="https://viadere.com/verify-button/v2/viadere-verify.js" defer
+        integrity="sha384-Qy17uaPnono8d8OebBf88ECPi3+skAq2tUBR+bFa6D3/k5d7IjWWUclkc77LkmTk" crossorigin="anonymous"></script>
 </head>
 <body>
 <main>

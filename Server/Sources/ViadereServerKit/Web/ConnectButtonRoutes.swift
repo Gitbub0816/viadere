@@ -88,14 +88,21 @@ enum ConnectButtonRoutes {
     static func register(_ app: Application) { assets.register(app) }
 }
 
-/// Serves the embeddable "Verify with Viadere" button (`Server/Public/verify-button/v1/`, `docs/VERIFY-BUTTON.md`): the same immutable,
+/// Serves the embeddable "Verify with Viadere" button (`Server/Public/verify-button/{v1,v2}/`, `docs/VERIFY-BUTTON.md`): the same immutable,
 /// SRI-ready, allow-listed serving as the connect button.
+///
+/// Both versions stay served. `v1` (QR code first) is published with Subresource Integrity hashes and never changes; `v2` shows the
+/// Viadere code (CKey) first with the QR code one control away. An integrator moves to `v2` by changing the two URLs and hashes.
 enum VerifyButtonRoutes {
-    static let version = "v1"
-    static let assets = EmbedAssets(name: "verify-button", version: version, files: [
-        "viadere-verify.js": "text/javascript; charset=utf-8",
-        "viadere-verify.css": "text/css; charset=utf-8",
-    ])
+    /// The version new integrations should use.
+    static let version = "v2"
+    static let versions = ["v1", "v2"]
+    static let assets = versions.map { version in
+        EmbedAssets(name: "verify-button", version: version, files: [
+            "viadere-verify.js": "text/javascript; charset=utf-8",
+            "viadere-verify.css": "text/css; charset=utf-8",
+        ])
+    }
 
-    static func register(_ app: Application) { assets.register(app) }
+    static func register(_ app: Application) { assets.forEach { $0.register(app) } }
 }

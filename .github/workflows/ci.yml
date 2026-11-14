@@ -105,6 +105,7 @@ jobs:
         run: |
           "$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_connect_button.py
           "$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_verify_button.py
+          "$RUNNER_TEMP/pw/bin/python" Server/Tests/browser/test_verify_button_v2.py
 
   site:
     name: Site (build + lint)
