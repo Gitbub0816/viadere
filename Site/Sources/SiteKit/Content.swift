@@ -7,6 +7,16 @@ public struct SiteConfig: Sendable {
     /// Hosts that may appear in `<a href>` (never in resource attributes).
     public var allowedLinkHosts: [String] = ["www.rfc-editor.org"]
     public var openapiPath = "../docs/openapi.yaml"
+    /// Further OpenAPI contracts rendered as their own reference (site.yaml `references:`). A page selects one with
+    /// front matter `api: <key>`; its tag pages are generated under `base`, and its data types live at `{base}schemas/`.
+    public struct Reference: Sendable {
+        public var key: String
+        public var openapiPath: String
+        public var base: String        // "/developers/auth-delivery/"
+        public var label: String       // sidebar prefix, e.g. "Auth delivery"
+        public var order: Int          // sidebar order of the first generated tag page
+    }
+    public var references: [Reference] = []
     public var securityContact = "mailto:[SECURITY-CONTACT-PLACEHOLDER]"
     public var securityExpires = "[EXPIRES-PLACEHOLDER: RFC 3339 date-time within 12 months]"
     public var securityPolicyURL = "https://viadere.com/legal/vulnerability-disclosure-policy/"
@@ -27,6 +37,14 @@ public struct SiteConfig: Sendable {
         if let v = y["base_url"]?.string { c.baseURL = v.hasSuffix("/") ? String(v.dropLast()) : v }
         if let v = y["allowed_link_hosts"]?.strings as [String]? { c.allowedLinkHosts = v }
         if let v = y["openapi"]?.string { c.openapiPath = v }
+        for r in y["references"]?.array ?? [] {
+            guard let key = r["key"]?.string, let path = r["openapi"]?.string, var base = r["base"]?.string, base.hasPrefix("/") else {
+                throw SiteError("site.yaml: each references entry needs key, openapi and base (a path starting with /)")
+            }
+            if !base.hasSuffix("/") { base += "/" }
+            if c.references.contains(where: { $0.key == key || $0.base == base }) { throw SiteError("site.yaml: duplicate reference \(key)") }
+            c.references.append(Reference(key: key, openapiPath: path, base: base, label: r["label"]?.string ?? key, order: r["order"]?.int ?? 45))
+        }
         if let v = y["security_contact"]?.string { c.securityContact = v }
         if let v = y["security_expires"]?.string { c.securityExpires = v }
         if let v = y["security_policy"]?.string { c.securityPolicyURL = v }
