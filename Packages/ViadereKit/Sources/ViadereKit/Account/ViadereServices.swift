@@ -30,8 +30,8 @@ public struct ViadereServices: Sendable {
     public var loopsAPI: (any LoopsAPI)?
     /// Brand Kits (`nil` in the App Clip). Synchronous reads; no security flow awaits it.
     public var brandKits: BrandKitStore?
-    /// Auth delivery (links, push approvals' reduce-only answers): the live client arrives with the server API; until then every call
-    /// fails closed (`UnavailableAuthDeliveryAPI`).
+    /// Auth delivery (the inbox, the display object, one-time codes, reduce-only answers): `LiveAuthDeliveryAPI` in the app and its
+    /// extensions; the App Clip and bare test graphs keep `UnavailableAuthDeliveryAPI`, where every call fails closed.
     public var authDelivery: any AuthDeliveryAPI = UnavailableAuthDeliveryAPI()
     /// Posts the local "Deny not sent yet" notice (N-09). The app supplies the UserNotifications implementation.
     public var localSecurityNotices: any LocalSecurityNoticePosting = NoLocalSecurityNotices()
@@ -115,7 +115,7 @@ public struct ViadereServices: Sendable {
                                residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
         if !isAppClip {
             services.approveAPI = LiveApproveAPI(client: client)
-            services.authDelivery = LiveAuthDeliveryAPI(client: client)
+            services.authDelivery = LiveAuthDeliveryAPI(client: client, flags: .forConfiguration(configuration))
             services.oidc = LiveOIDCDeviceAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)

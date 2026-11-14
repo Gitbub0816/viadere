@@ -13,6 +13,12 @@ public enum AuthDeliveryCopy {
 
     public static let n01Title = "Viadere"
     public static let n01Body = "You have a new security item."
+    /// N-02, after the display was fetched (title: the business).
+    public static func n02Body(business: String) -> String { "\(iso(business)) sign-in link is ready. Tap to continue." }
+    /// N-05: the code itself is never in a notification.
+    public static func n05Body(business: String) -> String { "Your \(iso(business)) code is ready. Open Viadere to see it." }
+    /// N-06: a fixed template, never business text.
+    public static func n06Body(business: String) -> String { "\(iso(business)) sent a security notice." }
     public static let n08Body = "You have a new security item. Open Viadere to review it."
     public static let n09Title = "Viadere"
     public static let n09Body = "Deny not sent yet. Open Viadere."
@@ -53,6 +59,22 @@ public enum AuthDeliveryCopy {
     public static let linkCannotCheck = "We couldn't check this sign-in link right now, so we didn't open it. Try again in a moment."
     public static let linkClock = "We couldn't check this sign-in link. Check your phone's date and time, then try again."
     public static let tryAgain = "Try again"
+
+    // MARK: One-time code (§4)
+
+    /// C-OTP-01 title.
+    public static func codeTitle(business: String) -> String { "Your \(iso(business)) code" }
+    public static func codeUseOnly(business: String) -> String { "Use it only on \(iso(business))." }
+    public static func codeNeverShare(business: String) -> String {
+        "Never share this code. \(iso(business)) will never ask you for it by phone, text or email."
+    }
+    public static let copyCode = "Copy code"
+    /// C-OTP-04: the tap that asks the service for the code (it is handed over once).
+    public static let showCode = "Show code"
+    /// C-OTP-02.
+    public static func codeExpired(business: String) -> String { "This code has expired. Ask \(iso(business)) for a new one." }
+    /// C-TOTP-01: a partner TOTP code, labelled as passed on.
+    public static func totpLabel(business: String) -> String { "Sign-in code for \(iso(business)). Viadere passed it on; \(iso(business)) checks it." }
 
     // MARK: Legacy `/h/` hand-off confirm (ADR-0021 §4 item 4; wording proposed by A6, A9 to review before the Stage 4 merge)
 

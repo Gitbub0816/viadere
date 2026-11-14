@@ -44,10 +44,13 @@ public enum PushPayload {
 ///   after first unlock and signs a reduce-only deny). There is no Approve action and no Report action on an approval notification.
 /// - `viadere.auth.link`: **Open** (foreground) and **This wasn't me** (reduce-only report, no unlock).
 /// - `viadere.auth.code`: no actions; a tap opens the app, where the code is shown after unlock.
+/// - `viadere.auth.notice`: no actions; registered so that hidden previews show the security placeholder.
 public enum AuthNotificationCategory {
     public static let approve = "viadere.approve"
     public static let link = "viadere.auth.link"
     public static let code = "viadere.auth.code"
+    /// A security notice from a business (N-06): no actions; a tap opens the app, where the inbox lists it.
+    public static let notice = "viadere.auth.notice"
     /// "Sign in with Viadere" `login_hint` push (`ach` only). Review opens the confirm screen; there is no inline answer (the factor needs the
     /// approval key and the typed number).
     public static let oidc = OIDCPushPayloadPolicy.category
@@ -76,7 +79,8 @@ public enum AuthNotificationCategory {
     public static let oidcCategory = NotificationCategoryModel(identifier: oidc, actions: [
         NotificationActionModel(identifier: reviewAction, title: AuthDeliveryCopy.review, style: .normal, requiresAuthentication: true, opensApp: true),
     ])
-    public static let categories = [approveCategory, linkCategory, codeCategory, oidcCategory]
+    public static let noticeCategory = NotificationCategoryModel(identifier: notice, actions: [])
+    public static let categories = [approveCategory, linkCategory, codeCategory, noticeCategory, oidcCategory]
 }
 
 /// Where a tapped authentication-delivery push goes (F-14, F-15): the request itself, never the Alerts list.
@@ -104,7 +108,10 @@ extension PushPayload {
         return value
     }
 
-    public static func deliveryId(from userInfo: [String: String]) -> UUID? { userInfo[deliveryKey].flatMap { UUID(uuidString: $0) } }
+    /// `adl`: the delivery's wire id (`adl_` plus 22 base64url characters, what the server sends) or a bare UUID. Anything else is ignored.
+    public static func deliveryId(from userInfo: [String: String]) -> UUID? {
+        userInfo[deliveryKey].flatMap { AuthDeliveryID($0)?.uuid ?? UUID(uuidString: $0) }
+    }
 
     /// Resolves a delivered push to its destination. The category decides which key is read, so a `req` on a link push is not followed.
     public static func target(category: String, userInfo: [String: String]) -> NotificationTarget? {

@@ -133,6 +133,7 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | | Detail | Expires at {time} |
 | | Buttons | This wasn't me · Copy code (iOS pasteboard item local-only with expiry; Android `EXTRA_IS_SENSITIVE`, **verify**) |
 | C-OTP-02 | Expired | This code has expired. Ask {Business} for a new one. |
+| C-OTP-04 | Button before the code is shown (the tap is the one-time `open`; the sheet opens without the code) | Show code |
 | C-OTP-03 | Email fallback footnote (only in Viadere's email template) | {Business} sent this code by email because you asked for it there. Email is easier to intercept than the Viadere app. |
 | C-TOTP-01 | Partner TOTP code label | Sign-in code for {Business}. Viadere passed it on; {Business} checks it. |
 
