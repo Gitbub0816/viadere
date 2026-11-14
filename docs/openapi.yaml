@@ -89,6 +89,7 @@ tags:
   - name: Approve
   - name: KeyDirectory
   - name: LinkSessions
+  - name: Profiles
 
 paths:
   /v1/business/capabilities:

@@ -236,7 +236,7 @@ paths:
               schema: { $ref: "#/components/schemas/AuthDeliveryOpenResponse" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
-        "410": { description: Expired, cancelled or already ended. }
+        "410": { description: "Expired, cancelled or already ended." }
   /v1/auth-deliveries/{deliveryId}/deny:
     post:
       tags: [Device]
@@ -272,7 +272,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
-        "201": { description: Created (`ApprovalRequestView`). }
+        "201": { description: "Created (`ApprovalRequestView`)." }
         "200": { description: Idempotent replay. }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -284,7 +284,7 @@ paths:
       parameters:
         - { name: requestId, in: path, required: true, schema: { type: string } }
       responses:
-        "200": { description: The relay's view (`ApprovalRequestView`). }
+        "200": { description: "The relay's view (`ApprovalRequestView`)." }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/business/auth-links/redeem:
     post:
@@ -366,13 +366,13 @@ components:
       required: true
       schema: { type: string, format: uuid }
   responses:
-    Unauthorized: { description: Missing, invalid or unsigned credentials (`401`). }
-    Forbidden: { description: The key lacks the scope, capability or entitlement (`403`). }
-    NotFound: { description: Unknown, or not yours (the same body). }
+    Unauthorized: { description: "Missing, invalid or unsigned credentials (`401`)." }
+    Forbidden: { description: "The key lacks the scope, capability or entitlement (`403`)." }
+    NotFound: { description: "Unknown, or not yours (the same body)." }
     NotDeliverable: { description: "`not_deliverable`: unknown customer, no eligible app, paused or frozen (one body)." }
     Conflict: { description: "State conflict, `idempotency_conflict` or `already_opened`." }
     Validation: { description: "`validation_failed` (`details` names the field and a code) or `destination_not_allowed`, `destination_signature_required`." }
-    RateLimited: { description: Per-tenant flood limit (`429`, `Retry-After`). Per-subject budgets never refuse; they make delivery silent. }
+    RateLimited: { description: "Per-tenant flood limit (`429`, `Retry-After`). Per-subject budgets never refuse; they make delivery silent." }
   schemas:
     DeliveryId:
       type: string
