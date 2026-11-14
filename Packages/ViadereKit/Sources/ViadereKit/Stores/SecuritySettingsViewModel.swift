@@ -32,6 +32,9 @@ public final class SecuritySettingsViewModel {
     /// Show amounts, places and other details in approval notifications on the lock screen. Off by default: the
     /// lock screen then names only who is asking.
     public var richPreviewsEnabled: Bool
+    /// Show a pending request's business, question and answers in its Live Activity on the Lock Screen and in the Dynamic Island (F-09).
+    /// Off by default: the Live Activity then only says that a decision is needed.
+    public var liveActivityDetailsEnabled: Bool
     /// Recovery codes status (`nil` until loaded, or when the server doesn't offer recovery).
     public private(set) var recoveryInfo: RecoveryInfo?
     public private(set) var recoveryAvailable = true
@@ -50,6 +53,7 @@ public final class SecuritySettingsViewModel {
         addPhone = PhoneLinkViewModel(services: services)
         appLockEnabled = services.preferences.bool(.appLockEnabled)
         richPreviewsEnabled = services.preferences.bool(.richNotificationPreviews)
+        liveActivityDetailsEnabled = services.preferences.bool(.liveActivityLockScreenDetails)
         appLockMethod = services.appLock.methodName
         addPhone.onLinked = { [weak self] link in self?.phoneLinked(link) }
     }
@@ -291,6 +295,25 @@ public final class SecuritySettingsViewModel {
         }
         services.preferences.setBool(enabled, for: .richNotificationPreviews)
         richPreviewsEnabled = enabled
+    }
+
+    /// Turning Live Activity details on needs a successful authentication, like detailed previews (it puts the business, the question and
+    /// the answers where anyone holding the phone can read them); turning them off never does. The widget extension reads the
+    /// preference from the app group each time it draws, so the change applies to running activities at their next update.
+    public func setLiveActivityDetails(_ enabled: Bool) async {
+        guard enabled != services.preferences.bool(.liveActivityLockScreenDetails) else {
+            liveActivityDetailsEnabled = enabled
+            return
+        }
+        if enabled {
+            guard await services.appLock.isAvailable(),
+                  await services.appLock.authenticate(reason: LiveActivityDetailsSetting.authenticationReason) else {
+                liveActivityDetailsEnabled = false
+                return
+            }
+        }
+        services.preferences.setBool(enabled, for: .liveActivityLockScreenDetails)
+        liveActivityDetailsEnabled = enabled
     }
 
     // MARK: New-device cool-down and confirmation

@@ -25,7 +25,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
     // Security
     case appLock, approvals, devices, authenticator, recovery
     // Notifications
-    case notifications, lockScreenDetails, businessNotifications, loops
+    case notifications, lockScreenDetails, liveActivityDetails, businessNotifications, loops
     // Privacy and sharing
     case profileReceipts, consents, verifications
     // Records
@@ -39,7 +39,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         switch self {
         case .profile, .household, .phones, .sessions: .account
         case .appLock, .approvals, .devices, .authenticator, .recovery: .security
-        case .notifications, .lockScreenDetails, .businessNotifications, .loops: .notifications
+        case .notifications, .lockScreenDetails, .liveActivityDetails, .businessNotifications, .loops: .notifications
         case .profileReceipts, .consents, .verifications: .privacy
         case .acknowledgments, .dataExport: .records
         case .appearance: .appearance
@@ -59,6 +59,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "Recovery codes"
         case .notifications: "Notifications"
         case .lockScreenDetails: "Details on the lock screen"
+        case .liveActivityDetails: "Live Activity details"
         case .businessNotifications: "Business by business"
         case .loops: "Requests built by businesses"
         case .profileReceipts: "Sharing history"
@@ -84,6 +85,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "The way back in if you lose every device"
         case .notifications: "How and when Viadere interrupts you"
         case .lockScreenDetails: "What approval notifications show"
+        case .liveActivityDetails: "What a pending request shows on the Lock Screen"
         case .businessNotifications: "How loudly each business may interrupt"
         case .loops: "Short requests a business builds"
         case .profileReceipts: "Profile details you shared or stopped sharing"
@@ -109,6 +111,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "list.number"
         case .notifications: "bell"
         case .lockScreenDetails: "lock.rectangle"
+        case .liveActivityDetails: "rectangle.badge.checkmark"
         case .businessNotifications: "building.2"
         case .loops: "square.stack"
         case .profileReceipts: "clock.arrow.circlepath"
@@ -134,6 +137,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: ["lost phone", "recover", "backup codes", "passkey", "account recovery"]
         case .notifications: ["alerts", "sounds", "focus", "interrupt", "quiet", "mute", "quiet hours", "night", "sleep", "default level", "all businesses"]
         case .lockScreenDetails: ["preview", "amount", "lock screen", "privacy", "rich notifications"]
+        case .liveActivityDetails: ["live activities", "dynamic island", "lock screen", "question", "answers", "privacy", "business name"]
         case .businessNotifications: ["mute", "quiet", "silence", "offers", "per business"]
         case .loops: ["loops", "built by", "forms", "business requests"]
         case .profileReceipts: ["shared", "receipts", "stopped sharing"]
@@ -149,7 +153,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
     public var screen: SettingsDestination? {
         switch self {
         case .appLock: nil // an inline control on the You page itself
-        case .lockScreenDetails, .businessNotifications: .notifications
+        case .lockScreenDetails, .liveActivityDetails, .businessNotifications: .notifications
         default: self
         }
     }
@@ -230,7 +234,7 @@ extension SettingsDestination {
     /// Whether the item is its own row on the You page (inline controls and items inside the Notifications screen are not).
     public var isTopLevel: Bool {
         switch self {
-        case .lockScreenDetails, .businessNotifications: false
+        case .lockScreenDetails, .liveActivityDetails, .businessNotifications: false
         default: true
         }
     }
@@ -276,4 +280,20 @@ public struct SecurityPosture: Sendable, Equatable {
         }
         return SecurityPosture(level: .good, headline: "Protected", detail: detail)
     }
+}
+
+// MARK: - Live Activity details (F-09)
+
+/// The two choices of "Live Activity details" (You → Notifications), as data: what a pending request's Live Activity shows on the Lock
+/// Screen and in the Dynamic Island. The default is the neutral one (`PreferenceKey.liveActivityLockScreenDetails` off).
+public enum LiveActivityDetailsSetting {
+    public static var label: String { SettingsDestination.liveActivityDetails.title }
+    /// One sentence that says what appears either way.
+    public static let explanation = "A pending request can stay on your Lock Screen as a Live Activity: by default it only says that a decision is needed, and with details on it shows the business, the question and the answers to anyone who can see your phone."
+    public static let neutralTitle = "Only that a decision is needed"
+    public static let neutralDetail = "No business name, question or answers until you open Viadere."
+    public static let detailedTitle = "The business, question and answers"
+    public static let detailedDetail = "Answer from the Lock Screen. Anyone who can see your phone sees the details too."
+    /// The reason shown by Face ID or the passcode prompt when turning details on.
+    public static let authenticationReason = "Show request details on the Lock Screen"
 }
