@@ -51,7 +51,7 @@ import type * as T from "./types.js";
 import { assertValidCreateRequest, DELIVERY_ID_PATTERN } from "./validate.js";
 import { assertResponse, assertResponseList, assertValidRequest, pathParameter } from "./validation.js";
 
-export const SDK_VERSION = "0.2.0";
+export const SDK_VERSION = "0.1.0";
 
 /**
  * Retries for transient failures (network errors, `429`, `5xx`). Only requests that are safe to repeat are retried: every `GET`, every request
@@ -356,7 +356,7 @@ export class ViadereClient {
    * `authenticate` needs the capability `auth.challenge`, `authorize` needs `transaction.approve`, every other kind `message.send`.
    */
   async issueInteraction(request: T.IssueInteractionRequest): Promise<Created<T.Interaction>> {
-    return this.#create(schemas.IssueInteractionRequest, schemas.Interaction, "/v1/business/interactions", request, request.idempotencyKey);
+    return this.#create(schemas.IssueInteractionRequest, schemas.Interaction, "/v1/business/interactions", request, (request as { idempotencyKey?: string } | null)?.idempotencyKey);
   }
 
   /** `GET /v1/business/interactions/{id}` (scope `interactions:read`). A text-channel decision carries no `assurance` and no `verification`. */
@@ -373,12 +373,12 @@ export class ViadereClient {
 
   /** `POST /v1/business/messages` (scope `messages:write`): into the customer's conversation with you. */
   async sendMessage(request: T.BusinessSendMessageRequest): Promise<Created<T.ConversationMessage>> {
-    return this.#create(schemas.BusinessSendMessageRequest, schemas.ConversationMessage, "/v1/business/messages", request, request.idempotencyKey);
+    return this.#create(schemas.BusinessSendMessageRequest, schemas.ConversationMessage, "/v1/business/messages", request, (request as { idempotencyKey?: string } | null)?.idempotencyKey);
   }
 
   /** `POST /v1/business/statuses` (scope `statuses:write`): a newer status with the same `activityKey` replaces the earlier one. */
   async updateStatus(request: T.BusinessStatusUpdateRequest): Promise<Created<T.Interaction>> {
-    return this.#create(schemas.BusinessStatusUpdateRequest, schemas.Interaction, "/v1/business/statuses", request, request.idempotencyKey);
+    return this.#create(schemas.BusinessStatusUpdateRequest, schemas.Interaction, "/v1/business/statuses", request, (request as { idempotencyKey?: string } | null)?.idempotencyKey);
   }
 
   // ===========================================================================================================================================
@@ -386,7 +386,7 @@ export class ViadereClient {
 
   /** `POST /v1/business/rewards`. Without a customer it joins your program; with one, only that customer sees it. */
   async createReward(request: T.IssueRewardRequest): Promise<Created<T.Reward>> {
-    return this.#create(schemas.IssueRewardRequest, schemas.Reward, "/v1/business/rewards", request, request.idempotencyKey);
+    return this.#create(schemas.IssueRewardRequest, schemas.Reward, "/v1/business/rewards", request, (request as { idempotencyKey?: string } | null)?.idempotencyKey);
   }
 
   /** `GET /v1/business/rewards`: newest first, at most 200. */
@@ -1009,9 +1009,9 @@ export class ViadereClient {
   // -------------------------------------------------------------------------------------------------------------------------------------------
 
   /** Validates, sends with the idempotency key, checks the response: the shape of every keyed create (`201`, or `200` for a replay). */
-  async #create<X>(requestSchema: schemas.SchemaDef, responseSchema: schemas.SchemaDef, path: string, request: unknown, idempotencyKey: string): Promise<Created<X>> {
+  async #create<X>(requestSchema: schemas.SchemaDef, responseSchema: schemas.SchemaDef, path: string, request: unknown, idempotencyKey: string | undefined): Promise<Created<X>> {
     assertValidRequest(requestSchema, request);
-    const result = await this.#send("POST", path, { body: request, idempotencyKey });
+    const result = await this.#send("POST", path, { body: request, ...(idempotencyKey !== undefined ? { idempotencyKey } : {}) });
     return { value: assertResponse<X>(responseSchema, result.body), created: result.status === 201 };
   }
 

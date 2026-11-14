@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createPrivateKey, sign as nodeSign } from "node:crypto";
+import { sign as nodeSign } from "node:crypto";
 import { describe, it } from "node:test";
 import {
   ApprovalEnrollmentSecret,
@@ -117,7 +117,6 @@ describe("encodings (SECURITY.md 2.1, 2.2)", () => {
   it("refuses a public key that is not a point on P-256", () => {
     assert.equal(parseP256PublicKey(base64urlEncode(Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]))), undefined);
     assert.equal(parseP256PublicKey("AAAA"), undefined);
-    assert.throws(() => createPrivateKey("not a key"));
   });
 });
 
