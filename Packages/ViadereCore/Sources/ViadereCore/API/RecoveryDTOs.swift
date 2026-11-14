@@ -38,7 +38,7 @@ public enum RecoveryCodeFormat {
 
     /// Canonical form (upper case, no spaces or dashes, `I`/`L` → `1`, `O` → `0`) or `nil` when it is not `length` characters of the
     /// alphabet.
-    private static func normalize(_ raw: String, length: Int) -> String? {
+    static func normalize(_ raw: String, length: Int) -> String? {
         guard raw.count <= 64 else { return nil }
         let cleaned = raw.uppercased().filter { !$0.isWhitespace && $0 != "-" }
         guard cleaned.count == length else { return nil }

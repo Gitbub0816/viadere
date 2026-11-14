@@ -58,6 +58,32 @@ public enum APIRoutes {
     public static let deviceRevoke = Endpoint<EmptyBody, EmptyBody>(
         "devices.revoke", .DELETE, "/v1/devices/{deviceId}", auth: .deviceSignedBearer)
 
+    // MARK: Device pairing (WP-D1, §2.105)
+    /// A trusted (D1) device creates the pairing code the person types on the new device (`201`). A new code revokes the previous one.
+    public static let devicePairingInvite = Endpoint<EmptyBody, DevicePairingInvitation>(
+        "devicePairings.invite", .POST, "/v1/device-pairings/invitations", auth: .deviceSignedBearer)
+    /// The new device opens a ceremony (public; per-IP budget; says nothing about any account).
+    public static let devicePairingBegin = Endpoint<EmptyBody, DevicePairingBeginResponse>(
+        "devicePairings.begin", .POST, "/v1/device-pairings/begin", auth: .none)
+    /// The new device registers its keys with the pairing code (public; per-IP and per-account budgets, fail closed) (`201`).
+    public static let devicePairingStart = Endpoint<DevicePairingStartRequest, DevicePairingStartResponse>(
+        "devicePairings.start", .POST, "/v1/device-pairings/{pairingId}/start", auth: .none)
+    /// The new device polls with its status token; the first answer after approval carries its device and a bound session (public).
+    public static let devicePairingStatus = Endpoint<DevicePairingStatusRequest, DevicePairingStatus>(
+        "devicePairings.status", .POST, "/v1/device-pairings/{pairingId}/status", auth: .none)
+    /// The new device gives up (public, status token).
+    public static let devicePairingCancel = Endpoint<DevicePairingStatusRequest, DevicePairingStatus>(
+        "devicePairings.cancel", .POST, "/v1/device-pairings/{pairingId}/cancel", auth: .none)
+    /// The account's pending pairing, for a D1 device only (a D0 device gets an empty list: it cannot approve).
+    public static let devicePairingsPending = Endpoint<EmptyBody, [DevicePairingRequest]>(
+        "devicePairings.pending", .GET, "/v1/device-pairings/pending", auth: .deviceSignedBearer)
+    /// A D1 device approves with a `VIADERE-PAIR-V1` statement signed with Face ID.
+    public static let devicePairingApprove = Endpoint<DevicePairingApproveRequest, DevicePairingApproveResponse>(
+        "devicePairings.approve", .POST, "/v1/device-pairings/{pairingId}/approve", auth: .deviceSignedBearer)
+    /// Deny or "This wasn't me" (any live app device of the account).
+    public static let devicePairingDeny = Endpoint<DevicePairingDenyRequest, EmptyBody>(
+        "devicePairings.deny", .POST, "/v1/device-pairings/{pairingId}/deny", auth: .deviceSignedBearer)
+
     // MARK: Account recovery
     /// Spends one recovery code and returns options to register a NEW passkey (`PasskeyRegistrationOptions`). Public, rate-limited.
     public static let recoveryBegin = Endpoint<RecoveryBeginRequest, PasskeyRegistrationOptions>(
@@ -450,6 +476,8 @@ public enum APIRoutes {
         accountEnrollBegin.descriptor, accountCreate.descriptor, recoveryPasskeyBegin.descriptor, recoveryPasskeyFinish.descriptor,
         deviceEnrollBegin.descriptor, deviceEnroll.descriptor, deviceConfirm.descriptor, devicesList.descriptor, deviceRevoke.descriptor,
         deviceReplacementCancel.descriptor,
+        devicePairingInvite.descriptor, devicePairingBegin.descriptor, devicePairingStart.descriptor, devicePairingStatus.descriptor,
+        devicePairingCancel.descriptor, devicePairingsPending.descriptor, devicePairingApprove.descriptor, devicePairingDeny.descriptor,
         recoveryBegin.descriptor, recoveryFinish.descriptor, recoveryComplete.descriptor, recoveryCancel.descriptor, recoveryInfo.descriptor,
         recoveryCodesBegin.descriptor, recoveryCodesRegenerate.descriptor,
         phoneLinkMOBegin.descriptor, phoneLinkStatus.descriptor, phoneLinkKeep.descriptor,

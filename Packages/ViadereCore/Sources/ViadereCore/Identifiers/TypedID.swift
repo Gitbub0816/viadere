@@ -67,6 +67,7 @@ public enum IDTag {
     public enum Ceremony {}
     public enum Redemption {}
     public enum Recovery {}
+    public enum DevicePairing {}
 }
 
 public typealias BusinessID = TypedID<IDTag.Business>
@@ -92,3 +93,5 @@ public typealias CeremonyID = TypedID<IDTag.Ceremony>
 public typealias RedemptionID = TypedID<IDTag.Redemption>
 /// Identifies one account-recovery attempt (`RecoveryStatus.id`).
 public typealias RecoveryID = TypedID<IDTag.Recovery>
+/// Identifies one device pairing (`VIADERE-PAIR-V1`, SECURITY.md §2.105): a new device asking a trusted device of an account to add it.
+public typealias DevicePairingID = TypedID<IDTag.DevicePairing>

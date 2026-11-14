@@ -622,6 +622,8 @@ public enum SecurityNoticeTopic: String, Codable, Sendable, Hashable {
     /// The account's phone number moved to another account after a transfer request: the account fetched the request, did not keep the number
     /// and the waiting period ended (ADR-0027 section 1.3).
     case phoneTransferred
+    /// Someone tried to add a device to the account and a device of the account answered "This wasn't me" (§2.105). Nothing was added.
+    case devicePairingReported
     case unknown
 
     public init(from decoder: any Decoder) throws {
