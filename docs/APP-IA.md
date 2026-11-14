@@ -178,3 +178,33 @@ SwiftUI never runs `.task` on a view with no content.
   caption (`ViadereLoadingState`), never a stock spinner.
 * **Motion**: tabs cross-fade (0.16 s); alert cards rise in, staggered for the first screenful only (`viadereEntrance`); history rows settle
   under a press (`.viaderePressable`). All of it is off with Reduce Motion.
+
+### 9.1 Screen states, feedback and motion rules (refinement pass, 2026-11-14)
+
+New design-system pieces (`App/Shared/DesignSystem/ViadereStates.swift`, all in `ViadereDesignSystemGallery`):
+
+* `ViadereSkeleton(.rows(n) | .cards(n), label:)`: placeholder rows or cards for a list's first load. It breathes gently, is still with
+  Reduce Motion, and is one "Loading …" element for VoiceOver.
+* `ViadereErrorState(title, message:, retry:)`: a first load that failed, with "Try again". Only when there is nothing to show.
+* `ViadereNoResults(text, clear:)`: an on-device search that found nothing, with "Clear search".
+* `.viadereToast($text)`: a toast owned by a pushed screen or sheet (the tabs keep using `AppModel.toast`).
+* `withViadereAnimation(_:reduceMotion:_:)` and `.viadereAnimation(_:value:)`: the only way a screen animates explicitly. Screens do not
+  call `withAnimation` or `.animation(_:value:)` directly (not yet migrated: the approval sheet's "not me" toggle, the scanner, and
+  the Loop presentation button style; the sign-in sheet and the tab bar gate theirs inline).
+
+Rules the screens follow:
+
+* **One decision for list screens** (`ScreenLoadState.resolve`, ViadereKit, tested): content always wins; a first load shows the skeleton;
+  a first load that failed shows `ViadereErrorState`; only a successful empty answer shows `ViadereEmptyState`. A refresh that fails keeps
+  the content and says so in a `ViadereNotice`. Used by Alerts, Messages, Businesses and Benefits.
+* **Confirmations** are a toast with the copy in `FeedbackCopy` (ViadereKit, tested), shown only when the server kept the change
+  (`setMuted`, `setArchived` and `setFavorite` return whether it did): mute and archive a conversation, restore it, favorite a business, save the public name.
+* **Rows that open something** use `.buttonStyle(.viaderePressable)`; rows that select or toggle stay `.plain`.
+* **Context menus** repeat actions the screen already offers: conversation (Mute, Archive), business (Open, favorite), authenticator code
+  (Copy code, Delete). There are no swipe actions: lists are `ViadereRowGroup` in a `ScrollView`, not `List`, so the stock swipe is not
+  available and no custom one was added.
+* **Haptics** mark a result, never a tap: a message sent or refused, a claim, a code arriving, the vault unlocking, a destructive
+  confirmation appearing, an onboarding step. `ViadereOutcome` carries its own.
+* **Flow endings** use `ViadereOutcome` with the flow's existing copy: Connect, redemption (expired, refused, failed), the verification
+  result and failure, phone linking, data export.
+* **Numbers that change** (points balance, authenticator code) use `contentTransition(.numericText())` through `.viadereAnimation`.
