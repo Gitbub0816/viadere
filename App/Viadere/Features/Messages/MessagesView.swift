@@ -23,7 +23,8 @@ struct MessagesView: View {
                     }
                     content
                     archivedEntry
-                    if let error = messages.errorMessage {
+                    // A first load that failed has its own state (with a retry); the notice is for a failed refresh or change.
+                    if let error = messages.errorMessage, !messages.conversations.isEmpty {
                         ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m)
                     }
                 }
@@ -59,14 +60,16 @@ struct MessagesView: View {
 
     @ViewBuilder private var content: some View {
         let groups = messages.groups(context: context)
-        if messages.conversations.isEmpty && messages.isLoading {
-            ViadereLoading(height: 30).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+        let state = ScreenLoadState.resolve(isLoading: messages.isLoading, isEmpty: messages.conversations.isEmpty,
+                                            errorMessage: messages.errorMessage)
+        if state == .loading {
+            ViadereSkeleton(.rows(4), label: "Loading conversations").padding(.top, ViadereSpace.s)
+        } else if case .failed(let message) = state {
+            ViadereErrorState("Couldn't load messages", message: message) { await messages.load() }
+                .padding(.top, ViadereSpace.m)
         } else if groups.isEmpty {
             if !messages.searchQuery.isEmpty {
-                Text("No conversation matches \u{201C}\(messages.searchQuery)\u{201D}.")
-                    .font(ViadereType.body)
-                    .foregroundStyle(ViadereColor.textSecondary)
-                    .padding(.top, ViadereSpace.m)
+                ViadereNoResults(FeedbackCopy.noMatch(messages.searchQuery, in: "conversation")) { messages.searchQuery = "" }
             } else if let business = model.organization.selectedBusiness {
                 ViadereEmptyState("No messages with \(business.safeName)",
                                   message: "Start a conversation from \(business.safeName)'s page. Replies arrive here and as notifications.",
@@ -83,9 +86,12 @@ struct MessagesView: View {
                     .padding(.top, ViadereSpace.xl)
             }
         } else if context == .all {
-            ForEach(groups) { group in
-                ViadereSectionHeader(group.business.safeName)
-                threadList(group.threads)
+            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                VStack(alignment: .leading, spacing: 0) {
+                    ViadereSectionHeader(group.business.safeName)
+                    threadList(group.threads)
+                }
+                .viadereEntrance(index)
             }
         } else {
             threadList(groups.flatMap(\.threads))
@@ -104,7 +110,7 @@ struct MessagesView: View {
                         ViadereIconTile(systemName: "archivebox")
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
             }
             .padding(.top, ViadereSpace.m)
         }
@@ -114,19 +120,31 @@ struct MessagesView: View {
         ViadereRowGroup {
             ForEach(Array(threads.enumerated()), id: \.element.id) { index, conversation in
                 Button { path.append(conversation) } label: { ConversationRow(conversation: conversation) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     .contextMenu {
-                        Button(conversation.muted == true ? "Unmute" : "Mute") {
-                            Task { await messages.setMuted(conversation.id, !(conversation.muted ?? false)) }
+                        Button { toggleMuted(conversation) } label: {
+                            Label(conversation.muted == true ? "Unmute" : "Mute", systemImage: conversation.muted == true ? "bell" : "bell.slash")
                         }
-                        Button("Archive") { Task { await messages.setArchived(conversation.id, true) } }
+                        Button { archive(conversation) } label: { Label("Archive", systemImage: "archivebox") }
                     }
-                    .accessibilityAction(named: Text(conversation.muted == true ? "Unmute" : "Mute")) {
-                        Task { await messages.setMuted(conversation.id, !(conversation.muted ?? false)) }
-                    }
-                    .accessibilityAction(named: Text("Archive")) { Task { await messages.setArchived(conversation.id, true) } }
+                    .accessibilityAction(named: Text(conversation.muted == true ? "Unmute" : "Mute")) { toggleMuted(conversation) }
+                    .accessibilityAction(named: Text("Archive")) { archive(conversation) }
                 if index < threads.count - 1 { ViadereHairline(inset: 56) }
             }
+        }
+    }
+
+    /// Mute and Archive confirm with a toast only when the server kept the change; a refusal shows the reason in the notice instead.
+    private func toggleMuted(_ conversation: ConversationSummary) {
+        let muted = !(conversation.muted ?? false)
+        Task {
+            if await messages.setMuted(conversation.id, muted) { model.toast = FeedbackCopy.conversationMuted(muted) }
+        }
+    }
+
+    private func archive(_ conversation: ConversationSummary) {
+        Task {
+            if await messages.setArchived(conversation.id, true) { model.toast = FeedbackCopy.conversationArchived(true) }
         }
     }
 }
@@ -140,6 +158,7 @@ private struct ArchivedConversationsView: View {
     var body: some View {
         let threads = messages.archived(context: model.organization.effective)
         SubScreen(title: "Archived", subtitle: "Hidden from Messages. The business isn't told.", backTitle: "Messages") {
+            if let error = messages.errorMessage { ViadereNotice(error, kind: .warning) }
             if threads.isEmpty {
                 ViadereEmptyState("Nothing archived", message: "Conversations you archive appear here.")
             } else {
@@ -147,7 +166,11 @@ private struct ArchivedConversationsView: View {
                     ForEach(Array(threads.enumerated()), id: \.element.id) { index, conversation in
                         HStack(spacing: ViadereSpace.xs) {
                             ConversationRow(conversation: conversation)
-                            Button("Restore") { Task { await messages.setArchived(conversation.id, false) } }
+                            Button("Restore") {
+                                Task {
+                                    if await messages.setArchived(conversation.id, false) { model.toast = FeedbackCopy.conversationArchived(false) }
+                                }
+                            }
                                 .buttonStyle(.viadere(.quiet, fullWidth: false))
                                 .accessibilityLabel(Text("Restore the conversation with \(conversation.business.safeName)"))
                         }
@@ -183,6 +206,12 @@ private struct ConversationRow: View {
                         .foregroundStyle(ViadereColor.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: ViadereSpace.xs)
+                    if conversation.muted == true {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ViadereColor.textTertiary)
+                            .accessibilityLabel(Text("Muted"))
+                    }
                     if conversation.unreadCount > 0 {
                         Circle().fill(ViadereColor.accent).frame(width: 8, height: 8).accessibilityLabel(Text("Unread"))
                     }
@@ -205,6 +234,7 @@ struct ConversationView: View {
     /// The business's card decoration (an accent line at most; never its name or badge). From the verified local cache.
     @State private var decoration: MessageCardDecoration
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(conversation: ConversationSummary, model: AppModel) {
         self.conversation = conversation
@@ -232,16 +262,23 @@ struct ConversationView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: vm.rows.count) { _, _ in
-                    if let last = vm.rows.last?.id { withAnimation(ViadereMotion.gentle) { proxy.scrollTo(last, anchor: .bottom) } }
+                    if let last = vm.rows.last?.id {
+                        withViadereAnimation(ViadereMotion.gentle, reduceMotion: reduceMotion) { proxy.scrollTo(last, anchor: .bottom) }
+                    }
                 }
             }
             if let error = vm.errorMessage {
                 ViadereNotice(error, kind: .warning)
                     .padding(.horizontal, ViadereSpace.screen)
                     .padding(.bottom, ViadereSpace.xs)
+                    .transition(.opacity)
             }
             composer
         }
+        .viadereAnimation(ViadereMotion.quick, value: vm.errorMessage)
+        // One light tap when a message leaves, a warning when it could not be sent.
+        .sensoryFeedback(.impact(weight: .light), trigger: vm.isSending) { was, now in was && !now && vm.errorMessage == nil }
+        .sensoryFeedback(.warning, trigger: vm.errorMessage) { _, now in now != nil }
         .viadereScreenBackground()
         // The business's space: its kit tints the thread and its bubbles (re-resolved per theme); the sender line stays protected.
         .environment(\.brandStyle, BrandStyle(decoration.style))
@@ -290,10 +327,12 @@ struct ConversationView: View {
                         .foregroundStyle(ViadereColor.onPrimary)
                         .frame(width: 44, height: 44)
                         .background(Circle().fill(vm.canSend ? ViadereColor.primaryFill : ViadereColor.textTertiary.opacity(0.4)))
+                        .viadereAnimation(ViadereMotion.quick, value: vm.canSend)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
                 .disabled(!vm.canSend)
                 .accessibilityLabel(Text("Send"))
+                .accessibilityHint(Text(vm.canSend ? "" : (vm.remainingCharacters < 0 ? "The message is too long" : "Write a message first")))
             }
             .padding(.horizontal, ViadereSpace.m)
             .padding(.vertical, ViadereSpace.xs)

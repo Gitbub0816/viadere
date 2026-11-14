@@ -28,6 +28,9 @@ struct AddCodeSheet: View {
             }
         }
         .viadereScreenBackground()
+        .viadereAnimation(ViadereMotion.gentle, value: mode)
+        // A code that was refused (not an authenticator code, or a duplicate) is felt as well as said.
+        .sensoryFeedback(.warning, trigger: model.message) { _, now in now != nil }
     }
 
     private var choose: some View {
@@ -104,8 +107,9 @@ struct AddCodeSheet: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(ViadereSpace.m)
-                .background(RoundedRectangle(cornerRadius: ViadereRadius.card, style: .continuous).fill(ViadereColor.surface))
-                .overlay(RoundedRectangle(cornerRadius: ViadereRadius.card, style: .continuous).strokeBorder(ViadereColor.hairline, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: ViadereRadius.control, style: .continuous).fill(ViadereColor.surface))
+                .overlay(RoundedRectangle(cornerRadius: ViadereRadius.control, style: .continuous).strokeBorder(ViadereColor.hairline, lineWidth: 1))
+                .accessibilityLabel(Text(placeholder))
             if let hint { Text(hint).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary) }
         }
     }

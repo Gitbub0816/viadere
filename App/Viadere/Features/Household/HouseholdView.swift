@@ -4,6 +4,7 @@ import ViadereKit
 
 /// Settings → Household: who can act for you (and who you can act for), always scoped, always expiring, always revocable.
 struct HouseholdView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var vm: HouseholdViewModel
     @State private var inviting = false
     @State private var accepting = false
@@ -18,7 +19,7 @@ struct HouseholdView: View {
                 Button("I have an invitation code") { vm.resetAcceptance(); accepting = true }.buttonStyle(.viadere(.secondary))
             }
             if vm.phase == .loading {
-                ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.l)
+                ViadereSkeleton(.rows(2), label: "Loading shared access")
             }
             if !vm.activeGiven.isEmpty { section("You've shared", grants: vm.activeGiven, endLabel: "End access") }
             if !vm.activeReceived.isEmpty { section("Shared with you", grants: vm.activeReceived, endLabel: "Stop acting for them") }
@@ -33,11 +34,11 @@ struct HouseholdView: View {
                     } label: {
                         ViadereRow("Household activity", subtitle: "Every grant, response and block", leading: { ViadereIconTile(systemName: "list.bullet.rectangle") })
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                 }
             }
             if !vm.pastGrants.isEmpty {
-                Button(showPast ? "Hide earlier" : "Show earlier · \(vm.pastGrants.count)") { withAnimation(ViadereMotion.standard) { showPast.toggle() } }
+                Button(showPast ? "Hide earlier" : "Show earlier · \(vm.pastGrants.count)") { withViadereAnimation(reduceMotion: reduceMotion) { showPast.toggle() } }
                     .buttonStyle(.viadere(.quiet, fullWidth: false))
                 if showPast {
                     ViadereRowGroup {
@@ -84,7 +85,7 @@ struct HouseholdView: View {
                             }
                             .padding(.bottom, ViadereSpace.s)
                         } else {
-                            Button(endLabel) { withAnimation(ViadereMotion.standard) { confirming = grant.id } }
+                            Button(endLabel) { withViadereAnimation(reduceMotion: reduceMotion) { confirming = grant.id } }
                                 .buttonStyle(.viadere(.quiet, fullWidth: false))
                         }
                     }
@@ -355,7 +356,7 @@ struct HouseholdAuditView: View {
         SubScreen(title: "Household activity", subtitle: "Everything done with shared access, and anything that was blocked.", backTitle: "Household") {
             switch vm.auditPhase {
             case .idle, .loading:
-                ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.l)
+                ViadereSkeleton(.rows(4), label: "Loading household activity")
             case .unavailable:
                 ViadereEmptyState("Not available yet", message: "Household activity will appear here.")
             case .failed(let message):

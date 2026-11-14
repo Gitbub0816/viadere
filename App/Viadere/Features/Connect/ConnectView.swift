@@ -45,7 +45,11 @@ struct ConnectView: View {
             .viadereScreenBackground()
             .toolbar(.hidden, for: .navigationBar)
         }
-        .animation(ViadereMotion.gentle, value: vm.phase)
+        .viadereAnimation(ViadereMotion.gentle, value: vm.phase)
+        .sensoryFeedback(.warning, trigger: vm.phase) { _, now in
+            if case .failed = now { return true }
+            return false
+        }
         .task(id: model.pendingConnect) {
             guard let pending = model.pendingConnect else { return }
             model.pendingConnect = nil
@@ -137,7 +141,7 @@ struct ConnectView: View {
                             ViadereAvatar(name: business.safeName, size: 36, isVerified: true)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     if index < vm.suggestions.count - 1 { ViadereHairline(inset: 50) }
                 }
             }
@@ -190,8 +194,12 @@ struct ConnectView: View {
         }
     }
 
-    private var loading: some View {
-        ViadereLoading(height: 36).frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+    @ViewBuilder private var loading: some View {
+        if case .connecting = vm.phase {
+            ViadereLoadingState("Connecting…")
+        } else {
+            ViadereLoadingState("Looking it up…")
+        }
     }
 
     private func chooser(_ matches: [BusinessSummary]) -> some View {
@@ -205,7 +213,7 @@ struct ConnectView: View {
                             ViadereAvatar(name: business.safeName, size: 36, isVerified: true)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     if index < matches.count - 1 { ViadereHairline(inset: 50) }
                 }
             }
@@ -221,16 +229,9 @@ private struct ConnectedState: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.l) {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(ViadereColor.success)
-                .accessibilityHidden(true)
-            Text("Connected to \(relationship.business.safeName)")
-                .font(ViadereType.display)
-                .foregroundStyle(ViadereColor.textPrimary)
-            Text("Sign-in and approval requests will reach you here, usually as a notification you can answer in one tap.")
-                .font(ViadereType.body)
-                .foregroundStyle(ViadereColor.textSecondary)
+            // The drawn mark carries the success haptic and the VoiceOver announcement.
+            ViadereOutcome(.success, "Connected to \(relationship.business.safeName)",
+                           detail: "Sign-in and approval requests will reach you here, usually as a notification you can answer in one tap.")
             VStack(spacing: ViadereSpace.xs) {
                 Button("Done") {
                     onDone()
@@ -254,7 +255,6 @@ private struct ConnectedState: View {
             }
         }
         .padding(.top, ViadereSpace.l)
-        .sensoryFeedback(.success, trigger: relationship.id)
     }
 }
 

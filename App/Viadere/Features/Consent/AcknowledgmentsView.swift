@@ -10,11 +10,11 @@ struct AcknowledgmentsView: View {
         SubScreen(title: "Acknowledgments", subtitle: "What you've read and acknowledged, with the version and time.") {
             switch vm.phase {
             case .idle, .loading:
-                ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.l)
+                ViadereSkeleton(.rows(3), label: "Loading acknowledgments")
             case .unavailable:
                 ViadereEmptyState("Not available yet", message: "Acknowledgment records will appear here.")
             case .failed(let message):
-                ViadereNotice(message, kind: .warning)
+                ViadereErrorState("Couldn't load acknowledgments", message: message) { await vm.load() }
             case .loaded:
                 if vm.records.isEmpty {
                     ViadereEmptyState("Nothing yet", message: "When you acknowledge a policy, estimate or notice, the record appears here.")

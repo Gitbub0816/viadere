@@ -128,8 +128,15 @@ struct BusinessHomeView: View {
                 ViadereQuickAction("Message", symbol: "bubble.left") { startMessage() }
             }
             ViadereQuickAction(isFavorite ? "Favorite" : "Add favorite", symbol: isFavorite ? "star.fill" : "star") {
-                Task { await model.businesses.setFavorite(business.id, !isFavorite) }
+                let favorite = !isFavorite
+                Task {
+                    // Confirmed only when the server kept it; a refusal rolls the star back.
+                    if await model.businesses.setFavorite(business.id, favorite) {
+                        model.toast = FeedbackCopy.favorite(favorite, business: business.safeName)
+                    }
+                }
             }
+            .sensoryFeedback(.selection, trigger: isFavorite)
             .accessibilityValue(Text(isFavorite ? "Selected" : ""))
             ViadereQuickAction("Settings", symbol: "slider.horizontal.3") { showingSettings = true }
         }
@@ -153,14 +160,14 @@ struct BusinessHomeView: View {
                         ViadereIconTile(systemName: "bell")
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
                 ViadereHairline(inset: 50)
                 Button { showingSettings = true } label: {
                     ViadereRow("Settings for \(business.safeName)", subtitle: "What it can contact you about, privacy, block or disconnect") {
                         ViadereIconTile(systemName: "slider.horizontal.3")
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
             }
         }
     }
@@ -195,10 +202,11 @@ struct BusinessHomeView: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: ViadereSpace.s) {
                 ViadereSectionHeader(title)
-                ForEach(items) { item in
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     AlertCard(entry: item, canAct: model.alerts.canAct(item), now: model.services.clock()) {
                         Task { await AlertOpener.open(item, model: model) }
                     }
+                    .viadereEntrance(index)
                 }
             }
         }

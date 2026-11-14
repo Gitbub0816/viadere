@@ -26,7 +26,7 @@ struct VerificationHistoryView: View {
                             Button { center.present(prompt.id) } label: {
                                 ViadereRow(prompt.recipientName, subtitle: VerificationPromptContent.purposeText(prompt.purposeCode)) { ViadereIconTile(systemName: "person.badge.shield.checkmark") }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                         }
                     }
                 }
@@ -35,8 +35,13 @@ struct VerificationHistoryView: View {
                     Text("When a business asks you to verify something, a receipt appears here: who asked, what was shared and when.")
                         .font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary).padding(.vertical, ViadereSpace.s)
                 }
+                if vm.items.isEmpty && vm.isLoading {
+                    ViadereSkeleton(.rows(3), label: "Loading receipts")
+                }
+                // No empty card: the group is drawn only when there is a receipt to show.
+                if !vm.items.isEmpty {
                 ViadereRowGroup {
-                    ForEach(vm.items) { item in
+                    ForEach(Array(vm.items.enumerated()), id: \.element.id) { index, item in
                         VStack(alignment: .leading, spacing: ViadereSpace.xs) {
                             ViadereRow(item.recipientName, subtitle: VerificationHistoryViewModel.summary(item)) { ViadereIconTile(systemName: icon(item.status)) }
                             Text("\(VerificationPromptContent.purposeText(item.purposeCode)) · \(item.requestedAt.formatted(date: .abbreviated, time: .shortened))")
@@ -45,8 +50,11 @@ struct VerificationHistoryView: View {
                                 Button("Withdraw before it's shared") { Task { await vm.withdraw(item) } }.buttonStyle(.viadere(.secondary, fullWidth: false))
                             }
                         }
+                        .padding(.bottom, ViadereSpace.xs)
                         .accessibilityElement(children: .combine)
+                        if index < vm.items.count - 1 { ViadereHairline(inset: 50) }
                     }
+                }
                 }
                 Text("Withdrawing stops a disclosure that hasn't happened yet. Something already shared with a business can't be taken back by Viadere; ask the business to delete it.")
                     .font(ViadereType.footnote).foregroundStyle(ViadereColor.textTertiary).padding(.top, ViadereSpace.s)

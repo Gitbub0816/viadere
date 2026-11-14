@@ -31,7 +31,7 @@ struct BenefitsView: View {
                                     ViadereIconTile(systemName: "wallet.pass")
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                         }
                         .padding(.top, ViadereSpace.m)
                     }
@@ -68,8 +68,14 @@ struct BenefitsView: View {
     @ViewBuilder private var content: some View {
         let rewards = benefits.rewards(context: context)
         let accounts = benefits.accounts(context: context)
-        if benefits.isLoading {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+        let state = ScreenLoadState.resolve(isLoading: benefits.isLoading,
+                                            isEmpty: benefits.overview.rewards.isEmpty && benefits.overview.accounts.isEmpty,
+                                            errorMessage: benefits.errorMessage)
+        if state == .loading {
+            ViadereSkeleton(.rows(4), label: "Loading your benefits").padding(.top, ViadereSpace.l)
+        } else if case .failed(let message) = state {
+            ViadereErrorState("Couldn't load your benefits", message: message) { await benefits.load() }
+                .padding(.top, ViadereSpace.m)
         } else if model.businesses.hasLoaded && model.businesses.active.isEmpty {
             ViadereEmptyState("No businesses yet", message: "Coupons and rewards from the businesses you connect to appear here.",
                               actionTitle: "Add a business") { model.addBusinessPresented = true }
@@ -80,13 +86,14 @@ struct BenefitsView: View {
             if !accounts.isEmpty, benefits.filter == .available || benefits.filter == nil {
                 ViadereSectionHeader("Memberships")
                 VStack(spacing: ViadereSpace.s) {
-                    ForEach(accounts) { account in
+                    ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                         NavigationLink {
                             BusinessRewardsView(business: account.business, model: model)
                         } label: {
                             LoyaltyAccountCard(account: account)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
+                        .viadereEntrance(index)
                     }
                 }
             }
@@ -97,7 +104,7 @@ struct BenefitsView: View {
                         Button { selection = RewardSelection(id: entry.id) } label: {
                             RewardRow(entry: entry, presentation: model.rewards.presentation(for: entry), showsBusiness: context == .all)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         if index < rewards.count - 1 { ViadereHairline(inset: 50) }
                     }
                 }
@@ -107,7 +114,8 @@ struct BenefitsView: View {
                 .foregroundStyle(ViadereColor.textTertiary)
                 .padding(.top, ViadereSpace.s)
         }
-        if let error = benefits.errorMessage {
+        // A first load that failed has its own state above (with a retry); the notice is for a failed refresh.
+        if let error = benefits.errorMessage, state == .content {
             ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m)
         }
     }

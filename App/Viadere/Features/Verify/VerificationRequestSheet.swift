@@ -43,22 +43,16 @@ struct VerificationRequestSheet: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .loading:
-            ViadereLoading()
+            ViadereLoadingState("Checking this request…")
         case .failed(let message):
-            StateBlock(symbol: "exclamationmark.circle", title: "This request isn't available", message: message)
+            ViadereOutcome(.caution, "This request isn't available", detail: message)
             Button("Close") { dismiss() }.buttonStyle(.viadere(.secondary))
         case .reviewing:
             if let prompt = model.prompt { review(prompt) }
         case .choosingMethod:
             if let prompt = model.prompt { methodChoice(prompt) }
         case .verifying(let method):
-            VStack(spacing: ViadereSpace.m) {
-                ViadereLoading()
-                Text(method == .wallet ? "Waiting for Apple Wallet…" : "Continue in the verification screens…")
-                    .font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, ViadereSpace.xl)
+            ViadereLoadingState(method == .wallet ? "Waiting for Apple Wallet…" : "Continue in the verification screens…")
         case .finished(let outcome):
             result(outcome)
         }
@@ -165,8 +159,9 @@ struct VerificationRequestSheet: View {
 
     private func result(_ outcome: VerificationAttemptOutcome) -> some View {
         VStack(alignment: .leading, spacing: ViadereSpace.l) {
-            StateBlock(symbol: outcome.status == .released ? "checkmark.circle" : "minus.circle",
-                       title: outcome.status == .released ? "Done" : "Nothing was shared", message: model.resultText)
+            // The drawn mark carries the haptic (success when shared, a light tap when nothing was) and the VoiceOver announcement.
+            ViadereOutcome(outcome.status == .released ? .success : .neutral,
+                           outcome.status == .released ? "Done" : "Nothing was shared", detail: model.resultText)
             if outcome.status == .released, let label = outcome.label {
                 ViadereCard(padding: ViadereSpace.m) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -179,24 +174,5 @@ struct VerificationRequestSheet: View {
             }
             Button("Done") { dismiss() }.buttonStyle(.viadere(.primary))
         }
-        .sensoryFeedback(.success, trigger: outcome.status == .released)
-    }
-}
-
-/// An icon, a title and a sentence.
-private struct StateBlock: View {
-    let symbol: String
-    let title: String
-    let message: String
-
-    var body: some View {
-        VStack(spacing: ViadereSpace.s) {
-            Image(systemName: symbol).font(.system(size: 40, weight: .light)).foregroundStyle(ViadereColor.accent).accessibilityHidden(true)
-            Text(title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
-            Text(message).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary).multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, ViadereSpace.xl)
-        .accessibilityElement(children: .combine)
     }
 }

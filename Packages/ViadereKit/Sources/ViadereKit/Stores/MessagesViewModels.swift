@@ -83,24 +83,35 @@ public final class MessagesViewModel {
         conversations.filter { context.businessFilter == nil || $0.business.id == context.businessFilter }.reduce(0) { $0 + $1.unreadCount }
     }
 
-    /// Archives (or restores) a thread for this account only; the business is never told.
-    public func setArchived(_ id: SessionID, _ archived: Bool) async {
-        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+    /// Archives (or restores) a thread for this account only; the business is never told. True when the server kept the change
+    /// (the screen confirms only then).
+    @discardableResult
+    public func setArchived(_ id: SessionID, _ archived: Bool) async -> Bool {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return false }
         let previous = conversations[index].archived
         conversations[index].archived = archived
-        do { _ = try await api.updateConversation(id, ConversationStateUpdate(archived: archived)) } catch {
+        do {
+            _ = try await api.updateConversation(id, ConversationStateUpdate(archived: archived))
+            return true
+        } catch {
             if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].archived = previous }
             errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+            return false
         }
     }
 
-    public func setMuted(_ id: SessionID, _ muted: Bool) async {
-        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult
+    public func setMuted(_ id: SessionID, _ muted: Bool) async -> Bool {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return false }
         let previous = conversations[index].muted
         conversations[index].muted = muted
-        do { _ = try await api.updateConversation(id, ConversationStateUpdate(muted: muted)) } catch {
+        do {
+            _ = try await api.updateConversation(id, ConversationStateUpdate(muted: muted))
+            return true
+        } catch {
             if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].muted = previous }
             errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+            return false
         }
     }
 

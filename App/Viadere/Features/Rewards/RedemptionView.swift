@@ -43,7 +43,9 @@ struct RedemptionView: View {
         .onChange(of: capture.screenshotCount) { _, _ in model.noteScreenshot() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { model.invalidate() } }
         .onDisappear { model.invalidate() }
-        .sensoryFeedback(.success, trigger: model.phase == .active)
+        // Once, when the code arrives (not again when it expires; the outcome below has its own).
+        .sensoryFeedback(.success, trigger: model.phase == .active) { _, now in now }
+        .sensoryFeedback(.selection, trigger: copied) { _, now in now }
     }
 
     private var header: some View {
@@ -63,19 +65,16 @@ struct RedemptionView: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .idle, .requesting:
-            VStack(spacing: ViadereSpace.s) {
-                ViadereLoading(height: 32)
-                Text("Getting your code…").font(ViadereType.subhead).foregroundStyle(ViadereColor.textSecondary)
-            }
-            .frame(maxWidth: .infinity, minHeight: 240)
+            ViadereLoadingState("Getting your code…")
+                .frame(maxWidth: .infinity, minHeight: 240)
         case .active:
             activeCode
         case .expired:
-            message(symbol: "clock", title: "This code expired", text: "It only works for a couple of minutes. Nothing was used. Get a new one when you're at the counter.")
+            ViadereOutcome(.caution, "This code expired", detail: "It only works for a couple of minutes. Nothing was used. Get a new one when you're at the counter.")
         case .refused(let text):
-            message(symbol: "xmark.circle", title: "Not available", text: text)
+            ViadereOutcome(.caution, "Not available", detail: text)
         case .failed(let text):
-            message(symbol: "wifi.exclamationmark", title: "Couldn't get a code", text: text)
+            ViadereOutcome(.caution, "Couldn't get a code", detail: text)
         }
     }
 
@@ -104,15 +103,6 @@ struct RedemptionView: View {
                 .foregroundStyle(ViadereColor.textSecondary)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func message(symbol: String, title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: ViadereSpace.s) {
-            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(ViadereColor.textTertiary).accessibilityHidden(true)
-            Text(title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
-            Text(text).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, ViadereSpace.l)
     }
 
     @ViewBuilder private var footer: some View {

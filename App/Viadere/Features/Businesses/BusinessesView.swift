@@ -99,23 +99,25 @@ struct BusinessesView: View {
         let results = directory.results
         let active = results.filter(\.isActive)
         let ended = results.filter { !$0.isActive }
-        if directory.isLoading {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+        let state = ScreenLoadState.resolve(isLoading: directory.isLoading, isEmpty: directory.directory.isEmpty,
+                                            errorMessage: directory.errorMessage)
+        if state == .loading {
+            ViadereSkeleton(.rows(4), label: "Loading your businesses").padding(.top, ViadereSpace.l)
+        } else if case .failed(let message) = state {
+            ViadereErrorState("Couldn't load your businesses", message: message) { await directory.load() }
+                .padding(.top, ViadereSpace.m)
         } else if directory.directory.isEmpty {
             ViadereEmptyState("No businesses yet",
                               message: "Add a business with its QR code, its @handle or its code. Verified businesses only.",
                               actionTitle: "Add a business") { model.addBusinessPresented = true }
                 .padding(.top, ViadereSpace.xl)
         } else if results.isEmpty {
-            Text("No business matches \u{201C}\(directory.query)\u{201D}.")
-                .font(ViadereType.body)
-                .foregroundStyle(ViadereColor.textSecondary)
-                .padding(.top, ViadereSpace.m)
+            ViadereNoResults(FeedbackCopy.noMatch(directory.query, in: "business")) { directory.query = "" }
         } else {
             let favorites = active.filter(\.preferences.favorite)
             let others = active.filter { !$0.preferences.favorite }
-            if !favorites.isEmpty { section("Favorites", favorites) }
-            if !others.isEmpty { section(favorites.isEmpty ? "Connected" : "Everyone else", others) }
+            if !favorites.isEmpty { section("Favorites", favorites).viadereEntrance(0) }
+            if !others.isEmpty { section(favorites.isEmpty ? "Connected" : "Everyone else", others).viadereEntrance(1) }
             if !ended.isEmpty {
                 ViadereSectionHeader("No longer connected")
                 ViadereRowGroup {
@@ -139,8 +141,19 @@ struct BusinessesView: View {
                 }
             }
         }
-        if let error = directory.errorMessage {
+        // A first load that failed has its own state above (with a retry); the notice is for a failed refresh or change.
+        if let error = directory.errorMessage, !directory.directory.isEmpty {
             ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m)
+        }
+    }
+
+    /// Confirms with a toast only when the server kept the change; a refusal rolls the star back and shows the reason.
+    private func toggleFavorite(_ entry: ConnectedBusiness) {
+        let favorite = !entry.preferences.favorite
+        Task {
+            if await directory.setFavorite(entry.business.id, favorite) {
+                model.toast = FeedbackCopy.favorite(favorite, business: entry.business.safeName)
+            }
         }
     }
 
@@ -154,10 +167,15 @@ struct BusinessesView: View {
                             ViadereBusinessCard(name: entry.business.safeName, subtitle: detail(entry), isVerified: entry.business.isVerified,
                                                 badge: badge(entry))
                         }
-                        .buttonStyle(.plain)
-                        ViadereFavoriteButton(isFavorite: entry.preferences.favorite, name: entry.business.safeName) {
-                            Task { await directory.setFavorite(entry.business.id, !entry.preferences.favorite) }
+                        .buttonStyle(.viaderePressable)
+                        .contextMenu {
+                            Button { path.append(.business(entry.business.id)) } label: { Label("Open", systemImage: "arrow.up.forward") }
+                            Button { toggleFavorite(entry) } label: {
+                                Label(entry.preferences.favorite ? "Remove from favorites" : "Add to favorites",
+                                      systemImage: entry.preferences.favorite ? "star.slash" : "star")
+                            }
                         }
+                        ViadereFavoriteButton(isFavorite: entry.preferences.favorite, name: entry.business.safeName) { toggleFavorite(entry) }
                     }
                     if index < entries.count - 1 { ViadereHairline(inset: 58) }
                 }
@@ -193,7 +211,7 @@ struct BusinessesView: View {
             .viadereSurface(radius: ViadereRadius.control + 4)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.viaderePressable)
         .accessibilityElement(children: .combine)
     }
 

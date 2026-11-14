@@ -85,7 +85,7 @@ struct LoopDirectoryView: View {
                     ViadereRow("Your Loops", subtitle: model.loopLibrary.loops.count == 1 ? "1 added" : "\(model.loopLibrary.loops.count) added",
                                leading: { ViadereIconTile(systemName: "square.stack") })
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
             }
             .padding(.top, ViadereSpace.xs)
         }
@@ -93,9 +93,14 @@ struct LoopDirectoryView: View {
 
     @ViewBuilder private var content: some View {
         if directory.page == nil, directory.isLoading {
-            ViadereLoading()
+            ViadereSkeleton(.rows(4), label: "Loading Loops")
         } else if let error = directory.errorMessage {
-            ViadereNotice(error, kind: .warning)
+            // Nothing loaded yet: the reason and a retry. With a page on screen, a notice is enough.
+            if directory.page == nil {
+                ViadereErrorState("Couldn't load Loops", message: error) { await directory.load() }
+            } else {
+                ViadereNotice(error, kind: .warning)
+            }
         } else if directory.isEmpty {
             ViadereEmptyState(directory.isFiltering ? "No matches" : "No Loops yet",
                               message: directory.isFiltering ? "Try another word or category." : "Loops businesses publish appear here after Viadere reviews them.")
@@ -119,7 +124,7 @@ struct LoopDirectoryView: View {
                 } label: {
                     LoopEntryRow(entry: entry, brand: model.services.brandKits)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
                 if index < entries.count - 1 { ViadereHairline(inset: 62) }
             }
         }
@@ -203,7 +208,7 @@ struct BusinessLoopDirectorySection: View {
                         } label: {
                             LoopEntryRow(entry: entry, brand: model.services.brandKits)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.viaderePressable)
                         if index < directory.entries.count - 1 { ViadereHairline(inset: 62) }
                     }
                 }

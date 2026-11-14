@@ -247,7 +247,7 @@ struct LoopSettingsView: View {
                 } label: {
                     ViadereRow("Browse Loops", subtitle: "Reviewed by Viadere", leading: { ViadereIconTile(systemName: "square.grid.2x2") })
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.viaderePressable)
             }
             .padding(.top, ViadereSpace.xs)
         }
@@ -361,7 +361,7 @@ struct BusinessLoopsSection: View {
                                 ViadereRow(LoopCatalogViewModel.title(summary), subtitle: "Built by \(business.safeName)",
                                            leading: { ViadereIconTile(systemName: "square.stack") })
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.viaderePressable)
                             .accessibilityLabel(Text("\(LoopCatalogViewModel.title(summary)). Built by \(business.safeName), a business on Viadere"))
                             if index < catalog.loops.count - 1 { ViadereHairline(inset: 50) }
                         }

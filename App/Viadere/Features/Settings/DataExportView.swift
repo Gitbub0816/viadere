@@ -23,12 +23,12 @@ struct DataExportView: View {
                 case .idle:
                     Button("Request my data") { Task { await vm.start() } }.buttonStyle(.viadere(.primary))
                 case .requesting:
-                    ProgressView("Asking Viadere…")
+                    ViadereLoadingState("Asking Viadere…")
                 case .waiting:
-                    ProgressView("Preparing your export. This can take a few minutes; you can leave this screen and come back.")
+                    ViadereLoadingState("Preparing your export. This can take a few minutes; you can leave this screen and come back.")
                 case .ready(let data):
-                    Text("Your export is ready. Save it somewhere only you can reach: the file is not encrypted once it is saved.")
-                        .font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+                    ViadereOutcome(.success, "Your export is ready.",
+                                   detail: "Save it somewhere only you can reach: the file is not encrypted once it is saved.")
                     Button("Save to Files") { document = ExportDocument(data: data); exporting = true }.buttonStyle(.viadere(.primary))
                     Button("Done") { vm.reset() }.buttonStyle(.viadere(.quiet, fullWidth: false))
                 case .failed(let message):
@@ -36,6 +36,10 @@ struct DataExportView: View {
                     Button("Try again") { Task { await vm.start() } }.buttonStyle(.viadere(.secondary))
                 }
             }
+        }
+        .sensoryFeedback(.warning, trigger: vm.phase) { _, now in
+            if case .failed = now { return true }
+            return false
         }
         .fileExporter(isPresented: $exporting, document: document, contentType: .json, defaultFilename: "viadere-export") { _ in
             document = nil

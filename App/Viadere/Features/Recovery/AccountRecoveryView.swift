@@ -32,7 +32,7 @@ struct AccountRecoveryView: View {
                 ended(ending)
             }
         }
-        .animation(ViadereMotion.gentle, value: vm.phase)
+        .viadereAnimation(ViadereMotion.gentle, value: vm.phase)
         .viadereScreenBackground()
         .task { await vm.resumeIfPending() }
         // On open and when returning to the foreground: a throttled check, never a loop.

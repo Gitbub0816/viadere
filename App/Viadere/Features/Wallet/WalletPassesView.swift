@@ -36,7 +36,7 @@ struct WalletPassesView: View {
     @ViewBuilder private var content: some View {
         if let vm = passes {
             if vm.isLoading && !vm.hasLoaded {
-                ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+                ViadereSkeleton(.rows(3), label: "Loading passes").padding(.top, ViadereSpace.l)
             } else if vm.hasLoaded && vm.passes.isEmpty {
                 ViadereEmptyState("No passes yet", message: "When you add a loyalty card, an offer or a ticket to Wallet, or a business sends you one, it appears here.")
                     .padding(.top, ViadereSpace.xl)
@@ -46,7 +46,7 @@ struct WalletPassesView: View {
             }
             if let error = vm.errorMessage { ViadereNotice(error, kind: .warning).padding(.top, ViadereSpace.m) }
         } else {
-            ViadereLoading().frame(maxWidth: .infinity).padding(.top, ViadereSpace.xxl)
+            ViadereSkeleton(.rows(3), label: "Loading passes").padding(.top, ViadereSpace.l)
         }
     }
 
@@ -65,7 +65,7 @@ struct WalletPassesView: View {
                         }
                         .accessibilityLabel(Text(presentation.accessibilityLabel))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     if index < list.count - 1 { ViadereHairline(inset: 50) }
                 }
             }

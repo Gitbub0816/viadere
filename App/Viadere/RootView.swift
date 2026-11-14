@@ -16,7 +16,7 @@ struct RootView: View {
             .opacity(model.isLocked ? 0 : 1)
             .allowsHitTesting(!model.isLocked)
             .accessibilityHidden(model.isLocked)
-        .animation(ViadereMotion.gentle, value: model.phase)
+        .viadereAnimation(ViadereMotion.gentle, value: model.phase)
         .viadereScreenBackground()
         .passkeyExplanation(model.passkeyGate)
         .onChange(of: model.isLocked, initial: true) { _, locked in
@@ -90,7 +90,7 @@ private struct ToastHost: View {
                     }
             }
         }
-        .animation(ViadereMotion.standard, value: model.toast)
+        .viadereAnimation(ViadereMotion.standard, value: model.toast)
     }
 }
 
