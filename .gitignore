@@ -5,3 +5,5 @@ DerivedData/
 .DS_Store
 Design/tools/.venv/
 __pycache__/
+# Isolated working copies made by coding agents; never part of the repository.
+.claude/worktrees/
