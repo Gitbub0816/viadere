@@ -53,6 +53,8 @@ public final class AppModel {
     public var scannerPresented = false
     /// A handle or code read by the scanner, for Add business to look up.
     public var scannedLookup: String?
+    /// What the scanner accepted, until the shell delivers it.
+    public private(set) var scannedDecision: ScannedCodeDecision?
     /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
     public var presentedApproval: ApprovalViewModel? {
         didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
@@ -310,21 +312,34 @@ public final class AppModel {
 
     /// A code read by the in-app scanner. `ScannedCodePolicy` is the only judge of what a scan may open; an accepted link takes the same
     /// path as a tapped one, so it lands on a review screen and approves nothing. Returns the reason when the code was refused.
+    ///
+    /// An accepted code closes the scanner and waits in `scannedDecision`; the shell calls `deliverScanned()` once the scanner is off
+    /// screen, so the review sheet is never presented over a closing camera.
     @discardableResult
-    public func scanned(_ payload: String, symbology: ScannedSymbology) async -> ScanRejection? {
+    public func scanned(_ payload: String, symbology: ScannedSymbology) -> ScanRejection? {
         switch ScannedCodePolicy.evaluate(payload, symbology: symbology) {
-        case .open(let link):
+        case .rejected(let reason):
+            return reason
+        case let accepted:
+            scannedDecision = accepted
             scannerPresented = false
-            await handle(link)
             return nil
+        }
+    }
+
+    /// Opens what the scanner accepted (at most once).
+    public func deliverScanned() async {
+        guard let decision = scannedDecision else { return }
+        scannedDecision = nil
+        switch decision {
+        case .open(let link):
+            await handle(link)
         case .lookup(let text):
-            scannerPresented = false
             selectedTab = .businesses
             scannedLookup = text
             addBusinessPresented = true
-            return nil
-        case .rejected(let reason):
-            return reason
+        case .rejected:
+            break
         }
     }
 

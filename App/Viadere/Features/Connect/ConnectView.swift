@@ -3,7 +3,7 @@ import ViadereCore
 import ViadereKit
 
 /// One field for everything: `@handle`, a permanent code (auto-formatted `AF-2345`), a link or a name,
-/// plus a QR scanner. Every path converges on the same verified-business review.
+/// plus the code scanner. Every path converges on the same verified-business review.
 struct ConnectView: View {
     @Bindable var model: AppModel
     @State private var vm: ConnectViewModel
@@ -58,26 +58,40 @@ struct ConnectView: View {
             vm.setInput(handle.display)
             await vm.submit()
         }
+        .task(id: model.scannedLookup) {
+            // A handle or code read by the shell's scanner.
+            guard let text = model.scannedLookup else { return }
+            model.scannedLookup = nil
+            await vm.handleScanned(text)
+        }
         .task(id: model.pendingLinkSession) {
             guard let pending = model.pendingLinkSession else { return }
             model.pendingLinkSession = nil
             linkSession = pending
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            QRScannerScreen { payload in
-                showingScanner = false
-                // A business's link-session QR (`/k/…`) opens the link sheet; anything else is a connect code.
-                if case .linkSession(let code, let secret)? = DeepLinkRouter.route(payload) {
+            CodeScannerScreen { payload, symbology in
+                // `ScannedCodePolicy` decides; this sheet only routes what it accepted.
+                switch ScannedCodePolicy.evaluate(payload, symbology: symbology) {
+                case .rejected(let reason):
+                    return reason
+                case .lookup(let text):
+                    showingScanner = false
+                    Task { await vm.handleScanned(text) }
+                case .open(.linkSession(let code, let secret)):
+                    // A business's link-session code (`/k/…`) opens the link sheet.
+                    showingScanner = false
                     linkSession = PendingLinkSession(code: code, secret: secret)
-                    return
-                }
-                // A business's "Verify with Viadere" QR (`/v/…`) opens the verification-session review.
-                if case .verificationSession(let code)? = DeepLinkRouter.route(payload) {
+                case .open(.connect(let code, let link)):
+                    showingScanner = false
+                    Task { await vm.open(code: code, link: link, source: .qr) }
+                case .open(let link):
+                    // A sign-in, verification, enrollment or Loop code: Add business steps aside and the shell opens its review.
+                    showingScanner = false
                     model.addBusinessPresented = false
-                    model.pendingVerificationSession = PendingVerificationSession(code: code)
-                    return
+                    Task { await model.handle(link) }
                 }
-                Task { await vm.handleScanned(payload) }
+                return nil
             } onClose: { showingScanner = false }
             .viaderePullDownToDismiss() // the scanner closes with a downward pull, like a sheet
         }
@@ -138,7 +152,7 @@ struct ConnectView: View {
             } label: {
                 HStack(spacing: ViadereSpace.xs) {
                     Image(systemName: "qrcode.viewfinder")
-                    Text("Scan a QR code")
+                    Text("Scan a code")
                 }
             }
             .buttonStyle(.viadere(.secondary))

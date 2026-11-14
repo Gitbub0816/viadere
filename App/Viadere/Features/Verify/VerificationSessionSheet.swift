@@ -30,7 +30,7 @@ struct VerificationSessionSheet: View {
         Group {
             switch phase {
             case .loading:
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                ViadereLoadingState("Checking this request…").frame(maxHeight: .infinity)
             case .review(let review), .accepting(let review):
                 reviewView(review)
             case .verifying(let model, let returnURL, let host):

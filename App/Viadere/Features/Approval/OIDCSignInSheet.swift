@@ -8,6 +8,7 @@ import ViadereKit
 struct OIDCSignInSheet: View {
     @State private var model: OIDCSignInViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(pending: PendingOIDCSignIn) {
         let services = AppEnvironment.services
@@ -23,7 +24,7 @@ struct OIDCSignInSheet: View {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     switch model.phase {
                     case .loading:
-                        ProgressView().frame(maxWidth: .infinity)
+                        ViadereLoadingState("Checking this sign-in request…")
                     case .reviewing, .submitting:
                         question
                     default:
@@ -32,6 +33,7 @@ struct OIDCSignInSheet: View {
                 }
                 .padding(.horizontal, ViadereSpace.screen)
                 .padding(.top, ViadereSpace.m)
+                .animation(reduceMotion ? nil : ViadereMotion.gentle, value: model.phase)
             }
             .scrollIndicators(.hidden)
             footer
@@ -41,6 +43,7 @@ struct OIDCSignInSheet: View {
         .background(ViadereColor.background)
         .viadereProtectedSurface()
         .privacySensitive()
+        .sensoryFeedback(.warning, trigger: model.notice) { _, notice in notice != nil }
         .task { await model.load() }
     }
 
@@ -74,9 +77,20 @@ struct OIDCSignInSheet: View {
         }
     }
 
+    /// The end of the request, in the view model's own copy, with a drawn mark and one haptic. Success only for an accepted approval; a
+    /// refusal the person chose is neutral; everything that stopped the request is a caution.
     @ViewBuilder private var outcome: some View {
         if let message = model.message {
-            Text(message).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+            ViadereOutcome(outcomeKind, message)
+                .transition(.opacity)
+        }
+    }
+
+    private var outcomeKind: ViadereOutcome.Kind {
+        switch model.phase {
+        case .approved: .success
+        case .denied, .reported: .neutral
+        default: .caution
         }
     }
 

@@ -92,7 +92,7 @@ struct ProfileRequestSheet: View {
                 } else if let loadError {
                     ViadereNotice(loadError, kind: .danger)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity)
+                    ViadereLoading().frame(maxWidth: .infinity).padding(.vertical, ViadereSpace.xl)
                 }
             }
             .padding(ViadereSpace.screen)
@@ -234,7 +234,7 @@ struct ProfileVerificationSheet: View {
                     ViadereNotice(text, kind: .danger)
                     Button("Try again") { vm.reset() }.buttonStyle(.viadere(.secondary))
                 case .started:
-                    ProgressView().frame(maxWidth: .infinity)
+                    ViadereLoading().frame(maxWidth: .infinity).padding(.vertical, ViadereSpace.xl)
                 case .choosing:
                     Button("Use ID in Apple Wallet") { Task { await vm.verifyWithWallet(presenter: PassKitProfileWalletPresenter()) } }
                         .buttonStyle(.viadere(.primary))

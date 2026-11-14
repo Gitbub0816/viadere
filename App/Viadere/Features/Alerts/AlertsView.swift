@@ -17,7 +17,9 @@ struct AlertsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     OrganizationContextHeader(model: model)
-                    ViadereHeader("Alerts", subtitle: subtitle)
+                    ViadereHeader("Alerts", subtitle: subtitle) {
+                        ViadereIconButton(systemName: "viewfinder", label: "Scan a code") { model.scannerPresented = true }
+                    }
                     securityNotice
                     ViadereSegmented(selection: Binding(get: { alerts.segment }, set: { alerts.segment = $0 }), options: AlertsSegment.allCases) {
                         $0 == .needsYou ? "Needs you" : "History"
@@ -82,11 +84,12 @@ struct AlertsView: View {
             emptyNeedsYou.padding(.top, ViadereSpace.xl)
         } else {
             VStack(spacing: ViadereSpace.s) {
-                ForEach(items) { entry in
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
                     AlertCard(entry: entry, canAct: alerts.canAct(entry), now: model.services.clock(),
                               brand: BrandStyle(AlertBrandStyle.make(entry, brand: model.services.brandKits))) {
                         Task { await AlertOpener.open(entry, model: model) }
                     }
+                    .viadereEntrance(index)
                 }
             }
         }
@@ -123,7 +126,7 @@ struct AlertsView: View {
                     Button { Task { await AlertOpener.open(entry, model: model) } } label: {
                         AlertHistoryRow(entry: entry, status: alerts.displayStatus(entry), now: model.services.clock())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.viaderePressable)
                     .disabled(entry.target?.kind != .interaction)
                     if index < min(items.count, 100) - 1 { ViadereHairline(inset: 50) }
                 }

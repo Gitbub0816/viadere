@@ -30,19 +30,26 @@ extension AppTab {
 /// appearance). Add business opens as a sheet. The bar never grows with the number of businesses.
 struct MainShell: View {
     @Bindable var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                switch model.selectedTab {
-                case .alerts: AlertsView(model: model)
-                case .messages: MessagesView(model: model)
-                case .benefits: BenefitsView(model: model)
-                case .businesses: BusinessesView(model: model)
-                case .you: SettingsView(model: model)
+            ZStack {
+                Group {
+                    switch model.selectedTab {
+                    case .alerts: AlertsView(model: model)
+                    case .messages: MessagesView(model: model)
+                    case .benefits: BenefitsView(model: model)
+                    case .businesses: BusinessesView(model: model)
+                    case .you: SettingsView(model: model)
+                    }
                 }
+                .id(model.selectedTab)
+                .transition(.opacity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // A short cross-fade between tabs (none with Reduce Motion): the bar stays put, only the page changes.
+            .animation(reduceMotion ? nil : ViadereMotion.quick, value: model.selectedTab)
             ViadereTabBar(selection: $model.selectedTab, items: AppTab.allCases.map { tab in
                 ViadereTabBar<AppTab>.Item(tab: tab, title: tab.title, symbol: tab.symbol, badge: badge(for: tab))
             })
@@ -113,6 +120,14 @@ struct MainShell: View {
                 .presentationDetents([.large])
                 .presentationCornerRadius(ViadereRadius.sheet)
                 .presentationBackground(ViadereColor.background)
+        }
+        .fullScreenCover(isPresented: $model.scannerPresented, onDismiss: {
+            // What the scanner accepted opens only now, with the camera off screen.
+            Task { await model.deliverScanned() }
+        }) {
+            CodeScannerScreen(onCode: { payload, symbology in model.scanned(payload, symbology: symbology) },
+                              onClose: { model.scannerPresented = false })
+                .viaderePullDownToDismiss()
         }
         .task { await model.messages.load() }
         .onChange(of: model.home.content, initial: true) { _, content in

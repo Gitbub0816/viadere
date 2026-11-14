@@ -233,7 +233,9 @@ The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not 
 | OIDC-01 | Authorize page heading | Sign in to {Client} with Viadere |
 | OIDC-02 | Passkey button (first, primary) | Use your Viadere passkey |
 | OIDC-03 | App option | Use the Viadere app instead |
-| OIDC-04 | QR instruction | Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you. |
+| OIDC-04 | Code instruction (under the Viadere code) | Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you. |
+| OIDC-04a | Link to the QR code · instruction under it · link back | Using your phone's camera instead? Show a QR code · Scan with your phone's camera. Only scan a code on this page. Don't scan one that someone sent or showed you. · Back to the Viadere code |
+| OIDC-04b | Scanner (app): hint · caution · accepted · refused | Point at a Viadere code or QR code · Only scan a code on a page you opened yourself. · Code read · That code isn't from Viadere. Nothing was opened. / This code is no longer used. Nothing was opened. / This code asks the app to act without showing you first. Viadere doesn't accept those. / That code can't be read as a Viadere code. Nothing was opened. |
 | OIDC-05 | Consent | {Client} wants to confirm it's you. It gets an ID that only {Client} can use. It doesn't get your name, email or phone number, and other apps can't match it. You'll return to {redirect host}. |
 | OIDC-06 | Consent buttons | Cancel · Continue |
 | OIDC-07 | Error (bad client or redirect) | This sign-in request isn't valid. Return to the app you came from. If you got here from a message, close this page. |

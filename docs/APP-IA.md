@@ -166,3 +166,15 @@ Needs server or partner work:
 
 The business page keeps `BusinessLoopsSection`, owned and loaded by the page (`LoopCatalogViewModel`, `BusinessRewardsViewModel`), because
 SwiftUI never runs `.task` on a view with no content.
+
+## 9. Scanner and feedback (2026-11-14)
+
+* **Scan a code** is a round `viewfinder` button in the Alerts and Businesses headers, and "Scan a code" in Add business. All three open the
+  same full-screen scanner (`Features/Scan/CodeScannerScreen.swift`): it reads the Viadere code on "Sign in with Viadere" (a CKey) and
+  Viadere QR codes, has a light button when the phone has a torch, closes with the close button or a downward pull, and says in one
+  sentence why a code was refused. What a scan may open is decided only by `ScannedCodePolicy` (`docs/SECURITY.md` §2.104).
+* **Outcomes** (`ViadereOutcome`): the end of a sign-in or link request is a drawn ring and mark with one haptic (success, neutral for the
+  person's own refusal, caution for anything that stopped), in the flow's approved copy. **Loading** in sheets is the breathing mark with a
+  caption (`ViadereLoadingState`), never a stock spinner.
+* **Motion**: tabs cross-fade (0.16 s); alert cards rise in, staggered for the first screenful only (`viadereEntrance`); history rows settle
+  under a press (`.viaderePressable`). All of it is off with Reduce Motion.

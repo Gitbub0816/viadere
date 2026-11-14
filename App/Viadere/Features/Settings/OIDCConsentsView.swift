@@ -16,7 +16,7 @@ struct OIDCConsentsView: View {
             VStack(alignment: .leading, spacing: ViadereSpace.m) {
                 switch model.phase {
                 case .loading:
-                    ProgressView().frame(maxWidth: .infinity)
+                    ViadereLoading().frame(maxWidth: .infinity).padding(.vertical, ViadereSpace.xl)
                 case .unavailable, .failed:
                     ViadereNotice("We couldn't load this list. Try again later.", kind: .info)
                 case .loaded where model.consents.isEmpty:

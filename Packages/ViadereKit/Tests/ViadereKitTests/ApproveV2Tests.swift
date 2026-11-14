@@ -599,7 +599,7 @@ struct ApproveGateDeviceTests {
     @Test func aSlowerRefreshCannotRollTheHeadBack() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        let business = await relay.businessId
+        let business = relay.businessId
         _ = try await phone.directory.verify(businessId: business)
         let first = try #require(try await phone.store.load().lastSeenHead)
         // Refresh A reads the log, then stalls; the log grows and refresh B completes; then A finishes with its older tree.
@@ -618,7 +618,7 @@ struct ApproveGateDeviceTests {
     @Test func twoRefreshesThatSawDifferentTreesOfOneSizeAreAForkAndFailClosed() async throws {
         let relay = try await makeRelay()
         let phone = ApprovePhone(relay: relay, logKey: await relay.logPublicKey, now: relay.now)
-        let business = await relay.businessId
+        let business = relay.businessId
         _ = try await phone.directory.verify(businessId: business)
         let seen = try #require(try await phone.store.load().lastSeenHead)
         await relay.stallNext()

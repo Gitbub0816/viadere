@@ -30,7 +30,7 @@ struct LinkConfirmationSheet: View {
                 VStack(alignment: .leading, spacing: ViadereSpace.l) {
                     switch model.phase {
                     case .loading:
-                        ProgressView().frame(maxWidth: .infinity)
+                        ViadereLoading().frame(maxWidth: .infinity).padding(.vertical, ViadereSpace.xl)
                     case .reviewing, .opening:
                         question
                     default:
@@ -79,7 +79,16 @@ struct LinkConfirmationSheet: View {
             Text(model.title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary).accessibilityAddTraits(.isHeader)
         }
         if let message = model.message {
-            Text(message).font(ViadereType.body).foregroundStyle(ViadereColor.textPrimary)
+            ViadereOutcome(outcomeKind, message)
+        }
+    }
+
+    /// Success only when the destination was opened; a report is the person's own refusal; everything else stopped short.
+    private var outcomeKind: ViadereOutcome.Kind {
+        switch model.phase {
+        case .opened: .success
+        case .reported: .neutral
+        default: .caution
         }
     }
 

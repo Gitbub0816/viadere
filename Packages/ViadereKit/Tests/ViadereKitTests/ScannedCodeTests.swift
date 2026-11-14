@@ -105,3 +105,46 @@ struct ScannedCodeTests {
         }
     }
 }
+
+@Suite("Scanner hand-off")
+@MainActor
+struct ScannerHandOffTests {
+    @Test func anAcceptedCodeClosesTheScannerAndOpensItsReviewOnlyWhenDelivered() async throws {
+        let (services, _) = await p3World()
+        let model = AppModel(services: services)
+        await model.bootstrap()
+        model.scannerPresented = true
+        let link = OIDCChallengeLink.build(challengeId: ScannedCodeTests.ach, domain: .current)
+        #expect(model.scanned(link, symbology: .ckey) == nil)
+        #expect(!model.scannerPresented)
+        #expect(model.pendingOIDCSignIn == nil, "nothing is presented over the closing camera")
+        await model.deliverScanned()
+        #expect(model.pendingOIDCSignIn?.challengeId == ScannedCodeTests.ach)
+        // Delivered once.
+        model.pendingOIDCSignIn = nil
+        await model.deliverScanned()
+        #expect(model.pendingOIDCSignIn == nil)
+    }
+
+    @Test func aRefusedCodeChangesNothingAndKeepsTheScannerOpen() async throws {
+        let (services, _) = await p3World()
+        let model = AppModel(services: services)
+        await model.bootstrap()
+        model.scannerPresented = true
+        #expect(model.scanned("https://evil.example/o/\(ScannedCodeTests.ach)", symbology: .ckey) == .notViadere)
+        #expect(model.scanned("viadere://settings", symbology: .qr) == .notViadere)
+        #expect(model.scannerPresented)
+        #expect(model.scannedDecision == nil)
+        await model.deliverScanned()
+        #expect(model.pendingOIDCSignIn == nil && model.selectedTab == .alerts && !model.addBusinessPresented)
+    }
+
+    @Test func aPrintedHandleOpensAddBusinessWithTheLookup() async throws {
+        let (services, _) = await p3World()
+        let model = AppModel(services: services)
+        await model.bootstrap()
+        #expect(model.scanned("@northwind", symbology: .qr) == nil)
+        await model.deliverScanned()
+        #expect(model.scannedLookup == "@northwind" && model.addBusinessPresented && model.selectedTab == .businesses)
+    }
+}

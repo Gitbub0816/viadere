@@ -26,6 +26,7 @@ struct BusinessesView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     OrganizationContextHeader(model: model)
                     ViadereHeader("Businesses", subtitle: subtitle) {
+                        ViadereIconButton(systemName: "viewfinder", label: "Scan a code") { model.scannerPresented = true }
                         Button {
                             model.addBusinessPresented = true
                         } label: {

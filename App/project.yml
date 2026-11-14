@@ -64,6 +64,12 @@ packages:
   DiditSDK:
     url: https://github.com/didit-protocol/sdk-ios.git
     from: "4.9.1"
+  # CKey scanner (the Viadere code on "Sign in with Viadere"). Scan-only product: decoder and camera helper, no renderer, no telemetry
+  # code. CKey is pre-1.0 and C++, so it is pinned to the exact commit of tag v0.1.0-build.85 (Stable-Release), never a range: a new build
+  # is adopted by changing this line after review (CLAUDE.md exceptions, docs/SECURITY.md §2.104).
+  CKey:
+    url: https://github.com/clearkeysolutions/ckey.git
+    revision: ede38f57aa1a20c456b1858f4fccd919e98ef269
 
 # Reusable pieces ----------------------------------------------------------------------------------------------
 # Networking targets use a hand-written, *preprocessed* Info.plist: the DEBUG-only ATS exception for
@@ -150,6 +156,8 @@ targets:
         product: ViadereCore
       - package: DiditSDK
         product: DiditSDKCore
+      - package: CKey
+        product: CKeyScanner
       - target: ViadereNotificationService
       - target: ViadereNotificationContent
       - target: ViadereCredentialProvider

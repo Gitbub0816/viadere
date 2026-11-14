@@ -225,7 +225,7 @@ update Live Activities; `pushType: .token` update tokens and the iOS 17.2 push-t
 ## Screens (P2 scope, structured for P3–P5)
 
 Onboarding (animated mark, passkey, device enrollment, notification priming, optional phone link by sending one text from the phone) ·
-Home · Connect (`@handle`, auto-formatted codes with I→1/O→0, name search, QR scanner, universal links, verified card,
+Home · Connect (`@handle`, auto-formatted codes with I→1/O→0, name search, code scanner (CKey and QR), universal links, verified card,
 purpose-scoped consent) · Business detail · **Approval sheet** · Messages (threads, structured `choose` chips,
 composer) · Settings/Security (devices, app lock, linked phones, consent history, sessions, sign out, delete).
 
@@ -400,6 +400,9 @@ against the iOS 17/18 SDK but never compiled; build them first in Xcode and expe
    (`DiditSdk.shared.startVerification(token:)`, `.diditVerification`); the DiditSDK package requirement and the entitlement are untested here.
 7. Approve v2 (WP1): `Features/Approve/*` (syntax-parsed only), `ApproveV2/AppleApprovalKeyVault.swift` (per-enrollment Secure Enclave tags through `SecureEnclaveKeyStore`, Keychain HPKE key) and `ApproveEnvironment.live`; the `VIADERE_KEY_DIRECTORY_LOG_KEYS` xcconfig-to-Info.plist substitution.
 7. Passkeys inside an App Clip, Live Activity push-to-start, the Dynamic Island layout, and the content-extension card.
+8. The scanner (`Features/Scan/CodeScannerScreen.swift`): the `CKey` package pinned by revision in `project.yml` (product `CKeyScanner`, module
+   `CKeyScanKit`, C++20 sources built by SwiftPM), `CKeyDecoder.decode(pixelBuffer:)` on the video-data queue next to the QR metadata output,
+   the torch, and the viewfinder animation. `ViadereFeedback.swift` (`ViadereOutcome`, `viadereEntrance`) is syntax-parsed only.
 7. XcodeGen spec details (extension embedding, on-demand-install-capable type, watch embedding).
 8. P3 UI: everything under `Features/Rewards`, `Activity`, `Wallet`, `Household`, `Consent`, the reworked widget, and the
    PassKit calls (`PKAddPassButton`, `PKAddPassesViewController`, `PKPass(data:)`, `PKPassLibrary`). `Text(timerInterval:)`
