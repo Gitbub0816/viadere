@@ -34,7 +34,7 @@ Approve lets a business ask “is this you?” for a sign-in. The customer sees 
 :::
 
 ::: callout
-**Beta.** Approve works today for approved businesses. It has not completed independent penetration testing, and no assurance level is promised beyond what each result states.
+**Beta, with one part held back.** Approve is built and in pre-release testing, and it is not generally available. In the beta path a business receives Viadere's attestation of the device-signed decision. The path in which the business checks the device signature itself, Approve v2, is built and switched off behind a release gate until its security assessment passes. Approve has not completed independent penetration testing, and no assurance level is promised beyond what each result states.
 :::
 :::
 
@@ -61,7 +61,7 @@ The phone signs the decision with a key in the Secure Enclave. Each business rel
 :::
 ::: card
 ### Verify
-Viadere checks the signature, the context shown and the assurance, and sends a signed webhook. The business verifies the result against the request it created.
+Viadere checks the signature, the context shown and the assurance, and sends a signed webhook. With Approve v2, the business also verifies the device signature against the request it created.
 :::
 :::
 :::
@@ -70,11 +70,11 @@ Viadere checks the signature, the context shown and the assurance, and sends a s
 ::: feature flip
 ::: feature-copy
 ::: kicker
-{icon:seal} The signed result
+{icon:seal} The signed result · {badge:planned}
 :::
 ## Evidence the business can check for itself.
 
-An approval binds the business, the amount or payee, a single-use challenge and a short expiry. Replaying it, or substituting any of those, fails verification. A relay status alone is never the evidence.
+With Approve v2, which is built and not released, an approval binds the business, the amount or payee, a single-use challenge and a short expiry. Replaying it, or substituting any of those, fails verification. A relay status alone is never the evidence.
 
 [Read the security architecture](/security/architecture/){.more}
 :::
@@ -97,7 +97,7 @@ A simple approve or deny prompt is not the same as phishing-resistant authentica
 ::: card
 ### {icon:x} What Approve does not do
 - Face ID unlocks a key on the device. It does not prove legal identity.
-- Text channels never carry an approval. A sensitive request sent by SMS or RCS becomes a secure link to the app.
+- Text channels never carry an approval. A sensitive request sent by SMS or RCS becomes a notice to open the Viadere app, with no link and no code.
 - Approve does not by itself satisfy a business's customer identification, anti-money-laundering or banking obligations.
 :::
 :::

@@ -71,7 +71,7 @@ Businesses see a per-business pseudonym, not your Viadere identity or phone numb
 ::: grid grid-2 gap-lg
 ::: card
 ### {icon:id} Verification choices
-Where Verify becomes available, you choose what to prove. Verify is planned and not available yet.
+Where Verify becomes available, you choose what to prove. Verify is built and not released, so it is not available yet.
 :::
 ::: card
 ### {icon:user} Accessibility
@@ -83,7 +83,7 @@ Some credentials are protected on your device. Losing access to a device or reco
 :::
 ::: card
 ### {icon:sms} Text messages
-If you use Viadere by text, ordinary SMS is not end-to-end encrypted. A text can show a secure link, but an approval of a sign-in or payment happens only in the app. See [safety and reporting](/consumers/safety/).
+If you use Viadere by text, ordinary SMS is not end-to-end encrypted. A text never carries a link or a code for a sign-in or payment: it says to open the Viadere app, and an approval happens only there. See [safety and reporting](/consumers/safety/).
 :::
 :::
 :::

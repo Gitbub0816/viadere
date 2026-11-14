@@ -402,7 +402,7 @@ a.more:hover::after { transform: translateX(3px); }
 /* Product cards (generated) */
 .pcards { display: grid; gap: 1rem; margin: 1.75rem 0; }
 @media (min-width: 40rem) { .pcards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 72rem) { .pcards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 62rem) { .pcards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .pcard { position: relative; display: flex; flex-direction: column; padding: 1.5rem; border-radius: var(--radius); background: linear-gradient(180deg, var(--raised), var(--surface)); border: 1px solid var(--hairline); box-shadow: var(--e1), var(--inset-hi); transition: transform .25s var(--ease), box-shadow .25s var(--ease), border-color .25s ease; min-height: 15rem; }
 .pcard:hover { transform: translateY(-3px); box-shadow: var(--e3); border-color: var(--hairline-strong); }
 .pcard:focus-within { box-shadow: 0 0 0 2px var(--focus); }

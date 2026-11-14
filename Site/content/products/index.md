@@ -1,8 +1,8 @@
 ---
 title: Products
 layout: marketing
-headline: Four products. *One verified identity.*
-description: Messaging, Approve, Verify and Authenticator share one verified business registry, one consent model and one delivery layer. Each carries its real status.
+headline: One platform. *Each part with its real status.*
+description: Messaging, Approve, Wallet passes, Verify, Authenticator and the rest share one verified business registry, one consent model and one delivery layer. Each carries its real status.
 order: 0
 hero_art: stage
 actions:
@@ -15,7 +15,7 @@ actions:
 ::: section-head
 ## Each product, *with its real status.*
 
-Messaging and Approve are in beta for approved businesses. Verify and Authenticator are planned and not available.
+Messaging, Approve and Wallet passes are in beta: built, in pre-release testing and not generally available. Everything marked planned is not available, including what is already built and held behind a release gate.
 :::
 
 {{ generate: product-cards }}
@@ -32,8 +32,8 @@ Messaging and Approve are in beta for approved businesses. Verify and Authentica
 Status badges on this site follow one rule, and the build of this site fails if a product page is missing one or overstates it.
 
 - {badge:live} **Generally available** to eligible businesses and customers.
-- {badge:beta} **Working and in use by approved businesses.** Interfaces, limits and pricing may change, and no availability commitment is published yet.
-- {badge:planned} **Designed but not available.** Nothing on a planned product page is a promise of a date or a feature.
+- {badge:beta} **Built and in pre-release testing.** Not generally available. Interfaces, limits and pricing may change, and no availability commitment is published yet.
+- {badge:planned} **Not available.** Some planned products are already built and held behind a release gate until their reviews pass. Each page says how far it has got, and nothing on it is a promise of a date or a feature.
 :::
 ::: feature-art
 {{ generate: mockup signin }}
@@ -48,7 +48,7 @@ Status badges on this site follow one rule, and the build of this site fails if 
 :::
 ## Integrate once. *Every product follows.*
 
-All four products rely on the same verified business registry, purpose-scoped consent and signed results. Businesses integrate once through the [Business API](/developers/).
+Every product relies on the same verified business registry, purpose-scoped consent and signed results. Businesses integrate once through the [Business API](/developers/).
 :::
 
 {{ generate: mockup flow }}

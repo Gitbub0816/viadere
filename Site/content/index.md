@@ -115,7 +115,7 @@ Businesses can run points, perks like a free coffee on Tuesdays, and single-use 
 - {icon:check} **Single-use codes:** a code that was already redeemed or has expired is refused.
 - {icon:check} **Normal priority, always.** Rewards and marketing never jump ahead of security requests.
 
-[Rewards in the Business API](/businesses/#use-cases){.more}
+[Wallet and rewards](/products/wallet/){.more}
 :::
 ::: feature-art
 {{ generate: mockup wallet }}
@@ -128,9 +128,9 @@ Businesses can run points, perks like a free coffee on Tuesdays, and single-use 
 ::: kicker
 {icon:clock} On the roadmap
 :::
-## Planned, and *labelled that way.*
+## Not released, and *labelled that way.*
 
-Two products are designed but not available. We show them so that you can judge the intent, not because you can use them today.
+Two products are built and held behind release gates. They are not available. We show them so that you can judge them, not because you can use them today.
 :::
 
 ::: grid grid-2 gap-lg
@@ -143,18 +143,18 @@ Confirm one fact, such as “over 21”, without handing over a date of birth, n
 
 {{ generate: mockup verify }}
 
-[Read the Verify intent](/products/verify/){.more}
+[Read about Verify](/products/verify/){.more}
 :::
 ::: card
 {badge:planned}
 
 ### Authenticator
 
-A vault for your passkeys and one-time codes, synced between your devices, with recovery that does not depend on identity checks. It ships only after an independent cryptography and recovery review.
+A vault for your passkeys and one-time codes, synced between your devices, with recovery that does not depend on identity checks. It is built, and it ships only after an independent cryptography and recovery review.
 
 {{ generate: mockup authenticator }}
 
-[Read the Authenticator intent](/products/authenticator/){.more}
+[Read about Authenticator](/products/authenticator/){.more}
 :::
 :::
 :::
@@ -259,7 +259,7 @@ Viadere is designed to hold as little as it can, and to make every decision chec
 {{ generate: mockup pillars }}
 
 ::: callout
-**Honest about limits.** Ordinary SMS is not end-to-end encrypted, so a sign-in or payment is never approved by text reply: a text receives a secure link to the app instead. Viadere has not completed an independent audit or certification, and says so on the [attestations](/security/attestations/) page.
+**Honest about limits.** Ordinary SMS is not end-to-end encrypted, so a sign-in or payment is never approved by text reply: a text receives a notice to open the Viadere app instead, with no link and no code. Viadere has not completed an independent audit or certification, and says so on the [attestations](/security/attestations/) page.
 :::
 :::
 
@@ -267,7 +267,7 @@ Viadere is designed to hold as little as it can, and to make every decision chec
 ::: section-head
 ## Each product, *with its real status.*
 
-Messaging and Approve are in beta for approved businesses. Verify and Authenticator are planned and not available.
+Messaging, Approve and Wallet passes are in beta: built, in pre-release testing and not generally available. Everything marked planned is not available, including what is already built and held behind a release gate.
 :::
 
 {{ generate: product-cards }}

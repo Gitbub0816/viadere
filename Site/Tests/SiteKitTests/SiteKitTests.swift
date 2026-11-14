@@ -104,8 +104,8 @@ struct RichComponentTests {
         for name in ["signin", "payment", "conversation", "wallet", "verify", "authenticator", "lineup", "contrast"] {
             #expect(Showcase.render(name)!.lowercased().contains("illustration"), "\(name)")
         }
-        #expect(Showcase.render("verify")!.contains("Planned"))
-        #expect(Showcase.render("authenticator")!.contains("Planned"))
+        #expect(Showcase.render("verify")!.contains("Not released"))
+        #expect(Showcase.render("authenticator")!.contains("Not released"))
         #expect(Showcase.render("nope") == nil)
     }
     @Test func mockupTextIsLinted() throws {
@@ -247,6 +247,60 @@ struct OpenAPITests {
         let schemas = api.renderSchemas()
         for (name, _) in api.spec["components"]?["schemas"]?.entries ?? [] { #expect(schemas.contains("id=\"schema-\(name)\""), "\(name)") }
     }
+
+    /// An operation whose tag is missing from the contract's `tags:` list still gets a page (the Profiles routes were lost this way).
+    @Test func undeclaredTagsAreRendered() throws {
+        let api = OpenAPI(spec: try YAMLParser.parse("tags:\n  - name: A\npaths:\n  /a:\n    get:\n      tags: [A]\n      operationId: a\n  /b:\n    get:\n      tags: [B]\n      operationId: b\n"))
+        #expect(api.tags == ["A", "B"])
+        #expect(api.renderTagPage("B").contains("id=\"op-b\""))
+    }
+
+    /// The second reference (site.yaml `references:`): every path, operation and schema of the auth-delivery contract is rendered,
+    /// and its links stay inside its own section.
+    @Test func rendersTheAuthDeliveryContractAsItsOwnReference() throws {
+        let config = try SiteConfig.load(from: siteRoot.appendingPathComponent("site.yaml"))
+        let ref = try #require(config.references.first { $0.key == "auth-delivery" })
+        #expect(ref.base == "/developers/auth-delivery/")
+        let builder = SiteBuilder(options: BuildOptions(siteRoot: siteRoot))
+        let api = try #require(try builder.loadReferences(config)["auth-delivery"])
+        let url = URL(fileURLWithPath: ref.openapiPath, relativeTo: siteRoot).standardizedFileURL
+        let source = try String(contentsOf: url, encoding: .utf8)
+        let sourcePaths = source.components(separatedBy: "\n").filter { $0.hasPrefix("  /") && $0.hasSuffix(":") }.map { String($0.dropFirst(2).dropLast()) }
+        #expect(sourcePaths.count > 5)
+        let rendered = Set(api.operations.map(\.path))
+        for path in sourcePaths { #expect(rendered.contains(path), "\(path) not rendered") }
+        let html = api.tags.map { api.renderTagPage($0) }.joined()
+        for op in api.operations { #expect(html.contains("id=\"op-\(op.id)\""), "\(op.id) missing") }
+        let schemas = api.renderSchemas()
+        for (name, _) in api.spec["components"]?["schemas"]?.entries ?? [] { #expect(schemas.contains("id=\"schema-\(name)\""), "\(name)") }
+        let all = html + schemas + api.renderIndex()
+        #expect(all.contains("href=\"/developers/auth-delivery/schemas/#schema-AuthDeliveryView\""))
+        #expect(all.contains("href=\"/developers/auth-delivery/business/#op-createAuthDelivery\""))
+        #expect(!all.contains("href=\"/developers/api/") && !all.contains("href=\"/developers/schemas/"))
+        // A response described in a flow map with an unquoted comma keeps its whole sentence.
+        #expect(html.contains("Missing, invalid or unsigned credentials"))
+        // The pages exist, select the contract with `api:`, and the contract states that the surface is off by default.
+        let pages = try builder.loadPages(config: config, openapi: nil, references: ["auth-delivery": api])
+        for u in ["/developers/auth-delivery/", "/developers/auth-delivery/business/", "/developers/auth-delivery/device/",
+                  "/developers/auth-delivery/webhooks/", "/developers/auth-delivery/schemas/"] {
+            #expect(pages.first { $0.url == u }?.front["api"]?.string == "auth-delivery", "\(u)")
+        }
+        #expect(api.infoSections.contains { $0.title == "Feature flag" && $0.markdown.contains("AUTH_DELIVERY_ENABLED") })
+    }
+
+    @Test func aPageCannotNameAnUnknownReference() throws {
+        var md = Markdown()
+        let p = try page("/x/", "title: T\napi: nope", "{{ generate: api-index }}\n")
+        #expect(throws: SiteError.self) { _ = try SiteBuilder(options: BuildOptions(siteRoot: siteRoot)).expand(p, pages: [p], api: nil, md: &md) }
+    }
+
+    @Test func flowMapTextWithAnUnquotedCommaIsKeptWhole() throws {
+        let y = try YAMLParser.parse("a: { description: Unknown, or not yours (the same body). }\nb: { type: string, description: One, two, three. }\nc: { x: 1, y: \"q, r\" }\n")
+        #expect(y["a"]?["description"]?.string == "Unknown, or not yours (the same body).")
+        #expect(y["b"]?["type"]?.string == "string")
+        #expect(y["b"]?["description"]?.string == "One, two, three.")
+        #expect(y["c"]?["x"]?.int == 1 && y["c"]?["y"]?.string == "q, r")
+    }
 }
 
 @Suite("Whole site")
@@ -264,12 +318,16 @@ struct SiteBuildTests {
         let urls = Set(Self.report.pages)
         for u in ["/", "/products/", "/products/messaging/", "/products/approve/", "/products/verify/", "/products/authenticator/",
                   "/businesses/", "/consumers/", "/developers/", "/developers/api/", "/developers/webhooks/", "/developers/errors/",
-                  "/security/", "/security/disclosure/", "/privacy/", "/legal/", "/company/", "/status/"] { #expect(urls.contains(u), "\(u)") }
+                  "/products/wallet/", "/products/loops/", "/products/brand-kits/", "/products/sign-in/", "/products/viadere-code/",
+                  "/developers/sdks/", "/developers/auth-delivery/", "/developers/auth-delivery/business/", "/developers/auth-delivery/schemas/",
+                  "/developers/api/profiles/", "/security/", "/security/disclosure/", "/privacy/", "/legal/", "/company/", "/status/"] { #expect(urls.contains(u), "\(u)") }
     }
 
     @Test func productStatusesAreHonest() throws {
         _ = Self.report
-        let want = ["messaging": "beta", "approve": "beta", "verify": "planned", "authenticator": "planned"]
+        // Built behind a release gate, or staging only, is "planned": nothing that is not released may read as available.
+        let want = ["messaging": "beta", "approve": "beta", "wallet": "beta", "verify": "planned", "authenticator": "planned",
+                    "sign-in": "planned", "viadere-code": "planned", "loops": "planned", "brand-kits": "planned"]
         for (slug, status) in want {
             let html = try String(contentsOf: Self.outDir.appendingPathComponent("products/\(slug)/index.html"), encoding: .utf8)
             #expect(html.contains("badge badge-\(status)"), "\(slug)")
