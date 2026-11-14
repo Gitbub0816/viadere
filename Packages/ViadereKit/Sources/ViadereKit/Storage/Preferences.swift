@@ -24,6 +24,8 @@ public enum PreferenceKey: String, CaseIterable, Sendable {
     case lastKnownConsumerId
     /// The saved business context of the Organization views (`OrganizationContext` JSON). A filter only; never sent as authority.
     case organizationContext
+    /// SHA-256 of Safe Action request ids this phone already accepted, with when each lapses (`PreferencesSafeActionReplayStore`).
+    case safeActionSeenRequests
 }
 
 public final class UserDefaultsPreferences: PreferencesStore, @unchecked Sendable {

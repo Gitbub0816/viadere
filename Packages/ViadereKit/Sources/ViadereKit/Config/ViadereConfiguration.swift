@@ -48,6 +48,10 @@ public struct ViadereConfiguration: Sendable {
     /// Viadere's `loop-publication` verification keys, pinned in the build (Info.plist `ViadereLoopPublicationKeys`). Empty = every Loop
     /// shows the safe "can't be shown" fallback.
     public var loopPublicationKeys: [PinnedManifestKey] = []
+    /// Ed25519 keys of the CKey Safe Action issuer for this build's link domain, pinned in the build (`SafeActionKeyPins`; Info.plist
+    /// `ViadereCKeySafeActionKeys`, build setting `VIADERE_CKEY_SAFE_ACTION_KEYS`). Empty = every Safe Action is refused; the plain
+    /// sign-in link and the QR code still work.
+    public var safeActionKeys: [PinnedSafeActionKey] = []
 
     public static let productionHost = "api.viadere.com"
 
@@ -130,6 +134,7 @@ public struct ViadereConfiguration: Sendable {
             config.linkDescriptorKeys = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { (try? DevicePublicKey(base64URL: $0)) != nil }
         }
         config.applyManifestKeyPins(from: info)
+        config.applySafeActionKeyPins(from: info)
         if let raw = info["ViadereWalletBetaLabel"] as? String, ["no", "false", "0"].contains(raw.lowercased()) { config.walletBetaLabel = false }
         if let flag = info["ViadereWalletBetaLabel"] as? Bool { config.walletBetaLabel = flag }
         if let raw = info["ViadereStagingDiagnostics"] as? String, ["yes", "true", "1"].contains(raw.lowercased()) { config.stagingDiagnostics = true }

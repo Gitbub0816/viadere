@@ -9,11 +9,14 @@ public enum ScannedSymbology: String, Sendable, Equatable {
     case ckey
 }
 
-/// What the app does with a scanned code. A scan never approves, opens a web page or contacts a server by itself: the most it does is open
-/// the same review screen a tapped Viadere link opens.
+/// What the app does with a scanned code. A scan never approves or opens a web page by itself: the most it does is open the same review
+/// screen a tapped Viadere link opens.
 public enum ScannedCodeDecision: Sendable, Equatable {
     /// A Viadere link on this build's link domain: open its review screen.
     case open(DeepLink)
+    /// A well-formed CKey Safe Action envelope (`ckey-action:1:…`). **Not yet trusted**: `SafeActionReader` verifies it (pinned key,
+    /// signature, app, action, time, single use, the issuer's request information) and the most it then does is open the sign-in review.
+    case safeAction(String)
     /// A business handle or permanent code printed as plain text: look it up in Add business.
     case lookup(String)
     case rejected(ScanRejection)
@@ -24,8 +27,9 @@ public enum ScanRejection: Sendable, Equatable {
     case notViadere
     /// An old text-message link (`/l/`, `/h/`): never read or redeemed.
     case retired
-    /// A signed "act without asking" code (`ckey-action:`). Viadere never lets a code act by itself; every request is reviewed on screen.
-    case automaticAction
+    /// Something spelled like a CKey Safe Action (`ckey-action:` in any letter case) that is not a well-formed version 1 envelope of a
+    /// sign-in's size. Viadere never lets a code act by itself; a well-formed one still has to verify (`SafeActionReader`).
+    case unverifiedAction
     /// Longer than any Viadere code, or carrying control characters.
     case malformed
 
@@ -34,7 +38,7 @@ public enum ScanRejection: Sendable, Equatable {
         switch self {
         case .notViadere: "That code isn't from Viadere. Nothing was opened."
         case .retired: "This code is no longer used. Nothing was opened."
-        case .automaticAction: "This code asks the app to act without showing you first. Viadere doesn't accept those."
+        case .unverifiedAction: SafeActionRejection.malformed.message
         case .malformed: "That code can't be read as a Viadere code. Nothing was opened."
         }
     }
@@ -46,19 +50,31 @@ public enum ScanRejection: Sendable, Equatable {
 /// - only `https` universal links on the build's link domain (the `viadere://` scheme is refused: nothing printed needs it);
 /// - only link kinds that are shown as codes (connect, business link session, verification session, sign-in, Approve enrollment, Loop
 ///   install), each of which opens a review screen and decides nothing;
-/// - no CKey Safe Actions (`ckey-action:`), which exist to run without a prompt;
+/// - a CKey Safe Action (`ckey-action:`) is never acted on here: only an exact, well-formed version 1 envelope no longer than a sign-in
+///   envelope for this link domain is handed on, unverified, to `SafeActionReader`; every other spelling is refused;
 /// - bounded length and no control characters, checked before any parser sees the text.
 public enum ScannedCodePolicy {
     /// The longest Viadere link is an Approve enrollment link with its fragment secret, well under this.
     public static let maxPayloadBytes = 512
     static let safeActionPrefix = "ckey-action:"
 
+    /// The byte cap for a Safe Action only: the longest sign-in envelope this link domain's issuer can sign (`ViadereSignInSafeAction`;
+    /// 264 for `viadere.com`, above 512 only for a link domain of 198 characters or more). Everything else keeps `maxPayloadBytes`.
+    public static func maxSafeActionBytes(domain: LinkDomain) -> Int { ViadereSignInSafeAction.maxTextBytes(issuer: domain.host) }
+
     public static func evaluate(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain = .current) -> ScannedCodeDecision {
-        guard !payload.isEmpty, payload.utf8.count <= maxPayloadBytes,
+        let safeActionCap = maxSafeActionBytes(domain: domain)
+        guard !payload.isEmpty, payload.utf8.count <= max(maxPayloadBytes, safeActionCap),
               payload.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && !(0x80...0x9F).contains($0.value) }) else {
             return .rejected(.malformed)
         }
-        if payload.lowercased().hasPrefix(safeActionPrefix) { return .rejected(.automaticAction) }
+        if payload.lowercased().hasPrefix(safeActionPrefix) {
+            // Exactly `ckey-action:1:` in lower case, within the sign-in size, and a parseable envelope. Nothing is trusted yet and nothing
+            // runs: the reader verifies it after the scanner has closed. A QR code carrying one is treated the same as a CKey.
+            guard payload.utf8.count <= safeActionCap, (try? CKeySafeAction.parse(text: payload)) != nil else { return .rejected(.unverifiedAction) }
+            return .safeAction(payload)
+        }
+        guard payload.utf8.count <= maxPayloadBytes else { return .rejected(.malformed) }
 
         if payload.contains(":") {
             // A link. Exactly `https://`, in lower case as Viadere writes it, with no surrounding space to trim away.

@@ -338,8 +338,30 @@ public final class AppModel {
             selectedTab = .businesses
             scannedLookup = text
             addBusinessPresented = true
+        case .safeAction(let text):
+            await deliverSafeAction(text)
         case .rejected:
             break
+        }
+    }
+
+    /// A scanned CKey Safe Action. It is verified first (`SafeActionReader`: pinned key, signature, app, action, time, single use, the
+    /// issuer's request information); a verified one opens the sign-in review carrying who is asking, and approves nothing. Anything else
+    /// shows the fixed refusal and opens nothing. A Safe Action is single use, so it is never queued: locked or not ready means refused.
+    private func deliverSafeAction(_ text: String) async {
+        guard !isLocked, phase == .ready, let reader = services.safeActionReader else {
+            toast = SafeActionRejection.notReady.message
+            return
+        }
+        switch await reader.read(text) {
+        case .needsConfirmation(let request):
+            // The app may have locked while the issuer was asked.
+            guard !isLocked, phase == .ready else { toast = SafeActionRejection.notReady.message; return }
+            pendingOIDCSignIn = PendingOIDCSignIn(challengeId: request.requestId, safeAction: request)
+        case .rejected(let reason):
+            toast = reason.message
+        case .notASafeAction:
+            toast = SafeActionRejection.malformed.message
         }
     }
 
@@ -535,11 +557,16 @@ public struct PendingAuthDelivery: Sendable, Equatable, Identifiable {
     public init(id: UUID) { self.id = id }
 }
 
-/// An OIDC sign-in to confirm: the authority challenge id from the QR universal link or the push.
+/// An OIDC sign-in to confirm: the authority challenge id from the QR universal link, the push, or a verified CKey Safe Action.
 public struct PendingOIDCSignIn: Sendable, Equatable, Identifiable {
     public var challengeId: String
+    /// Set only when the review was opened by a verified Safe Action: the verified issuer and what it says about who is asking.
+    public var safeAction: VerifiedSafeActionRequest?
     public var id: String { challengeId }
-    public init(challengeId: String) { self.challengeId = challengeId }
+    public init(challengeId: String, safeAction: VerifiedSafeActionRequest? = nil) {
+        self.challengeId = challengeId
+        self.safeAction = safeAction
+    }
 }
 
 /// A verification session to review: its code (from the link, the QR, or typed by the person).

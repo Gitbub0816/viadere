@@ -14,7 +14,8 @@ struct OIDCSignInSheet: View {
         let services = AppEnvironment.services
         _model = State(initialValue: OIDCSignInViewModel(
             challengeId: pending.challengeId, api: services.oidc, signer: DeviceKeyFactorSigner(keys: services.keys),
-            pinnedKeys: AuthorityStatementKeyPins.effective(configuration: services.configuration), environment: services.configuration.authorityEnvironment))
+            pinnedKeys: AuthorityStatementKeyPins.effective(configuration: services.configuration), environment: services.configuration.authorityEnvironment,
+            safeAction: pending.safeAction))
     }
 
     var body: some View {
@@ -49,6 +50,7 @@ struct OIDCSignInSheet: View {
 
     private var question: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.s) {
+            safeActionContext
             Text(model.title).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary).accessibilityAddTraits(.isHeader)
             if let consent = model.consentText { Text(consent).font(ViadereType.body).foregroundStyle(ViadereColor.textSecondary) }
             websiteRow
@@ -60,6 +62,24 @@ struct OIDCSignInSheet: View {
                 .viadereSurface(radius: ViadereRadius.control)
             Text(model.numberHelp).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
             if let notice = model.notice { ViadereNotice(notice, kind: .warning) }
+        }
+    }
+
+    /// Shown only when a verified Viadere code (CKey Safe Action) opened this review (UX_COPY OIDC-12): who signed the code, which browser
+    /// asked, and the warning about someone else's code. Text and rows come from the view model; the statement check, the number and the
+    /// device-key signature below are unchanged.
+    @ViewBuilder private var safeActionContext: some View {
+        if let context = model.safeActionContext(formatTime: { $0.formatted(date: .omitted, time: .shortened) }) {
+            VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                ForEach(context.rows) { row in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.label).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                        Text(row.value).font(ViadereType.subhead).foregroundStyle(ViadereColor.textPrimary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                ViadereNotice(context.warning, kind: .warning)
+            }
         }
     }
 
