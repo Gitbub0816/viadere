@@ -911,6 +911,13 @@ public struct ViadereDesignSystemGallery: View {
 
                 ViadereEmptyState("No requests", message: "When a business asks for something, it appears here.",
                                   actionTitle: "Connect a business") {}
+
+                ViadereSectionHeader("States")
+                ViadereSkeleton(.cards(1))
+                ViadereSkeleton(.rows(2))
+                ViadereErrorState("Couldn't load your businesses", message: "You're offline. Try again when you're connected.") {}
+                ViadereNoResults("No business matches \u{201C}harbor\u{201D}.") {}
+                ViadereOutcome(.success, "You're connected to Harbor Bank.")
             }
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.xxl)
