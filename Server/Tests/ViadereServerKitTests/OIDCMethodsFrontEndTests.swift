@@ -264,9 +264,27 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
             // The QR encodes exactly `https://{link domain}/o/{ach}` (no number, no client), with OIDC-04 beside it; the challenge id is not printed.
             let link = OIDCChallengeLink.build(challengeId: ach, domain: h.ctx.config.linkDomain)
             XCTAssertEqual(OIDCChallengeLink.parse(URL(string: link)!, domain: h.ctx.config.linkDomain), ach)
+            // First the Viadere code: a CKey in the concept style, for the app's scanner.
+            let ckey = try CKeySymbol.encode(link, level: .medium).svg(style: .concept, label: "Viadere code to open this sign-in in the Viadere app")
+            XCTAssertTrue(waiting.text.contains("<div class=\"ckey\">\(ckey)</div>"))
             let qr = try QRCode.encode(link, errorCorrection: .medium).svg(title: "QR code to open this sign-in in the Viadere app")
-            XCTAssertTrue(waiting.text.contains(qr))
-            XCTAssertTrue(waiting.text.contains("Only scan a code on this page. Don't scan one that someone sent or showed you."))
+            XCTAssertFalse(waiting.text.contains(qr))
+            XCTAssertTrue(waiting.text.contains("Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you."))
+            // The same link as a QR code for the phone's camera, one plain link away (no script); it survives the refresh and switches back.
+            let statusPath = "/oidc/authorize/status?id=\(page.id)"
+            XCTAssertTrue(waiting.text.contains("<a href=\"\(statusPath)&amp;code=qr\">"))
+            let fallback = try await h.request(.GET, statusPath + "&code=qr", headers: ["Cookie": page.cookie])
+            XCTAssertEqual(fallback.status, .ok)
+            XCTAssertTrue(fallback.text.contains("<div class=\"qr\">\(qr)</div>"))
+            XCTAssertFalse(fallback.text.contains("class=\"ckey\""))
+            XCTAssertTrue(fallback.text.contains("Scan with your phone's camera. Only scan a code on this page. Don't scan one that someone sent or showed you."))
+            XCTAssertTrue(fallback.text.contains("<a href=\"\(statusPath)\">Back to the Viadere code</a>"))
+            XCTAssertTrue(fallback.text.contains(try unwrap(row.matchCode)))
+            XCTAssertFalse(fallback.text.contains(ach))
+            XCTAssertEqual(fallback.headers.first(name: "Content-Security-Policy"), waiting.headers.first(name: "Content-Security-Policy"))
+            // The QR page is only for the browser that started the request.
+            let foreign = try await h.request(.GET, statusPath + "&code=qr")
+            XCTAssertEqual(foreign.status, .forbidden)
             XCTAssertTrue(waiting.text.contains(try unwrap(row.matchCode)))
             XCTAssertFalse(waiting.text.contains(ach))
             XCTAssertFalse(waiting.headers.first(name: "Content-Security-Policy")?.contains("script-src") ?? true)

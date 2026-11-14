@@ -272,7 +272,8 @@ enum OIDCFrontEnd {
             try await row.delete(on: req.db)
             return redirect(row.redirectURI, [("error", "access_denied")], state: row.state, issuer: issuer)
         case "challenged":
-            return page(OIDCMethodsFrontEnd.heading(row.clientName), OIDCMethodsFrontEnd.appWaitingBody(row: row, linkDomain: req.ctx.config.linkDomain), refresh: true)
+            return page(OIDCMethodsFrontEnd.heading(row.clientName), OIDCMethodsFrontEnd.appWaitingBody(row: row, linkDomain: req.ctx.config.linkDomain, qr: q["code"] == "qr"),
+                        refresh: true)
         default:
             return errorPage()
         }

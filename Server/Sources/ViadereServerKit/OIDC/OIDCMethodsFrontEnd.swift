@@ -67,17 +67,31 @@ enum OIDCMethodsFrontEnd {
         return html
     }
 
-    /// The app path while the challenge is open: the number (never on the phone), the QR universal link with OIDC-04, and the redirect host.
-    static func appWaitingBody(row: OIDCAuthorizationRecord, linkDomain: LinkDomain) -> String {
+    /// The app path while the challenge is open: the number (never on the phone), the scannable sign-in link with OIDC-04, and the redirect host.
+    ///
+    /// The link is drawn as a CKey in the concept style (`CKeySymbol`, read by the Viadere app's scanner). `qr` draws the same link as a QR
+    /// code instead, for a phone whose camera app opens the universal link; the page offers the switch as an ordinary link, so it survives
+    /// the three-second refresh and needs no script. Both codes carry exactly `https://{link domain}/o/{ach}` and nothing else.
+    static func appWaitingBody(row: OIDCAuthorizationRecord, linkDomain: LinkDomain, qr: Bool = false) -> String {
         let e = OIDCFrontEnd.escape
         var html = "<p>Open the Viadere app on your phone and approve the sign-in to \(e(row.clientName)).</p>"
         if let number = row.matchCode { html += "<p>Number to enter on your phone: <strong class=\"number\">\(e(number))</strong></p>" }
         if let ach = row.challengeId, AuthorityChallengeID.isValid(ach) {
             let link = OIDCChallengeLink.build(challengeId: ach, domain: linkDomain)
-            if let svg = (try? QRCode.encode(link, errorCorrection: .medium))?.svg(title: "QR code to open this sign-in in the Viadere app") {
-                html += "<div class=\"qr\">\(svg)</div>"
+            let status = "/oidc/authorize/status?id=" + row.id!.uuidString.lowercased()
+            if qr {
+                if let svg = (try? QRCode.encode(link, errorCorrection: .medium))?.svg(title: "QR code to open this sign-in in the Viadere app") {
+                    html += "<div class=\"qr\">\(svg)</div>"
+                }
+                html += "<p class=\"notice\">Scan with your phone's camera. Only scan a code on this page. Don't scan one that someone sent or showed you.</p>"
+                html += "<p class=\"notice\"><a href=\"\(status)\">Back to the Viadere code</a></p>"
+            } else {
+                if let symbol = try? CKeySymbol.encode(link, level: .medium) {
+                    html += "<div class=\"ckey\">\(symbol.svg(style: .concept, label: "Viadere code to open this sign-in in the Viadere app"))</div>"
+                }
+                html += "<p class=\"notice\">Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you.</p>"
+                html += "<p class=\"notice\"><a href=\"\(status)&amp;code=qr\">Using your phone's camera instead? Show a QR code</a></p>"
             }
-            html += "<p class=\"notice\">Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you.</p>"
         }
         return html
     }
@@ -260,6 +274,7 @@ enum OIDCPageAssets {
     .primary{background:var(--fg);color:var(--bg)}.secondary{background:transparent;color:var(--fg)}.quiet{background:transparent;color:var(--muted);border-color:transparent}
     .notice{color:var(--muted);font-size:.95rem}.number{font:2rem ui-monospace,monospace;letter-spacing:.2em}
     .qr{max-width:14rem;margin:1rem auto}.qr svg{width:100%;height:auto;display:block;border-radius:8px}
+    .ckey{max-width:17rem;margin:1.2rem auto}.ckey svg{width:100%;height:auto;display:block;border-radius:22px}a{color:inherit}
     """
 
     static let script = """

@@ -49,6 +49,10 @@ public final class AppModel {
     }
     /// Add business (+): from the Businesses directory or next to the selector; also opened by connect codes, QR and link sessions.
     public var addBusinessPresented = false
+    /// The camera scanner (Alerts and Businesses headers, Add business). It reads Viadere codes and QR codes; see `scanned(_:symbology:)`.
+    public var scannerPresented = false
+    /// A handle or code read by the scanner, for Add business to look up.
+    public var scannedLookup: String?
     /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
     public var presentedApproval: ApprovalViewModel? {
         didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
@@ -302,6 +306,26 @@ public final class AppModel {
     public func open(url: URL) async {
         guard let link = DeepLinkRouter.route(url) else { return }
         await handle(link)
+    }
+
+    /// A code read by the in-app scanner. `ScannedCodePolicy` is the only judge of what a scan may open; an accepted link takes the same
+    /// path as a tapped one, so it lands on a review screen and approves nothing. Returns the reason when the code was refused.
+    @discardableResult
+    public func scanned(_ payload: String, symbology: ScannedSymbology) async -> ScanRejection? {
+        switch ScannedCodePolicy.evaluate(payload, symbology: symbology) {
+        case .open(let link):
+            scannerPresented = false
+            await handle(link)
+            return nil
+        case .lookup(let text):
+            scannerPresented = false
+            selectedTab = .businesses
+            scannedLookup = text
+            addBusinessPresented = true
+            return nil
+        case .rejected(let reason):
+            return reason
+        }
     }
 
     public func handle(_ link: DeepLink) async {
