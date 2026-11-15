@@ -22,6 +22,8 @@ for tool in docker git gh cosign syft trivy; do command -v "$tool" >/dev/null ||
 cd "$(git rev-parse --show-toplevel)" || fail "run inside the repository"
 [ -z "$(git status --porcelain)" ] || fail "the working tree has changes: commit or stash them first (the image must match a commit)"
 SHA="$(git rev-parse HEAD)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 
 echo "== tag $TAG at $SHA"
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -56,10 +58,9 @@ publish() { # $1 = image name, $2 = Dockerfile
     *) fail "$1 was pushed as an index, not a single image (Docker Desktop: Settings > General, turn off the containerd image store, then retry)" ;;
   esac
   echo "== $1: SBOM and keyless signature (a browser window opens for the Sigstore sign-in)"
-  syft "registry:$ref" --platform linux/amd64 -o "spdx-json=sbom-$1.spdx.json" || fail "$1 SBOM"
+  syft "registry:$ref" --platform linux/amd64 -o "spdx-json=$WORK/sbom-$1.spdx.json" || fail "$1 SBOM"
   cosign sign --yes "$ref" || fail "$1 sign"
-  cosign attest --yes --type spdxjson --predicate "sbom-$1.spdx.json" "$ref" || fail "$1 SBOM attestation"
-  rm -f "sbom-$1.spdx.json"
+  cosign attest --yes --type spdxjson --predicate "$WORK/sbom-$1.spdx.json" "$ref" || fail "$1 SBOM attestation"
   echo "$1 $ref"
 }
 
