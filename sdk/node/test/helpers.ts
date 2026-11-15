@@ -41,25 +41,35 @@ export interface RecordedRequest {
   url: string;
   method: string;
   headers: Record<string, string>;
+  /** A JSON (string) body; `undefined` for none and for a raw body. */
   body: string | undefined;
+  /** A raw (bytes) body, as sent. */
+  bytes: Uint8Array | undefined;
   redirect: string;
 }
 
-export type Scripted = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
+/** `bytes` answers a raw body (an image download) instead of JSON. */
+export type Scripted = { status: number; body?: unknown; bytes?: Uint8Array; headers?: Record<string, string> } | Error;
 
 /** A fetch stand-in that answers from a script and records what was sent. */
 export function scriptedFetch(script: Scripted[]) {
   const requests: RecordedRequest[] = [];
-  const fetchFn = async (url: string, init: { method: string; headers: Record<string, string>; body?: string; redirect: "manual"; signal: AbortSignal }) => {
-    requests.push({ url, method: init.method, headers: init.headers, body: init.body, redirect: init.redirect });
+  const fetchFn = async (url: string, init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; redirect: "manual"; signal: AbortSignal }) => {
+    requests.push({ url, method: init.method, headers: init.headers, body: typeof init.body === "string" ? init.body : undefined,
+                    bytes: init.body instanceof Uint8Array ? init.body : undefined, redirect: init.redirect });
     const next = script.shift();
     if (next === undefined) throw new Error("script exhausted");
     if (next instanceof Error) throw next;
     const headers = new Map(Object.entries(next.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const text = next.body === undefined ? "" : JSON.stringify(next.body);
     return {
       status: next.status,
       headers: { get: (name: string) => headers.get(name.toLowerCase()) ?? null },
-      text: async () => (next.body === undefined ? "" : JSON.stringify(next.body)),
+      text: async () => (next.bytes !== undefined ? Buffer.from(next.bytes).toString("latin1") : text),
+      arrayBuffer: async () => {
+        const bytes = next.bytes ?? Buffer.from(text, "utf8");
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      },
     };
   };
   return { fetchFn, requests };

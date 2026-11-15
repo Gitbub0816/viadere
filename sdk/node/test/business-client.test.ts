@@ -119,10 +119,12 @@ const ROWS: Row[] = [
 const FLOW_TESTED = ["createApprovalEnrollment", "createLinkSession", "createVerificationSession", "createAuthApproval"];
 /** The auth-delivery operations of `client.test.ts`. */
 const DELIVERY_TESTED = ["createAuthDelivery", "getAuthDelivery", "cancelAuthDelivery", "completeAuthDelivery", "updateWebhook", "testAuthWebhook"];
+/** The raw-body image operations of `attachments.test.ts` (not JSON, so not in the table). */
+const ATTACHMENT_TESTED = ["uploadAttachment", "getAttachment"];
 
 describe("every operation: method, path, headers, body, idempotency, retries", () => {
   it("the table covers every route the SDK offers", () => {
-    const covered = new Set<string>([...ROWS.map((r) => r.op), ...FLOW_TESTED, ...DELIVERY_TESTED]);
+    const covered = new Set<string>([...ROWS.map((r) => r.op), ...FLOW_TESTED, ...DELIVERY_TESTED, ...ATTACHMENT_TESTED]);
     assert.deepEqual([...Object.keys(BUSINESS_ROUTES), ...Object.keys(ROUTES)].filter((op) => !covered.has(op)), []);
   });
 

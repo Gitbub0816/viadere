@@ -8,6 +8,7 @@ export {
   DEFAULT_RETRY,
   NO_RETRY,
   SDK_VERSION,
+  attachmentPrecheck,
   type CreateOptions,
   type CreateResult,
   type RetryPolicy,

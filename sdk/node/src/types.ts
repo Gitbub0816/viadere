@@ -464,14 +464,51 @@ export interface ConversationMessage {
   readAt?: Timestamp;
   deliveryStatus: "queued" | "sent" | "delivered" | "read" | "failed";
   interactionId?: Uuid;
+  /** Images sent with the message, in display order: metadata only. Fetch the bytes with `downloadAttachment`. */
+  attachments?: MessageAttachment[];
 }
+
+// ---- message attachments (SECURITY.md §2.113) ------------------------------------------------------------------------------------------------
+
+/** The only types an upload may declare and a stored image has (`MessageAttachmentPolicy.storedMediaTypes` in ViadereCore). */
+export const MESSAGE_ATTACHMENT_MEDIA_TYPES = ["image/png", "image/jpeg"] as const;
+export type MessageAttachmentMediaType = (typeof MESSAGE_ATTACHMENT_MEDIA_TYPES)[number];
+export const MESSAGE_ATTACHMENT_STATES = ["pending", "attached"] as const;
+/** Largest upload body: 2 MiB (`MessageAttachmentPolicy.maxUploadBytes`; the upload route's `maxLength` in `docs/openapi.yaml`). */
+export const MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+/** At most this many images per message (`MessageAttachmentPolicy.maxPerMessage`). */
+export const MESSAGE_ATTACHMENT_MAX_PER_MESSAGE = 4;
+/** Largest stored image (`MessageAttachmentPolicy.maxStoredBytes`): the most a download can be. */
+export const MESSAGE_ATTACHMENT_MAX_STORED_BYTES = 3 * 1024 * 1024;
+
+/** An image of a conversation: metadata only, never bytes and never a URL. */
+export interface MessageAttachment {
+  id: Uuid;
+  /** The one conversation the image belongs to; it can be sent and fetched only there. */
+  sessionId: Uuid;
+  /** The type of the stored, re-encoded image (never what the uploader declared). */
+  mediaType: MessageAttachmentMediaType;
+  byteSize: number;
+  width: number;
+  height: number;
+  /** Lowercase hex SHA-256 of the stored bytes the download returns. */
+  sha256: string;
+  state: (typeof MESSAGE_ATTACHMENT_STATES)[number];
+  /** When a pending upload stops being usable. */
+  expiresAt?: Timestamp;
+}
+
 export interface BusinessSendMessageRequest {
   relationshipId?: Uuid;
   subjectRef?: SubjectRef;
+  /** Required with `attachmentIds`: the conversation the images were uploaded to. */
   sessionId?: Uuid;
+  /** 1 to 1600 characters; may be empty when `attachmentIds` is present. */
   body: string;
   agentName?: string;
   idempotencyKey: string;
+  /** Pending images uploaded to `sessionId` (1 to 4, no duplicates), in display order. Part of the idempotency hash. */
+  attachmentIds?: Uuid[];
 }
 export interface BusinessStatusUpdateRequest {
   relationshipId?: Uuid;
@@ -726,9 +763,12 @@ export interface MessageReceivedData {
   relationshipId: Uuid;
   subjectRef?: SubjectRef;
   messageId: Uuid;
+  /** May be empty when the customer sent only images. */
   text: string;
   channel: InteractionChannel;
   receivedAt: Timestamp;
+  /** The customer's images as ids and metadata (never bytes, never a URL): fetch each with `downloadAttachment`. */
+  attachments?: MessageAttachment[];
 }
 export interface RelationshipEventData {
   relationshipId: Uuid;
@@ -1161,6 +1201,8 @@ export const BUSINESS_ROUTES = {
   getInteractionOutcome: { method: "GET", path: "/v1/business/interactions/{interactionId}" },
   cancelInteraction: { method: "POST", path: "/v1/business/interactions/{interactionId}/cancel" },
   sendMessage: { method: "POST", path: "/v1/business/messages" },
+  uploadAttachment: { method: "POST", path: "/v1/business/conversations/{sessionId}/attachments" },
+  getAttachment: { method: "GET", path: "/v1/business/conversations/{sessionId}/attachments/{attachmentId}" },
   updateStatus: { method: "POST", path: "/v1/business/statuses" },
   createSandboxRelationship: { method: "POST", path: "/v1/business/sandbox/relationships" },
   createApprovalEnrollment: { method: "POST", path: "/v1/business/approve/enrollments" },
