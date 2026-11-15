@@ -56,6 +56,14 @@ enum WebRoutes {
             response.headers.replaceOrAdd(name: .cacheControl, value: "public, max-age=3600")
             return response
         }
+        // Android App Links (SECURITY.md §2.114): generated from ANDROID_PACKAGE_NAME + ANDROID_CERT_SHA256_FINGERPRINTS; 404 until both are set.
+        routes.get(".well-known", "assetlinks.json") { req -> Response in
+            guard let data = assetLinks(req.ctx.config.android) else { throw APIError.notFound }
+            let response = Response(status: .ok, body: .init(data: data))
+            response.headers.contentType = .json
+            response.headers.replaceOrAdd(name: .cacheControl, value: "public, max-age=3600")
+            return response
+        }
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("c", ":code", use: connectPage)
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("v", ":code", use: verificationSessionPage)
         // Retired links (ADR-0027): `/l/…` and `/h/…` from texts sent by older builds. Nothing is looked up; the token is never read.
@@ -68,6 +76,18 @@ enum WebRoutes {
         // The pairing code's QR universal link (`/p/{code}`, SECURITY.md §2.107): the app of a device that is not enrolled handles it; in a browser
         // nothing is looked up, nothing is started and the code is not shown back.
         routes.grouped(IPRateLimitMiddleware(name: "web") { $0.rateLimits.directory }).get("p", ":code", use: devicePairingLinkPage)
+    }
+
+    /// The Digital Asset Links statement list: the app may open every https link of this host (`handle_all_urls`, the Android counterpart of the
+    /// AASA `applinks`) and share its passkeys (`get_login_creds`, the counterpart of `webcredentials`). `nil` = not configured.
+    static func assetLinks(_ android: AndroidSettings) -> Data? {
+        guard let packageName = android.packageName, !android.certificateFingerprints.isEmpty else { return nil }
+        let statement: [String: Any] = [
+            "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+            "target": ["namespace": "android_app", "package_name": packageName,
+                       "sha256_cert_fingerprints": android.certificateFingerprints.map(AndroidSettings.fingerprintText)] as [String: Any],
+        ]
+        return try? JSONSerialization.data(withJSONObject: [statement], options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
     // MARK: Pages

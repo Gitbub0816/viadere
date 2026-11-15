@@ -61,6 +61,14 @@ struct ApproveNotifier {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }
             }
+            await PushFanout(db: db, ctx: ctx).deliverToOtherProviders(deviceIds: Array(byDevice.keys)) { deviceId, _ in
+                guard let deliveryId = byDevice[deviceId] else { return nil }
+                let req = deliveryId.uuidString.lowercased()
+                return PushMessage(deviceToken: "", environment: .production, topic: ctx.config.appBundleID, title: PushPayloadBuilder.genericTitle,
+                                   body: "Action needed. Open to review a security request.", category: ApprovePushPayloadPolicy.category,
+                                   threadID: "viadere.approve", interruptionLevel: ApprovePushPayloadPolicy.interruptionLevel, mutableContent: true,
+                                   interactionId: nil, highPriority: true, collapseID: req, approveRequestId: req)
+            }
         } catch {
             // Best effort: the request stays available through the authenticated API.
         }

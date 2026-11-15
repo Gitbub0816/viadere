@@ -16,6 +16,22 @@ time** (Gradle resolved this time; 28/28 tests), with dependency locks and `veri
 `AndroidGradlePluginVersion` errors (Gradle 9.9.1 and AGP 9.5.1 are out; a toolchain upgrade for `sdk/android` and `Packages/android/viadere-verify`
 together), and the CLAUDE.md "Kotlin SDK" row still says "not yet built". Normative: [`SECURITY.md`](SECURITY.md) §2.101 "Email fallback", §2.112.
 
+**Platform seams: push providers, FCM, Play Integrity, assetlinks, OTLP export (2026-11-15, G26, G28).** The APNs sender now sits behind a
+`PushProvider` seam (unchanged; `PushProviderRouter` sends a token only through the provider it was registered for). FCM registration tokens go to a
+new `push_tokens` table (migration `PushTokens.v1`, additive; `apns_tokens` untouched; one provider per device). An FCM HTTP v1 sender (no Google SDK:
+service-account JWT-bearer OAuth with swift-crypto RS256 through the guarded outbound client) sends **data-only** messages carrying only the opaque
+ids the iOS pushes carry; it is behind `FCM_ENABLED` (default off; refused without `FCM_SERVICE_ACCOUNT_JSON` and `ANDROID_PACKAGE_NAME`) and wired
+for interaction pushes, security notices, Approve v2 requests and business-message notices. Android integrity: with `PLAY_INTEGRITY_ENABLED` and the
+owner's Play Console response keys, a classic Play Integrity token is decrypted and verified locally (A256KW/A256GCM JWE, ES256 JWS) and must carry the
+nonce of the same App Attest binding; without the keys the verifier stays the stub that never attests. `/.well-known/assetlinks.json` is generated
+from `ANDROID_PACKAGE_NAME` + `ANDROID_CERT_SHA256_FINGERPRINTS` (404 otherwise). OTLP/HTTP JSON export of request spans and the `/metrics`
+counters behind `OTEL_EXPORTER_OTLP_ENDPOINT` (off when unset; https only in staging/production) with a strict attribute and label allow-list
+(swift-otel 1.6.0 evaluated, not adopted: no new dependency). Normative: [`SECURITY.md`](SECURITY.md) §2.114. Open: the hardware key attestation
+chain (Google roots + revocation list) is not verified (WP-E1), so Play Integrity alone decides Android integrity and there is no per-device farming
+bound for Android; standard (non-classic) Play Integrity requests need Google's decode API (not built); Loop, Verify, pairing, operator-notice,
+auth-delivery and OIDC pushes are still APNs-only; the Android app does not exist yet. Owner: FCM service account, Play Integrity response keys,
+signing-certificate fingerprints, an https OTLP/HTTP collector.
+
 **Wallet credential status lists (2026-11-15, G24).** Verify (and profile verification) now checks an mdoc's issuer status list when the MSO names
 one (IETF Token Status List, draft-ietf-oauth-status-list-21, CWT form): fetched only from a host listed for that IACA
 (`WALLET_STATUS_LIST_HOSTS`) through the SSRF guard with address pinning and no redirects, signature verified to the **same** IACA, `lst`

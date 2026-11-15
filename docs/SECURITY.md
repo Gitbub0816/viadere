@@ -339,11 +339,11 @@ An account is created **by a device**: no name, email, phone, password or passke
    and attests the key list with the unchanged App Attest binding `VIADERE-APPATTEST-ENROLL-V1\n{accountId}\n{challenge}\n{keyListDigest}`.
 3. `POST /v1/accounts` (public; same budgets and switch, plus `accountCreateGlobal`) with `AccountCreateRequest {ceremonyId, challenge, platform, deviceName?, keys, integrity?, clientKind}` → `201 AccountCreateResponse {accountId, device, session}`. Checks, in order: every `algorithm` is `ES256` (`400`); key shape (exactly one key per purpose including `request`; an App Clip registers `request` only; `422`); the ceremony is open, unexpired and the challenge hash matches (constant time); every proof verifies over the reserved id (`401`, the same response for every ceremony or proof failure); integrity under `APP_ATTEST_MODE` (a reused App Attest key is unattested; `require` without a verified attestation is `403 attestation_required`); the per-bucket budget (`accountCreatePerBucket`: accounts per App Attest environment, or `unattested`, and client network, /24 IPv4 or /64 IPv6, per hour; `429`; refunded when creation does not happen). Only then is the ceremony consumed (compare-and-swap `open → used`), and one transaction creates the account, the device, its keys, the App Attest key and a token family **already bound to the device** (no fresh-session enrollment window; an App Clip session is capped at the device's 7-day expiry), and records `account.created`. Two concurrent creates on one ceremony create exactly one account. Fields a client adds (a name, an email, a phone, a tier) are not part of the contract and are dropped.
 
-**Integrity evidence** (`IntegrityEvidence`, platform-neutral): `{"format": "apple-app-attest", "keyId", "attestation"}` (the §2.5 App Attest fields), `{"format": "android-key-attestation", "certificateChain": [base64 DER…], "playIntegrityToken"?}`, or `{"format": "none"}`. The server dispatches on `format` and never reads one format's fields as another's. `android-key-attestation` goes to a stub verifier that **never** returns attested (until WP-E1); unknown formats are unattested (`unknown_format`). `POST /v1/devices` accepts `integrity` too (the older `appAttest` field still works; both present and different is `400`). Stored: `devices.integrity_format`, `app_attest_keys.format`.
+**Integrity evidence** (`IntegrityEvidence`, platform-neutral): `{"format": "apple-app-attest", "keyId", "attestation"}` (the §2.5 App Attest fields), `{"format": "android-key-attestation", "certificateChain": [base64 DER…], "playIntegrityToken"?}`, or `{"format": "none"}`. The server dispatches on `format` and never reads one format's fields as another's. `android-key-attestation` goes to `AndroidKeyAttestationVerifier`: the stub that **never** returns attested unless Play Integrity keys are configured (`PLAY_INTEGRITY_ENABLED`), and then only for a verified classic Play Integrity verdict bound to this enrollment (§2.114; the key attestation chain is not verified yet, WP-E1); unknown formats are unattested (`unknown_format`). `POST /v1/devices` accepts `integrity` too (the older `appAttest` field still works; both present and different is `400`). Stored: `devices.integrity_format`, `app_attest_keys.format`.
 
 **Key algorithm.** `DeviceKeyRegistration.algorithm` (absent = `ES256`, the only accepted value; anything else `400`). It is not part of the proof message or the key-list digest. Stored as `devices.key_algorithm`.
 
-**Push registration.** `POST /v1/push/apns-token` also accepts `PushRegistration {provider, token, environment?, appId}`; only `provider: "apns"` is accepted today (`fcm` and unknown providers are `422` and never stored where the APNs sender reads).
+**Push registration.** `POST /v1/push/apns-token` also accepts `PushRegistration {provider, token, environment?, appId}`; `apns` tokens go to `apns_tokens`; `fcm` tokens are accepted only while `FCM_ENABLED` is on and go to `push_tokens`, never where the APNs sender reads (§2.114); unknown providers, and `fcm` while FCM is off, are `422` and stored nowhere.
 
 **Tiers** (`ViadereCore/Policy/TrustTier.swift`, decided by the server only; `Device.trustTier` is informational):
 * **D0**: any registered device. Messaging, history, connecting, and deny/report on any request.
@@ -1196,7 +1196,7 @@ A business shows a "Verify with Viadere" button on its website or in its app. It
 
 **Hand-off (button behaviour, normative for all three platforms).** A phone or tablet opens the link **only through the Viadere app** (iOS `UIApplication.open(_:options: [.universalLinksOnly: true])`, Android `FLAG_ACTIVITY_REQUIRE_NON_BROWSER`; the web component on a phone follows the link and the OS hands it to the app, or the `/v/{CODE}` landing page offers the app); when that is not possible (a computer, or no app) the button shows **a code first** with "Choose another option": open on this device, enter the code in the app (`ABCD-EFGH`), send to my phone (only when the integrator enables it; the integrator's server then creates an ordinary verification request for an already-connected `subject_ref`, which Viadere pushes — the button itself never sends anything), get the app. Which code: the iOS and Android SDK buttons and version 1 of the web component (`verify-button/v1`, immutable, still served) show the link as a **QR code**. Version 2 of the web component (`verify-button/v2`) shows the **Viadere code** first (the link as a CKey, §2.104, lead "Scan with the Viadere app") and keeps the QR code one control away in the same view ("Use your phone's camera instead" / "Back to the Viadere code"), because a phone without the app can only read a QR code with its camera; in forced-colours mode it shows the QR code only. Both codes carry exactly the validated link and nothing else, so which code is shown changes nothing about what a scan can do (§2.104, "A code changes nothing about who is trusted"). The web component (both versions) makes no network requests, uses no storage, no `innerHTML`, no inline styles and no `eval`, renders only links matching `^https://(viadere\.com|viadere\.cksites\.dev)/v/[A-HJ-NP-Z2-9]{8}$`, and works under `default-src 'none'; script-src 'self'; style-src 'self'; require-trusted-types-for 'script'; trusted-types 'none'` (headless-browser tests `test_verify_button.py` and `test_verify_button_v2.py`; version 2 builds the CKey as SVG elements with attributes only, its gradient and filter ids suffixed with the panel's unique id). `VerifyButtonTests.testVersion1IsFrozen` pins the published v1 hashes. Its files are served like the connect button's: versioned, immutable, `Access-Control-Allow-Origin: *` without credentials, `nosniff`, `default-src 'none'`, an allow-list of file names and a published `integrity.json` for SRI. `/v/{CODE}` landing page: no lookup, no business name, `no-store`, a strict CSP; the AASA lists `/v/*`.
 
-**Residual risks.** (1) **Real-time relay phishing**: an attacker on a look-alike site starts a genuine session on the real business's site and shows its QR to the victim, who verifies for the attacker's browser session. Without proximity binding this is not preventable by the protocol; it is reduced by the five-minute single-use session, the origin shown in the app next to the verified business and domain, the explicit warning, the fact that the attacker gains only the business's acceptance of *that* browser session (no credential, no account link, no personal data beyond what the person consented to share with the real business), and the business's ability to bind the session to its own signed-in visitor on its server. Businesses must not treat a verification as an account login. (2) A typed code can be relayed the same way; it has the same bounds. (3) Accepting connects the account to the business (shown before acceptance); the connection follows the ordinary consent rules and can be ended at any time. (4) Android App Link hand-off needs a Viadere Android app and a `/.well-known/assetlinks.json` on the link domain; until both exist, Android phones get the QR-first panel. (5) A Wallet presentation made through a verification session goes through the same Verify request path, so the issuer status-list check and its fail mode of §2.60 ("Wallet credential status") apply unchanged; a status list can be up to an hour old.
+**Residual risks.** (1) **Real-time relay phishing**: an attacker on a look-alike site starts a genuine session on the real business's site and shows its QR to the victim, who verifies for the attacker's browser session. Without proximity binding this is not preventable by the protocol; it is reduced by the five-minute single-use session, the origin shown in the app next to the verified business and domain, the explicit warning, the fact that the attacker gains only the business's acceptance of *that* browser session (no credential, no account link, no personal data beyond what the person consented to share with the real business), and the business's ability to bind the session to its own signed-in visitor on its server. Businesses must not treat a verification as an account login. (2) A typed code can be relayed the same way; it has the same bounds. (3) Accepting connects the account to the business (shown before acceptance); the connection follows the ordinary consent rules and can be ended at any time. (4) Android App Link hand-off needs a Viadere Android app and a `/.well-known/assetlinks.json` on the link domain (served once `ANDROID_PACKAGE_NAME` and `ANDROID_CERT_SHA256_FINGERPRINTS` are configured, §2.114); until both exist, Android phones get the QR-first panel. (5) A Wallet presentation made through a verification session goes through the same Verify request path, so the issuer status-list check and its fail mode of §2.60 ("Wallet credential status") apply unchanged; a status list can be up to an hour old.
 
 ### 2.101 Authentication delivery and webhook signature v2 (ADR-0020, ADR-0021, ADR-0025, ADR-0031; `ViadereCore/AuthDelivery`, `ViadereCore/Security/WebhookSignatureV2.swift`, `Server/.../AuthDelivery`, `BusinessSDK/WebhooksSignatureV2.swift`; contract `contracts/openapi/auth-delivery-v1.yaml`)
 
@@ -1777,3 +1777,100 @@ sent, mismatching bytes never shown). `Infra/azure/tests/test_policy_check.py` `
 an immutability policy or container soft delete over 7 days fail the plan in both profiles; a public endpoint fails in standard and in lean
 without the subnet-only firewall and Entra-only access; a third identity, a broader api role, a worker with a built-in read/write role, an
 account-wide assignment or a deleter role with any other action fail.
+
+### 2.114 Platform seams: push providers, FCM, Android integrity, App Links and telemetry export (G26, G28; WP-E1, WP-E2, WP-F2; `Server/.../Push/PushProvider.swift`, `Push/FCMSender.swift`, `Security/PlayIntegrity.swift`, `Security/DeviceIntegrity.swift`, `Config/AndroidConfig.swift`, `Web/WebRoutes.swift` (assetlinks), `Operations/Telemetry.swift`; migration `PushTokens.v1`)
+
+**Push providers.** `PushProvider` (`kind`, `deliver(message, to: PushTarget)`) is the seam; the APNs sender (`APNsSender`, APNSwift) sits behind
+`APNsPushProvider` unchanged, and every existing APNs path still reads `apns_tokens` and calls it directly. `PushProviderRouter` hands a target only
+to the provider its token was **registered for** (`PushTarget.provider`): a token registered for APNs is never sent through FCM and the reverse; a
+provider that is not configured, or `unknown`, receives nothing. Tokens of other providers live in `push_tokens (id, consumer_id, device_id unique,
+provider, token, environment, app_id, updated_at, invalidated_at)` (WP-E2, additive; dual read: APNs from `apns_tokens`, others from
+`push_tokens`). **One provider per device**: an APNs registration deletes the device's `push_tokens` row and an FCM registration deletes its
+`apns_tokens` row (one transaction). Device revocation and account deletion delete both. Invalid-token feedback (`tokenInvalid`) sets
+`invalidated_at` on that row only. The non-APNs half (`PushFanout`) is wired for interaction pushes, security notices, Approve v2 requests and
+business-message notices; Loop, Verify, pairing, operator-notice, auth-delivery and OIDC sign-in pushes are APNs-only until the Android app needs them.
+
+**Registration.** `POST /v1/push/apns-token` with `PushRegistration {provider: "fcm", token, appId}`: `422 provider: unsupported` unless FCM is on
+(below); then `token` must be 32-4096 characters of `[A-Za-z0-9_:-]`, `appId` must equal `ANDROID_PACKAGE_NAME`, and `environment` must be absent
+(`422 token: invalid` otherwise). Unknown providers stay `422` and are stored nowhere.
+
+**FCM HTTP v1 sender** (`FCM_ENABLED`, default `false`). On requires `FCM_SERVICE_ACCOUNT_JSON` (a Google service-account key file: `type =
+service_account`, `project_id`, `client_email` ending `.iam.gserviceaccount.com`, an RSA `private_key`; `token_uri`, if present, must be
+`https://oauth2.googleapis.com/token`) and `ANDROID_PACKAGE_NAME`, else the boot is refused; credentials without the flag do nothing. No Google SDK:
+OAuth 2.0 JWT-bearer grant (RFC 7523) with an RS256 assertion `{iss: client_email, scope: "https://www.googleapis.com/auth/firebase.messaging",
+aud: token_uri, iat, exp = iat + 3600}` (header `kid` = `private_key_id`), signed with swift-crypto, posted through the server's outbound client
+(https only, identity-endpoint guard); the access token is cached until 60 s before expiry and dropped on `401`/`403`. Send:
+`POST https://fcm.googleapis.com/v1/projects/{project_id}/messages:send`. The sender refuses a target of another provider or another app id.
+Response `200` = delivered; `404`, an `UNREGISTERED` error code, or `400 INVALID_ARGUMENT` naming the registration token = invalid token; anything
+else = failed (best effort, the authenticated API stays the source of truth).
+
+**FCM payload (normative).** Data-only, exactly:
+```
+{"message": {"token": "<registration token>",
+             "data": {"v": "1", "kind": "<category>", ["iid" | "loopInstanceId" | "adl" | "req" | "ach"]: "<opaque id>"},
+             "android": {"priority": "HIGH" | "NORMAL", "ttl": "3600s", ["collapse_key": "<collapse id>"]}}}
+```
+`kind` is the iOS category (`viadere.*`); the ids are exactly the top-level ids of the corresponding APNs payload. No `notification`, `apns`,
+`webpush` or `fcm_options` block; no title, body, thread id, business name, amount or any other text: the Android app shows its own generic
+notification and fetches the content over the authenticated API. `HIGH` when the iOS push would be `immediately`, `NORMAL` when quiet hours or a
+quieter level made it passive. `FCMPushPayloadPolicy.isAllowed` (top level `message` only; data keys from the list above; every value an opaque id of
+1-128 characters of `[A-Za-z0-9._-]`; `kind` starting `viadere.`) is checked on every body before it is sent.
+
+**Android integrity.** `android-key-attestation` evidence (§2.5a) goes to `AndroidKeyAttestationVerifier`. Without Play Integrity keys
+(`PLAY_INTEGRITY_ENABLED`, default `false`) it is the **stub**: never `attested` (`verifier_not_implemented`), so an Android enrollment is refused
+under `APP_ATTEST_MODE=require` and D0 under `report`. On requires `PLAY_INTEGRITY_DECRYPTION_KEY` (base64 AES-256, a secret),
+`PLAY_INTEGRITY_VERIFICATION_KEY` (base64 DER P-256 public key), `ANDROID_PACKAGE_NAME` and `ANDROID_CERT_SHA256_FINGERPRINTS`, else the boot is
+refused. It then attests only a **classic** Play Integrity token (`playIntegrityToken`) that passes, in order: compact JWE with protected header
+`alg = A256KW`, `enc = A256GCM`, no `zip`, no `crit`, 12-byte IV, 16-byte tag, at most 16 KiB (`play_integrity_malformed`); AES key unwrap and
+AES-GCM open with the protected header as AAD (`play_integrity_decryption`); inner compact JWS `alg = ES256` verified with the configured key
+(`play_integrity_signature`); `requestDetails.requestPackageName` = the package (`play_integrity_package`); `requestDetails.nonce` (padding ignored,
+constant-time) = `base64url(AppAttestBinding.clientDataHash(accountId, challenge, keys))`, i.e. SHA-256 of the same binding App Attest signs
+(`play_integrity_nonce`); `requestDetails.timestampMillis` at most 300 s old and at most 60 s ahead (`play_integrity_stale`);
+`appIntegrity.appRecognitionVerdict = PLAY_RECOGNIZED` and `packageName` = the package (`play_integrity_app_not_recognized`); every
+`certificateSha256Digest` is one of the configured fingerprints (`play_integrity_certificate`); `deviceIntegrity.deviceRecognitionVerdict` contains
+`MEETS_DEVICE_INTEGRITY` or `MEETS_STRONG_INTEGRITY` (`play_integrity_device`). A token is bound to one single-use ceremony, so it cannot be reused. A
+verified result is `attested` with environment `play-integrity` (the per-bucket account budget's bucket) and **no** key id: Play Integrity names no
+hardware key, so nothing is recorded in `app_attest_keys`. App Clip enrollments never take Android evidence (`unsupported_client`). Standard
+(non-classic) requests need Google's `decodeIntegrityToken` API and are not supported. **Residual (WP-E1):** the hardware key attestation chain
+(`certificateChain`, to Google's roots with the revocation list) is size-checked and otherwise ignored, never trusted; the device's approval keys are
+therefore as client-claimed as the Secure Enclave claim on iOS, and there is no "one attestation key per device" farming bound for Android until it
+is verified. An Android device reaches D1 only with a verified verdict and the other §2.5a conditions; an unverifiable one never does.
+
+**App Links (`GET /.well-known/assetlinks.json`).** Served only when `ANDROID_PACKAGE_NAME` and `ANDROID_CERT_SHA256_FINGERPRINTS` (SHA-256 of
+the signing certificates, `AB:CD:…`, at most 10) are both set; otherwise `404`. Exact body (sorted keys, `application/json`,
+`Cache-Control: public, max-age=3600`):
+```
+[{"relation":["delegate_permission/common.handle_all_urls","delegate_permission/common.get_login_creds"],
+  "target":{"namespace":"android_app","package_name":"<package>","sha256_cert_fingerprints":["<AB:CD:…>", …]}}]
+```
+(`handle_all_urls` is the counterpart of the AASA `applinks`, `get_login_creds` of `webcredentials`.)
+
+**Telemetry export** (`OTEL_EXPORTER_OTLP_ENDPOINT`; unset = off and nothing is recorded). A minimal in-process OTLP/HTTP **JSON** exporter (OTLP
+1.x protobuf-JSON mapping: hex trace/span ids, 64-bit integers as decimal strings) posts `{endpoint}/v1/traces` and `{endpoint}/v1/metrics` every
+60 s and at shutdown, through Vapor's client behind the identity-endpoint guard; failures are dropped, never retried with old data. The endpoint must
+be `https` in `staging`/`production` (plain `http` refuses to boot there; allowed elsewhere for a local collector), with no user info, query or
+fragment; no `OTEL_EXPORTER_OTLP_HEADERS` is read, so no credential rides on this path. `swift-otel` (1.6.0, stable) was evaluated and not adopted:
+it pulls swift-protobuf (and gRPC by default) and bootstraps the process-global logging, metrics and tracing systems, whose Vapor integrations put raw
+paths and peer addresses into spans; the in-process exporter keeps the allow-list exhaustive and adds no dependency. **Spans:** one SERVER span per
+request with exactly `http.request.method`, `http.route` (the **route pattern**, e.g. `/v1/sessions/:sessionId`, `unmatched` when none matched;
+never the requested path) and `http.response.status_code`; status error for 5xx; fresh random ids (incoming `traceparent` is ignored); at most 2048
+waiting spans. **Metrics:** the `/metrics` counters (`viadere_http_responses_total{class}`, `viadere_security_events_total{event}`,
+`viadere_brand_asset_rejections_total{reason}`, `viadere_job_failures_total`) as cumulative sums and the database gauges as gauges. **Redaction
+(normative):** span attribute keys outside `{http.request.method, http.route, http.response.status_code}`, metric label keys outside `{class, event,
+reason}` and resource keys outside `{service.name}` are dropped; an allowed string value is dropped if it is empty or over 128 characters, non-ASCII,
+contains `@`, `?`, `=` or a newline, contains a UUID or a run of 7 or more digits, or would be changed by `LogRedactor` (tokens, keys, codes, phone
+numbers); a span name failing the same test becomes `request`. Request bodies, headers, tokens, codes, addresses, phone numbers, subject refs and
+identifiers therefore never leave the process.
+
+**Tests.** `PlatformSeamsTests`: the FCM body is data-only and carries only the opaque ids (no title, body, thread or business text) and the policy
+refuses a `notification` block, extra keys, text in an id or a non-`viadere.` kind; FCM is off by default and refused without credentials, without
+the package, with a non-Google `token_uri` or an unusable key; the sender's assertion verifies with the account key and has the exact claims, the
+access token is cached, `UNREGISTERED` is an invalid token, another app or provider is never sent; the router never crosses providers; an FCM
+registration is stored apart, replaces the device's APNs token, is delivered only through FCM while the APNs device gets only APNs, invalid-token
+feedback disables only that row, and FCM registration is `422` while off; Play Integrity: a valid synthetic token attests, and a wrong challenge,
+key, header, signer, package, nonce, age, recognition, certificate or device verdict each fails with its reason, the stub never attests a perfect
+token, the flag refuses to boot without its keys; under `require` an unsigned or wrong-nonce token, or a chain alone, is `403
+attestation_required` and a verified verdict creates a D1 device; assetlinks is `404` unconfigured (and with a package but no fingerprints) and its
+body is exact; telemetry is off by default, refuses plain `http` in strict environments (also through the boot path), forbidden attributes and
+personal-looking values are dropped from spans and labels, and an exported request span carries the route pattern, not the requested id. The existing
+`DeviceFirstAccountTests.testAndroidAndUnknownEvidenceIsNeverAttested` and every APNs payload test pass unchanged.

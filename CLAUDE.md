@@ -37,7 +37,7 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 8. **Exceptions are explicit and temporary.** Any component not on its current stable release must have a row in the table below with the reason and the condition for removing it. No silent version caps (`..<` upper bounds) without a matching row.
 9. **Keep this file true.** When you upgrade or add a component, update the "Current versions" table and the date in the same commit.
 
-### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then; Android and browser-test rows checked 2026-11-02; authority tier and Cloudflare provider rows 2026-11-02; CKey row 2026-11-14; Kotlin SDK row 2026-11-15)
+### Current versions (checked 2026-10-29; rows marked 2026-10-30 re-checked then; Android and browser-test rows checked 2026-11-02; authority tier and Cloudflare provider rows 2026-11-02; CKey row 2026-11-14; Kotlin SDK, FCM, Play Integrity and OpenTelemetry rows 2026-11-15)
 
 | Component | Required | Notes |
 |---|---|---|
@@ -55,6 +55,9 @@ Viadere handles authentication and payment approvals. Outdated runtimes, SDKs an
 | Python (tooling only) | 3.15.x | |
 | MailerSend API (partner) | v1 (`/v1/email`, `/v1/sms`) | Staging and production email and SMS (US/CA); Twilio remains a supported alternative |
 | Apple Wallet (partner) | PassKit web service `v1`, `pass.json` `formatVersion` 1, `relevantDates` (iOS 18) next to `relevantDate` (iOS 17 target) | Checked 2026-10-31 on Apple's documentation (`docs/WALLET.md`); update pushes over production APNs with the Pass Type ID certificate |
+| Firebase Cloud Messaging (partner) | HTTP v1 (`POST https://fcm.googleapis.com/v1/projects/{project}/messages:send`), OAuth 2.0 service-account JWT-bearer grant at `https://oauth2.googleapis.com/token`, scope `firebase.messaging` | Checked 2026-11-15 on Firebase's REST reference (the legacy API is retired; v1 is current). No Google SDK: `Server/.../Push/FCMSender.swift` signs RS256 with swift-crypto; `FCM_ENABLED` default off (SECURITY.md §2.114) |
+| Google Play Integrity (partner) | Classic requests, verdict decrypted and verified locally (JWE `A256KW`/`A256GCM`, JWS `ES256`) with the owner's response keys | Checked 2026-11-15 on developer.android.com (local decryption is offered for classic requests only; standard requests need the `decodeIntegrityToken` API, not built). `PLAY_INTEGRITY_ENABLED` default off |
+| OpenTelemetry export | OTLP 1.x over HTTP with the JSON encoding (`/v1/traces`, `/v1/metrics`; opentelemetry-proto v1.11.1 is the newest tag) | Checked 2026-11-15: no library. swift-otel 1.6.0 (newest stable tag) was evaluated and not adopted (pulls swift-protobuf and gRPC by default, bootstraps process-global logging/metrics/tracing whose Vapor spans carry raw paths and peer addresses); the server has its own minimal exporter with an allow-list (`Operations/Telemetry.swift`, SECURITY.md §2.114). Re-evaluate at each monthly refresh |
 | Xcode / iOS SDK | Xcode 27.1 (latest stable; 27.2 is RC) | `App/project.yml` `xcodeVersion: "2710"` |
 | OpenTofu | 1.13.2 | `Infra/terraform`, `Infra/azure`; CI downloads it checksum-pinned (`get.opentofu.org/tofu/api.json`) |
 | hashicorp/azurerm / azure/azapi (OpenTofu providers) | 5.12.0 / 2.13.0 | `Infra/azure/versions.tf`, exact pins; both served by `registry.opentofu.org` on 2026-10-29 |

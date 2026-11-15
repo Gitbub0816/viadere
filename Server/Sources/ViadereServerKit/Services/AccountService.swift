@@ -85,6 +85,7 @@ struct AccountService {
             // A device name ("Ana's iPhone") is personal data.
             try await DeviceRecord.query(on: tx).filter(\.$consumerId == id).set(\.$name, to: "Deleted device").update()
             try await LiveActivityTokenRecord.query(on: tx).filter(\.$consumerId == id).delete()
+            try await PushTokenRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await DeviceEnrollChallengeRecord.query(on: tx).filter(\.$consumerId == id).delete()
             try await PasskeyCredentialRecord.query(on: tx).filter(\.$consumerId == id).delete()
             // The synced credential vault (ciphertext, public keys, join requests) goes with the account.

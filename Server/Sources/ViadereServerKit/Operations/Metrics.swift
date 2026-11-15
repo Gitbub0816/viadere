@@ -105,6 +105,11 @@ final class MetricsRegistry: @unchecked Sendable {
 
     func value(_ event: Event) -> Int { lock.withLock { events[event] ?? 0 } }
 
+    /// The counters at one instant (the OTLP exporter's source, `Telemetry.swift`).
+    func lockedSnapshot() -> (events: [Event: Int], statusClasses: [String: Int], jobFailures: Int, brandRejections: [BrandAssetPolicy.Rejection: Int]) {
+        lock.withLock { (events, statusClasses, jobFailures, brandRejections) }
+    }
+
     /// The exposition text. `gauges` are computed from the database at scrape time by `MetricsService`.
     func render(gauges: [(name: String, help: String, value: Double)]) -> String {
         let (e, s, job, failures, rejections) = lock.withLock { (events, statusClasses, lastJobRun, jobFailures, brandRejections) }

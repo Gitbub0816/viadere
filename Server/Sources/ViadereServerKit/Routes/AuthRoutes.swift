@@ -127,11 +127,16 @@ enum DeviceRoutes {
             return try req.emptyOK()
         }
         routes.api(APIRoutes.apnsTokenRegister) { req in
-            // The platform-neutral body (`PushRegistration`, with `provider`) or the original APNs one. Only APNs is delivered today: an FCM
-            // (or unknown) provider's token is refused, never stored where the APNs sender would use it.
+            // The platform-neutral body (`PushRegistration`, with `provider`) or the original APNs one. APNs tokens go to `apns_tokens` (read by the
+            // APNs sender only); FCM tokens go to `push_tokens`, and only while FCM is configured (SECURITY.md §2.114). An unknown provider, or FCM
+            // while it is off, is refused and stored nowhere.
             let body: APNsTokenRegistration
             if (try? req.decodeBody(PushProviderProbe.self))?.provider != nil {
                 let neutral: PushRegistration = try req.decodeBody()
+                if neutral.provider == .fcm {
+                    try await AuthRoutes.registerFCM(neutral, req: req)
+                    return try req.emptyOK()
+                }
                 guard let apns = neutral.apnsRegistration else {
                     throw APIError.validation("This push provider is not supported yet.", details: ["provider": "unsupported"])
                 }
@@ -147,6 +152,8 @@ enum DeviceRoutes {
                 throw APIError.validation("The push token is not valid.", details: ["token": "invalid"])
             }
             let did = deviceId.uuid
+            // One provider per device: an APNs registration replaces an FCM one.
+            try await PushTokenRecord.query(on: req.db).filter(\.$deviceId == did).delete()
             if let existing = try await APNsTokenRecord.query(on: req.db).filter(\.$deviceId == did).first() {
                 existing.token = token
                 existing.environment = body.environment.rawValue
@@ -165,6 +172,44 @@ enum DeviceRoutes {
             let body: LiveActivityTokenRegistration = try req.decodeBody()
             try await LiveActivityService(db: req.db, ctx: req.ctx).register(principal: try req.consumer, body: body)
             return try req.emptyOK()
+        }
+    }
+}
+
+extension AuthRoutes {
+    /// An FCM registration token: 32 to 4096 characters of letters, digits, `-`, `_` and `:` (FCM's alphabet).
+    static func isFCMToken(_ token: String) -> Bool {
+        (32...4096).contains(token.count) && token.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ":") }
+    }
+
+    /// An FCM registration for the configured Android app, only while FCM is on (else the same `422` as any unsupported provider).
+    static func registerFCM(_ body: PushRegistration, req: Request) async throws {
+        let ctx = req.ctx
+        guard ctx.push.supports(.fcm), let packageName = ctx.config.android.packageName else {
+            throw APIError.validation("This push provider is not supported yet.", details: ["provider": "unsupported"])
+        }
+        let principal = try req.consumer
+        guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
+        guard isFCMToken(body.token), body.appId == packageName, body.environment == nil else {
+            throw APIError.validation("The push token is not valid.", details: ["token": "invalid"])
+        }
+        let did = deviceId.uuid
+        let consumerId = principal.consumerId.uuid
+        let now = ctx.now
+        try await req.db.transaction { tx in
+            // One provider per device: an FCM registration replaces an APNs one, so the APNs sender never picks this device up again.
+            try await APNsTokenRecord.query(on: tx).filter(\.$deviceId == did).delete()
+            if let existing = try await PushTokenRecord.query(on: tx).filter(\.$deviceId == did).first() {
+                existing.provider = PushRegistration.Provider.fcm.rawValue
+                existing.token = body.token
+                existing.environment = nil
+                existing.appId = body.appId
+                existing.updatedAt = now
+                existing.invalidatedAt = nil
+                try await existing.update(on: tx)
+            } else {
+                try await PushTokenRecord(consumerId: consumerId, deviceId: did, provider: .fcm, token: body.token, appId: body.appId, now: now).create(on: tx)
+            }
         }
     }
 }

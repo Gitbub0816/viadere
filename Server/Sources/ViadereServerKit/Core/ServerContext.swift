@@ -35,6 +35,10 @@ public final class ServerContext: Sendable {
     let queue: QueueRuntime
     public let limiter: RateLimiter
     public let apns: any APNsSender
+    /// Every configured push provider, by the provider a token was registered for (APNs always; FCM only with `FCM_ENABLED`). SECURITY.md §2.114.
+    public let push: PushProviderRouter
+    /// Request spans for the OTLP exporter (`OTEL_EXPORTER_OTLP_ENDPOINT`); records nothing while export is off.
+    let spans: SpanRecorder
     public let sms: any SMSProvider
     public let passkeys: any PasskeyVerifier
     public let webhookTransport: any WebhookTransport
@@ -64,7 +68,8 @@ public final class ServerContext: Sendable {
                 integrity: any DeviceIntegrityVerifier = UnconfiguredDeviceIntegrityVerifier(),
                 email: any EmailSender = DisabledEmailSender(), domains: (any DomainChecker)? = nil, outbound: (any OutboundHTTP)? = nil,
                 kms: (any KeyManagementService)? = nil, auditObjectStore: (any ObjectStore)? = nil, accessTokens: (any AccessTokenSource)? = nil,
-                queueTransport: (any QueueTransport)? = nil, tenantDestinationKeys: (any TenantDestinationKeyDirectory)? = nil) {
+                queueTransport: (any QueueTransport)? = nil, tenantDestinationKeys: (any TenantDestinationKeyDirectory)? = nil,
+                fcm: (any PushProvider)? = nil) {
         self.config = config
         self.clock = clock
         cipher = FieldCipher(key: config.dataEncryptionKey, keyId: config.operations.dataKeyId, previous: config.operations.previousDataKeys)
@@ -72,6 +77,8 @@ public final class ServerContext: Sendable {
         subjects = SubjectRefDeriver(key: config.subjectRefKey)
         limiter = RateLimiter(store: rateLimitStore, clock: clock)
         self.apns = apns
+        push = PushProviderRouter([APNsPushProvider(sender: apns)] + (fcm.map { [$0] } ?? []))
+        spans = SpanRecorder(enabled: config.telemetry.endpoint != nil)
         self.sms = sms
         self.passkeys = passkeys
         self.webhookTransport = webhookTransport

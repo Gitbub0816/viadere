@@ -85,9 +85,13 @@ public protocol DeviceIntegrityVerifier: Sendable {
     func verifyAssertion(_ assertion: Data, clientData: Data, publicKeyX963: Data, storedCounter: Int, clientKind: DeviceClientKind) throws -> Int
     /// Assesses a sensitive request (for example starting an SMS verification, which costs money) from `deviceId`.
     func assessSensitiveRequest(deviceId: DeviceID, purpose: String) async -> IntegrityVerdict
+    /// The Android verifier this verifier dispatches `android-key-attestation` evidence to. The default is the stub that never attests.
+    var android: AndroidKeyAttestationVerifier { get }
 }
 
 extension DeviceIntegrityVerifier {
+    public var android: AndroidKeyAttestationVerifier { AndroidKeyAttestationVerifier() }
+
     public func verifyEnrollment(integrity evidence: IntegrityEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration],
                                  clientKind: DeviceClientKind) async -> AttestationResult {
         guard let evidence else { return AttestationResult(attested: false, reason: "not_provided") }
@@ -97,7 +101,9 @@ extension DeviceIntegrityVerifier {
             guard let apple = evidence.appleAppAttest else { return AttestationResult(attested: false, reason: "malformed_object", format: evidence.rawFormat) }
             result = await verifyEnrollment(apple, consumerId: consumerId, challenge: challenge, keys: keys, clientKind: clientKind)
         case .androidKeyAttestation:
-            result = await AndroidKeyAttestationVerifier().verify(evidence.androidKeyAttestation, consumerId: consumerId, challenge: challenge, keys: keys)
+            // There is no Android App Clip: such evidence on an App Clip enrollment is never attested.
+            result = clientKind == .appClip ? AttestationResult(attested: false, reason: "unsupported_client")
+                : await android.verify(evidence.androidKeyAttestation, consumerId: consumerId, challenge: challenge, keys: keys)
         case .none:
             result = AttestationResult(attested: false, reason: "not_provided")
         case .unknown:
@@ -128,15 +134,47 @@ public struct UnconfiguredDeviceIntegrityVerifier: DeviceIntegrityVerifier {
     public func assessSensitiveRequest(deviceId: DeviceID, purpose: String) async -> IntegrityVerdict { .unverified }
 }
 
-/// Android hardware key attestation (+ Play Integrity) verifier: **a stub**. It never returns `attested`, whatever it is given, until the real
-/// verifier exists (key attestation chain to Google's roots with the revocation list, Play Integrity verdict decoded server-side, nonce =
-/// SHA-256 of the same binding as App Attest; WP-E1). Until then an Android enrollment is unattested: refused under `APP_ATTEST_MODE=require`,
-/// D0 under `report`.
+/// Android integrity verifier (SECURITY.md §2.5a, §2.114). Without Play Integrity keys (`PLAY_INTEGRITY_ENABLED` off, the default) it is **the
+/// fail-closed stub**: it never returns `attested`, whatever it is given, so an Android enrollment is unattested (refused under
+/// `APP_ATTEST_MODE=require`, D0 under `report`). With the keys it attests only a classic Play Integrity token that decrypts with the owner's AES key,
+/// verifies with the owner's P-256 key, names the configured package and signing certificate, says `PLAY_RECOGNIZED` and
+/// `MEETS_DEVICE_INTEGRITY` (or strong), is at most five minutes old, and carries the nonce `PlayIntegrityBinding.nonce` of **this** enrollment.
+/// The hardware key attestation chain (`certificateChain`, to Google's roots with the revocation list) is not verified yet (WP-E1): it is
+/// size-checked and otherwise ignored, never trusted.
 public struct AndroidKeyAttestationVerifier: Sendable {
-    public init() {}
+    let playIntegrity: PlayIntegrityVerifier?
+
+    /// The stub.
+    public init() { playIntegrity = nil }
+
+    public init(playIntegrity: PlayIntegrityVerifier?) { self.playIntegrity = playIntegrity }
+
+    /// The verifier for this configuration: the stub unless Play Integrity keys, the package and its certificates are all configured.
+    static func configured(_ config: ServerConfig, clock: any ServerClock) -> AndroidKeyAttestationVerifier {
+        guard let keys = config.android.playIntegrity, let packageName = config.android.packageName, !config.android.certificateFingerprints.isEmpty else {
+            return AndroidKeyAttestationVerifier()
+        }
+        return AndroidKeyAttestationVerifier(playIntegrity: PlayIntegrityVerifier(keys: keys, packageName: packageName,
+                                                                                  certificateFingerprints: config.android.certificateFingerprints, clock: clock))
+    }
 
     public func verify(_ evidence: AndroidKeyAttestationEvidence?, consumerId: ConsumerID, challenge: String, keys: [DeviceKeyRegistration]) async -> AttestationResult {
-        AttestationResult(attested: false, reason: evidence == nil ? "malformed_object" : "verifier_not_implemented",
-                          format: IntegrityEvidenceFormat.androidKeyAttestation.rawValue)
+        let format = IntegrityEvidenceFormat.androidKeyAttestation.rawValue
+        guard let evidence else { return AttestationResult(attested: false, reason: "malformed_object", format: format) }
+        guard let playIntegrity else { return AttestationResult(attested: false, reason: "verifier_not_implemented", format: format) }
+        guard evidence.certificateChain.count <= 10, evidence.certificateChain.allSatisfy({ $0.count <= 8 * 1024 }) else {
+            return AttestationResult(attested: false, reason: "malformed_object", format: format)
+        }
+        guard let token = evidence.playIntegrityToken, !token.isEmpty else {
+            return AttestationResult(attested: false, reason: "play_integrity_missing", format: format)
+        }
+        do {
+            try playIntegrity.verify(token: token, nonce: PlayIntegrityBinding.nonce(consumerId: consumerId, challenge: challenge, keys: keys))
+            return AttestationResult(attested: true, reason: "verified", environment: "play-integrity", format: format)
+        } catch let failure as PlayIntegrityVerifier.Failure {
+            return AttestationResult(attested: false, reason: failure.rawValue, format: format)
+        } catch {
+            return AttestationResult(attested: false, reason: PlayIntegrityVerifier.Failure.malformed.rawValue, format: format)
+        }
     }
 }

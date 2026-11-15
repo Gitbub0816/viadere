@@ -65,6 +65,14 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     } else {
         apns = DisabledAPNsSender()
     }
+    // FCM (SECURITY.md §2.114): only with FCM_ENABLED and a service account; the override is a test seam refused in staging and production.
+    var fcm: (any PushProvider)?
+    if let override = overrides.fcm {
+        guard !config.isStrict else { throw ServerConfigError.invalid("an FCM override in staging or production") }
+        fcm = override
+    } else if let account = config.android.fcm, let packageName = config.android.packageName {
+        fcm = try FCMHTTPv1Sender(account: account, packageName: packageName, http: outbound, now: { clock.now() })
+    }
     let sms: any SMSProvider
     if let override = overrides.sms { sms = override } else if let twilio = config.twilio {
         sms = TwilioProvider(config: twilio, client: client, logger: app.logger)
@@ -131,7 +139,8 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
                             domains: domains, outbound: outbound, kms: kms, auditObjectStore: auditStore, accessTokens: tokens,
-                            queueTransport: queueTransport, tenantDestinationKeys: overrides.tenantDestinationKeys ?? authorityTenantKeys(config: config, app: app, clock: clock))
+                            queueTransport: queueTransport, tenantDestinationKeys: overrides.tenantDestinationKeys ?? authorityTenantKeys(config: config, app: app, clock: clock),
+                            fcm: fcm)
     app.brandKits = BrandKitRuntime(store: try BrandKitRegistration.store(config: config, override: overrides.brandAssetStore, tokens: tokens, http: outbound,
                                                                           now: { clock.now() }),
                                     maxConcurrent: config.brandKits.maxConcurrentIngestions)
@@ -189,6 +198,8 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     app.middleware = Middlewares()
     app.middleware.use(SecurityHeadersMiddleware())
     app.middleware.use(MetricsMiddleware())
+    // Request spans for OTLP (SECURITY.md §2.114): method, route pattern and status only; records nothing while export is off.
+    app.middleware.use(TelemetryMiddleware())
     app.middleware.use(RequestLoggingMiddleware())
     // Origin lock (G-10): before routing, authentication and any database access. It answers 421 itself, so it sits outside the error mapper.
     app.middleware.use(EdgeLockMiddleware())
@@ -206,6 +217,13 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
 
     if let port = config.operations.metricsPort {
         app.lifecycle.use(InternalMetricsServer(host: config.operations.metricsHost, port: port, token: config.operations.metricsToken) { [app] in await MetricsService(db: app.db, ctx: app.ctx).render() })
+    }
+    if let endpoint = config.telemetry.endpoint, config.role != .migrate {
+        let transport = overrides.otlpHTTP ?? OTLPHTTPTransport(client: app.client, destinationGuard: destinationGuard,
+                                                                allowPlainHTTP: !config.isStrict && endpoint.scheme?.lowercased() == "http")
+        app.lifecycle.use(OTLPExporter(settings: config.telemetry, http: transport, spans: app.ctx.spans, metrics: app.ctx.metrics) { [app] in
+            await MetricsService(db: app.db, ctx: app.ctx).gauges()
+        })
     }
     if config.runBackgroundJobs, config.role != .migrate { app.lifecycle.use(BackgroundJobRunner(interval: .milliseconds(Int(config.jobIntervalSeconds * 1000)))) }
     // Process roles (ADR-0010): the api publishes the outbox right after commits; the worker also consumes every queue.
@@ -248,6 +266,10 @@ public struct Overrides: Sendable {
     public var attachmentStore: (any ObjectStore)?
     /// Authority-published tenant destination keys (ADR-0031). `nil` = none known (business-mode magic links fail closed until Stage 6).
     public var tenantDestinationKeys: (any TenantDestinationKeyDirectory)?
+    /// The FCM provider (tests). `nil` = `FCMHTTPv1Sender` when `FCM_ENABLED` is on, else none. Refused in staging and production.
+    public var fcm: (any PushProvider)?
+    /// The OTLP transport (tests). `nil` = the outbound HTTPS client when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+    public var otlpHTTP: (any OutboundHTTP)?
     /// The private authority (ADR-0019 §4). `nil` = HTTPS to `AUTHORITY_URL` with a managed-identity token when OIDC is on; tests run the authority in process.
     public var authorityTransport: (any AuthorityTransport)?
 

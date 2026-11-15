@@ -58,6 +58,15 @@ EXEMPT = {
     "REQUEST_SIGNATURE_AUTHORITIES": "optional: defaults to the host of PUBLIC_BASE_URL (SECURITY.md 2.112); set in app_env to accept more hosts",
     "ATTACHMENT_DIRECTORY": "development only; refused in staging/production (Azure uses AZURE_ATTACHMENT_BLOB_*)",
     "WALLET_STATUS_LIST_HOSTS": "only when Verify's Wallet method is enabled: plain configuration in app_env then (issuer status-list hosts)",
+    "ANDROID_PACKAGE_NAME": "only once an Android app exists (SECURITY.md 2.114): plain configuration in app_env then",
+    "ANDROID_CERT_SHA256_FINGERPRINTS": "only once an Android app exists: plain configuration in app_env then (public certificate fingerprints)",
+    "FCM_ENABLED": "default false (SECURITY.md 2.114); set in app_env with the Android app",
+    "FCM_SERVICE_ACCOUNT_JSON": "only with FCM_ENABLED: add to app_secret_env (Key Vault secret) then",
+    "PLAY_INTEGRITY_ENABLED": "default false (SECURITY.md 2.114); set in app_env with the Android app",
+    "PLAY_INTEGRITY_DECRYPTION_KEY": "only with PLAY_INTEGRITY_ENABLED: add to app_secret_env (Key Vault secret) then",
+    "PLAY_INTEGRITY_VERIFICATION_KEY": "only with PLAY_INTEGRITY_ENABLED: public key, plain configuration in app_env then",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "unset = export off (SECURITY.md 2.114); an https OTLP/HTTP collector in app_env when one exists",
+    "OTEL_SERVICE_NAME": "optional; defaults to viadere-server",
     "AUTH_EMAIL_FALLBACK_ENABLED": "default false; refused in staging/production until the email-fallback gate (ledger L-8) is recorded",
 }
 # Names the server reads that are not in .env.example.

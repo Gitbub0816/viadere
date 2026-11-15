@@ -77,10 +77,13 @@ public struct AppAttestVerifier: DeviceIntegrityVerifier {
     let environment: AppAttestEnvironment
     let roots: [Certificate]
     let clock: any ServerClock
+    /// Android evidence goes here (the stub unless Play Integrity is configured, SECURITY.md §2.114).
+    public let android: AndroidKeyAttestationVerifier
 
     /// `trustedRoots` is a test seam: production code builds the verifier with `AppAttestVerifier.apple(...)`, whose only root is Apple's.
     init(teamID: String, appBundleID: String, clipBundleID: String, environment: AppAttestEnvironment, trustedRoots: [Certificate],
-         clock: any ServerClock) {
+         clock: any ServerClock, android: AndroidKeyAttestationVerifier = AndroidKeyAttestationVerifier()) {
+        self.android = android
         self.teamID = teamID
         self.appBundleID = appBundleID
         self.clipBundleID = clipBundleID
@@ -92,7 +95,8 @@ public struct AppAttestVerifier: DeviceIntegrityVerifier {
     /// The production verifier: trusts only Apple's App Attestation Root CA (fingerprint-checked).
     static func apple(config: ServerConfig, clock: any ServerClock) throws -> AppAttestVerifier {
         AppAttestVerifier(teamID: config.appleTeamID, appBundleID: config.appBundleID, clipBundleID: config.appClipBundleID,
-                          environment: config.appAttestEnvironment, trustedRoots: [try AppleAppAttestRoot.certificate()], clock: clock)
+                          environment: config.appAttestEnvironment, trustedRoots: [try AppleAppAttestRoot.certificate()], clock: clock,
+                          android: AndroidKeyAttestationVerifier.configured(config, clock: clock))
     }
 
     static let nonceExtensionOID: ASN1ObjectIdentifier = [1, 2, 840, 113635, 100, 8, 2]

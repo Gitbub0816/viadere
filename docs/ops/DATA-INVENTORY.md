@@ -53,6 +53,7 @@ keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodi
 | `rate_limit_buckets` | limiter keys (IP /64, hashes), tokens | OPS | P (IP) | | Purged when refilled/expired (job loop) | keys hold client IPs |
 | `security_notices` | in-app security notices | SEC | P | none | Until account deletion | |
 | `apns_tokens` | APNs device tokens | OPS | P | none | Dropped when APNs reports invalid; with account | tokens are personal data |
+| `push_tokens` | Push tokens of providers other than APNs (FCM registration tokens, Android) | OPS | P | none | Invalidated when the provider reports the token invalid; deleted on device revocation, on re-registration with another provider and with the account (SECURITY.md §2.114) | tokens are personal data |
 | `live_activity_tokens`, `live_activity_starts` | Live Activity push tokens, activity keys | OPS | P | none | Dropped when APNs invalidates | |
 | `webhook_subscriptions` | business URL, **secret ciphertext** (+ previous) | SEC | | E | Until deleted by the business | |
 | `webhook_deliveries` | event body (**ciphertext**), status, attempts | SMP | P | E | Succeeded/dead rows deleted after `WEBHOOK_RETENTION_DAYS` (30); bodies mentioning a deleted consumer scrubbed | |
