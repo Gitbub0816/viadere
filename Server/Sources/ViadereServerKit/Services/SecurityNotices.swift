@@ -18,6 +18,7 @@ struct SecurityNotices {
         case recoveryCredentialAdded
         case businessLinked, businessLinkUnconfirmed
         case phoneTransferRequested, phoneUnlinked, phoneTransferred
+        case devicePairingReported
 
         var kind: SecurityNoticeTopic {
             switch self {
@@ -51,6 +52,7 @@ struct SecurityNotices {
             case .recoveryCredentialAdded: .recoveryCredentialAdded
             case .businessLinked: .businessLinked
             case .businessLinkUnconfirmed: .businessLinkUnconfirmed
+            case .devicePairingReported: .devicePairingReported
             }
         }
 
@@ -116,6 +118,8 @@ struct SecurityNotices {
                 "A business linked your Viadere account to your account with them. If this wasn't you, open Viadere, disconnect the business and contact it."
             case .businessLinkUnconfirmed:
                 "A business never confirmed the link you started, so Viadere ended it. If you didn't just link a business, open Viadere and review your businesses."
+            case .devicePairingReported:
+                "Someone tried to add a device to your Viadere account and you said it wasn't you. Nothing was added. Review your devices in Viadere."
             case .delegationEnded:
                 "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
             }

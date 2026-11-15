@@ -465,6 +465,19 @@ public struct RateLimitSettings: Sendable {
     public var accountCreateGlobal: RateRule = .perHour(3000, burst: 300)
     /// Accounts created per App Attest environment (or "unattested") and network (/24 IPv4, /64 IPv6) per hour: the anti-farming budget.
     public var accountCreatePerBucket: RateRule = .perHour(20, burst: 10)
+    /// Device pairing (§2.105), all fail closed (`device-pairing*`). Ceremonies a client network may open per hour.
+    public var devicePairingBeginPerIP: RateRule = .perHour(30, burst: 10)
+    /// Pairings a client network may start per hour (each start also spends the code it names).
+    public var devicePairingStartPerIP: RateRule = .perHour(10, burst: 5)
+    /// Pairings an account may receive per rolling 24 hours, whatever their outcome (the key-log device add's cap, ADR-0033 §4.1 item 3):
+    /// it also bounds a relay's chance to hit the comparison code (≤ 5 × 10^-6 per account per day).
+    public var devicePairingStartPerAccount: RateRule = RateRule(capacity: 5, perMinute: 5.0 / 1440)
+    /// Pairing codes an account may create per hour.
+    public var devicePairingInvitePerAccount: RateRule = .perHour(10, burst: 5)
+    /// Approval attempts per account per hour (wrong numbers included).
+    public var devicePairingApprovePerAccount: RateRule = .perHour(30, burst: 10)
+    /// Status polls and cancels per client network per minute (the new device polls every few seconds while it waits).
+    public var devicePairingStatusPerIP: RateRule = .perMinute(60, burst: 30)
 
     public static let standard = RateLimitSettings(
         globalIP: .perMinute(300), authCeremony: .perMinute(20, burst: 10), refresh: .perMinute(30, burst: 10),

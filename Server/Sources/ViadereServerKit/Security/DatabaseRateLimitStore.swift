@@ -33,6 +33,8 @@ public struct DatabaseRateLimitStore: RateLimitStore {
         "authdl-", "authlink-", "bizsig-", "authority-",
         // The staging OpenID provider (ADR-0024 section 4): challenge creation per client IP and per client, device evidence.
         "oidc-",
+        // Device pairing (§2.105): begin, start, status, invitations and approvals.
+        "device-pairing",
     ]
 
     let database: @Sendable () -> (any Database)?
