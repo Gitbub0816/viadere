@@ -43,6 +43,30 @@ export * from "./webhooks-v1.js";
 export * as schemas from "./schemas.js";
 export { assertValidRequest, validateRequest, pathParameter, MAX_REQUEST_BODY_BYTES, type Problem } from "./validation.js";
 export { LINK_STEP_UP_WINDOW_MS } from "./client.js";
+export {
+  BODILESS_COMPONENTS,
+  BODY_COMPONENTS,
+  HttpSignatureError,
+  SIGNATURE_ALGORITHM,
+  SIGNATURE_LABEL,
+  SIGNATURE_MAX_AGE_SECONDS,
+  SIGNATURE_MAX_FUTURE_SKEW_SECONDS,
+  SIGNATURE_MAX_LIFETIME_SECONDS,
+  SIGNATURE_NONCE_TTL_SECONDS,
+  SIGNATURE_TAG,
+  requestContentDigest,
+  signRequest,
+  signatureAuthority,
+  signatureBase,
+  signingKeyProof,
+  splitTarget,
+  verifyHttpSignature,
+  type RegisteredSigningKey,
+  type RequestSigningKey,
+  type SignRequestInput,
+  type SignedRequest,
+  type VerifyHttpSignatureOptions,
+} from "./http-signatures.js";
 export type {
   ApprovalEnrollmentInvitation,
   AuthApprovalDraft,

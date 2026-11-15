@@ -49,7 +49,7 @@ enum DashboardFormat {
         "paused": "Endpoint paused.", "resumed": "Endpoint resumed.", "verified": "Endpoint verified.", "test": "Test event queued.",
         "sandbox": "Sandbox customer created.", "reply": "Simulated reply queued.", "saved": "Saved.", "session": "Session signed out.",
         "approved-change": "Approved.", "rejected-change": "Rejected.", "cancelled": "Cancelled.", "ticket": "Ticket received.", "requested": "Request received.",
-        "cert": "Certificate saved.", "cert-removed": "Certificate removed.", "switch": "Switch updated.", "frozen": "Account frozen and signed out.",
+        "cert": "Certificate saved.", "cert-removed": "Certificate removed.", "sigkey": "Signing key registered.", "sigkey-revoked": "Signing key revoked.", "switch": "Switch updated.", "frozen": "Account frozen and signed out.",
         "unfrozen": "Account unfrozen.", "notice": "Notice queued for delivery.", "revoked-all": "Keys revoked.", "hold": "Legal hold recorded.",
         "root-authorized": "Root key change authorized for 15 minutes. Publish the signed entry from your tooling now.", "golive-approved": "Production access approved.", "golive-rejected": "Request declined.", "reviewed": "Review recorded.",
         "profile-requested": "Profile change sent for Viadere's review. Customers keep seeing the current profile until it is approved.",

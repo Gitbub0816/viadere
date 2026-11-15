@@ -12,6 +12,14 @@ private struct CertificateForm: Content {
     var fingerprint: String?
     var kind: String?
 }
+private struct SigningKeyForm: Content {
+    var label: String
+    var apiKey: String
+    var publicKey: String
+    var challenge: String
+    var proof: String
+    enum CodingKeys: String, CodingKey { case label, apiKey = "api_key", publicKey = "public_key", challenge, proof }
+}
 private struct AlertsForm: Content {
     var topics: [String]?
     var contacts: String?
@@ -68,6 +76,20 @@ enum ConsoleSecurity {
             try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).setMTLSRequired(form.enabled == "1")
             return DashboardResponses.redirect("/dashboard/security/certificates?m=saved")
         }
+        pages.get("dashboard", "security", "signing-keys") { req in try await signingKeysPage(req) }
+        pages.post("dashboard", "security", "signing-keys") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            let form = try req.content.decode(SigningKeyForm.self)
+            guard let apiKeyId = UUID(uuidString: form.apiKey) else { throw APIError.validation("Choose an API key.", details: ["api_key": "invalid"]) }
+            _ = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).addSigningKey(apiKeyId: apiKeyId, label: form.label, publicKey: form.publicKey,
+                                                                                                challenge: form.challenge, proof: form.proof)
+            return DashboardResponses.redirect("/dashboard/security/signing-keys?m=sigkey")
+        }
+        pages.post("dashboard", "security", "signing-keys", ":id", "revoke") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).revokeSigningKey(id: try req.uuid("id"))
+            return DashboardResponses.redirect("/dashboard/security/signing-keys?m=sigkey-revoked")
+        }
         pages.get("dashboard", "security", "alerts") { req in try await alertsPage(req) }
         pages.post("dashboard", "security", "alerts") { req -> Response in
             let (p, _) = try req.businessDashboard
@@ -111,6 +133,7 @@ enum ConsoleSecurity {
         let sessions = try await SessionSecurity(db: req.db, ctx: req.ctx).active(businessId: businessId, userId: nil, currentSession: p.session.id)
         let certs = try await MTLSCertificates(db: req.db, ctx: req.ctx).list(businessId: businessId).filter { $0.isActive(at: req.ctx.now) }
         let contacts = try await SecuritySettings(db: req.db, ctx: req.ctx).contacts(businessId: businessId)
+        let signingKeys = try await RequestSigningKeys(db: req.db, ctx: req.ctx).list(businessId: businessId).filter { $0.revokedAt == nil }.count
         let tiles = ConsoleUI.stats([
             ConsoleUI.Stat(String(sessions.count), "Active console sessions", href: "/dashboard/security/sessions"),
             ConsoleUI.Stat("\(unrestricted) / \(keys.count)", "Keys without IP or certificate limits", tone: unrestricted > 0 && keys.contains(where: \.livemode) ? .warning : nil),
@@ -126,6 +149,7 @@ enum ConsoleSecurity {
             + item(.success, .clock, "Sensitive actions", "\(settings.privilegedInactivitySeconds) s", "They ask for your passkey again and stop working after this much inactivity.", "/dashboard/security/network", "Change")
             + item(settings.consoleIPAllowlist.isEmpty ? .neutral : .success, .lock, "Console network", settings.consoleIPAllowlist.isEmpty ? "Anywhere" : "Allow-list", "Restrict the console to your networks.", "/dashboard/security/network", "Manage")
             + item(certs.isEmpty ? .neutral : .success, .document, "Client certificates", settings.mtlsRequired ? "Required" : "\(certs.count) active", "Mutual TLS for enterprise API clients.", "/dashboard/security/certificates", "Manage")
+            + item(signingKeys == 0 ? .neutral : .success, .key, "Request signing", "\(signingKeys) active", "RFC 9421 signatures that let a live key send sign-in prompts without mutual TLS.", "/dashboard/security/signing-keys", "Manage")
             + item(settings.twoPersonRequired ? .success : .neutral, .users, "Two-person approval", settings.twoPersonRequired ? "On" : "Off", "Keys and roles need a second person.", "/dashboard/security/approvals", "Manage")
             + item(contacts.isEmpty ? .warning : .success, .megaphone, "Alerts and contacts", contacts.isEmpty ? "No contact" : "\(contacts.count) contact\(contacts.count == 1 ? "" : "s")",
                    "New-device sign-ins, key and role changes, webhook and assurance notices by email.", "/dashboard/security/alerts", "Manage")
@@ -225,6 +249,47 @@ enum ConsoleSecurity {
                         + ConsoleUI.formActions(ConsoleUI.button("Save", .secondary, passkey: true) + ConsoleUI.passkeyNote()))) + "</div>"
         }
         return DashboardUI.businessPage(p, title: "Client certificates", active: "/dashboard/security/certificates", subtitle: "Mutual TLS for enterprise API clients.", flash: DashboardFormat.flash(req), body: body)
+    }
+
+    // MARK: Request signing (SECURITY §2.112)
+
+    private static func signingKeysPage(_ req: Request) async throws -> Response {
+        let (p, businessId) = try req.businessDashboard
+        try p.require(.viewSecurity)
+        let service = RequestSigningKeys(db: req.db, ctx: req.ctx)
+        let keys = try await service.list(businessId: businessId)
+        let allAPIKeys = try await BusinessAPIKeyRecord.query(on: req.db).filter(\.$businessId == businessId).sort(\.$createdAt, .descending).all()
+        let usable = allAPIKeys.filter { $0.isUsable(at: req.ctx.now) && $0.rotatedTo == nil }
+        let names = Dictionary(allAPIKeys.compactMap { k in k.id.map { ($0, k) } }, uniquingKeysWith: { a, _ in a })
+        let manage = p.can(.manageSecurity)
+        let rows = keys.map { k -> [ConsoleUI.Cell] in
+            let status = k.revokedAt != nil ? DashboardFormat.badge("Revoked", "mu") : DashboardFormat.badge("Active", "ok")
+            let apiKey = names[k.apiKeyId].map { "\($0.name) (\($0.livemode ? "live" : "test"), \($0.kid ?? "•••" + $0.last4))" } ?? "—"
+            let revoke = manage && k.revokedAt == nil
+                ? ConsoleUI.confirm("Revoke", ariaLabel: "Revoke \(k.label)", "<form method=\"post\" action=\"/dashboard/security/signing-keys/\(k.id?.uuidString.lowercased() ?? "")/revoke\">\(DashboardUI.csrf(p))"
+                    + "<p>Requests signed with this key are refused at once. Live sign-in prompts from its API key then need another signing key or mutual TLS.</p><button class=\"btn dd sm\" type=\"submit\" aria-label=\"Revoke \(DashboardUI.esc(k.label))\">\(ConsoleUI.icon(.key))Revoke</button></form>") : ""
+            return [.text(k.label), ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(k.keyid))</code>"), .text(apiKey), ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(String(k.fingerprint.prefix(16))))…</code>"),
+                    .date(k.createdAt), ConsoleUI.Cell(html: k.lastUsedAt.map(DashboardFormat.day) ?? "—", sort: k.lastUsedAt.map { .date($0) }), ConsoleUI.Cell(html: status), ConsoleUI.Cell(html: revoke)]
+        }
+        var body = ConsoleUI.card("Signing keys", description: "A live API key needs an HTTP message signature (RFC 9421) or mutual TLS to send sign-in prompts and approvals. You keep the private key, ideally in a KMS or HSM; Viadere stores only the public key, bound to one API key. Rotating that API key carries the binding over.",
+                                  ConsoleUI.table([ConsoleUI.Column("Label", key: "label"), ConsoleUI.Column("Key id"), ConsoleUI.Column("API key"), ConsoleUI.Column("Fingerprint"),
+                                                   ConsoleUI.Column("Added", key: "added"), ConsoleUI.Column("Last used", key: "used"), ConsoleUI.Column("Status"), ConsoleUI.Column("", actions: true)],
+                                                  rows, caption: "Request-signing keys", state: ConsoleUI.TableState(req, id: "s"), empty: "No signing keys yet."))
+        if manage, let first = usable.first?.id, let userId = p.user.id {
+            // The proof binds the API key, so each API key has its own challenge.
+            let choices = usable.compactMap { k in k.id.map { ConsoleUI.Choice($0.uuidString.lowercased(), "\(k.name) (\(k.livemode ? "live" : "test"))", help: k.kid.map { "Key id \($0)" }) } }
+            let perKey = usable.compactMap { k in k.id.map { "<li>\(DashboardUI.esc(k.name)): <code>\(DashboardUI.esc(service.challenge(businessId: businessId, apiKeyId: $0, userId: userId)))</code></li>" } }.joined()
+            body += ConsoleUI.card("Register a signing key", description: "Generate a P-256 key pair where it will live, sign the challenge of the API key you choose (the SDKs have a helper: HTTPSigningKeyProof.prove in Swift, signingKeyProof in Node), and paste the public key and the proof. Never paste a private key. A challenge works once, for 15 minutes.",
+                ConsoleUI.form("/dashboard/security/signing-keys", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.input("label", label: "Label", id: "label", required: true, attrs: ["maxlength": "64"])
+                    + ConsoleUI.choices("api_key", legend: "API key it signs for", choices, selected: first.uuidString.lowercased())
+                    + "<p class=\"sm\">Challenge to sign, per API key:</p><ul class=\"sm\">\(perKey)</ul>"
+                    + ConsoleUI.input("challenge", label: "The challenge you signed", id: "challenge", required: true, attrs: ["maxlength": "120", "spellcheck": "false"])
+                    + ConsoleUI.textarea("public_key", label: "Public key (base64url X9.63 or PEM)", id: "public_key", placeholder: "-----BEGIN PUBLIC KEY-----", required: true, attrs: ["maxlength": "1000", "spellcheck": "false"])
+                    + ConsoleUI.input("proof", label: "Proof (base64url signature over the challenge)", id: "proof", required: true, attrs: ["maxlength": "200", "spellcheck": "false"])
+                    + ConsoleUI.formActions(ConsoleUI.button("Register key", passkey: true) + ConsoleUI.passkeyNote())))
+        }
+        return DashboardUI.businessPage(p, title: "Request signing", active: "/dashboard/security/signing-keys", subtitle: "RFC 9421 signatures for live API calls.", flash: DashboardFormat.flash(req), body: body)
     }
 
     // MARK: Alerts and contacts

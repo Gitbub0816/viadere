@@ -1202,7 +1202,7 @@ A business shows a "Verify with Viadere" button on its website or in its app. It
 
 Viadere is a **transport** for a business's magic link, a partner-generated one-time code or a security notice. It never verifies the result: **OPENED is never authentication success**; only the business's own `complete` call (`succeeded` or `failed`) finishes a delivery, and only from `opened`. There is no SMS channel for any auth method (the channel enum has no `sms` member; owner decisions 1 and 9) and no route that verifies an OTP or TOTP. Everything is behind `AUTH_DELIVERY_ENABLED` (default **off** in staging and production; off = every route `404`, queue handlers inert).
 
-**Tenant and credentials.** The tenant is the API key's business, never a body member: `tenant_id`, `audience` and any other unknown member (also nested) is `422`; duplicate JSON members, bodies over 16 KiB and `otpauth` in any field (any case, also after one percent-decode) are `422`. A foreign delivery id is `404` with the body of an unknown one and an audit event `auth_delivery.cross_tenant_refused`. A live key needs mutual TLS on these routes (`AUTH_LIVE_KEY_ASSURANCE=mtls`, mandatory in staging and production; `401 signature_required` otherwise); RFC 9421 request signatures are not implemented yet. Test keys reach sandbox customers only. Unknown customer, no eligible app device (App Clip, revoked, expired), inactive relationship, missing consent and approval freeze are the **same** `404 not_deliverable`.
+**Tenant and credentials.** The tenant is the API key's business, never a body member: `tenant_id`, `audience` and any other unknown member (also nested) is `422`; duplicate JSON members, bodies over 16 KiB and `otpauth` in any field (any case, also after one percent-decode) are `422`. A foreign delivery id is `404` with the body of an unknown one and an audit event `auth_delivery.cross_tenant_refused`. A live key needs an RFC 9421 request signature (§2.112) or mutual TLS on these routes (`AUTH_LIVE_KEY_ASSURANCE=mtls_or_signature`, the staging and production default, or the stricter `mtls`; `none` is refused there; `401 signature_required` otherwise). Test keys reach sandbox customers only. Unknown customer, no eligible app device (App Clip, revoked, expired), inactive relationship, missing consent and approval freeze are the **same** `404 not_deliverable`.
 
 **State machine** (`AuthDeliveryStateMachine`, one table in Core): `created, validated, queued, sent, delivered, opened, completed, expired, cancelled, denied, failed`. Every transition is a compare-and-swap on `version`; a lost race changes nothing. `sent` means a provider accepted the push, `delivered` the first device-signed fetch, `opened` the device-signed `open`. Each transition writes one event row and one opaque webhook event in the same transaction.
 
@@ -1224,7 +1224,7 @@ string to sign (LF-joined, no trailing LF): VIADERE-WEBHOOK-V2, METHOD, host[:po
 ```
 Every field has a closed charset (no LF). Receivers recompute from the endpoint **they registered**, per `v2=` entry whose `kid` they hold, check `|now - t| <= 300 s`, the tenant equals their own and the digest matches the received body, and keep event ids for at least 72 h from first receipt (`WebhookRetrySchedule.dedupHorizon`, derived from the sender's backoff table). `auth.*` events exist only on v2 subscriptions with the opaque envelope, never carry a `v1=` entry and never carry a link, code, token, subject reference or variable. Migration: subscriptions default to `v1`; `PATCH /v1/business/webhooks/{id}` moves one to `v2` (no way back) and dual-signs the older event types for 30 days. Vectors: `docs/protocol/vectors/webhook-v2.json`.
 
-**Tests.** ST-GW-09 (partly: live key needs mTLS), ST-GW-10, ST-GW-11, ST-TEN-01..04, ST-TEN-06, ST-DLV-01..09, ST-ML-03..05, ST-ML-10 (device half), ST-ML-11, ST-ML-12, ST-ML-13, ST-OTP-01, ST-OTP-02, ST-TOTP-01, ST-WH-01..03, ST-WH-06, ST-WH-07, ST-PRIV-01..04, ST-UX-05; revision 3.1 allocation, 30-request threshold, exhaustion and the 639-request bound (`MatchGroupTests`, `AuthGroupingTests`).
+**Tests.** ST-GW-09 (live key needs a request signature or mTLS, §2.112), ST-GW-10, ST-GW-11, ST-TEN-01..04, ST-TEN-06, ST-DLV-01..09, ST-ML-03..05, ST-ML-10 (device half), ST-ML-11, ST-ML-12, ST-ML-13, ST-OTP-01, ST-OTP-02, ST-TOTP-01, ST-WH-01..03, ST-WH-06, ST-WH-07, ST-PRIV-01..04, ST-UX-05; revision 3.1 allocation, 30-request threshold, exhaustion and the 639-request bound (`MatchGroupTests`, `AuthGroupingTests`).
 
 ### 2.102 Push MFA with number matching: `auth-approvals`, ApprovalResult v2, reduce-only Deny (ADR-0022, ADR-0023 §2, ADR-0020 §2a; Stage 5; `ViadereCore/Approve/ApprovalNumberMatch.swift`, `ApprovalResult.swift`, `ViadereCore/AuthDelivery/AuthApprovalDTOs.swift`, `Server/.../Approve/AuthApprovalService.swift`, `BusinessSDK/AuthApprovals.swift`, `Kit/AuthDelivery/NumberMatchApproval.swift`)
 
@@ -1282,7 +1282,7 @@ Behind `AUTH_DELIVERY_ENABLED` **and** `APPROVE_V2_ENABLED` (both off in staging
 
 **Retention and reconciliation (ledger S6-07, S6-08).** The authority's maintenance (every minute) deletes OIDC codes, link codes and PoP nonces one day after expiry, replay keys at expiry, and challenges with their bindings, closed device-add entries, recovery attempts, sign records and cached heads after 30 days (owner decisions 7 and 10); append-only evidence is never purged. The api's background tick deletes `oidc_authorizations` at expiry. `ViadereAuthority reconcile` (job `job-viadere-authority-reconcile`, hourly, `reconcile_job_enabled`, default off; Log Analytics Reader on the authority workspace, no Key Vault role) matches every Key Vault `AuditEvent` sign and unwrap one-to-one against the sign records (120 s window), audits each unmatched operation and fails the execution, which alerts.
 
-**`push_approval` record.** Each `POST /v1/business/auth-approvals` writes an `auth_deliveries` row with the Approve request's id, `method = push_approval`, `request_id = push_approval#<request_id>` (`#` is outside the business identifier alphabet) and mirrors the request's state transitions (decision, reduce-only deny, cancel, supersession, lock, expiry) as delivery events. It sends no `auth.delivery.*` webhook, is absent from the device inbox, answers `404` on the delivery routes and is never swept by the delivery expiry.
+**`push_approval` record.** Each `POST /v1/business/auth-approvals` writes an `auth_deliveries` row with the Approve request's id, `method = push_approval`, `request_id = push_approval#<request_id>` (`#` is outside the business identifier alphabet) and mirrors the request's state transitions (decision, reduce-only deny, cancel, supersession, lock, expiry) as delivery events. Since contract v1.x (G22, ledger S6-09) it is exposed **read-only**: `GET /v1/business/auth-deliveries/{id}` returns it with `method: push_approval` (OpenAPI `ViewMethod`; the creatable `Method` stays `magic_link`, `otp`, `notice`, so a create request still cannot name it), tenant-scoped like any delivery (another tenant's id is the same `404`), and each transition emits the same opaque `auth.delivery.*` webhook event (ids only, v2 endpoints only, never the business's `request_id`). Cancel and complete on the delivery routes still answer `404` (the business acts through `/v1/business/auth-approvals`); it is absent from the device inbox and never swept by the delivery expiry. Test: `AuthApprovalTests.testEveryAuthApprovalHasAPushApprovalDeliveryRecordThatMirrorsIt`.
 
 **Tests.** `AuthorityCoreTests` (RFC 7638 and RFC 7636 vectors; pairwise `sub`, `account_ref` and display-digest vectors computed independently in Python; JOSE profile refusals; cross-`typ` statement refusals; factor member rules; grant verifier), `AuthorityEvidenceTests`, `AuthorityOIDCTests`, `AuthorityControlTests` (infra variable contract, Entra token checks, ST-AUTH-18 worker on evidence, pin and thumbprint startup failures, admin registration rules, staged imports, signing-call scan, exact route list, process hardening, strict overrides refused), `OIDCFrontEndTests` (end to end with the authority in process, ST-OIDC-17, edge limit), `AuthorityPasskeyConsentTests` (passkey code with `acr:passkey`; origin allow-list, `crossOrigin`, `topOrigin`, ceremony type; UV, RP id, logged key, revoked or frozen; ST-REC-17 both ways; single use including concurrent submissions; counter; consent per account and reduce-only revoke; `login_hint` verification; import rules; strict RP id), `OIDCMethodsFrontEndTests` (passkey end to end through the api, binding, CSRF and origin; cancel; QR content and no printed challenge id; `login_hint` push only to the verified account and limited; consent routes), Core `AuthorityOIDCMethodsTests`, Kit `OIDCSignInTests` (pinned statement, display rules, number field, three refusals, deny and report without a number, `uv` from the key, consent copy, deep link and push routing), `AuthApprovalTests.testEveryAuthApprovalHasAPushApprovalDeliveryRecordThatMirrorsIt`. Mutation-checked: removing the display-digest comparison or the PKCE check fails tests; so does removing the passkey origin allow-list, the `crossOrigin`/`topOrigin` refusal, the UV requirement, the passkey single-use compare-and-swap, the `login_hint` comparison, the api's hint-accepted check before a push, the same-origin check on the passkey calls, or the device's display host check.
 
@@ -1572,3 +1572,89 @@ reserved words and retired handles refused for everyone; one operator cannot app
 passkey dead after release; single-use link; old passkeys deleted at completion; operator path: checklist complete for both operators, the
 requester cannot approve, nothing released before approval or before the waiting period ends, other members and the member notified, refused
 while another admin has a passkey, the member cancels; every step audited).
+
+### 2.112 RFC 9421 request signatures for business API calls (G9; ADR-0020 §3; `ViadereCore/Security/HTTPMessageSignatures.swift`, `Server/.../Security/RequestSignatures.swift`, `Principals.swift` (`BusinessAPIKeyMiddleware`), `Dashboard/ConsoleSecurity.swift` (Request signing), `BusinessSDK/RequestSigning.swift`, `sdk/node/src/http-signatures.ts`; vectors [`protocol/vectors/http-signatures-v1.json`](protocol/vectors/http-signatures-v1.json), generated independently by `generate_http_signatures_v1.py`)
+
+A business proves possession of a registered P-256 key on each request with an HTTP Message Signature (RFC 9421) over the request and an RFC 9530
+`Content-Digest` of its body. A stolen API key alone can then no longer send live sign-in prompts (THREAT_MODEL T-GW-8, AS-2b): on the
+authentication routes a live key needs this signature **or** Tier E mutual TLS (§2.74). The signature adds a factor; the API key still
+authenticates, and every authorization check still applies.
+
+**Profile (normative).**
+
+1. **Fields.** One `Signature-Input` and one `Signature` field line, each a dictionary with exactly **one** member under the same label (the SDKs
+   write `sig1`). With a body, one `Content-Digest` line of exactly one member `sha-256=:<base64 of the 32-byte SHA-256 of the exact body>:` and one
+   `Content-Type` line. Any duplicated `Signature`, `Signature-Input`, `Content-Digest` or `Content-Type` line is refused rather than joined
+   (RFC 9421 §2.1 would combine them; the profile allows a single instance, as §2.1 recommends).
+2. **Covered components, in this order and nothing else.** With a body: `("@method" "@authority" "@path" "@query" "content-digest" "content-type")`.
+   Without a body: `("@method" "@authority" "@path" "@query")`, and a `Content-Digest` is refused. No component parameters (`;sf`, `;key`, `;req`,
+   `;bs`, `;tr`), no `@target-uri`, no other field. `@path` and `@query` are the request target exactly as on the request line, undecoded; no
+   query is `@query: ?` (RFC 9421 §2.2.7). `@authority` is Viadere's own public host: the verifier reconstructs it from `REQUEST_SIGNATURE_AUTHORITIES`
+   (lowercase `host[:port]`, default port omitted; default: the host of `PUBLIC_BASE_URL`) and never reads `Host` (cloudflared rewrites it,
+   §2.74); with several configured authorities each is tried.
+3. **Parameters.** `created`, `expires` (integers), `keyid`, `nonce`, `tag` (strings) are required; `alg` is optional and, if present, must be
+   `ecdsa-p256-sha256` (RFC 9421 §3.2 step 6.5: the algorithm comes from the registered key; a contradicting one fails); any other parameter, a
+   duplicated one or one of the wrong type is refused. `tag="viadere-api-v1"`. `keyid` is `vsk_` + 16 lowercase hex characters, issued by
+   Viadere. `nonce` is 22 to 64 base64url characters (16 random bytes or more). The `Signature-Input` value must be in strict structured-field
+   serialization (it is re-serialized and compared byte for byte), so the signed `@signature-params` line is exactly the received value.
+4. **Algorithm.** `ecdsa-p256-sha256` only (RFC 9421 §3.3.4): the signature is the RFC 8941 byte sequence (padded standard base64, canonical) of
+   **raw `r‖s`, 64 bytes**; DER (or any other length) is refused. **Low S is required** (`s <= n/2`): RFC 9421 does not mandate it, but it does
+   not forbid an application from refusing a non-canonical encoding (§3.2.1), and here the signer is a business server, not a Secure Enclave, so
+   the SDKs normalize KMS output (DER or either `s`) before sending. This differs from §2.1, where verifiers accept both `s` forms because device
+   keys may emit either; in both cases replay protection rests on the nonce, never on the signature bytes.
+5. **Time.** Unix seconds on the server's clock: `created - now <= 300` (`created_in_future`), `now - created <= 300` (`stale`; the §2.3 window),
+   `created < expires <= created + 300` (`invalid_expires`), `now <= expires` (`expired`).
+6. **Key binding.** The `keyid` must name a registered, unrevoked key of the **same business** as the API key, bound to **that API key**
+   (`unknown_key`, `revoked_key`, `wrong_business`, `wrong_api_key`). An API-key rotation moves the binding to the successor; the predecessor
+   keeps it only for the rest of its overlap. Because the binding is checked, a signed request cannot be replayed with another API key, which is
+   why `Authorization` is not a covered component.
+7. **Single use.** After the signature verifies (never before, so a forger cannot burn nonces), the nonce is recorded in the database replay store
+   in scope `bizsig:{business id}:{keyid}` for 600 s; a reused nonce is refused (`replayed`). A store error fails the request (fail closed).
+8. **Verification order (normative; the vectors' error codes).** (1) field lines: `missing_signature`, `duplicate_field`, `signature_incomplete`;
+   (2) `Signature-Input`: `malformed_signature_input`, `multiple_signatures`, `component_parameters`; `Signature`: `malformed_signature`,
+   `multiple_signatures`; then `label_mismatch`; (3) body:
+   `digest_required`, `malformed_digest`, `digest_mismatch`, `content_type_required`, `digest_not_allowed`, then `wrong_components`;
+   (4) `unknown_parameter`, `duplicate_parameter`, `malformed_parameter`, `missing_parameter`, `wrong_algorithm`, `wrong_tag`, `malformed_keyid`,
+   `malformed_nonce`; (5) `created_in_future`, `stale`, `invalid_expires`, `expired`; (6) `not_raw_signature`, `high_s`; (7) key binding as in
+   item 6; (8) `bad_signature` (over each accepted authority); (9) `replayed`.
+
+**Where it applies.** `BusinessAPIKeyMiddleware` verifies a request that carries `Signature` or `Signature-Input` on **every** business route,
+after the key, business state, IP allow-list and certificate checks and before scope and any handler; a signature that does not verify is a
+`401` even where an unsigned request would be accepted. The verified `keyid` is bound to the principal (`requestSigningKeyId`). On the
+authentication routes (`auth-deliveries`, `auth-approvals`, `auth-links/redeem`) `AUTH_LIVE_KEY_ASSURANCE` decides what a live key needs:
+`mtls_or_signature` (default in staging and production: a verified signature or a certificate-bound key), `mtls` (certificate only, stricter),
+`none` (development and tests only; refused in staging and production). Test keys are unchanged (sandbox customers only). Answers: `401
+signature_required` (no signature and no mTLS), `401 signature_invalid` (`details.reason` names a structural reason; key and signature failures
+carry no detail, so a stolen API key cannot probe whose a `keyid` is), `401 clock_skew` (item 5), `401 replay_detected`. Every refusal increments
+`api_key_signature_denied` and is audited `apikey.signature_denied` with the reason (at most once per key and reason per 5 minutes).
+
+**Registration (console, Security > Request signing).** Owner or Security Admin (`manageSecurity`) with the console step-up (fresh passkey and
+the privileged-inactivity limit). The page shows a challenge per usable API key, `{issued}.{nonce}.{mac}` with the MAC (the server pepper) over
+business, API key, person, time and nonce; valid 15 minutes and **single use** (spent in the replay store before the proof is checked, so one
+challenge cannot be ground). Proof of possession: the base64url raw `r‖s` signature over
+`"viadere-request-signing-key-v1" LF challenge LF public-key-base64url` (`HTTPSigningKeyProof`, Node `signingKeyProof`; either `s` accepted).
+The public key is base64url X9.63 or a PEM SubjectPublicKeyInfo of P-256; anything containing `PRIVATE` is refused; one public key belongs to one
+registration across all tenants (the answer does not say whose); at most 5 active keys per API key. Viadere issues the `vsk_` id. Stored in
+`business_request_signing_keys` (public key, fingerprint, bound API key, label, creator, last use, revocation; deleted with the organization).
+Revocation (same permission, step-up) takes effect on the next request. `request_signing_key.added|revoked` are audited and every Owner is
+mailed (adds also go to the security contacts).
+
+**Not covered, by design.** `Idempotency-Key` and other headers are not signed (ADR-0020 §3 listed `idempotency-key` and `@target-uri`; the
+profile replaces `@target-uri` with `@authority`/`@path`/`@query` and leaves `idempotency-key` out: a captured request cannot be resent because
+its nonce is spent, and changing the key of a request in flight gains nothing). Response signatures are not offered.
+
+**Residual risks.** (1) A business that keeps the signing key next to the API key (same host, same secret store) gains little: the SDK documents
+a KMS or HSM signer. (2) Registration needs only one Owner or Security Admin; two-person approval does not yet cover it (the Owners are told).
+(3) The nonce store is the primary database (no separate cache), so a flood of validly signed requests costs one insert each; the business rate
+limit applies first. (4) No business-wide "require signatures on every route" switch exists yet (the auth routes require them for live keys).
+
+**Tests.** Core `HTTPMessageSignatureTests` (vectors byte for byte, every refusal code, nonce spent only after a valid signature, KMS DER and high-S
+normalized by the signer, a signer whose key does not match is refused before sending, proof of possession); server `RequestSignatureTests`
+(every negative vector through the server's adapter with its `401` code and audit reason, and over HTTP before any handler; positive vectors
+spend their nonce once; a live key creates a delivery with a signature and no mTLS, refused unsigned, with an unregistered key, a tampered body,
+another API key's key, another authority and after revocation; mTLS still works without a signature; `mtls` mode refuses a signature alone; an
+invalid signature is refused even on a route that needs none; rotation carries the binding through the overlap; console registration needs a
+fresh single-use challenge and a valid proof, refuses a pasted private key and a duplicate public key, audits and mails the Owners; a Developer
+cannot register; configuration defaults and authority parsing); Swift SDK `RequestSigningSDKTests` and Node `http-signatures.test.ts` (vectors byte
+for byte, every attempt signed with a fresh nonce and verified by the profile, failing signer sends nothing; Node also runs every negative vector
+through its reference verifier).

@@ -56,6 +56,8 @@ final class AuthDeliveryRecord: Model, @unchecked Sendable {
 
     var statusValue: AuthDeliveryStatus { AuthDeliveryStatus(rawValue: status) ?? .failed }
     var methodValue: AuthDeliveryMethod { AuthDeliveryMethod(rawValue: method) ?? .notice }
+    /// The `method` the business reads (`push_approval` included, ADR-0022 §1).
+    var viewMethod: AuthDeliveryViewMethod { AuthDeliveryViewMethod(rawValue: method) ?? .notice }
     var purposeValue: AuthDeliveryPurpose { AuthDeliveryPurpose(rawValue: purpose) ?? .accountNotice }
     var wireId: AuthDeliveryID { AuthDeliveryID(id!) }
 }

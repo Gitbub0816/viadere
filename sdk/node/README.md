@@ -71,6 +71,23 @@ required members of its schema (`invalid_response`).
 - **Safety.** `http` is accepted only for loopback hosts; a base URL with credentials, a query or a fragment is refused; the key format is checked
   (`vdk_live_...`, `vdk_test_...`).
 
+## Request signing (RFC 9421, opt-in)
+
+A **live** key needs an HTTP Message Signature or mutual TLS on the authentication routes (auth deliveries, push approvals, link redemption): a stolen
+bearer key alone cannot send sign-in prompts (`docs/SECURITY.md` section 2.112). Register a P-256 public key under **Security > Request signing**
+(Owner or Security Admin, passkey step-up): the console shows a challenge per API key; sign it with `signingKeyProof(challenge, signer)` and paste the
+public key (`signer.publicKey`) and the proof. The console then shows the key id `vsk_...`.
+
+```ts
+const signer = { keyId: "vsk_0123456789abcdef", ...softwareSigner(privateKey) }; // or { keyId, publicKey, sign: (m) => kms.sign(m) }
+const client = new ViadereClient({ apiKey: process.env.VIADERE_API_KEY!, requestSigner: signer });
+```
+
+Every attempt, retries included, gets `Content-Digest` (with a body), `Signature-Input` and `Signature` with a fresh nonce and `created`. The covered
+components are exactly `"@method" "@authority" "@path" "@query" "content-digest" "content-type"` (the first four without a body), `tag="viadere-api-v1"`,
+`ecdsa-p256-sha256` raw `r||s` low S. A signer may return DER or either `s` (KMS output): it is normalised and checked against its public key, and a
+failing signer sends nothing (`signing_failed`). `verifyHttpSignature` is the server's profile, in its normative order, for proxies and tests.
+
 ## Verifying what is signed
 
 All of it is ECDSA P-256 / SHA-256 with **raw `r‖s` signatures** (64 bytes, base64url) exactly as `docs/SECURITY.md` section 2.1 defines: DER is refused,
@@ -199,13 +216,14 @@ genuine id; if your handler fails before it finished, `await verifier.release(ev
 
 ## Conformance
 
-`npm test` compiles with strict TypeScript and runs the Node built-in test runner (327 tests):
+`npm test` compiles with strict TypeScript and runs the Node built-in test runner (336 tests):
 
 - **Parity** (`test/parity.test.ts`): reads `docs/openapi.yaml` and `contracts/openapi/auth-delivery-v1.yaml` and fails when an operation is missing or its
   method or path drifts (operations deliberately not offered are on a commented allow-list, `OPERATIONS_NOT_OFFERED`), when a schema member, a `required`
   list, `additionalProperties: false` or an enum drifts, and when the Swift SDK calls a route this SDK does not have. `src/schemas.ts` ties every
   TypeScript interface to that table at compile time.
-- **Shared vectors** (`docs/protocol/vectors/`): `webhook-v2.json`, `webhook-v2-negative.json` (signature v2), `approval-result-v2.json` (ApprovalResult
+- **Shared vectors** (`docs/protocol/vectors/`): `http-signatures-v1.json` (RFC 9421 request signatures: positive cases byte for byte, 55 refusals with
+  their codes), `webhook-v2.json`, `webhook-v2-negative.json` (signature v2), `approval-result-v2.json` (ApprovalResult
   v1/v2, match tags, session handles, the code sampler), `link-session-v1.json` (link statement, result and confirmation, the approval-enrollment
   statement, binding tag, check code, SAS, pseudonym, link).
 - **No shared vector exists** for the verification-session result, the enrollment secret's tag and SAS, and webhook signature v1: they are tested by

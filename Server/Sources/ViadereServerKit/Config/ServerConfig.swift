@@ -182,6 +182,8 @@ public struct ServerConfig: Sendable {
     public var approve = ApproveSettings()
     /// Authentication delivery (ADR-0020; `AUTH_DELIVERY_ENABLED`, default off in staging and production).
     public var authDelivery = AuthDeliverySettings()
+    /// RFC 9421 business request signatures (SECURITY §2.112; `REQUEST_SIGNATURE_AUTHORITIES`).
+    var requestSignatures = RequestSignatureSettings()
     /// The staging OpenID provider front end (ADR-0024; `OIDC_PROVIDER_ENABLED`, off by default, refused in production).
     public var oidc = OIDCProviderSettings()
     /// Verify (WP3) release gate, Wallet and provider configuration (`VERIFY_ENABLED`, default off).

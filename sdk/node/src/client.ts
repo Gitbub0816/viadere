@@ -10,6 +10,7 @@ import {
   type PendingApproval,
 } from "./approval.js";
 import { constantTimeEquals, isKid, type Es256Signer } from "./crypto.js";
+import { signRequest, type RequestSigningKey } from "./http-signatures.js";
 import { StatementVerificationError, ViadereApiError, ViadereFlowError, ViadereSdkError } from "./errors.js";
 import { deterministicIdempotencyKey, generateIdempotencyKey, isValidIdempotencyKey } from "./idempotency.js";
 import * as schemas from "./schemas.js";
@@ -92,6 +93,14 @@ export interface ViadereClientOptions {
    * is the only brake on push-bombing).
    */
   throttle?: RequesterThrottle | { maxOpen?: number } | false;
+  /**
+   * Opt-in RFC 9421 request signing (docs/SECURITY.md section 2.112): what a live key needs on the authentication routes when it is not bound to
+   * mutual TLS. The `keyId` is the `vsk_...` id the console showed when you registered the public key; `sign` may call your KMS or HSM. Every
+   * attempt, retries included, is signed with a fresh nonce.
+   */
+  requestSigner?: RequestSigningKey;
+  /** Test seam: unix seconds for `created` (default: the clock). */
+  now?: () => number;
   /** Test seam: replaces `fetch`. */
   fetch?: FetchLike;
   /** Test seam: waits `seconds`. */
@@ -288,6 +297,8 @@ export class ViadereClient {
   readonly #fetch: FetchLike;
   readonly #sleep: (seconds: number) => Promise<void>;
   readonly #random: () => number;
+  readonly #requestSigner: RequestSigningKey | undefined;
+  readonly #now: () => number;
   /** The throttle in use, or `undefined` when switched off. Feed it webhook events with `throttle.observeEvent(type, requestId)`. */
   readonly throttle: RequesterThrottle | undefined;
   /** The universal-link host of the links this client builds and accepts. */
@@ -319,6 +330,11 @@ export class ViadereClient {
     this.#fetch = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
     this.#sleep = options.sleep ?? ((s) => new Promise((resolve) => setTimeout(resolve, s * 1000)));
     this.#random = options.random ?? Math.random;
+    if (options.requestSigner !== undefined && !/^vsk_[0-9a-f]{16}$/.test(options.requestSigner.keyId)) {
+      throw new ViadereSdkError("invalid_signing_key", "The request-signing key id must be the vsk_ id the console showed.");
+    }
+    this.#requestSigner = options.requestSigner;
+    this.#now = options.now ?? (() => Math.floor(Date.now() / 1000));
     this.throttle = options.throttle === false ? undefined : options.throttle instanceof RequesterThrottle ? options.throttle : new RequesterThrottle(options.throttle ?? {});
   }
 
@@ -1054,8 +1070,18 @@ export class ViadereClient {
     const maxAttempts = retryable ? this.#retry.maxAttempts : 1;
     for (let attempt = 1; ; attempt++) {
       let response: Awaited<ReturnType<FetchLike>>;
+      const url = this.#baseUrl + path + query;
+      let attemptHeaders = headers;
+      if (this.#requestSigner !== undefined) {
+        // A signing failure is never sent unsigned.
+        try {
+          attemptHeaders = { ...headers, ...(await signRequest(this.#requestSigner, { method, url, body: payload, contentType: headers["Content-Type"], created: this.#now() })) };
+        } catch {
+          throw new ViadereSdkError("signing_failed", "The request signer failed or returned a signature that does not verify under its public key; nothing was sent.");
+        }
+      }
       try {
-        response = await this.#fetch(this.#baseUrl + path + query, { method, headers, ...(payload !== undefined ? { body: payload } : {}), redirect: "manual", signal: AbortSignal.timeout(this.#timeoutMs) });
+        response = await this.#fetch(url, { method, headers: attemptHeaders, ...(payload !== undefined ? { body: payload } : {}), redirect: "manual", signal: AbortSignal.timeout(this.#timeoutMs) });
       } catch {
         if (attempt < maxAttempts) {
           await this.#sleep(this.#delay(attempt, undefined));

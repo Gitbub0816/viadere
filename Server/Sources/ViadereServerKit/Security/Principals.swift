@@ -25,6 +25,8 @@ public struct BusinessPrincipal: Authenticatable, Sendable {
     /// Set only when the business console acts through the business-API code path (G5 replies, G6 benefits, §2.108/§2.109): the signed-in
     /// staff member. Never set by the API-key middleware, so an API call can never be attributed to a person.
     public var consoleUserId: UUID? = nil
+    /// The `vsk_…` key whose RFC 9421 signature this request carried and that verified (SECURITY §2.112); `nil` for an unsigned request.
+    public var requestSigningKeyId: String? = nil
 
     /// Who the audit chain names for an action taken with this principal: the API key, or the console user acting through the same path.
     public var auditActor: AuditActor {
@@ -184,7 +186,8 @@ struct DeviceSignedBearerMiddleware: AsyncMiddleware {
 ///
 /// Order of checks (each failure is the same `401` for an unknown, revoked, expired or restricted key, so a probe learns nothing): well-formed
 /// key, key id lookup and constant-time secret check, revoked/expired/end of rotation overlap, business state and onboarding (a live key needs
-/// approved go-live; a test key works once domain control is verified), the key's IP allow-list, Tier E client-certificate binding, then scope.
+/// approved go-live; a test key works once domain control is verified), the key's IP allow-list, Tier E client-certificate binding, the RFC 9421
+/// request signature when the request carries one (SECURITY §2.112), then scope.
 struct BusinessAPIKeyMiddleware: AsyncMiddleware {
     let requiredScope: String?
 
@@ -225,6 +228,12 @@ struct BusinessAPIKeyMiddleware: AsyncMiddleware {
                 throw APIError.unauthorized
             }
         }
+        // RFC 9421 request signature (SECURITY §2.112): a signed request is verified before anything else reads it, whatever the route, and a
+        // signature that does not verify is a `401` even where an unsigned request would be accepted.
+        var signingKeyId: String?
+        if HTTPSignatureRequest(method: "", target: "", fields: request.headers.map { (name: $0.name, value: $0.value) }, body: Data()).isSigned {
+            signingKeyId = try await RequestSigningKeys.verify(request, key: key, ctx: ctx, db: db)
+        }
         if let required = requiredScope, !key.scopeSet.contains(required) {
             throw APIError(.forbidden, .insufficientScope, "This API key does not have the required scope.", details: ["scope": required])
         }
@@ -246,13 +255,15 @@ struct BusinessAPIKeyMiddleware: AsyncMiddleware {
             try await BusinessAPIKeyRecord.query(on: db).filter(\.$id == key.id!).set(\.$lastUsedAt, to: now).set(\.$lastUsedIPHash, to: ipHash).update()
         }
         request.auth.login(BusinessPrincipal(businessId: business.businessID, keyId: key.id ?? UUID(), livemode: key.livemode,
-                                             scopes: key.scopeSet, businessName: business.displayName, capabilities: key.capabilitySet))
+                                             scopes: key.scopeSet, businessName: business.displayName, capabilities: key.capabilitySet,
+                                             requestSigningKeyId: signingKeyId))
         return try await next.respond(to: request)
     }
 
-    /// At most one audit record per key per five minutes for a given denial, so a hostile client cannot flood the chain.
-    private static func auditDenied(_ action: String, key: BusinessAPIKeyRecord, ctx: ServerContext, db: any Database, metadata: [String: String]) async {
-        guard await ctx.limiter.allow("apikey-deny-audit", key: "\(action)|\(key.id?.uuidString ?? "")", rule: RateRule(capacity: 1, perMinute: 0.2)) else { return }
+    /// At most one audit record per key per five minutes for a given denial (and `bucket`, e.g. a signature refusal reason), so a hostile client
+    /// cannot flood the chain.
+    static func auditDenied(_ action: String, key: BusinessAPIKeyRecord, ctx: ServerContext, db: any Database, metadata: [String: String], bucket: String = "") async {
+        guard await ctx.limiter.allow("apikey-deny-audit", key: "\(action)|\(bucket)|\(key.id?.uuidString ?? "")", rule: RateRule(capacity: 1, perMinute: 0.2)) else { return }
         _ = try? await AuditService(db: db, ctx: ctx).record(action, outcome: .denied, actor: AuditActor(kind: .business, id: key.kid ?? "legacy"),
                                                            businessId: BusinessID(key.businessId), subjectType: "api_key", subjectId: key.id?.uuidString.lowercased(),
                                                            metadata: metadata)

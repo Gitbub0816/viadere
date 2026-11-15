@@ -2,6 +2,19 @@
 
 ## 0.1.0 (unreleased)
 
+### `push_approval` delivery records (contract v1.x, additive)
+
+- `AuthDeliveryView.method` is now `ViewMethod` (`VIEW_METHODS`: the three creatable methods plus `push_approval`, the read-only record every
+  `createAuthApproval` writes); `Method` for create requests is unchanged. `parity.test.ts` checks the new OpenAPI `ViewMethod` enum.
+
+### RFC 9421 request signatures (SECURITY section 2.112)
+
+- **`requestSigner`** client option (opt-in): signs every attempt with an HTTP Message Signature (`ecdsa-p256-sha256`, raw `r||s`, low S; `@method`,
+  `@authority`, `@path`, `@query`, `content-digest`, `content-type`; `tag="viadere-api-v1"`; sha-256 `Content-Digest`), a fresh nonce per retry. What a
+  live key needs on the auth routes when it is not bound to mutual TLS. The signer is an `Es256Signer` plus its `vsk_` key id, so a KMS can sign.
+- `signRequest`, `verifyHttpSignature` (the server's profile, with the normative error codes), `signingKeyProof` (the console's proof of possession),
+  `requestContentDigest`; tests against `docs/protocol/vectors/http-signatures-v1.json`. New `ViadereSdkError` kinds `invalid_signing_key`, `signing_failed`.
+
 - Typed client for the auth-delivery business API: create, get, cancel, complete, webhook v2 switch and test; idempotency keys, retries with backoff.
 - Webhook signature v2 verifier (ADR-0025) with the replay store on by default (R23-06) and strict envelope decoding.
 - Per-requester throttle on by default (C-14): 3 open deliveries per account and client network prefix.

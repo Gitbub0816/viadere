@@ -671,11 +671,57 @@ under *Security > Certificates*. Then create keys with **Require a bound client 
 the server believes that only on a request that carries our edge token, so a header you send yourself changes nothing. You can also require a certificate for **every** key of the organization. Remove a certificate and its keys stop working at once.
 A VPN, a private endpoint or dedicated connectivity can be arranged for Tier E through Viadere; they end at the same API layer. Ordinary businesses do not need any of this.
 
+## 8a-2. Request signing (RFC 9421): the alternative to mutual TLS for live keys
+
+A **live** key needs either mutual TLS (above) or an **HTTP Message Signature** (RFC 9421) on the authentication routes (auth deliveries, push
+approvals, link redemption): a stolen API key alone then cannot send sign-in prompts to your customers. Signatures work on every business route; once a
+request carries one, it must verify (normative profile: `docs/SECURITY.md` §2.112).
+
+**Register a signing key (once per API key).**
+
+1. Generate a P-256 key pair **where it will live** (your KMS or HSM; a software key only for development). Viadere never sees the private key.
+2. In the console, *Security > Request signing* (Owner or Security Admin; you confirm with your passkey): pick the API key the signing key is for and
+   copy that key's challenge (it works once, for 15 minutes).
+3. Sign the challenge: Swift `try await HTTPSigningKeyProof.prove(challenge: challenge, key: signer)`, Node `await signingKeyProof(challenge, signer)`.
+   (The signed message is `viadere-request-signing-key-v1` LF challenge LF your public key, base64url X9.63; the proof is base64url raw `r||s`.)
+4. Paste the public key (base64url X9.63 or a PEM `PUBLIC KEY`), the challenge and the proof, and register. The console shows the key id `vsk_...`;
+   every Owner receives an email. Up to 5 active signing keys per API key; rotating the API key carries the binding to the new key (the old key keeps
+   it for its overlap). Revoke a signing key on the same page: it stops working at once.
+
+**Sign requests.**
+
+```swift
+struct KMSSigner: HTTPRequestSigningKey {           // or SoftwareHTTPRequestSigningKey(keyId:privateKey:)
+    let keyId = "vsk_0123456789abcdef"              // shown by the console
+    let publicKey: DevicePublicKey                  // the registered public key
+    func sign(_ message: Data) async throws -> Data { try await kms.signP256SHA256(message) }   // raw r||s or DER, either S
+}
+let client = try ViadereBusinessClient(apiKey: liveKey, requestSigner: KMSSigner(publicKey: registered))
+```
+
+```ts
+const client = new ViadereClient({ apiKey: process.env.VIADERE_API_KEY!, requestSigner: { keyId: "vsk_0123456789abcdef", publicKey, sign: (m) => kms.sign(m) } });
+```
+
+The SDKs sign every attempt (retries get a fresh nonce) and check each signature against your public key before sending. Without an SDK, send:
+
+```
+Content-Digest:  sha-256=:<base64 SHA-256 of the exact body>:        (only with a body)
+Signature-Input: sig1=("@method" "@authority" "@path" "@query" "content-digest" "content-type");created=<now>;expires=<now+300>;keyid="vsk_...";nonce="<16+ random bytes, base64url>";tag="viadere-api-v1"
+Signature:       sig1=:<base64 of raw r||s (64 bytes), s <= n/2>:
+```
+
+Without a body, cover exactly `"@method" "@authority" "@path" "@query"` and send no `Content-Digest`. `@authority` is the API host you call
+(`viadere.com`, or the host Viadere gives you), `@path` and `@query` exactly as on your request line (`@query` is `?` when there is none). Every nonce
+is single use; keep your clock within 300 s. Refusals are `401 signature_invalid` (a structural problem is named in `details.reason`),
+`401 clock_skew`, `401 replay_detected`, and `401 signature_required` when a live key on an auth route has neither a signature nor mutual TLS.
+Check your implementation against `docs/protocol/vectors/http-signatures-v1.json` (positive cases byte for byte, every refusal with its code).
+
 ## 8b. Authentication delivery (staging pilot; off by default)
 
 Viadere can deliver **your** magic link, **your** one-time code or a fixed-text security notice to the customer's Viadere app. It is a transport: it never verifies a code, and "opened" never means signed in. Your server verifies its own link or code and then tells Viadere the outcome. The full contract is `contracts/openapi/auth-delivery-v1.yaml`.
 
-1. **Get access.** Ask Viadere to enable authentication delivery for your tenant (flag `AUTH_DELIVERY_ENABLED`, staging only for now). Keys need the scopes `auth_deliveries:write` / `auth_deliveries:read`, the `auth.challenge` capability, and, for live keys, mutual TLS. Test keys address sandbox customers only.
+1. **Get access.** Ask Viadere to enable authentication delivery for your tenant (flag `AUTH_DELIVERY_ENABLED`, staging only for now). Keys need the scopes `auth_deliveries:write` / `auth_deliveries:read`, the `auth.challenge` capability, and, for live keys, an RFC 9421 request signature (§8a-2) or mutual TLS (§8a). Test keys address sandbox customers only.
 2. **Register a webhook endpoint with signature v2** (`signature_version: v2`, `envelopeVersion: 2026-10-27`) for `auth.delivery.*` events, or move an existing endpoint with `PATCH /v1/business/webhooks/{id}`. Verify with `WebhookVerifierV2` (Swift SDK): use the endpoint URL you registered, your tenant id (`Viadere-Tenant`) and a **durable** replay store (keep event ids at least 72 hours). `POST /v1/business/webhooks/test` with a test key sends a signed sample event.
 3. **Create a delivery** (`POST /v1/business/auth-deliveries`, `Idempotency-Key` required). Methods: `otp` (you generate the code, 4 to 10 characters of `0-9A-Z`; Viadere shows it in the app only after the customer opens the item, never on the Lock Screen), `magic_link`, `notice`. Pick a Viadere template id (`auth.sign_in_code.v1`, `auth.sign_in_link.v1`, ...); you cannot supply message text. The tenant is your API key, never a field. Send `session_handle` (a MUST for sign-in flows: `base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" || initiating_session_id))`, never the raw session id) so a repeated request from the same sign-in page replaces the earlier prompt; requests without it never replace anything.
 4. **Magic links.** Register the hosts you send links to (they must be on your verified domain), generate a single-use URL on one of them and sign a destination statement with `signAuthDestination` (your key stays in your KMS). Until Viadere's authority publishes tenant destination keys (Stage 6) business-mode links are refused with `422 destination_signature_required`. Your redemption page must send `Referrer-Policy: no-referrer`, load nothing from third parties, and consume the token only on an explicit POST.
@@ -691,6 +737,8 @@ Viadere can deliver **your** magic link, **your** one-time code or a fixed-text 
 - **Per-requester throttle is on by default** (C-14): at most 3 open deliveries per account and client network prefix. Pass the client IP of whoever started the sign-in.
 - Idempotency keys default to a value derived from `request_id`, so a retry after a crash replays the original.
 - Verify with the negative vectors in `docs/protocol/vectors/webhook-v2-negative.json` (generated by `generate_webhook_v2_negative.py`).
+- **Request signing** (§8a-2): `ViadereBusinessClient(requestSigner:)` (Swift) and `new ViadereClient({ requestSigner })` (TypeScript) sign every request
+  with RFC 9421; both take a signer that can call your KMS. The Kotlin SDK does not sign yet.
 
 ## 9. Go-live checklist
 

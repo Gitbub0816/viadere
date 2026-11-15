@@ -25,7 +25,8 @@ enum AuthDeliveryRoutes {
             try AuthDeliveryGate.require(req.ctx)
             let service = AuthDeliveryService(db: req.db, ctx: req.ctx)
             try await service.requireLiveKeyAssurance(try req.business)
-            return try req.jsonResponse(try await service.view(try await service.record(id: try deliveryId(req), principal: try req.business), withEvents: true))
+            return try req.jsonResponse(try await service.view(try await service.record(id: try deliveryId(req), principal: try req.business, includePushApproval: true),
+                                                               withEvents: true))
         }
         routes.api(APIRoutes.businessAuthDeliveryCancel, scope: Scope.authDeliveriesWrite) { req in
             try AuthDeliveryGate.require(req.ctx)

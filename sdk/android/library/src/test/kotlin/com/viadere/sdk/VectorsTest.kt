@@ -221,6 +221,7 @@ class ContractParityTest {
 
     @Test fun enumsMatchTheContract() {
         assertEquals(Method.entries.map { it.wire }, enumAfter("Method"))
+        assertEquals(ViewMethod.entries.map { it.wire }, enumAfter("ViewMethod"))
         assertEquals(Purpose.entries.map { it.wire }, enumAfter("Purpose"))
         assertEquals(Channel.entries.map { it.wire }, enumAfter("Channel"))
         assertEquals(Status.entries.map { it.wire }, enumAfter("Status"))

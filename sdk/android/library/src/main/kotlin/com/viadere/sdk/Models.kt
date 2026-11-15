@@ -16,6 +16,18 @@ public enum class Method(override val wire: String) : WireValue {
     }
 }
 
+/**
+ * `method` of a delivery record as the business reads it (OpenAPI `ViewMethod`): the creatable [Method] values plus `push_approval`, the record every
+ * `POST /v1/business/auth-approvals` writes (ADR-0022 section 1). Read-only through the delivery routes; never created.
+ */
+public enum class ViewMethod(override val wire: String) : WireValue {
+    MagicLink("magic_link"), Otp("otp"), Notice("notice"), PushApproval("push_approval");
+
+    public companion object {
+        public fun fromWire(value: String): ViewMethod? = entries.firstOrNull { it.wire == value }
+    }
+}
+
 public enum class Purpose(override val wire: String) : WireValue {
     SignIn("sign_in"), StepUp("step_up"), VerifyContact("verify_contact"), AccountNotice("account_notice");
 
@@ -124,7 +136,7 @@ public data class AuthDeliveryEvent(val status: Status, val at: String, val reas
 public data class AuthDeliveryView(
     val id: String,
     val requestId: String,
-    val method: Method,
+    val method: ViewMethod,
     val purpose: Purpose,
     val status: Status,
     val expiresAt: String,
@@ -154,7 +166,7 @@ public data class AuthDeliveryView(
             return AuthDeliveryView(
                 id = id,
                 requestId = o["request_id"] as? String ?: return null,
-                method = (o["method"] as? String)?.let(Method::fromWire) ?: return null,
+                method = (o["method"] as? String)?.let(ViewMethod::fromWire) ?: return null,
                 purpose = (o["purpose"] as? String)?.let(Purpose::fromWire) ?: return null,
                 status = (o["status"] as? String)?.let(Status::fromWire) ?: return null,
                 expiresAt = o["expires_at"] as? String ?: return null,
