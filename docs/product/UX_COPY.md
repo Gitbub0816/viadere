@@ -243,6 +243,8 @@ The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not 
 | OIDC-09 | Settings list | Apps you've signed in to with Viadere · {Client}, last used {date} |
 | OIDC-10 | Revoke action | Stop {Client} recognizing me |
 | OIDC-11 | Authorize page over the challenge limit (ADR-0024 §4) | Too many sign-in attempts from here. Wait a minute and try again. |
+| OIDC-12 | Phone screen (OIDC-08) opened by a verified Viadere code (CKey Safe Action, SECURITY.md §2.104), shown above the question | Rows "Requested by" {issuer} (verified code) · "Device" {device} · "Location" {location} (only when the site gives one) · "Requested" {time}; warning "Only continue if this is the device you are using right now. Someone may be showing you a code meant for their own session." |
+| OIDC-13 | Scanner refusal of a code that claims to be a Viadere sign-in (one sentence plus one reason; never repeats the code) | This code claims to be a Viadere sign-in but could not be verified. Nothing was opened. + one of: The code is damaged or incomplete. · It is meant for another app. · It asks for something Viadere doesn't accept from a code. · It isn't signed with a key this app trusts. · Its signature doesn't match. · It has expired. Refresh the sign-in page and scan again. · It was already scanned on this phone. Start the sign-in again on the website. · Viadere couldn't confirm who is asking. Check your connection and start the sign-in again. · That sign-in is no longer waiting. · Open and unlock Viadere, then scan again. |
 
 ## 9. Business-facing integration guidance (developer docs, not customer copy)
 
