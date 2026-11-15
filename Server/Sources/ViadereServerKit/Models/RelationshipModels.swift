@@ -28,6 +28,9 @@ final class RelationshipRecord: Model, @unchecked Sendable {
     /// Per-business preferences (spec v4 C7). Marketing is the consent purpose, not a column.
     @Field(key: "pref_muted") var prefMuted: Bool
     @Field(key: "pref_favorite") var prefFavorite: Bool
+    /// The campaign credited for this connection (`CodeStylesCampaigns.v1`): set when the connection is made or remade through a link whose
+    /// signed context the server verified and whose campaign was live; null otherwise. Never set from client-supplied text.
+    @OptionalField(key: "campaign_id") var campaignId: UUID?
 
     init() {}
 

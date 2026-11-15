@@ -53,7 +53,8 @@ enum DirectoryRoutes {
                 throw APIError.notFound
             }
             // A signed context is honoured only if its HMAC verifies and it has not expired; otherwise the plain code still resolves.
-            let context = try? req.ctx.connectKeys.verifiedContext(of: link, now: req.ctx.now)
+            // Its follow-up action is passed on only when it is on Core's closed list and the campaign is live (docs/SECURITY.md §2.106).
+            let context = try await CampaignService(db: req.db, ctx: req.ctx).presentable(businessId: business.id!, link: link)
             return DirectoryResolveResponse(method: .link, matches: [summary], context: context)
         case .handle(let handle):
             guard let business = try await directory.verified(handle: handle), let summary = try await directory.summary(for: business) else {

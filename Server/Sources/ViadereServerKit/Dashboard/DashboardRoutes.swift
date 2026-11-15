@@ -68,8 +68,11 @@ struct DashboardPageErrorMiddleware: AsyncMiddleware {
 
 private struct CampaignForm: Content {
     var campaign: String
+    var name: String?
     var action: String?
     var days: Int?
+    /// Download only: `primary` (the business's styled code) or `qr` (the plain QR code).
+    var code: String?
 }
 
 private struct InviteForm: Content {
@@ -239,6 +242,8 @@ enum DashboardRoutes {
         pages.get("dashboard", "campaigns") { req in try await campaignsPage(req) }
         pages.post("dashboard", "campaigns") { req in try await createCampaign(req) }
         pages.post("dashboard", "campaigns", "download") { req in try await downloadCampaign(req) }
+        pages.get("dashboard", "campaigns", ":id") { req in try await campaignPage(req) }
+        pages.post("dashboard", "campaigns", ":id", "archive") { req in try await archiveCampaign(req) }
         pages.get("dashboard", "consent") { req in try await consentPage(req) }
         pages.get("dashboard", "audit") { req in try await auditPage(req) }
         pages.get("dashboard", "team") { req in try await teamPage(req) }
@@ -378,11 +383,19 @@ enum DashboardRoutes {
         let byKind = ConsoleUI.card("By kind", ConsoleUI.table([ConsoleUI.Column("Kind", key: "kind"), ConsoleUI.Column("Issued", key: "issued", numeric: true),
                                                                  ConsoleUI.Column("Decided", key: "decided", numeric: true), ConsoleUI.Column("Decision rate", key: "rate", numeric: true)],
                                                                 rows, caption: "Interactions by kind", state: ConsoleUI.TableState(req, id: "kind"), empty: "No interactions in this period."))
+        var campaignCard = ""
+        if !o.campaigns.isEmpty {
+            let campaignRows = o.campaigns.map { c -> [ConsoleUI.Cell] in [.text(c.name), ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(c.publicId))</code>", sort: .text(c.publicId)), .number(c.connects)] }
+            campaignCard = ConsoleUI.card("Connections by campaign", description: "\(o.campaignConnects) connections came through a campaign link in this period.",
+                                          actions: p.can(.manageCampaigns) ? ConsoleUI.linkButton("Campaigns", href: "/dashboard/campaigns", small: true) : "",
+                                          ConsoleUI.table([ConsoleUI.Column("Campaign", key: "name"), ConsoleUI.Column("Identifier"), ConsoleUI.Column("Connections", key: "n", numeric: true)], campaignRows,
+                                                          caption: "Connections by campaign", state: ConsoleUI.TableState(req, id: "cmp"), empty: "No campaign connections in this period."))
+        }
         let verifyCard = try await VerifyDashboard.card(db: req.db, ctx: req.ctx, businessId: businessId, days: o.days)
         let note = ConsoleUI.callout(.neutral, "<p class=\"sm\">Live traffic only, aggregated. Viadere never shows individual customers here, and a customer's phone number or messages never appear in analytics.</p>")
         let attention = await attentionCard(req, p: p, businessId: businessId)
         return DashboardUI.businessPage(p, title: "Overview", active: "/dashboard", subtitle: "How your organization is doing over the last \(o.days) days.", actions: periods,
-                                        flash: DashboardFormat.flash(req), body: attention + tiles + "<div class=\"cols\">\(chart)\(byKind)</div>" + verifyCard + note)
+                                        flash: DashboardFormat.flash(req), body: attention + tiles + "<div class=\"cols\">\(chart)\(byKind)</div>" + campaignCard + verifyCard + note)
     }
 
     /// "Needs your attention": open work the signed-in person can act on, each item shown only to roles that may open the page it links to.
@@ -437,51 +450,116 @@ enum DashboardRoutes {
 
     // MARK: Campaigns
 
+    private static let campaignsSubtitle = "Links and codes that open Viadere to your business."
+
     private static func campaignForm(_ p: DashboardPrincipal, verified: Bool) -> String {
         guard verified else {
-            return ConsoleUI.callout(.accent, title: "Available after verification", "<p>Campaign links and QR codes are available after Viadere verifies your organization. <a href=\"/dashboard/organization\">See what's left</a></p>")
+            return ConsoleUI.callout(.accent, title: "Available after verification", "<p>Campaign links and codes are available after Viadere verifies your organization. <a href=\"/dashboard/organization\">See what's left</a></p>")
         }
-        let fields = ConsoleUI.input("campaign", label: "Campaign", id: "campaign", placeholder: "spring-flyer", help: "A name you'll recognize in reports.", required: true, attrs: ["maxlength": "64"])
-            + ConsoleUI.input("action", label: "Action", id: "action", placeholder: "enroll_rewards", help: "What the app offers when the link opens.", optional: true, attrs: ["maxlength": "64"])
+        let actions = [ConsoleUI.Option("", "None")] + CampaignAction.allCases.map { ConsoleUI.Option($0.rawValue, $0.label) }
+        let fields = ConsoleUI.input("campaign", label: "Identifier", id: "campaign", placeholder: "spring-flyer", help: "Goes into the link. Letters, digits, dots, dashes and underscores.", required: true, attrs: ["maxlength": "64"])
+            + ConsoleUI.input("name", label: "Name", id: "campaign-name", placeholder: "Spring flyer", help: "What you'll see in reports.", optional: true, attrs: ["maxlength": String(CampaignService.maxNameLength)])
+            + ConsoleUI.select("action", label: "After connecting", id: "action", options: actions, help: "Where the app goes once the customer has reviewed your business and connected. It never changes what they consent to.", optional: true)
             + ConsoleUI.select("days", label: "Valid for", id: "days", options: [ConsoleUI.Option("90", "90 days"), ConsoleUI.Option("30", "30 days"), ConsoleUI.Option("365", "1 year"), ConsoleUI.Option("0", "No expiry")],
-                               help: "After this the plain code still works.")
-        return ConsoleUI.card("Create a link", description: "The link carries your permanent code plus a signed campaign context. It never contains customer data, and the QR code is generated here: nothing is sent to a third party.",
-                              ConsoleUI.form("/dashboard/campaigns", csrf: DashboardUI.csrf(p), "<div class=\"cols\">\(fields)</div>" + ConsoleUI.formActions(ConsoleUI.button("Generate link and QR"))))
+                               help: "After this the link still connects, but it is no longer counted.")
+        return ConsoleUI.card("Create a link", description: "The link carries your permanent code plus a signed campaign context. It never contains customer data, and the codes are drawn here: nothing is sent to a third party.",
+                              ConsoleUI.form("/dashboard/campaigns", csrf: DashboardUI.csrf(p), "<div class=\"cols\">\(fields)</div>" + ConsoleUI.formActions(ConsoleUI.button("Create link and codes"))))
+    }
+
+    private static func campaignStatus(_ status: CampaignService.Status) -> String {
+        switch status {
+        case .active: DashboardFormat.badge("Active", "ok")
+        case .expired: DashboardFormat.badge("Expired", "wa")
+        case .archived: DashboardFormat.badge("Archived", "mu")
+        }
+    }
+
+    private static func campaignList(_ req: Request, _ p: DashboardPrincipal, rows: [DashboardActions.CampaignRow]) -> String {
+        let cells = rows.map { row -> [ConsoleUI.Cell] in
+            let id = row.record.id?.uuidString.lowercased() ?? ""
+            let action = row.record.action.flatMap(CampaignAction.init(rawValue:))?.label ?? "—"
+            let archive = row.status == .archived ? "" : "<form method=\"post\" action=\"/dashboard/campaigns/\(id)/archive\">\(DashboardUI.csrf(p))<button class=\"btn s sm\" type=\"submit\">Archive</button></form>"
+            return [ConsoleUI.Cell(html: "<a href=\"/dashboard/campaigns/\(id)\">\(DashboardUI.esc(row.record.name))</a>", sort: .text(row.record.name)),
+                    ConsoleUI.Cell(html: "<code>\(DashboardUI.esc(row.record.publicId))</code>", sort: .text(row.record.publicId)),
+                    ConsoleUI.Cell(html: campaignStatus(row.status), sort: .text(row.status.rawValue)), .text(action), .number(row.connects),
+                    .date(row.record.createdAt), .date(row.record.expiresAt), ConsoleUI.Cell(html: archive)]
+        }
+        return ConsoleUI.card("Your campaigns", description: "Connections are counted only when a customer connects through a campaign's signed link while the campaign is active. Counts are totals: Viadere never shows who connected through a campaign.",
+                              ConsoleUI.table([ConsoleUI.Column("Campaign", key: "name"), ConsoleUI.Column("Identifier", key: "id"), ConsoleUI.Column("Status", key: "status"), ConsoleUI.Column("After connecting"),
+                                               ConsoleUI.Column("Connections", key: "connects", numeric: true), ConsoleUI.Column("Created", key: "created"), ConsoleUI.Column("Expires", key: "expires"),
+                                               ConsoleUI.Column("", actions: true)],
+                                              cells, caption: "Campaigns", state: ConsoleUI.TableState(req, id: "c"), empty: "No campaigns yet", emptyMessage: "Create a link above to print or share."))
     }
 
     private static func campaignsPage(_ req: Request) async throws -> Response {
         let (p, _) = try req.businessDashboard
         try p.require(.manageCampaigns)
-        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: "Links and QR codes that open Viadere to your business.",
-                                        flash: DashboardFormat.flash(req), body: campaignForm(p, verified: p.business?.isVerified == true))
+        let rows = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaigns()
+        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: campaignsSubtitle,
+                                        flash: DashboardFormat.flash(req), body: campaignForm(p, verified: p.business?.isVerified == true) + campaignList(req, p, rows: rows))
+    }
+
+    /// The codes of one link: the business's own styled code first, and always a plain QR code beside it (a phone camera cannot read a
+    /// CKey). Every CKey on a page is drawn in the business's one style (the Brand Studio preview shows one code), so the SVG's fixed
+    /// gradient and filter ids, when repeated, always name identical definitions.
+    static func codePair(link: String, style: BusinessCodeStyle, what: String) throws -> String {
+        let primary = try OpticalCodeRenderer.business(link, style: style, label: "\(style.symbology == .ckey ? "Viadere code" : "QR code") for \(what)")
+        let plain = try OpticalCodeRenderer.plainQR(link, label: "QR code for \(what)")
+        let primaryCaption = primary.symbology == .ckey ? "Your code. Customers scan it with the Viadere app." : "Your QR code, in your colours."
+        return """
+        <div class="codes"><figure><div class="qr ck" data-code="primary" data-symbology="\(primary.symbology.rawValue)">\(primary.svg)</div><figcaption>\(primaryCaption)</figcaption></figure>\
+        <figure><div class="qr" data-code="qr">\(plain)</div><figcaption>Plain QR code. Any phone camera reads it, with or without the app.</figcaption></figure></div>
+        """
+    }
+
+    private static func campaignDetail(_ req: Request, _ p: DashboardPrincipal, _ result: DashboardActions.Campaign) throws -> String {
+        let status = CampaignService.status(result.record, now: req.ctx.now)
+        let expires = result.expiresAt.map { "Expires \(DashboardFormat.date($0))." } ?? "No expiry."
+        func download(_ code: String, _ label: String) -> String {
+            "<form method=\"post\" action=\"/dashboard/campaigns/download\">\(DashboardUI.csrf(p))\(ConsoleUI.hidden("campaign", result.record.publicId))\(ConsoleUI.hidden("code", code))<button class=\"btn s sm\" type=\"submit\">\(label)</button></form>"
+        }
+        let style = p.can(.manageBrandKits) ? " <a href=\"\(ConsoleBrandStudio.path)#code-style\">Change your code's style</a>" : ""
+        return ConsoleUI.card(description: "Print the codes or share the link. All of them open Viadere to your business.",
+                              actions: download("primary", "Download your code (SVG)") + download("qr", "Download QR (SVG)"),
+                              titleHTML: "\(DashboardUI.esc(result.record.name)) \(campaignStatus(status))", """
+        <div class="split wa"><div><h3>Link with signed context</h3><pre>\(DashboardUI.esc(result.link.urlString))</pre><p class="mu sm">\(expires) If the context expires or is invalid, the plain code still works.</p>\
+        <h3>Plain link</h3><pre>\(DashboardUI.esc(result.plainLink.urlString))</pre><p class="mu sm">Phone cameras read QR codes only, so keep the QR code next to your code wherever you print it.\(style)</p></div>\
+        <div>\(try codePair(link: result.link.urlString, style: result.style, what: "your Viadere connect link"))</div></div>
+        """)
     }
 
     private static func createCampaign(_ req: Request) async throws -> Response {
         let (p, _) = try req.businessDashboard
         let form = try req.content.decode(CampaignForm.self)
-        let result = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaign(name: form.campaign, action: form.action, validDays: form.days ?? 90)
-        let svg = result.qr.svg(title: "QR code for your Viadere connect link")
-        let expires = result.expiresAt.map { "Expires \(DashboardFormat.date($0))." } ?? "No expiry."
-        let download = """
-        <form method="post" action="/dashboard/campaigns/download">\(DashboardUI.csrf(p))<input type="hidden" name="campaign" value="\(DashboardUI.esc(form.campaign))">\
-        <input type="hidden" name="action" value="\(DashboardUI.esc(form.action ?? ""))"><input type="hidden" name="days" value="\(form.days ?? 90)">\
-        <button class="btn s" type="submit">Download SVG</button></form>
-        """
-        let body = ConsoleUI.card("Your campaign link", description: "Print the QR code or share the link. Both open Viadere to your business.", actions: download, """
-        <div class="split"><div><h3>Link with signed context</h3><pre>\(DashboardUI.esc(result.link.urlString))</pre><p class="mu sm">\(expires) If the context expires or is invalid, the plain code still works.</p>\
-        <h3>Plain link</h3><pre>\(DashboardUI.esc(result.plainLink.urlString))</pre></div><div><div class="qr">\(svg)</div></div></div>
-        """) + campaignForm(p, verified: true)
-        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: "Links and QR codes that open Viadere to your business.",
-                                        flash: "Link created.", body: body)
+        let actions = DashboardActions(db: req.db, ctx: req.ctx, principal: p)
+        let result = try await actions.createCampaign(identifier: form.campaign, name: form.name, action: form.action, validDays: form.days ?? 90)
+        let body = try campaignDetail(req, p, result) + campaignForm(p, verified: true) + campaignList(req, p, rows: try await actions.campaigns())
+        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: campaignsSubtitle, flash: "Link created.", body: body)
+    }
+
+    private static func campaignPage(_ req: Request) async throws -> Response {
+        let (p, _) = try req.businessDashboard
+        let result = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaign(id: try req.uuid("id"))
+        return DashboardUI.businessPage(p, title: "Campaigns", active: "/dashboard/campaigns", subtitle: campaignsSubtitle, flash: DashboardFormat.flash(req),
+                                        body: try campaignDetail(req, p, result) + "<p>\(ConsoleUI.linkButton("All campaigns", href: "/dashboard/campaigns", small: true))</p>")
+    }
+
+    private static func archiveCampaign(_ req: Request) async throws -> Response {
+        let (p, _) = try req.businessDashboard
+        try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).archiveCampaign(id: try req.uuid("id"))
+        return DashboardResponses.redirect("/dashboard/campaigns")
     }
 
     private static func downloadCampaign(_ req: Request) async throws -> Response {
         let (p, _) = try req.businessDashboard
         let form = try req.content.decode(CampaignForm.self)
-        let result = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaign(name: form.campaign, action: form.action, validDays: form.days ?? 90)
-        let response = Response(status: .ok, body: .init(string: result.qr.svg(title: "Viadere connect link")))
+        let result = try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).campaign(identifier: form.campaign)
+        let plain = form.code == "qr"
+        let svg = plain ? try OpticalCodeRenderer.plainQR(result.link.urlString, label: "Viadere connect link")
+            : try OpticalCodeRenderer.business(result.link.urlString, style: result.style, label: "Viadere connect link").svg
+        let response = Response(status: .ok, body: .init(string: svg))
         response.headers.contentType = HTTPMediaType(type: "image", subType: "svg+xml")
-        response.headers.replaceOrAdd(name: .contentDisposition, value: "attachment; filename=\"viadere-connect-\(result.plainLink.code.canonical).svg\"")
+        response.headers.replaceOrAdd(name: .contentDisposition, value: "attachment; filename=\"viadere-connect-\(result.plainLink.code.canonical)\(plain ? "-qr" : "").svg\"")
         response.headers.replaceOrAdd(name: "Content-Security-Policy", value: "default-src 'none'; style-src 'none'; sandbox")
         return response
     }

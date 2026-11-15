@@ -117,12 +117,20 @@ struct RelationshipService {
         let directory = DirectoryService(db: db)
         guard let business = try await directory.verified(id: request.businessId.uuid),
               let summary = try await directory.summary(for: business) else { throw APIError.notFound }
+        let credit: CampaignService.Credit
         if let link = request.link {
             // A supplied link must be a valid Viadere link for *this* business; its signed context is verified, never trusted.
             guard let parsed = try? ConnectLink.parse(link, domain: ctx.config.linkDomain), parsed.code == summary.code else {
                 throw APIError.validation("The connect link does not match this business.", details: ["link": "mismatch"])
             }
+            // The verified context is kept: it credits the connection to a live campaign of this business (docs/SECURITY.md §2.106). A
+            // forged, expired, unknown or archived campaign context connects all the same and credits nothing.
+            credit = try await CampaignService(db: db, ctx: ctx).credit(businessId: business.id!, link: parsed)
+        } else {
+            credit = .none
         }
+        let creditedCampaign: UUID?
+        if case .credited(let campaign) = credit { creditedCampaign = campaign.id } else { creditedCampaign = nil }
         // A business the customer blocked cannot be connected again, by any path, until the customer unblocks it (WP-1.5).
         if try await PreferenceService(db: db, ctx: ctx).isBlocked(consumer: consumer.uuid, business: business.id!) {
             throw APIError.conflict(PreferenceService.blockedMessage)
@@ -139,20 +147,29 @@ struct RelationshipService {
                 existing.connectedAt = now
                 existing.lastActivityAt = now
                 existing.source = effectiveSource.rawValue
+                // A reconnection is a new connection: it carries this link's campaign, or none.
+                existing.campaignId = creditedCampaign
                 try await existing.update(on: tx)
                 try await ConsentService(db: tx, ctx: ctx).initialize(relationship: existing, optIn: optIn, source: consentSource, channels: channels)
                 return (existing, true)
             }
             let record = RelationshipRecord(consumerId: consumer.uuid, businessId: business.id!, source: effectiveSource, now: now)
+            record.campaignId = creditedCampaign
             try await record.create(on: tx)
             try await ConsentService(db: tx, ctx: ctx).initialize(relationship: record, optIn: optIn, source: consentSource, channels: channels)
             return (record, true)
         }
         if created {
             let audit = AuditService(db: db, ctx: ctx)
+            var metadata = ["source": effectiveSource.rawValue]
+            switch credit {
+            case .credited(let campaign): metadata["campaign"] = campaign.publicId
+            case .uncredited(let reason): metadata["campaign_status"] = reason
+            case .none: break
+            }
             _ = try await audit.record("relationship.connected", actor: AuditActor(kind: .consumer, id: consumer.description),
                                        consumerId: consumer, businessId: summary.id, subjectType: "relationship",
-                                       subjectId: record.id?.uuidString.lowercased(), metadata: ["source": effectiveSource.rawValue])
+                                       subjectId: record.id?.uuidString.lowercased(), metadata: metadata)
             try await WebhookService(db: db, ctx: ctx).enqueue(.relationshipConnected, businessId: summary.id,
                 payload: RelationshipEventPayload(relationshipId: RelationshipID(record.id!), subjectRef: ctx.subjects.subjectRef(businessId: summary.id, consumerId: consumer),
                                                        source: effectiveSource, occurredAt: now,

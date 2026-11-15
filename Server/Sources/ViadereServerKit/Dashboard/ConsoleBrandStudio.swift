@@ -18,7 +18,7 @@ enum ConsoleBrandStudio {
     static let flash: [String: String] = [
         "kit-saved": "Kit saved and sent to Viadere for review. Customers keep seeing the last approved version until then.",
         "kit-deleted": "Kit deleted.", "schedule-saved": "Schedule saved and published.",
-        "uploaded": "Image processed and sent to Viadere for review.",
+        "uploaded": "Image processed and sent to Viadere for review.", "code-saved": "Code style saved. Your campaign and install codes use it now.",
     ]
 
     private struct UploadForm: Content {
@@ -30,6 +30,7 @@ enum ConsoleBrandStudio {
 
     static func register(_ pages: any RoutesBuilder) {
         pages.get("dashboard", "brand") { req in try await studio(req) }
+        ConsoleCodeStyle.register(pages)
         pages.get("dashboard", "brand", "kits", "new") { req in try await kitPage(req, kitId: nil) }
         pages.get("dashboard", "brand", "kits", ":id") { req in try await kitPage(req, kitId: try req.uuid("id")) }
         pages.post("dashboard", "brand", "kits") { req -> Response in
@@ -182,7 +183,8 @@ enum ConsoleBrandStudio {
         }
     }
 
-    static func studio(_ req: Request) async throws -> Response {
+    /// `codeDraft`: a submitted "Your code" form to preview or to show refused (`ConsoleCodeStyle`); the page then answers 422 for a refusal.
+    static func studio(_ req: Request, codeDraft: ConsoleCodeStyle.Draft? = nil) async throws -> Response {
         let (p, businessId) = try req.businessDashboard
         guard canView(p) else { throw APIError.forbidden }
         guard let business = try await BusinessRecord.find(businessId, on: req.db) else { throw APIError.notFound }
@@ -242,9 +244,12 @@ enum ConsoleBrandStudio {
                                upload + ConsoleUI.table([ConsoleUI.Column("Image"), ConsoleUI.Column("Slot"), ConsoleUI.Column("Size"), ConsoleUI.Column("Stored", numeric: true), ConsoleUI.Column("Status")], assetRows,
                                                         caption: "Brand images", empty: "No images yet."))
         body += scheduleCard(kits: kits, schedule: schedule, csrf: csrf, canManage: canManage)
+        body += try await ConsoleCodeStyle.card(req, p: p, businessId: businessId, draft: codeDraft)
+        var status = HTTPStatus.ok
+        if case .refused? = codeDraft?.outcome { status = .unprocessableEntity }
         let flash = req.query[String.self, at: "m"].flatMap { Self.flash[$0] }
         return DashboardUI.businessPage(p, title: "Brand Kits", active: path, subtitle: "Your business's look on Viadere's pages and widgets.", actions: canAdd ? ConsoleUI.linkButton("New kit", href: "\(path)/kits/new", .primary, icon: .plus) : "",
-                                        flash: flash, body: body, script: script)
+                                        flash: flash, body: body, status: status, script: script)
     }
 
     static func scheduleCard(kits: [BrandKitRecord], schedule: BrandSchedule?, csrf: String, canManage: Bool) -> String {

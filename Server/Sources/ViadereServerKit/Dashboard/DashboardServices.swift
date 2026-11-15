@@ -28,6 +28,9 @@ struct DashboardAnalytics {
         var disconnects = 0
         var activeRelationships = 0
         var reports = 0
+        /// Connections credited to a campaign in the period (docs/SECURITY.md §2.106), and the campaigns they came through, most first.
+        var campaignConnects = 0
+        var campaigns: [(name: String, publicId: String, connects: Int)] = []
         /// Interactions issued per UTC day, oldest first.
         var daily: [(day: Date, count: Int)] = []
 
@@ -82,6 +85,18 @@ struct DashboardAnalytics {
         out.activeRelationships = abuse.activeRelationships
         out.disconnects = try await RelationshipRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$disconnectedAt >= from).count()
         out.consentRevocations = max(0, abuse.optOuts - out.disconnects)
+        let campaignService = CampaignService(db: db, ctx: ctx)
+        let credited = try await campaignService.connectCounts(businessId: businessId, since: from)
+        if !credited.isEmpty {
+            // Names come from this business's own rows only; a count whose campaign row is gone is not shown.
+            for campaign in try await campaignService.list(businessId: businessId) {
+                guard let id = campaign.id, let count = credited[id] else { continue }
+                out.campaigns.append((campaign.name, campaign.publicId, count))
+                out.campaignConnects += count
+            }
+            out.campaigns.sort { ($0.connects, $1.publicId) > ($1.connects, $0.publicId) }
+            out.campaigns = Array(out.campaigns.prefix(10))
+        }
         // Daily series (UTC).
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
