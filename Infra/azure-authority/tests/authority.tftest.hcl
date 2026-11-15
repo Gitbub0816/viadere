@@ -200,3 +200,33 @@ run "reconcile_job_enabled_has_no_key_vault_role" {
     error_message = "the reconcile identity reads the workspace and gains no Key Vault role"
   }
 }
+
+run "apple_team_id_and_extra_env_reach_the_authority" {
+  command = plan
+
+  variables {
+    authority_enabled        = true
+    image                    = "crmock.azurecr.io/viadere-authority@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    authority_entra_audience = "api://viadere-authority-staging"
+    apple_team_id            = "M669H43X63"
+    authority_env            = { CKEY_SAFE_ACTION_ISSUER = "link.example.test" }
+  }
+
+  assert {
+    condition     = local.authority_base_env["APPLE_TEAM_ID"] == "M669H43X63" && local.authority_base_env["CKEY_SAFE_ACTION_ISSUER"] == "link.example.test"
+    error_message = "APPLE_TEAM_ID (App Attest at key-log genesis) and the extra authority_env must reach the authority's environment"
+  }
+}
+
+run "apple_team_id_cannot_be_set_through_authority_env" {
+  command = plan
+
+  variables {
+    authority_enabled        = true
+    image                    = "crmock.azurecr.io/viadere-authority@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    authority_entra_audience = "api://viadere-authority-staging"
+    authority_env            = { APPLE_TEAM_ID = "M669H43X63" }
+  }
+
+  expect_failures = [var.authority_env]
+}

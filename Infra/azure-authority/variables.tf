@@ -143,6 +143,16 @@ variable "authority_entra_audience" {
   default     = ""
 }
 
+variable "apple_team_id" {
+  description = "Apple Developer Team ID of the app (APPLE_TEAM_ID). The authority checks App Attest at key-log genesis against SHA-256(\"{team}.{bundle}\") and, when strict with the key log on, refuses to start without it (SECURITY.md section 2.103). Public, not a secret."
+  type        = string
+  default     = ""
+  validation {
+    condition     = can(regex("^[A-Z0-9]{0,20}$", var.apple_team_id))
+    error_message = "apple_team_id is 1 to 20 uppercase letters or digits, or empty."
+  }
+}
+
 variable "authority_caller_object_ids" {
   description = "Object ids (oid) allowed to call the authority: the api identity (Authority.Evidence.Submit) and the worker identity (Authority.Revocations). The authority checks the role per route AND this allow-list (ADR-0019 section 4.4)."
   type        = map(string)
@@ -156,7 +166,7 @@ variable "authority_env" {
   validation {
     condition = length(setintersection(keys(var.authority_env), [
       "ENVIRONMENT", "PORT", "BIND_HOST", "AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_KEY_VAULT_URL", "DATABASE_HOST", "DATABASE_NAME",
-      "DATABASE_USER", "DATABASE_AUTH", "AUTHORITY_ENABLED", "AUTHORITY_ENTRA_AUDIENCE", "AUTHORITY_CALLER_OIDS", "AUTHORITY_OUTBOUND_ALLOWLIST",
+      "DATABASE_USER", "DATABASE_AUTH", "AUTHORITY_ENABLED", "AUTHORITY_ENTRA_AUDIENCE", "AUTHORITY_CALLER_OIDS", "AUTHORITY_OUTBOUND_ALLOWLIST", "APPLE_TEAM_ID",
     ])) == 0
     error_message = "authority_env must not set keys this module owns."
   }

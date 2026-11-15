@@ -45,7 +45,7 @@ resource "azapi_resource" "cae" {
 }
 
 locals {
-  authority_base_env = local.on == 0 ? {} : merge(var.authority_env, {
+  authority_base_env = local.on == 0 ? {} : merge(var.authority_env, { for k, v in { APPLE_TEAM_ID = var.apple_team_id } : k => v if v != "" }, {
     ENVIRONMENT                  = var.environment
     PORT                         = "8080"
     BIND_HOST                    = "0.0.0.0"

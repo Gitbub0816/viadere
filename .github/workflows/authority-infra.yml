@@ -87,6 +87,8 @@ jobs:
       TF_VAR_authority_enabled: ${{ vars.AUTHORITY_ENABLED_IAC }}
       TF_VAR_image: ${{ vars.AZURE_AUTH_BOOTSTRAP_IMAGE }}
       TF_VAR_authority_entra_audience: ${{ vars.AUTHORITY_ENTRA_AUDIENCE }}
+      TF_VAR_apple_team_id: ${{ vars.APPLE_TEAM_ID }}
+      TF_VAR_authority_env: ${{ vars.AUTHORITY_ENV_JSON || '{}' }}
       TF_VAR_authority_crypto_officers_group_object_id: ${{ vars.AUTHORITY_CRYPTO_OFFICERS_GROUP_ID }}
       TF_VAR_oidc_subject_workflow_ref: ${{ vars.OIDC_SUBJECT_WORKFLOW_REF }}
       TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
@@ -144,6 +146,8 @@ jobs:
       TF_VAR_authority_enabled: ${{ vars.AUTHORITY_ENABLED_IAC }}
       TF_VAR_image: ${{ vars.AZURE_AUTH_BOOTSTRAP_IMAGE }}
       TF_VAR_authority_entra_audience: ${{ vars.AUTHORITY_ENTRA_AUDIENCE }}
+      TF_VAR_apple_team_id: ${{ vars.APPLE_TEAM_ID }}
+      TF_VAR_authority_env: ${{ vars.AUTHORITY_ENV_JSON || '{}' }}
       TF_VAR_authority_crypto_officers_group_object_id: ${{ vars.AUTHORITY_CRYPTO_OFFICERS_GROUP_ID }}
       TF_VAR_oidc_subject_workflow_ref: ${{ vars.OIDC_SUBJECT_WORKFLOW_REF }}
       TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
