@@ -4,7 +4,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Idempotency keys for `POST /v1/business/*`: the same key with the same request replays the original (`200`); the same key with another request is
+ * Idempotency keys for every `POST` under `/v1/business/`: the same key with the same request replays the original (`200`); the same key with another request is
  * `409 idempotency_conflict`. Same derivation as the Swift and TypeScript SDKs.
  */
 public object IdempotencyKey {
