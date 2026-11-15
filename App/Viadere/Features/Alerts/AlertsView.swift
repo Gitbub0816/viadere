@@ -12,6 +12,8 @@ import ViadereKit
 struct AlertsView: View {
     @Bindable var model: AppModel
     @State private var path: [String] = []
+    /// Device pairing requests (§2.107); only a D1 device gets any.
+    @State private var pairings: PairingRequestsViewModel? = nil
     @State private var inbox: AuthDeliveryInboxViewModel
 
     init(model: AppModel) {
@@ -27,10 +29,12 @@ struct AlertsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     OrganizationContextHeader(model: model)
+                        .task { if pairings == nil { pairings = makePairings() } }
                     ViadereHeader("Alerts", subtitle: subtitle) {
                         ViadereIconButton(systemName: "viewfinder", label: "Scan a code") { model.scannerPresented = true }
                     }
                     securityNotice
+                    if context == .all, let pairings { PairingRequestsSection(model: pairings).padding(.bottom, ViadereSpace.s) }
                     ViadereSegmented(selection: Binding(get: { alerts.segment }, set: { alerts.segment = $0 }), options: AlertsSegment.allCases) {
                         $0 == .needsYou ? "Needs you" : "History"
                     }
@@ -89,6 +93,11 @@ struct AlertsView: View {
     }
 
     /// Viadere's own account notices stay on top in All (they are about the account, not a business).
+    private func makePairings() -> PairingRequestsViewModel {
+        let services = model.services
+        return PairingRequestsViewModel(api: services.devicePairingAPI, records: services.records, signer: services.pairingSigner, now: services.clock)
+    }
+
     @ViewBuilder private var securityNotice: some View {
         if context == .all, let notice = model.securityNotices.current {
             SecurityNoticeBanner(vm: model.securityNotices, notice: notice) { model.reviewDevices() }

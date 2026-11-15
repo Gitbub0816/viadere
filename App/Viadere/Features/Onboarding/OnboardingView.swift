@@ -120,6 +120,7 @@ private struct ErrorLine: View {
 
 private struct WelcomeStep: View {
     @Bindable var vm: OnboardingViewModel
+    @State private var pairing: NewDevicePairingViewModel?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,12 +146,24 @@ private struct WelcomeStep: View {
                 Button("I already have an account") { Task { await vm.signIn() } }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
+                // Device pairing (§2.107): an account without a passkey adds this device from one of its trusted devices.
+                Button("I already use Viadere") { pairing = vm.makeNewDevicePairing() }
+                    .buttonStyle(.viadere(.quiet))
+                    .disabled(vm.isWorking)
                 Button("Lost your devices?") { vm.beginRecovery() }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
             }
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.m)
+        }
+        .sheet(isPresented: Binding(get: { pairing != nil }, set: { if !$0 { pairing = nil } })) {
+            if let pairing {
+                ScrollView {
+                    NewDevicePairingView(model: pairing, onAdded: { self.pairing = nil; vm.onFinished?() })
+                }
+                .viadereScreenBackground()
+            }
         }
     }
 }

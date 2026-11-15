@@ -204,6 +204,7 @@ public final class SecurityNoticesViewModel {
         case .phoneTransferred: return "Your phone number was moved to another Viadere account \(when) because you did not keep it."
         case .businessLinked: return "A business linked your Viadere account to your account with them \(when)."
         case .businessLinkUnconfirmed: return "A business never confirmed a link you started, so it was ended \(when)."
+        case .devicePairingReported: return "Someone tried to add a device to your account \(when). You said it wasn't you, so nothing was added."
         case .unknown:
             let text = UntrustedText.paragraphs(notice.message, max: 300)
             return text.isEmpty ? "Something changed on your account \(when)." : "\(text) (\(when))"

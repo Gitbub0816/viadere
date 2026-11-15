@@ -555,6 +555,7 @@ struct SubScreen<Content: View>: View {
 struct DevicesView: View {
     let vm: SecuritySettingsViewModel
     @State private var confirming: DeviceID?
+    @State private var invite: AddDeviceInviteViewModel?
 
     var body: some View {
         SubScreen(title: "Trusted devices", subtitle: "Each approval is signed by a key inside one of these.") {
@@ -598,6 +599,11 @@ struct DevicesView: View {
                     if index < vm.devices.count - 1 { ViadereHairline() }
                 }
             }
+            Button(PairingCopy.inviteTitle) { invite = vm.makeAddDeviceInvite() }
+                .buttonStyle(.viadere(.secondary))
+                .sheet(isPresented: Binding(get: { invite != nil }, set: { if !$0 { invite = nil } })) {
+                    if let invite { ScrollView { AddDeviceInviteView(model: invite) }.viadereScreenBackground() }
+                }
             // Asking to remove a device is felt once, when the confirmation appears.
             .sensoryFeedback(.warning, trigger: confirming) { _, now in now != nil }
             Text("A new device can't approve high-risk requests until you approve it here with Face ID on a device you already trust. Waiting doesn't change that. Removing a device stops it from approving requests immediately.")

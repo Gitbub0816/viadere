@@ -43,6 +43,8 @@ public struct ViadereServices: Sendable {
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
     /// The Home Screen widget's snapshot writer (numbers only). The app sets it; extensions, the App Clip and tests leave it `nil`.
     public var homeWidget: HomeWidgetWriter?
+    /// Device pairing (§2.107): adding a device from a trusted one. Fails closed when absent (extensions, the App Clip).
+    public var devicePairingAPI: any DevicePairingAPI = UnavailableDevicePairingAPI()
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -124,6 +126,7 @@ public struct ViadereServices: Sendable {
             // Request information comes from the issuer's own host over the app's transport, with no session and no device signature.
             services.safeActionReader = SafeActionReader(configuration: configuration,
                                                          replay: PreferencesSafeActionReplayStore(preferences: services.preferences), transport: transport)
+            services.devicePairingAPI = LiveDevicePairingAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)

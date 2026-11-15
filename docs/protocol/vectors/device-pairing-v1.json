@@ -1,0 +1,304 @@
+{
+  "approvals": [
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "7Dzxw8KWKaGAlFp6XJpm_Wlb0WUP4QiM3F3yI0x-HN8QTfhAPl52CQicunBdOl9t6Mj9ioF2oBpayS1scROERQ",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "valid",
+      "name": "valid",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "EbOsKJeKcArbFuK2R5e8LnrpoTbe7BoKucpJ_-ucMELcVkmkrbFOR05chvSL2YEdnA-Dldi2rKVcVaNtdL18zg",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "valid",
+      "name": "valid_high_s_encoding",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "RI2SodpuiKzWVb4qxJZPsft7zDePDOpLQZBmNGLifysW_PVHt_ZM0Q7784MKZy7LNqifR0XiXoIEOOR98cY8_Q",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "bad_signature",
+      "name": "signed_by_another_key",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "devicePasscode",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "BU7-1HEvCrcHSK_siIkezLsT9PIV1qisBFOLHUhm6mdentnwWguKWovq_xKQE9bsJrN-QAPZIpqX5idB_JByXg",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "assurance_too_low",
+      "name": "passcode_assurance",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\ndevicePasscode"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "12345",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "ERltxDTRa5IS_EXURbO3Dkeg_OPP7HmiadLZpeODx40A9YPzd6pqAoSzvDXiaR9FWwScMEUXxHvIXgT3FfaeMg",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "malformed",
+      "name": "match_not_six_digits",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n12345\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9F38570A99991AEC5A4A39371158A415EA8C1D3DE3055AD4D3E5768DB57830B5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "tkHGdiMdhKquyPvQT8vQI9gs2c3pT96Zel2ARLyKpm93M-8esyzO3nZ3SSRAxfUq40Zy3YHNFTlQiedC4WexwQ",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "malformed",
+      "name": "digest_not_lowercase_hex",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9F38570A99991AEC5A4A39371158A415EA8C1D3DE3055AD4D3E5768DB57830B5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "ummWw4i_v3AD8w2MxC1xuyNSZdTx_Tg6cbhbl5bJ__ZVH8qbIHuf1xh_mvKJ2cpyrc731cQI66_HRhkn8_r64w",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "malformed",
+      "name": "nonce_not_256_bits",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nAAAAAAAAAAAAAAAAAAAAAA\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "7a2d3b5f-0c4e-4d6f-9081-223344556677",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "Fhg908MycxBdhp1ryDlvC_zB4A7Clg8E52JyTvZa4OUW_v55cKwGG-gBrjQpKuVj2Kw05aX5lmf7PHzyqJDVsw",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "binding_mismatch",
+      "name": "other_account",
+      "signingInput": "VIADERE-PAIR-V1\n7a2d3b5f-0c4e-4d6f-9081-223344556677\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "a7217f2d26161a173b078fe88db114e75278a8128d96f85a8516eeca06c029a4",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "2pclrVOgK5k2rqR7kuu4MYGZyqT20WWXkdGFFpt5885lca0p1LIpmTYMieZec7yfc09MtL5mXGXfpNkCwsmtAg",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "binding_mismatch",
+      "name": "other_nonce",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\na7217f2d26161a173b078fe88db114e75278a8128d96f85a8516eeca06c029a4\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "47f6225ce2b3e93fdb992f2e479fb9ba0414e6353547bf5d09058f6feba2eb36",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575980",
+        "newDeviceKeys": "3787106c94323bc00cb4733d845eb1268002ac3f76562817ac840c324e8fe97e",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "OCFBTZqdSgJlzS8QBO27z7wnkGr3dx-S_uJ7IiOKx54sKn4bsKix__G-SU0UVEpDbppVSnDi3IkT6DxT1RLkBw",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "binding_mismatch",
+      "name": "substituted_new_device_keys",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n3787106c94323bc00cb4733d845eb1268002ac3f76562817ac840c324e8fe97e\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n47f6225ce2b3e93fdb992f2e479fb9ba0414e6353547bf5d09058f6feba2eb36\n575980\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    },
+    {
+      "approval": {
+        "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+        "approverDeviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+        "approverPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+        "assurance": "biometric",
+        "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+        "expiresAt": "2026-10-26T07:37:20.000Z",
+        "match": "575981",
+        "newDeviceKeys": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+        "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+        "signature": "6QUsvTmgbBhWbBXlfzHYMkhqm-qWYcvDgwTCyx5Ai0tcznGh_1At2qZVdXV4IJ7_5Bzb76_gKkcqPhlr-wbb-w",
+        "signedAt": "2026-10-26T07:33:20.125Z"
+      },
+      "expect": "comparison_mismatch",
+      "name": "wrong_number",
+      "signingInput": "VIADERE-PAIR-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53\n1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5\nBJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU\n9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5\n575981\n2026-10-26T07:37:20.000Z\n2026-10-26T07:33:20.125Z\nbiometric"
+    }
+  ],
+  "approver": {
+    "accountId": "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+    "approvalBiometricPublicKey": "BJAiKo-iMapbivc6NzYqBf2qI1GD03FbLMUoIv67L5_4mXpjOTxOpqOtfPS2jKYTbMvlLQe7uJbG04W5RJGJZLU",
+    "deviceId": "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5"
+  },
+  "challenge": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "code": "575980",
+  "comparisonDigest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5",
+  "comparisonInput": "VIADERE-PAIR-CODE-V1\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\n726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+  "decimal6": [
+    {
+      "code": "000000",
+      "digest": "00000000000f4240000000000000000000000000000000000000000000000000"
+    },
+    {
+      "code": "000255",
+      "digest": "00000000000000ff111111111111111111111111111111111111111111111111"
+    },
+    {
+      "code": "551615",
+      "digest": "ffffffffffffffff222222222222222222222222222222222222222222222222"
+    },
+    {
+      "code": "575980",
+      "digest": "9f38570a99991aec5a4a39371158a415ea8c1d3de3055ad4d3e5768db57830b5"
+    }
+  ],
+  "description": "Device pairing (SECURITY.md 2.107): key proofs of the new device over the pairing id (VIADERE-ENROLL-V1), the key-list digest, the comparison digest VIADERE-PAIR-CODE-V1 and its 6-digit code (decimal6 of the first 8 bytes), the pairing code normalization, and the trusted device's VIADERE-PAIR-V1 approval statement. Signatures are ECDSA P-256 / SHA-256, raw r||s, base64url; verify them, do not compare them (ECDSA is randomized). Generated by generate_device_pairing_v1.py.",
+  "keyListDigest": "726f97b9ef8f2bc70a77a992d8e30f74c343d0a1200fde1eaf0938f7f6f77c53",
+  "newDeviceKeys": [
+    {
+      "proof": "nvKek-wbLdovoWOeFtWf56EkR3YKKROe_W7-OJi_y0BxX28BOS2w_Iv8A9yV83HXFvwTBXwhxaJ6HKIoSPET4A",
+      "proofMessage": "VIADERE-ENROLL-V1\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\nrequest\nBLWNWOigRBng7PQ1Fjk4LOnBlA5Yoc_fgCVGdFQ4lh8Mv23Aqg5NLeCQQyLhwFjn8f2s7bm2RhyBPI09aCIoyQ0",
+      "publicKey": "BLWNWOigRBng7PQ1Fjk4LOnBlA5Yoc_fgCVGdFQ4lh8Mv23Aqg5NLeCQQyLhwFjn8f2s7bm2RhyBPI09aCIoyQ0",
+      "purpose": "request"
+    },
+    {
+      "proof": "il9hU5R8z4eOaDWfs-ISZK-F1M9avFhJuRfeBNHOfZMZG0q2HAk293-CuaIlqtxkj8AlpELyM9IEXxhn6_-cPg",
+      "proofMessage": "VIADERE-ENROLL-V1\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\napprovalUserPresence\nBLcR2xddPi4D9bcB_KqGiWjvTs2f2Fs8jZ3wdK6OyeEFtKPvhdTIuy46B7mDgS9X5WWGgtD5xtDHh1-TKFfr6ps",
+      "publicKey": "BLcR2xddPi4D9bcB_KqGiWjvTs2f2Fs8jZ3wdK6OyeEFtKPvhdTIuy46B7mDgS9X5WWGgtD5xtDHh1-TKFfr6ps",
+      "purpose": "approvalUserPresence"
+    },
+    {
+      "proof": "9WnVm6t7tDIeFZK6nFP4DbzC-f3K0QHXszzXBCNbLfEupYQV0EmCajLV46g_btYkD7vUNlPDnJyW8ORGD0Ma6Q",
+      "proofMessage": "VIADERE-ENROLL-V1\n0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c\nICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\napprovalBiometric\nBGgE9GoK3dGmL2AXNbhdJuV21gJD83ybsbzOGiFoiSaYuo38lDWb-17_52MVj02olY26TRg-x9U1Gi6Iy4VQYcM",
+      "publicKey": "BGgE9GoK3dGmL2AXNbhdJuV21gJD83ybsbzOGiFoiSaYuo38lDWb-17_52MVj02olY26TRg-x9U1Gi6Iy4VQYcM",
+      "purpose": "approvalBiometric"
+    }
+  ],
+  "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "now": 1793000000,
+  "pairingCodeNormalization": [
+    {
+      "input": "ABCD-EFGH-JKMN",
+      "normalized": "ABCDEFGHJKMN"
+    },
+    {
+      "input": " abcd efgh jkmn ",
+      "normalized": "ABCDEFGHJKMN"
+    },
+    {
+      "input": "o0Il-1LOo-ZZZZ",
+      "normalized": "00111100ZZZZ"
+    },
+    {
+      "input": "ABCD-EFGH-JKMU",
+      "normalized": null
+    },
+    {
+      "input": "ABCD-EFGH-JKM",
+      "normalized": null
+    }
+  ],
+  "pairingId": "0b9a4c3e-2d1f-4e5a-8b7c-6d5e4f3a2b1c",
+  "substitution": {
+    "code": "481919",
+    "comparisonDigest": "47f6225ce2b3e93fdb992f2e479fb9ba0414e6353547bf5d09058f6feba2eb36",
+    "description": "A relay that registers its own keys under the same pairing id and nonce gets another digest and, here, another code.",
+    "keyListDigest": "3787106c94323bc00cb4733d845eb1268002ac3f76562817ac840c324e8fe97e",
+    "keys": [
+      {
+        "publicKey": "BIFzMw3dwOVtu57zUVMZ2TNV2difxoFBQ-UruFbGL99tP38i5zzivNNb2AeQlWfq_y1hRJMofUuANUCG5ENgklA",
+        "purpose": "request"
+      },
+      {
+        "publicKey": "BM4za26Jog5OQ-S7ZVGXAbPsag02CJbZ0TKe7YKs1PlNiQDo-e4E4aHyepTC0ODUverysBc8n7zHrtxaX1xveb8",
+        "purpose": "approvalBiometric"
+      }
+    ]
+  },
+  "version": 1
+}

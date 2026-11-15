@@ -171,6 +171,13 @@ public enum APIErrorCode: String, Codable, Sendable, CaseIterable {
     case matchDigitsRequired = "match_digits_required"
     /// `409`: no free code can exist for this person. Critical operator alert.
     case matchCodeSpaceExhausted = "match_code_space_exhausted"
+    /// `409` (device pairing, §2.107): the account has no live D1 device that could approve a new one. `details.recovery = "account_recovery"`:
+    /// the way back is account recovery (§2.26), not pairing.
+    case noTrustedDevice = "no_trusted_device"
+    /// `409`: the approval names another pairing, nonce, key set or comparison digest than the one the server holds (a substituted new-device key).
+    case pairingMismatch = "pairing_mismatch"
+    /// `409`: the number typed on the trusted device is not the one the new device shows (`details.remaining` attempts left).
+    case comparisonMismatch = "comparison_mismatch"
     case unknown
 
     public init(from decoder: any Decoder) throws {

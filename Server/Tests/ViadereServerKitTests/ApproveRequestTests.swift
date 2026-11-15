@@ -533,7 +533,7 @@ final class ApproveRequestTests: XCTestCase {
         try await withHarness({ $0.approve.enabled = false }) { h in
             let b = try await h.makeBusiness(name: "Northwind Bank", handle: "northwindbank")
             let consumer = try await h.readyConsumer()
-            let routes: [AnyEndpoint] = APIRoutes.all.filter { $0.template.contains("/approve") || $0.template.contains("/key-directory") }
+            let routes: [AnyEndpoint] = APIRoutes.all.filter { ($0.template.contains("/approve") || $0.template.contains("/key-directory")) && !$0.template.hasPrefix("/v1/device-pairings/") }
             XCTAssertGreaterThanOrEqual(routes.count, 24)
             for route in routes {
                 let path = route.template.replacingOccurrences(of: "{enrollmentId}", with: UUID().uuidString.lowercased()).replacingOccurrences(of: "{approvalId}", with: UUID().uuidString.lowercased())

@@ -58,6 +58,14 @@ public final class SecuritySettingsViewModel {
         addPhone.onLinked = { [weak self] link in self?.phoneLinked(link) }
     }
 
+    /// Settings → Trusted devices → Add another device (§2.107): the pairing code for the new device.
+    public func makeAddDeviceInvite() -> AddDeviceInviteViewModel { AddDeviceInviteViewModel(api: services.devicePairingAPI) }
+
+    /// The account's pending pairing requests (only a D1 device gets any), for Alerts and the pairing notification.
+    public func makePairingRequests() -> PairingRequestsViewModel {
+        PairingRequestsViewModel(api: services.devicePairingAPI, records: services.records, signer: services.pairingSigner, now: services.clock)
+    }
+
     public func load() async {
         let record = try? await services.records.load()
         currentDeviceId = record?.deviceId
