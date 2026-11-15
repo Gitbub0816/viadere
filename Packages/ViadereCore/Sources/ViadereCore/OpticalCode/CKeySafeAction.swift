@@ -8,9 +8,11 @@ import Foundation
 ///     issuer, app, action, key_id, request_id     each u8 length + bytes
 ///     issued_at u64 BE | expires_at u64 BE         Unix seconds
 ///     params u16 BE length + bytes                 at most 1024
-///     signature 64 bytes                           Ed25519 over "CKey Safe Action v1" + 0x00 + every byte above
+///     signature 64 bytes                           over the signing input "CKey Safe Action v1" + 0x00 + every byte above:
+///                                                  Ed25519, or ES256 (ECDSA P-256 / SHA-256, raw r‖s, low-S)
 ///
-/// This file parses, verifies and signs, in pure Swift (swift-crypto; no CKey C or C++ is linked). It decides nothing about whether an
+/// The envelope does not name the algorithm; the key does (`PublicKey`: the `alg` of the key file entry or of the app's pin). ES256 needs
+/// CKey 0.1.0-build.118 or later in other readers. This file parses, verifies and signs, in pure Swift (swift-crypto; no CKey C or C++ is linked). It decides nothing about whether an
 /// action may run: that is the reader's job (`ViadereKit.SafeActionReader`, SECURITY.md §2.104). It reaches every verdict of the CKey
 /// conformance vectors (`docs/protocol/vectors/ckey-safe-actions-v1.json`; `CKeySafeActionTests`).
 public struct CKeySafeAction: Sendable, Equatable {
@@ -63,6 +65,89 @@ public struct CKeySafeAction: Sendable, Equatable {
 
     public enum Field: String, Sendable, Equatable { case issuer, app, action, keyId, requestId }
 
+    /// An issuer's public key with its algorithm (spec "Issuer keys"). An unknown `alg` is ignored by readers, so it is never a key.
+    public enum PublicKey: Sendable, Equatable {
+        /// 32 bytes (RFC 8032).
+        case ed25519(Data)
+        /// A point on P-256 (swift-crypto refuses a point off the curve when the key is made).
+        case es256(P256.Signing.PublicKey)
+
+        public static let ed25519Name = "Ed25519"
+        public static let es256Name = "ES256"
+
+        public enum KeyError: Error, Sendable, Equatable {
+            /// Not `Ed25519` or `ES256`: a reader ignores the key.
+            case unknownAlgorithm
+            /// Wrong length, not hex, or not a point on the curve.
+            case invalidKey
+        }
+
+        /// From a key file entry or a pin: `Ed25519` with 64 hex digits, or `ES256` with the SEC 1 encoding, 66 hex digits (compressed,
+        /// `02`/`03`) or 130 (uncompressed, `04`). Hex digits in either case.
+        public init(alg: String, hex: String) throws {
+            guard let bytes = Self.bytes(hex: hex) else { throw KeyError.invalidKey }
+            switch alg {
+            case Self.ed25519Name:
+                guard bytes.count == 32, (try? Curve25519.Signing.PublicKey(rawRepresentation: bytes)) != nil else { throw KeyError.invalidKey }
+                self = .ed25519(bytes)
+            case Self.es256Name:
+                let key: P256.Signing.PublicKey?
+                switch (bytes.count, bytes.first) {
+                case (33, 0x02?), (33, 0x03?): key = try? P256.Signing.PublicKey(compressedRepresentation: bytes)
+                case (65, 0x04?): key = try? P256.Signing.PublicKey(x963Representation: bytes)
+                default: key = nil
+                }
+                guard let key else { throw KeyError.invalidKey }
+                self = .es256(key)
+            default:
+                throw KeyError.unknownAlgorithm
+            }
+        }
+
+        public var alg: String {
+            switch self {
+            case .ed25519: Self.ed25519Name
+            case .es256: Self.es256Name
+            }
+        }
+
+        /// Lower-case hex as a key file publishes it: 64 digits for Ed25519, the 66-digit compressed SEC 1 point for ES256.
+        public var hex: String {
+            let bytes: Data = switch self {
+            case .ed25519(let raw): raw
+            case .es256(let key): key.compressedRepresentation
+            }
+            return bytes.map { String(format: "%02x", $0) }.joined()
+        }
+
+        public static func == (lhs: PublicKey, rhs: PublicKey) -> Bool {
+            switch (lhs, rhs) {
+            case (.ed25519(let a), .ed25519(let b)): a == b
+            case (.es256(let a), .es256(let b)): a.x963Representation == b.x963Representation
+            default: false
+            }
+        }
+
+        static func bytes(hex text: String) -> Data? {
+            let digits = Array(text.utf8)
+            guard !digits.isEmpty, digits.count % 2 == 0 else { return nil }
+            func value(_ c: UInt8) -> UInt8? {
+                switch c {
+                case 0x30...0x39: c - 0x30
+                case 0x61...0x66: c - 0x61 + 10
+                case 0x41...0x46: c - 0x41 + 10
+                default: nil
+                }
+            }
+            var out = Data(capacity: digits.count / 2)
+            for index in stride(from: 0, to: digits.count, by: 2) {
+                guard let high = value(digits[index]), let low = value(digits[index + 1]) else { return nil }
+                out.append(high << 4 | low)
+            }
+            return out
+        }
+    }
+
     public enum ParseError: Error, Sendable, Equatable {
         /// No `ckey-action:1:` prefix, or nothing after it.
         case notASafeAction
@@ -111,11 +196,23 @@ public struct CKeySafeAction: Sendable, Equatable {
     /// not issued more than 120 s in the future, and `now` before `expires_at` (no grace after expiry: the conformance vector `expired`
     /// requires a code to be dead one second after `expires_at`).
     public static func verify(text: String, publicKey: Data, now: Date, maxLifetime: Int = defaultMaxLifetimeSeconds) -> Verdict {
+        verify(text: text, key: .ed25519(publicKey), now: now, maxLifetime: maxLifetime)
+    }
+
+    /// Ed25519: the scalar S must be below the group order. ES256: 1 ≤ r, s < n and s ≤ n/2 (a high-S signature is refused here, before
+    /// swift-crypto, which would accept it), then ECDSA P-256 over SHA-256 of the signing input.
+    public static func verify(text: String, key: PublicKey, now: Date, maxLifetime: Int = defaultMaxLifetimeSeconds) -> Verdict {
         guard maxLifetimeRange.contains(maxLifetime), let decoded = try? decode(text) else { return .invalid }
-        let signature = decoded.bytes[decoded.signatureOffset...]
-        guard publicKey.count == 32, isCanonicalScalar(signature.suffix(32)),
-              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
-              key.isValidSignature(Data(signature), for: Data(signingContext + decoded.bytes[..<decoded.signatureOffset])) else { return .integrity }
+        let signature = Data(decoded.bytes[decoded.signatureOffset...])
+        let input = Data(signingContext + decoded.bytes[..<decoded.signatureOffset])
+        switch key {
+        case .ed25519(let raw):
+            guard raw.count == 32, isCanonicalScalar(ArraySlice([UInt8](signature.suffix(32)))),
+                  let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw), key.isValidSignature(signature, for: input) else { return .integrity }
+        case .es256(let key):
+            guard isCanonicalES256(signature), let ecdsa = try? P256.Signing.ECDSASignature(rawRepresentation: signature),
+                  key.isValidSignature(ecdsa, for: input) else { return .integrity }
+        }
         let action = decoded.action
         let seconds = now.timeIntervalSince1970
         guard seconds >= 0, seconds < 9_007_199_254_740_992 else { return .expired }
@@ -131,6 +228,8 @@ public struct CKeySafeAction: Sendable, Equatable {
         /// The fields would not parse (a reader would refuse the envelope), so nothing is signed.
         case invalidFields(ParseError)
         case invalidSeed
+        /// Not 64 bytes.
+        case invalidSignature
     }
 
     /// Signs with an Ed25519 key given as its 32-byte seed. The fields pass the same parser readers use, so a signed envelope always parses.
@@ -140,6 +239,33 @@ public struct CKeySafeAction: Sendable, Equatable {
     }
 
     public func signed(with key: Curve25519.Signing.PrivateKey) throws -> String {
+        let input = try signingInput()
+        let signature = try key.signature(for: input)
+        return try assembled(signature: signature)
+    }
+
+    /// ES256 with a key in this process (tests and development; issuers sign through a key service with `signingInput` and `assembled`).
+    /// The signature is folded to low-S.
+    public func signed(with key: P256.Signing.PrivateKey) throws -> String {
+        let signature = try key.signature(for: try signingInput())
+        return try assembled(signature: Self.lowS(signature.rawRepresentation))
+    }
+
+    /// What the issuer's key signs: `CKey Safe Action v1`, a zero byte, then every envelope byte before the signature. The fields pass the
+    /// same parser readers use, so an envelope assembled from this input always parses.
+    public func signingInput() throws -> Data { Data(Self.signingContext + (try body())) }
+
+    /// The payload text from these fields and a 64-byte signature made over `signingInput()` (Ed25519, or ES256 raw r‖s already low-S).
+    /// Nothing is verified here: an issuer verifies the result once with its public key before publishing it.
+    public func assembled(signature: Data) throws -> String {
+        guard signature.count == Self.signatureBytes else { throw SigningError.invalidSignature }
+        return Self.prefix + Self.base64URLEncode(try body() + [UInt8](signature))
+    }
+
+    /// `s` folded into the lower half of P-256's group (`s ≤ n/2`), as the spec requires of ES256 issuers.
+    public static func lowS(_ raw: Data) -> Data { ViadereSignatureEncoding.normalizedRaw(raw) }
+
+    func body() throws -> [UInt8] {
         var body: [UInt8] = [1, scope.rawValue]
         for (field, value) in [(Field.issuer, issuer), (.app, app), (.action, action), (.keyId, keyId), (.requestId, requestId)] {
             let bytes = Array(value.utf8)
@@ -157,9 +283,7 @@ public struct CKeySafeAction: Sendable, Equatable {
         } catch let error as ParseError {
             throw SigningError.invalidFields(error)
         }
-        let signature = try key.signature(for: Data(Self.signingContext + body))
-        guard signature.count == Self.signatureBytes else { throw SigningError.invalidSeed }
-        return Self.prefix + Self.base64URLEncode(body + signature)
+        return body
     }
 
     // MARK: Internals
@@ -248,6 +372,25 @@ public struct CKeySafeAction: Sendable, Equatable {
         }
         return false // S == L
     }
+
+    /// ES256: r and s are 32-byte big-endian integers with 1 ≤ r, s < n, and s ≤ n/2 (one valid signature value per envelope).
+    public static func isCanonicalES256(_ signature: Data) -> Bool {
+        guard signature.count == 64 else { return false }
+        let bytes = [UInt8](signature)
+        let r = Array(bytes[0..<32]), s = Array(bytes[32..<64])
+        func isZero(_ v: [UInt8]) -> Bool { v.allSatisfy { $0 == 0 } }
+        func less(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+            for index in 0..<32 where a[index] != b[index] { return a[index] < b[index] }
+            return false
+        }
+        return !isZero(r) && !isZero(s) && less(r, p256Order) && !less(p256HalfOrder, s)
+    }
+
+    /// n of P-256, big-endian, and ⌊n/2⌋.
+    static let p256Order: [UInt8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51]
+    static let p256HalfOrder: [UInt8] = [0x7F, 0xFF, 0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                         0xDE, 0x73, 0x7D, 0x56, 0xD3, 0x8B, 0xCF, 0x42, 0x79, 0xDC, 0xE5, 0x61, 0x7E, 0x31, 0x92, 0xA8]
 
     static let groupOrder: [UInt8] = [0xED, 0xD3, 0xF5, 0x5C, 0x1A, 0x63, 0x12, 0x58, 0xD6, 0x9C, 0xF7, 0xA2, 0xDE, 0xF9, 0xDE, 0x14,
                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10]

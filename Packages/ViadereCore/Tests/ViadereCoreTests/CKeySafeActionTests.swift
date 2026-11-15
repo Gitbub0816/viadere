@@ -275,4 +275,136 @@ import Testing
         let reversed = try #require(try Self.load().first { $0.name == "expires before it is issued" })
         #expect(throws: CKeySafeAction.ParseError.lifetime) { try CKeySafeAction.parse(text: reversed.payload) }
     }
+
+    // MARK: ES256 (CKey 0.1.0-build.118+, `docs/protocol/vectors/ckey-safe-actions-es256-v1.json` copied unchanged from the CKey scratch branch)
+
+    struct ES256Vectors: Decodable {
+        struct Vector: Decodable {
+            let name: String, alg: String, payload: String, public_key: String, now: Double, max_lifetime: Int, expect: String
+            let fields: Vectors.Fields?
+        }
+        let vectors: [Vector]
+    }
+
+    static func loadES256() throws -> [ES256Vectors.Vector] {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { url.deleteLastPathComponent() }
+        return try JSONDecoder().decode(ES256Vectors.self, from: Data(contentsOf: url.appendingPathComponent("docs/protocol/vectors/ckey-safe-actions-es256-v1.json"))).vectors
+    }
+
+    /// A key that cannot be made is `invalid` (the vectors' verdict for an off-curve point or a wrong length); otherwise `verify` decides.
+    static func verdict(alg: String, publicKeyHex: String, payload: String, now: Double, maxLifetime: Int) -> String {
+        guard let key = try? CKeySafeAction.PublicKey(alg: alg, hex: publicKeyHex) else { return "invalid" }
+        return verdictName(CKeySafeAction.verify(text: payload, key: key, now: Date(timeIntervalSince1970: now), maxLifetime: maxLifetime))
+    }
+
+    @Test func everyES256ConformanceVectorReachesItsVerdict() throws {
+        let vectors = try Self.loadES256()
+        #expect(vectors.count == 9)
+        #expect(Set(vectors.map(\.expect)) == ["ok", "integrity", "expired", "invalid"])
+        for vector in vectors {
+            #expect(vector.alg == "ES256")
+            let name = Self.verdict(alg: vector.alg, publicKeyHex: vector.public_key, payload: vector.payload, now: vector.now, maxLifetime: vector.max_lifetime)
+            #expect(name == vector.expect, "\(vector.name)")
+            guard vector.expect == "ok", let fields = vector.fields else { continue }
+            let key = try CKeySafeAction.PublicKey(alg: "ES256", hex: vector.public_key)
+            #expect(CKeySafeAction.verify(text: vector.payload, key: key, now: Date(timeIntervalSince1970: vector.now), maxLifetime: vector.max_lifetime)
+                    == .ok(CKeySafeAction(scope: CKeySafeAction.Scope(rawValue: fields.scope)!, issuer: fields.issuer, app: fields.app, action: fields.action,
+                                          keyId: fields.key_id, requestId: fields.request_id, issuedAt: fields.issued_at, expiresAt: fields.expires_at,
+                                          params: Data(fields.params.utf8))), "\(vector.name)")
+        }
+        // The Ed25519 vectors under the typed key reach the same verdicts as before.
+        for vector in try Self.load() where vector.expect != "invalid_or_integrity" {
+            #expect(Self.verdict(alg: "Ed25519", publicKeyHex: vector.public_key, payload: vector.payload, now: vector.now, maxLifetime: vector.max_lifetime)
+                    == vector.expect || vector.public_key.count != 64, "\(vector.name)")
+        }
+    }
+
+    @Test func es256KeysParseFromSEC1AndRefuseAnythingElse() throws {
+        let key = P256.Signing.PrivateKey().publicKey
+        func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
+        let compressed = try CKeySafeAction.PublicKey(alg: "ES256", hex: hex(key.compressedRepresentation))
+        let uncompressed = try CKeySafeAction.PublicKey(alg: "ES256", hex: hex(key.x963Representation).uppercased())
+        #expect(compressed == uncompressed)
+        #expect(compressed.alg == "ES256")
+        #expect(compressed.hex == hex(key.compressedRepresentation))
+        #expect(compressed != .ed25519(Self.publicKey))
+        var offCurve = key.x963Representation
+        offCurve[64] ^= 0x01
+        let refused: [(String, String, CKeySafeAction.PublicKey.KeyError)] = [
+            ("ES256", hex(offCurve), .invalidKey),                                    // a point off the curve
+            ("ES256", hex(key.rawRepresentation), .invalidKey),                       // 64 bytes: no SEC 1 prefix
+            ("ES256", "05" + hex(key.compressedRepresentation.dropFirst()), .invalidKey),
+            ("ES256", "04" + hex(key.compressedRepresentation.dropFirst()), .invalidKey), // 33 bytes with the uncompressed prefix
+            ("ES256", hex(key.compressedRepresentation) + "00", .invalidKey),
+            ("ES256", "", .invalidKey),
+            ("ES256", "0g" + String(repeating: "0", count: 64), .invalidKey),
+            ("Ed25519", hex(key.compressedRepresentation), .invalidKey),
+            ("es256", hex(key.compressedRepresentation), .unknownAlgorithm),         // exact spelling only
+            ("ES384", hex(key.compressedRepresentation), .unknownAlgorithm),
+            ("", "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", .unknownAlgorithm),
+        ]
+        for (alg, text, error) in refused {
+            #expect(throws: error, "\(alg) \(text)") { try CKeySafeAction.PublicKey(alg: alg, hex: text) }
+        }
+        #expect(try CKeySafeAction.PublicKey(alg: "Ed25519", hex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") == .ed25519(Self.publicKey))
+    }
+
+    @Test func es256SigningInputAssemblyAndTheSignatureRules() throws {
+        let privateKey = P256.Signing.PrivateKey()
+        let key = CKeySafeAction.PublicKey.es256(privateKey.publicKey)
+        let action = Self.action()
+        // In process: always low-S, always verifies.
+        for _ in 0..<16 {
+            let text = try action.signed(with: privateKey)
+            #expect(CKeySafeAction.verify(text: text, key: key, now: Self.now, maxLifetime: 120) == .ok(action))
+            let raw = Data(CKeySafeAction.base64URLDecode(Array(text.utf8)[CKeySafeAction.prefix.utf8.count...])!.suffix(64))
+            #expect(CKeySafeAction.isCanonicalES256(raw))
+            // An Ed25519 key never accepts it, nor another P-256 key.
+            #expect(CKeySafeAction.verify(text: text, key: .ed25519(Self.publicKey), now: Self.now) == .integrity)
+            #expect(CKeySafeAction.verify(text: text, key: .es256(P256.Signing.PrivateKey().publicKey), now: Self.now) == .integrity)
+        }
+        // A key service path: sign the SHA-256 digest of the signing input elsewhere, fold to low-S, assemble.
+        let input = try action.signingInput()
+        #expect(input.prefix(20) == Data("CKey Safe Action v1".utf8 + [0]))
+        let raw = try privateKey.signature(for: input).rawRepresentation
+        let low = CKeySafeAction.lowS(raw)
+        let text = try action.assembled(signature: low)
+        #expect(CKeySafeAction.verify(text: text, key: key, now: Self.now, maxLifetime: 120) == .ok(action))
+        #expect(throws: CKeySafeAction.SigningError.invalidSignature) { try action.assembled(signature: low.prefix(63)) }
+
+        // The high-S twin of a valid signature verifies in swift-crypto, and is refused here.
+        let r = Data(low.prefix(32)), s = [UInt8](low.suffix(32))
+        let high = r + Self.subtract(CKeySafeAction.p256Order, s)
+        #expect(high != low)
+        #expect(privateKey.publicKey.isValidSignature(try P256.Signing.ECDSASignature(rawRepresentation: high), for: input))
+        #expect(CKeySafeAction.verify(text: try action.assembled(signature: high), key: key, now: Self.now, maxLifetime: 120) == .integrity)
+        // r or s zero, r = n, s = n, s = n/2 + 1: refused before the library; s = n/2 itself is low.
+        let zero = Data(repeating: 0, count: 32)
+        for bad in [zero + Data(s), r + zero, Data(CKeySafeAction.p256Order) + Data(s), r + Data(CKeySafeAction.p256Order),
+                    r + Self.add1(CKeySafeAction.p256HalfOrder), Data(repeating: 0xFF, count: 64)] {
+            #expect(!CKeySafeAction.isCanonicalES256(bad))
+            #expect(CKeySafeAction.verify(text: try action.assembled(signature: bad), key: key, now: Self.now, maxLifetime: 120) == .integrity)
+        }
+        #expect(CKeySafeAction.isCanonicalES256(r + Data(CKeySafeAction.p256HalfOrder)))
+        #expect(!CKeySafeAction.isCanonicalES256(low.prefix(63)))
+    }
+
+    static func subtract(_ a: [UInt8], _ b: [UInt8]) -> Data {
+        var out = [UInt8](repeating: 0, count: 32), borrow = 0
+        for i in stride(from: 31, through: 0, by: -1) {
+            var d = Int(a[i]) - Int(b[i]) - borrow
+            if d < 0 { d += 256; borrow = 1 } else { borrow = 0 }
+            out[i] = UInt8(d)
+        }
+        return Data(out)
+    }
+
+    static func add1(_ a: [UInt8]) -> Data {
+        var out = a
+        for i in stride(from: 31, through: 0, by: -1) {
+            if out[i] == 0xFF { out[i] = 0 } else { out[i] += 1; break }
+        }
+        return Data(out)
+    }
 }
