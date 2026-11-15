@@ -515,12 +515,13 @@ enum DashboardRoutes {
     private static func campaignDetail(_ req: Request, _ p: DashboardPrincipal, _ result: DashboardActions.Campaign) throws -> String {
         let status = CampaignService.status(result.record, now: req.ctx.now)
         let expires = result.expiresAt.map { "Expires \(DashboardFormat.date($0))." } ?? "No expiry."
-        func download(_ code: String, _ label: String) -> String {
-            "<form method=\"post\" action=\"/dashboard/campaigns/download\">\(DashboardUI.csrf(p))\(ConsoleUI.hidden("campaign", result.record.publicId))\(ConsoleUI.hidden("code", code))<button class=\"btn s sm\" type=\"submit\">\(label)</button></form>"
-        }
+        // One form, two submit buttons: the button pressed names the code to download.
+        let downloads = "<form method=\"post\" action=\"/dashboard/campaigns/download\" class=\"form-actions\">\(DashboardUI.csrf(p))\(ConsoleUI.hidden("campaign", result.record.publicId))"
+            + ConsoleUI.button("Download your code (SVG)", .secondary, small: true, name: "code", value: "primary")
+            + ConsoleUI.button("Download QR (SVG)", .secondary, small: true, name: "code", value: "qr") + "</form>"
         let style = p.can(.manageBrandKits) ? " <a href=\"\(ConsoleBrandStudio.path)#code-style\">Change your code's style</a>" : ""
         return ConsoleUI.card(description: "Print the codes or share the link. All of them open Viadere to your business.",
-                              actions: download("primary", "Download your code (SVG)") + download("qr", "Download QR (SVG)"),
+                              actions: downloads,
                               titleHTML: "\(DashboardUI.esc(result.record.name)) \(campaignStatus(status))", """
         <div class="split wa"><div><h3>Link with signed context</h3><pre>\(DashboardUI.esc(result.link.urlString))</pre><p class="mu sm">\(expires) If the context expires or is invalid, the plain code still works.</p>\
         <h3>Plain link</h3><pre>\(DashboardUI.esc(result.plainLink.urlString))</pre><p class="mu sm">Phone cameras read QR codes only, so keep the QR code next to your code wherever you print it.\(style)</p></div>\

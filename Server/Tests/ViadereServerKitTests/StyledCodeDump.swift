@@ -12,20 +12,21 @@ import XCTest
 final class StyledCodeDump: XCTestCase {
     struct Entry: Codable { var name: String; var symbology: String; var link: String; var page: String; var primary: String; var qr: String; var note: String }
 
-    /// Styles to prove. Two custom CKeys sit at the 3:1 floor, one dark on light and one light on dark; one QR sits at its 4.5:1 floor.
+    /// Styles to prove. Two custom CKeys sit at the mark limits and near the 3:1 floor, one dark on light and one light on dark; one QR sits
+    /// at its 4.5:1 floor.
     static let styles: [(name: String, note: String, form: [(String, String)])] = [
         ("concept", "Viadere preset", [("look", "concept")]),
         ("plain", "black on white preset", [("look", "plain")]),
-        ("cream-circles", "custom, accent, circles, dots, flat rays", [("look", "custom"), ("background", "#FFF8E7"), ("ink", "#2F1B0C"), ("use_accent1", "1"), ("accent1", "#7A2E14"),
+        ("cream-circles", "custom, accent, circles, dots, flat rays", [("look", "custom"), ("background", "#FFF8E7"), ("ink", "#2F1B0C"), ("use_accent1", "1"), ("accent1", "#5A1E0C"),
                                                                         ("accent_percent", "25"), ("modules", "circle"), ("rings", "dots"), ("rays", "flat")]),
         ("navy-materials", "custom light on dark, vignette, sheen, materials at the cap", [("look", "custom"), ("background", "#0F2A44"), ("use_edge", "1"), ("background_edge", "#0A1D30"),
-                                                                                           ("ink", "#F2E6C9"), ("use_shade", "1"), ("ink_shade", "#D9C79F"), ("use_accent1", "1"), ("accent1", "#B7C9A8"),
+                                                                                           ("ink", "#F2E6C9"), ("use_shade", "1"), ("ink_shade", "#E9DCBC"), ("use_accent1", "1"), ("accent1", "#DDE8D2"),
                                                                                            ("accent_percent", "18"), ("modules", "diamond"), ("bevel", "60"), ("shadow", "50"), ("texture", "40")]),
-        ("green-squares", "custom dark on light, square modules", [("look", "custom"), ("background", "#E8F1EC"), ("ink", "#1D4D3A"), ("modules", "square")]),
-        ("floor-grey-on-white", "custom at the floor: #949494 on #FFFFFF is 3.03:1", [("look", "custom"), ("background", "#FFFFFF"), ("ink", "#949494")]),
-        ("floor-grey-on-black", "custom at the floor: #5A5A5A on #000000 is 3.04:1", [("look", "custom"), ("background", "#000000"), ("ink", "#5A5A5A")]),
-        ("floor-accent-vignette", "custom at the floor with a vignette and an accent at 3.0:1", [("look", "custom"), ("background", "#FFFFFF"), ("use_edge", "1"), ("background_edge", "#F2F2F2"),
-                                                                                                  ("ink", "#5C3B1E"), ("use_accent1", "1"), ("accent1", "#8A8A8A"), ("accent_percent", "40"), ("shadow", "40"), ("bevel", "50")]),
+        ("green-squares", "custom dark on light, square modules", [("look", "custom"), ("background", "#E8F1EC"), ("ink", "#163D2E"), ("modules", "square")]),
+        ("floor-dark-marks", "custom at both floors: luma 56 marks, #383838 on #878787 is 3.28:1", [("look", "custom"), ("background", "#878787"), ("ink", "#383838")]),
+        ("floor-light-marks", "custom at both floors: luma 216 marks, #D8D8D8 on #787878 is 3.09:1", [("look", "custom"), ("background", "#787878"), ("ink", "#D8D8D8")]),
+        ("floor-accent-vignette", "custom with a vignette, an accent at the luma floor, shadow and bevel at their dark-on-light caps", [("look", "custom"), ("background", "#FFFFFF"), ("use_edge", "1"), ("background_edge", "#F2F2F2"),
+                                                                                                  ("ink", "#4A2E14"), ("use_accent1", "1"), ("accent1", "#383838"), ("accent_percent", "40"), ("shadow", "40"), ("bevel", "50")]),
         ("qr-navy", "QR in brand colours", [("look", "qr"), ("qr_dark", "#1B3A5C"), ("qr_light", "#FFFFFF")]),
         ("qr-floor", "QR at the 4.5:1 floor: #767676 on #FFFFFF", [("look", "qr"), ("qr_dark", "#767676"), ("qr_light", "#FFFFFF")]),
         ("qr-tinted", "QR on a tinted field: #2F1B0C on #F3E3C3", [("look", "qr"), ("qr_dark", "#2F1B0C"), ("qr_light", "#F3E3C3")]),

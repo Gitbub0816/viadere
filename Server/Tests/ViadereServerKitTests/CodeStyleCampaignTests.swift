@@ -120,6 +120,8 @@ final class CodeStyleCampaignTests: XCTestCase {
                 (customForm(background: "#777777", ink: "#FFFFFF", extra: [("use_accent1", "1"), ("accent1", "#000000"), ("accent_percent", "20")]), "Mixing the two"),
                 (customForm(background: "#14161E", ink: "#F6EEE0", extra: [("use_edge", "1"), ("background_edge", "#07080C"), ("use_shade", "1"), ("ink_shade", "#C8B69A")]), "colours of the Viadere code"),
                 (customForm(background: "#FFFFFF", ink: "#000000", extra: [("shadow", "45")]), "shadow of at most 40"),
+                (customForm(background: "#FFFFFF", ink: "#949494"), "#949494 is too close to the middle"),
+                (customForm(background: "#000000", ink: "#A0A0A0"), "#A0A0A0 is too close to the middle"),
                 (customForm(background: "#000000", ink: "#FFFFFF", extra: [("bevel", "90")]), "bevel of at most 60"),
                 ([("look", "qr"), ("qr_dark", "#FFFFFF"), ("qr_light", "#000000")], "dark squares on a light background"),
                 ([("look", "qr"), ("qr_dark", "#000000"), ("qr_light", "#A0A0A0")], "light colour is too dark"),
@@ -154,7 +156,7 @@ final class CodeStyleCampaignTests: XCTestCase {
         try await withHarness(Self.relaxed) { h in
             let (owner, account, businessId) = try await h.verifiedOwner()
             try await h.dashReauth(owner, account)
-            let form = customForm(background: "#FFF8E7", ink: "#2F1B0C", extra: [("use_accent1", "1"), ("accent1", "#7A2E14"), ("accent_percent", "20"),
+            let form = customForm(background: "#FFF8E7", ink: "#2F1B0C", extra: [("use_accent1", "1"), ("accent1", "#5A1E0C"), ("accent_percent", "20"),
                                                                                      ("modules", "diamond"), ("rings", "dots"), ("rays", "flat"), ("bevel", "20"), ("shadow", "10"), ("texture", "30"),
                                                                                      ("label", "<b>smuggled</b>"), ("logo_url", "https://evil.example/x.png")])
             let saved = try await h.formPost(ConsoleCodeStyle.savePath, owner, form)
@@ -163,14 +165,14 @@ final class CodeStyleCampaignTests: XCTestCase {
             XCTAssertFalse(row.styleJSON.contains("smuggled"))
             XCTAssertFalse(row.styleJSON.contains("evil"))
             let stored = try JSONDecoder().decode(BusinessCodeStyle.self, from: Data(row.styleJSON.utf8))
-            let expected = try BusinessCodeStyle(custom: CKeyStyleSpec(background: BrandColor("#FFF8E7")!, ink: BrandColor("#2F1B0C")!, accents: [BrandColor("#7A2E14")!],
+            let expected = try BusinessCodeStyle(custom: CKeyStyleSpec(background: BrandColor("#FFF8E7")!, ink: BrandColor("#2F1B0C")!, accents: [BrandColor("#5A1E0C")!],
                                                                        accentPercent: 20, modules: .diamond, rings: .dots, rays: .flat, bevel: 20, shadow: 10, texture: 30))
             XCTAssertEqual(stored, expected)
             // The editor shows the stored values back.
             let studio = try await h.page(ConsoleBrandStudio.path, owner)
             XCTAssertEqual(studio.status, .ok)
             XCTAssertTrue(studio.text.contains("value=\"#fff8e7\""))
-            XCTAssertTrue(studio.text.contains("value=\"#7a2e14\""))
+            XCTAssertTrue(studio.text.contains("value=\"#5a1e0c\""))
             let audit = try await XCTUnwrapAsync(await AuditEventRecord.query(on: h.db).filter(\.$action == "brandkit.code_style_saved").first())
             XCTAssertEqual(audit.businessId, businessId)
             XCTAssertTrue(audit.metadataJSON.contains("custom"))

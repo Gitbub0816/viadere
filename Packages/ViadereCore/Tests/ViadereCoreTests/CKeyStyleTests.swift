@@ -87,10 +87,10 @@ import Testing
         let link = "https://viadere.com/c/AF2345"
         let symbol = try CKeySymbol.encode(link)
         // The codeword is made before any style exists; a flat custom style draws the plain geometry in other colours.
-        let forest = try BusinessCodeStyle(custom: CKeyStyleSpec(background: Self.color("#FFF5D6"), ink: Self.color("#2F5D50")))
+        let forest = try BusinessCodeStyle(custom: CKeyStyleSpec(background: Self.color("#FFF5D6"), ink: Self.color("#1D3B33")))
         let styled = symbol.svg(style: try #require(forest.ckeyStyle))
         let plain = symbol.svg(style: .plain)
-        #expect(styled.replacingOccurrences(of: "#fff5d6", with: "#ffffff").replacingOccurrences(of: "#2f5d50", with: "#000000") == plain)
+        #expect(styled.replacingOccurrences(of: "#fff5d6", with: "#ffffff").replacingOccurrences(of: "#1d3b33", with: "#000000") == plain)
         // Shapes change the drawing of a mark, never the count of marks or their centres.
         func count(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }
         let diamonds = symbol.svg(style: try CKeyStyle(validating: CKeyStyleSpec(background: Self.color("#FFFFFF"), ink: Self.color("#000000"), modules: .diamond)))
@@ -117,9 +117,24 @@ import Testing
         if case .uncertified(.lowContrast)? = refusal(CKeyStyleSpec(background: white, ink: black, accents: [Self.color("#959595")], accentPercent: 5)) {} else { Issue.record("accent under 3:1") }
         #expect(refusal(CKeyStyleSpec(background: white, ink: black, shadow: 41)) == .uncertified(.strongShadowOnLight))
         #expect(refusal(CKeyStyleSpec(background: white, ink: black, bevel: 51)) == .uncertified(.strongBevelOnLight))
-        // Exactly 3:1, in both polarities: accepted.
-        #expect(refusal(CKeyStyleSpec(background: white, ink: Self.color("#949494"))) == nil)
-        #expect(refusal(CKeyStyleSpec(background: black, ink: Self.color("#5A5A5A"))) == nil)
+        // Exactly 3:1 passes the reference, but the reference reader did not decode either polarity when the code sat on a surround of the
+        // ink's side (grey on black on a light page, grey on white on a dark one; docs/SECURITY.md §2.105). Marks must sit near the far end.
+        #expect(refusal(CKeyStyleSpec(background: white, ink: Self.color("#949494"))) == .weakMarks(ink: "#949494"))
+        #expect(refusal(CKeyStyleSpec(background: black, ink: Self.color("#5A5A5A"))) == .weakMarks(ink: "#5A5A5A"))
+        #expect(refusal(CKeyStyleSpec(background: black, ink: Self.color("#A0A0A0"))) == .weakMarks(ink: "#A0A0A0"))
+        // The limits themselves: luma 56 and below for dark marks, 216 and above for light marks (Rec. 601 on the sRGB values).
+        #expect(refusal(CKeyStyleSpec(background: white, ink: Self.color("#383838"))) == nil)   // luma 56
+        #expect(refusal(CKeyStyleSpec(background: white, ink: Self.color("#393939"))) == .weakMarks(ink: "#393939"))
+        #expect(refusal(CKeyStyleSpec(background: black, ink: Self.color("#D8D8D8"))) == nil)   // luma 216
+        #expect(refusal(CKeyStyleSpec(background: black, ink: Self.color("#D7D7D7"))) == .weakMarks(ink: "#D7D7D7"))
+        // At the limit on a mid-tone field, where only the 3:1 check bounds the background.
+        #expect(refusal(CKeyStyleSpec(background: Self.color("#878787"), ink: Self.color("#383838"))) == nil)
+        #expect(refusal(CKeyStyleSpec(background: Self.color("#787878"), ink: Self.color("#D8D8D8"))) == nil)
+        // The rule covers every mark colour: sheen shade and accents too.
+        #expect(refusal(CKeyStyleSpec(background: white, ink: black, inkShade: Self.color("#505050"))) == .weakMarks(ink: "#505050"))
+        #expect(refusal(CKeyStyleSpec(background: black, ink: white, accents: [Self.color("#9EA1A6")], accentPercent: 10)) == .weakMarks(ink: "#9EA1A6"))
+        #expect(refusal(CKeyStyleSpec(background: black, ink: white, accents: [Self.color("#9EA1A6")], accentPercent: 0)) == nil)  // unused accent
+        #expect(BusinessCodeStyle.Refusal.weakMarks(ink: "#949494").message.contains("#949494"))
         // Materials stay within the concept preset's amounts.
         #expect(refusal(CKeyStyleSpec(background: black, ink: white, bevel: 60, shadow: 50, texture: 40)) == nil)
         #expect(refusal(CKeyStyleSpec(background: black, ink: white, bevel: 61)) == .materialsTooStrong)
@@ -131,7 +146,11 @@ import Testing
         disguised.accents = []
         disguised.modules = .circle
         #expect(refusal(disguised) == .reservedForViadere)
+        // With one colour changed it is no longer reserved, but the concept preset's sheen shade is too dim for a business style (the preset
+        // itself is Viadere's, drawn without this check).
         disguised.ink = Self.color("#F6EEE1")
+        #expect(refusal(disguised) == .weakMarks(ink: "#C8B69A"))
+        disguised.inkShade = Self.color("#E8DCC6")
         #expect(refusal(disguised) == nil)
         for refusal in [BusinessCodeStyle.Refusal.unsafe(.mixedPolarity), .uncertified(.strongShadowOnLight), .materialsTooStrong, .reservedForViadere, .qr(.inverted),
                         .qr(.lowContrast(ratioTimes100: 312)), .qr(.lowLuminanceDifference), .unsafe(.tooFaint(ink: "#f0f0f0", background: "#ffffff", ratio: 1.1))] {
@@ -165,7 +184,7 @@ import Testing
         #expect(BusinessCodeStyle.standard.choice == .ckeyPreset(.concept))
         #expect(BusinessCodeStyle.standard.ckeyStyle == .concept)
         let custom = try BusinessCodeStyle(custom: CKeyStyleSpec(background: Self.color("#2F5D50"), backgroundEdge: Self.color("#1D3B33"), ink: Self.color("#FFF5D6"),
-                                                                 inkShade: Self.color("#E8D9A8"), accents: [Self.color("#F0B060")], accentPercent: 12, modules: .circle,
+                                                                 inkShade: Self.color("#EEDFB0"), accents: [Self.color("#F8D890")], accentPercent: 12, modules: .circle,
                                                                  rings: .dots, rays: .flat, bevel: 30, shadow: 20, texture: 10))
         for style in [BusinessCodeStyle.standard, BusinessCodeStyle(preset: .plain), custom, try BusinessCodeStyle(qrDark: Self.color("#1F1E1C"), light: Self.color("#FFFFFF"))] {
             let data = try CanonicalJSON.serialize(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(style)))
@@ -176,6 +195,7 @@ import Testing
         // A stored style is data like any other: one that no longer passes is refused when read, never drawn.
         for bad in [##"{"v":1,"symbology":"ckey","custom":{"background":"#FFFFFF","ink":"#F0F0F0"}}"##,
                     ##"{"v":1,"symbology":"ckey","custom":{"background":"#FFFFFF","ink":"#959595"}}"##,
+                    ##"{"v":1,"symbology":"ckey","custom":{"background":"#FFFFFF","ink":"#949494"}}"##,
                     ##"{"v":1,"symbology":"ckey","custom":{"background":"#FFFFFF","ink":"red"}}"##,
                     ##"{"v":1,"symbology":"ckey","custom":{"background":"#FFFFFF","ink":"#000000","modules":"star"}}"##,
                     ##"{"v":1,"symbology":"ckey","preset":"concept","custom":{"background":"#FFFFFF","ink":"#000000"}}"##,
@@ -206,7 +226,10 @@ import Testing
             let qr = BusinessCodeStyle.suggestedQR(from: tokens)
             #expect(QRCodeColorPolicy.check(dark: qr.dark, light: qr.light) == nil)
         }
-        #expect(BusinessCodeStyle.suggestedCustom(from: table[2]).accents.map(\.hex) == ["#B5683A", "#6B675F"])
+        // #2F5D50 is too light for dark marks, so the suggestion is the light surface on the primary; neither accent is light enough.
+        let suggested = BusinessCodeStyle.suggestedCustom(from: table[2])
+        #expect(suggested.background.hex == "#2F5D50" && suggested.ink.hex == "#FFF5D6" && suggested.accents.isEmpty)
+        #expect(BusinessCodeStyle.suggestedCustom(from: BrandTokens(primary: Self.color("#1B3A5C"), accent: Self.color("#2F1B0C"))).accents.map(\.hex) == ["#2F1B0C"])
         #expect(BusinessCodeStyle.suggestedCustom(from: table[4]) == .plain)
         #expect(BusinessCodeStyle.suggestedQR(from: table[3]).dark == QRCodeColorPolicy.defaultDark)
     }

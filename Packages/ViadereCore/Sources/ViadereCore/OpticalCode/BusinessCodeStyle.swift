@@ -75,12 +75,27 @@ public struct BusinessCodeStyle: Sendable, Equatable, Codable {
     /// back from a browser rendering.
     public static let maxBevel = 60, maxShadow = 50, maxTexture = 40
 
+    /// Mark limits, as Rec. 601 luma of the sRGB values (0 to 255, what a camera's grey channel sees): light marks at least 216, dark marks
+    /// at most 56. The reference's 3:1 floor is not enough on its own: in the decode proof (docs/SECURITY.md §2.105) its reader missed
+    /// grey marks at 3:1 and up to 8:1 when the code sat on a surround of the marks' side (light marks on a light page, dark marks on a
+    /// dark one), and a business cannot choose where its code is printed. Both limits keep a margin of at least 8 below the worst
+    /// threshold measured.
+    public static let minimumLightMarkLuma = 216, maximumDarkMarkLuma = 56
+
+    /// Rec. 601 luma of a colour's sRGB values, rounded down (0...255).
+    public static func luma(_ color: BrandColor) -> Int {
+        let c = color.rgb
+        return (299 * Int(c.red) + 587 * Int(c.green) + 114 * Int(c.blue)) / 1000
+    }
+
     public enum Refusal: Error, Sendable, Equatable {
         /// The reference refuses the style.
         case unsafe(CKeyStyleCheck.Refusal)
         /// The reference accepts the style only with certification, which Viadere cannot run: refused.
         case uncertified(CKeyStyleCheck.Advice)
         case materialsTooStrong
+        /// A mark colour (`#RRGGBB`) not light enough for marks on a dark field, or not dark enough for marks on a light one.
+        case weakMarks(ink: String)
         /// A custom style with exactly the colours of the Viadere code. Choose the preset instead.
         case reservedForViadere
         case qr(QRCodeColorPolicy.Refusal)
@@ -100,6 +115,8 @@ public struct BusinessCodeStyle: Sendable, Equatable, Codable {
             case .uncertified(.strongShadowOnLight): "Dark marks on a light background can use a shadow of at most 40."
             case .uncertified(.strongBevelOnLight): "Dark marks on a light background can use a bevel of at most 50."
             case .materialsTooStrong: "Use a bevel of at most \(BusinessCodeStyle.maxBevel), a shadow of at most \(BusinessCodeStyle.maxShadow) and a texture of at most \(BusinessCodeStyle.maxTexture)."
+            case .weakMarks(let ink):
+                "\(ink.uppercased()) is too close to the middle for a mark colour. Light marks need to be near white and dark marks near black, so the code scans on any surface."
             case .reservedForViadere: "Those are exactly the colours of the Viadere code. Choose the Viadere preset, or change a colour."
             case .qr(.inverted): "A QR code needs dark squares on a light background. Phone cameras often cannot read the reverse."
             case .qr(.lowContrast(let ratio)):
@@ -139,6 +156,11 @@ public struct BusinessCodeStyle: Sendable, Equatable, Codable {
         let concept = CKeyStyleSpec.concept
         if spec.background == concept.background && spec.backgroundEdge == concept.backgroundEdge && spec.ink == concept.ink && spec.inkShade == concept.inkShade {
             return .reservedForViadere
+        }
+        // The check above passed, so every mark is on one side of the background.
+        let light = CKeyStyleCheck.isLightOnDark(spec) ?? false
+        for ink in CKeyStyleCheck.inks(spec) where light ? luma(ink) < minimumLightMarkLuma : luma(ink) > maximumDarkMarkLuma {
+            return .weakMarks(ink: ink.hex)
         }
         return nil
     }
