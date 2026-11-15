@@ -8,6 +8,9 @@ struct AuthSecretPayload: Codable, Sendable {
     var url: String?
     var code: String?
     var variables: [String: String]?
+    /// Cross-device link service (ADR-0021 §6): the authority's 2-digit number, shown to the **business** only (never in the device display), and
+    /// deleted with the rest of the secret when the delivery is answered or ends.
+    var matchCode: String?
 }
 
 /// The business side of authentication delivery and the state machine (ADR-0020). The tenant is always the API key's business; every query filters by it.
@@ -32,9 +35,16 @@ struct AuthDeliveryService {
             events = try await AuthDeliveryEventRecord.query(on: db).filter(\.$deliveryId == row.id!).sort(\.$at, .ascending).all()
                 .map { AuthDeliveryEventView(status: AuthDeliveryStatus(rawValue: $0.status) ?? .failed, at: $0.at, reason: $0.reason) }
         }
+        var crossDevice: AuthCrossDeviceLinkView?
+        if row.linkCrossDevice == true, let ach = row.linkChallengeId {
+            // ADR-0021 §6: the number while the delivery is open (sealed, deleted once answered or ended), the challenge reference for the redemption.
+            let open = !effectiveStatus(row).isTerminal && row.statusValue != .opened
+            let number = open ? await AuthDeliveryDeviceService(db: db, ctx: ctx).payload(row)?.matchCode : nil
+            crossDevice = AuthCrossDeviceLinkView(ach: ach, matchCode: number)
+        }
         return AuthDeliveryView(id: row.wireId, requestId: row.requestId, method: row.methodValue, purpose: row.purposeValue, status: effectiveStatus(row),
                                 expiresAt: row.expiresAt, createdAt: row.createdAt, correlationId: row.correlationId, clientTransactionRef: row.clientTransactionRef,
-                                reason: row.reason, events: events)
+                                reason: row.reason, events: events, crossDevice: crossDevice)
     }
 
     // MARK: Business credentials
@@ -185,7 +195,7 @@ struct AuthDeliveryService {
             let deliveryId = UUID()
             let challenge = AuthorityChallengeCreateRequest(purpose: .linkOpen, link: .init(
                 linkClientId: link.clientId, returnURL: link.returnURL, deliveryId: AuthDeliveryID(deliveryId).description, codeChallenge: link.codeChallenge,
-                purpose: request.purpose.rawValue, crossDevice: false, businessId: businessId.uuid))
+                purpose: request.purpose.rawValue, crossDevice: link.crossDevice, businessId: businessId.uuid))
             let created: (status: Int, response: AuthorityChallengeCreateResponse?)
             do { created = try await AuthorityClient(transport: transport).createChallenge(challenge) } catch {
                 throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
@@ -193,6 +203,11 @@ struct AuthDeliveryService {
             guard let response = created.response else {
                 // One answer for every refusal: an unknown, suspended or foreign link client, or a return URL it did not register.
                 throw APIError.validation("The link client or return_url is not registered for your business.", details: ["destination.link_client_id": "not_registered"])
+            }
+            // The mode the authority signed must be the one asked for: a number exactly for cross device, 2 digits (fail closed otherwise).
+            let numberOK = response.matchCode.map { $0.utf8.count == 2 && $0.allSatisfy { ("0"..."9").contains($0) } } ?? false
+            guard link.crossDevice ? numberOK : response.matchCode == nil else {
+                throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
             }
             plan.deliveryId = deliveryId
             plan.linkChallenge = response
@@ -245,12 +260,14 @@ struct AuthDeliveryService {
                 row.linkClientId = link.clientId
                 row.linkChallengeId = challenge.challengeId
                 row.linkStatement = challenge.statement
+                row.linkCrossDevice = link.crossDevice
             }
         }
         row.codeKind = request.otp?.codeKind.rawValue
         try await row.create(on: db)
-        let payload = AuthSecretPayload(url: plan.destination?.url, code: request.otp?.code, variables: request.variables)
-        if payload.url != nil || payload.code != nil || !(payload.variables ?? [:]).isEmpty {
+        let payload = AuthSecretPayload(url: plan.destination?.url, code: request.otp?.code, variables: request.variables,
+                                        matchCode: plan.destination?.link?.crossDevice == true ? plan.linkChallenge?.matchCode : nil)
+        if payload.url != nil || payload.code != nil || payload.matchCode != nil || !(payload.variables ?? [:]).isEmpty {
             let secret = AuthDeliverySecretRecord()
             secret.id = row.id
             secret.ciphertext = try settings.cipher.seal(try ViadereJSON.encode(payload), context: AuthDeliverySecretRecord.sealContext, rowId: row.id!)

@@ -20,3 +20,16 @@ struct CreateAuthLinkServiceSchema: AsyncMigration {
         }
     }
 }
+
+/// `AuthLinkService.v2` (additive, forward-only): cross-device link-service deliveries (ADR-0021 §6).
+struct CreateAuthLinkServiceCrossDevice: AsyncMigration {
+    var name: String { "AuthLinkService.v2" }
+
+    func prepare(on db: any Database) async throws {
+        try await db.schema(AuthDeliveryRecord.schema).field("link_cross_device", .bool).update()
+    }
+
+    func revert(on db: any Database) async throws {
+        try await db.schema(AuthDeliveryRecord.schema).deleteField("link_cross_device").update()
+    }
+}

@@ -33,9 +33,13 @@ public struct AuthDestinationRequest: Codable, Sendable, Hashable {
     public var returnUrl: String?
     public var codeChallenge: String?
     public var codeChallengeMethod: String?
+    /// `viadere` only (ADR-0021 §6): `true` when the person signs in on another device. The authority then asks the phone for the 2-digit number the
+    /// business shows (`AuthDeliveryView.crossDevice.match_code`), no code is opened on the phone, and the initiating session redeems with the
+    /// challenge reference. Absent or `false`: same device (the phone opens the signed return URL with `#vdr_code=`).
+    public var crossDevice: Bool?
 
     public init(linkMode: AuthLinkMode, url: String? = nil, signature: String? = nil, linkClientId: String? = nil, returnUrl: String? = nil,
-                codeChallenge: String? = nil, codeChallengeMethod: String? = nil) {
+                codeChallenge: String? = nil, codeChallengeMethod: String? = nil, crossDevice: Bool? = nil) {
         self.linkMode = linkMode
         self.url = url
         self.signature = signature
@@ -43,15 +47,16 @@ public struct AuthDestinationRequest: Codable, Sendable, Hashable {
         self.returnUrl = returnUrl
         self.codeChallenge = codeChallenge
         self.codeChallengeMethod = codeChallengeMethod
+        self.crossDevice = crossDevice
     }
 
     enum CodingKeys: String, CodingKey {
         case linkMode = "link_mode", url, signature, linkClientId = "link_client_id", returnUrl = "return_url"
-        case codeChallenge = "code_challenge", codeChallengeMethod = "code_challenge_method"
+        case codeChallenge = "code_challenge", codeChallengeMethod = "code_challenge_method", crossDevice = "cross_device"
     }
 
     public init(from decoder: any Decoder) throws {
-        try requireOnly(decoder, Set(["link_mode", "url", "signature", "link_client_id", "return_url", "code_challenge", "code_challenge_method"]))
+        try requireOnly(decoder, Set(["link_mode", "url", "signature", "link_client_id", "return_url", "code_challenge", "code_challenge_method", "cross_device"]))
         let c = try decoder.container(keyedBy: CodingKeys.self)
         linkMode = try c.decode(AuthLinkMode.self, forKey: .linkMode)
         url = try c.decodeIfPresent(String.self, forKey: .url)
@@ -60,6 +65,7 @@ public struct AuthDestinationRequest: Codable, Sendable, Hashable {
         returnUrl = try c.decodeIfPresent(String.self, forKey: .returnUrl)
         codeChallenge = try c.decodeIfPresent(String.self, forKey: .codeChallenge)
         codeChallengeMethod = try c.decodeIfPresent(String.self, forKey: .codeChallengeMethod)
+        crossDevice = try c.decodeIfPresent(Bool.self, forKey: .crossDevice)
     }
 }
 
@@ -213,10 +219,12 @@ public struct AuthDeliveryView: Codable, Sendable, Hashable {
     public var reason: String?
     /// Present on `GET`: one entry per transition (state and time only).
     public var events: [AuthDeliveryEventView]?
+    /// A cross-device link-service delivery only (ADR-0021 §6): what the initiating session needs. Absent for every other delivery.
+    public var crossDevice: AuthCrossDeviceLinkView?
 
     public init(id: AuthDeliveryID, requestId: String, method: AuthDeliveryMethod, purpose: AuthDeliveryPurpose, status: AuthDeliveryStatus,
                 expiresAt: Date, createdAt: Date, correlationId: String? = nil, clientTransactionRef: String? = nil, reason: String? = nil,
-                events: [AuthDeliveryEventView]? = nil) {
+                events: [AuthDeliveryEventView]? = nil, crossDevice: AuthCrossDeviceLinkView? = nil) {
         self.id = id
         self.requestId = requestId
         self.method = method
@@ -228,12 +236,30 @@ public struct AuthDeliveryView: Codable, Sendable, Hashable {
         self.clientTransactionRef = clientTransactionRef
         self.reason = reason
         self.events = events
+        self.crossDevice = crossDevice
     }
 
     enum CodingKeys: String, CodingKey {
         case id, requestId = "request_id", method, purpose, status, expiresAt = "expires_at", createdAt = "created_at"
-        case correlationId = "correlation_id", clientTransactionRef = "client_transaction_ref", reason, events
+        case correlationId = "correlation_id", clientTransactionRef = "client_transaction_ref", reason, events, crossDevice = "cross_device"
     }
+}
+
+/// `cross_device` of a link-service delivery view (ADR-0021 §6). The business shows `match_code` on the initiating screen ("Enter this number in
+/// Viadere", WEB-02), polls the delivery until it is `opened`, then redeems with `{link_client_id, ach, code_verifier}`. The phone never receives
+/// either value from the api: the number reaches it only through the person.
+public struct AuthCrossDeviceLinkView: Codable, Sendable, Hashable {
+    /// The authority challenge reference (`ach_…`). Redeems nothing without the initiating session's PKCE verifier and the business's own key.
+    public var ach: String
+    /// The 2-digit number, while the delivery is open; absent once it was answered or ended.
+    public var matchCode: String?
+
+    public init(ach: String, matchCode: String?) {
+        self.ach = ach
+        self.matchCode = matchCode
+    }
+
+    enum CodingKeys: String, CodingKey { case ach, matchCode = "match_code" }
 }
 
 public struct AuthDeliveryEventView: Codable, Sendable, Hashable {
