@@ -42,11 +42,80 @@ public struct RCSSuggestion: Sendable, Hashable, Codable {
     public var url: URL?
 }
 
+/// Orientation of an RBM standalone rich card.
+public enum RCSCardOrientation: String, Sendable, Hashable, Codable {
+    case vertical = "VERTICAL"
+    case horizontal = "HORIZONTAL"
+}
+
+/// Width of the cards in an RBM carousel.
+public enum RCSCardWidth: String, Sendable, Hashable, Codable {
+    case small = "SMALL"
+    case medium = "MEDIUM"
+}
+
+/// The content of one RCS Business Messaging rich card: a title, an optional description and at most
+/// `ChannelRenderer.maxRCSCardSuggestions` suggested replies.
+///
+/// There is deliberately **no media member**: no interaction payload carries a media reference that is safe to hand to a provider
+/// (brand images are served only from Viadere's own asset host and are not part of an interaction), so a card is text only.
+/// Every string has passed `DisplayTextSanitizer.sanitize`, `SMSEncoding.businessLine` and `SMSEncoding.field`; every suggestion is a
+/// `.reply` whose postback is the same renderer placeholder the chip list uses (the server swaps each for its signed single-use token).
+public struct RCSCardContent: Sendable, Hashable, Codable {
+    /// ≤ `ChannelRenderer.maxRCSCardTitle` characters (RBM allows 200).
+    public var title: String
+    /// ≤ `ChannelRenderer.maxRCSCardDescription` characters (RBM allows 2000).
+    public var description: String?
+    /// ≤ `ChannelRenderer.maxRCSCardSuggestions` (the RBM per-card limit), replies only.
+    public var suggestions: [RCSSuggestion]
+
+    public init(title: String, description: String? = nil, suggestions: [RCSSuggestion] = []) {
+        self.title = title
+        self.description = description
+        self.suggestions = suggestions
+    }
+}
+
+/// An RBM standalone rich card (`richCard.standaloneCard`).
+public struct RCSStandaloneCard: Sendable, Hashable, Codable {
+    public var orientation: RCSCardOrientation
+    public var content: RCSCardContent
+
+    public init(orientation: RCSCardOrientation = .vertical, content: RCSCardContent) {
+        self.orientation = orientation
+        self.content = content
+    }
+}
+
+/// An RBM carousel (`richCard.carouselCard`): `ChannelRenderer.rcsCarouselCards` (2-10) cards of one width.
+public struct RCSCarousel: Sendable, Hashable, Codable {
+    public var width: RCSCardWidth
+    public var cards: [RCSCardContent]
+
+    public init(width: RCSCardWidth = .medium, cards: [RCSCardContent]) {
+        self.width = width
+        self.cards = cards
+    }
+}
+
 /// RCS rendering of an interaction.
+///
+/// `text` and `suggestions` are always the complete plain message (text plus suggested-reply chips), so a consumer that ignores rich
+/// cards still sends a correct message. `card` and `carousel` are optional rich forms of the **same** content; at most one is set, and
+/// never for a secure handoff.
 public struct RCSRendering: Sendable, Hashable {
     public var text: String
     public var suggestions: [RCSSuggestion]
     public var isSecureHandoff: Bool
+    /// `status`, `reward` and `ticket`: the same content as one standalone card.
+    public var card: RCSStandaloneCard? = nil
+    /// A `choose` whose options do not fit as chips: one card per option, each carrying exactly that option's chip.
+    public var carousel: RCSCarousel? = nil
+
+    /// Every suggestion of the rich form (card or carousel), in order; empty without one.
+    public var richSuggestions: [RCSSuggestion] {
+        (card.map { [$0.content] } ?? carousel?.cards ?? []).flatMap(\.suggestions)
+    }
 }
 
 /// A notification action, mirroring `UNNotificationAction` options.
@@ -208,12 +277,49 @@ public enum ChannelRenderer {
 
     // MARK: RCS
 
-    /// Renders for an RCS-like channel with suggested replies.
+    /// RBM limit on suggested-reply chips in one message.
+    public static let maxRCSSuggestions = 11
+    /// RBM limit on the text of one suggestion.
+    public static let maxRCSSuggestionText = 25
+    /// RBM limit on suggestions attached to one rich card.
+    public static let maxRCSCardSuggestions = 4
+    /// RBM bounds on the number of cards in a carousel.
+    public static let rcsCarouselCards = 2...10
+    /// Viadere's cap on a card title (RBM allows 200).
+    public static let maxRCSCardTitle = 120
+    /// Viadere's cap on a card description (RBM allows 2000).
+    public static let maxRCSCardDescription = 400
+
+    /// Whether `options` can be shown faithfully as a chip list: at most `maxRCSSuggestions` options and no label longer than
+    /// `maxRCSSuggestionText` once rendered (a truncated chip can make two options look the same). A `choose` that does not fit and has
+    /// 2-10 options (`rcsCarouselCards`, also the `choose` validation range) gets a carousel in addition to the chips.
+    public static func optionsFitAsRCSChips(_ options: [ChoiceOption]) -> Bool {
+        options.count <= maxRCSSuggestions
+            && options.allSatisfy { SMSEncoding.field($0.label, maxLength: 40).count <= maxRCSSuggestionText }
+    }
+
+    /// Whether `interaction` may carry a rich card, a carousel or any actionable suggestion on RCS. The inline rule restated so the rich
+    /// path never depends on the order of checks in `rcs`: never a security-sensitive or unknown kind, never above `.channelReply` (so never
+    /// `high`/`critical` sensitivity).
+    static func rcsRichContentAllowed(_ interaction: Interaction) -> Bool {
+        AssurancePolicy.canPresentInline(interaction, on: .rcs) && !interaction.kind.isSecuritySensitive && !interaction.kind.isUnknown
+            && interaction.requiredAssurance == .channelReply
+    }
+
+    /// Business text for a card: hostile scalars removed (`DisplayTextSanitizer`), one line with a leading `[` or `Viadere` neutralised
+    /// (`SMSEncoding.businessLine`), then capped (`SMSEncoding.field`).
+    static func rcsCardText(_ text: String, maxLength: Int) -> String {
+        let cleaned = DisplayTextSanitizer.sanitize(text, maxCharacters: maxLength * 4)
+        return SMSEncoding.field(SMSEncoding.businessLine(cleaned), maxLength: maxLength)
+    }
+
+    /// Renders for an RCS-like channel with suggested replies, plus a standalone card (`status`, `reward`, `ticket`) or a carousel (a
+    /// `choose` whose options do not fit as chips, `optionsFitAsRCSChips`). The rich forms never change `text` or `suggestions`.
     public static func rcs(_ interaction: Interaction, business: BusinessSummary) -> RCSRendering {
         let name = SMSEncoding.field(business.displayName, maxLength: 40)
         func postback(_ target: String) -> String { "viadere:\(interaction.id):\(target)" }
         func reply(_ text: String, _ target: String) -> RCSSuggestion {
-            RCSSuggestion(kind: .reply, text: SMSEncoding.field(text, maxLength: 25), postbackData: postback(target), url: nil)
+            RCSSuggestion(kind: .reply, text: SMSEncoding.field(text, maxLength: maxRCSSuggestionText), postbackData: postback(target), url: nil)
         }
         if !AssurancePolicy.canPresentInline(interaction, on: .rcs) {
             return RCSRendering(text: "[\(name)]: " + secureHandoffText(interaction), suggestions: [], isSecureHandoff: true)
@@ -224,7 +330,7 @@ public enum ChannelRenderer {
         case .confirm:
             suggestions = [reply("Confirm", "decision.confirm"), reply("Decline", "decision.decline")]
         case .choose(let p):
-            suggestions = p.options.prefix(11).map { reply($0.label, "option.\($0.id)") }
+            suggestions = p.options.prefix(maxRCSSuggestions).map { reply($0.label, "option.\($0.id)") }
         case .acknowledge:
             suggestions = [reply("Acknowledge", "decision.acknowledge")]
         case .reply(let p):
@@ -241,7 +347,34 @@ public enum ChannelRenderer {
         } else {
             text = sms.body
         }
-        return RCSRendering(text: text, suggestions: suggestions, isSecureHandoff: false)
+        var rendering = RCSRendering(text: text, suggestions: suggestions, isSecureHandoff: false)
+        guard rcsRichContentAllowed(interaction) else { return rendering }
+        func card(_ title: String, _ parts: [String]) -> RCSStandaloneCard {
+            let description = parts.filter { !$0.isEmpty }.joined(separator: " ")
+            return RCSStandaloneCard(content: RCSCardContent(
+                title: "[\(name)]: " + rcsCardText(title, maxLength: min(80, maxRCSCardTitle - name.count - 4)),
+                description: description.isEmpty ? nil : SMSEncoding.field(description, maxLength: maxRCSCardDescription)))
+        }
+        switch interaction.payload {
+        case .status(let p):
+            rendering.card = card(p.title, [p.body.map { rcsCardText($0, maxLength: 240) } ?? ""])
+        case .reward(let p):
+            rendering.card = card(p.title, [p.details.map { rcsCardText($0, maxLength: 160) } ?? "", "Redeem in the Viadere app."])
+        case .ticket(let p):
+            let place = [p.venue, p.seat].compactMap { $0.map { rcsCardText($0, maxLength: 80) } }.filter { !$0.isEmpty }.joined(separator: ", ")
+            rendering.card = card(p.title, [place.isEmpty ? "" : place + ".", "View your ticket in the Viadere app."])
+        case .choose(let p) where !optionsFitAsRCSChips(p.options) && rcsCarouselCards.contains(p.options.count):
+            // One card per option: the full label as the title, the attributed prompt as the description, and exactly the chip the plain
+            // message carries for that option (same text, same postback placeholder, so the same signed token on the wire).
+            let prompt = "[\(name)]: " + rcsCardText(p.prompt, maxLength: 120)
+            rendering.carousel = RCSCarousel(width: .medium, cards: p.options.map { option in
+                RCSCardContent(title: rcsCardText(option.label, maxLength: 40), description: prompt,
+                               suggestions: [reply(option.label, "option.\(option.id)")])
+            })
+        default:
+            break
+        }
+        return rendering
     }
 
     // MARK: Native notifications
