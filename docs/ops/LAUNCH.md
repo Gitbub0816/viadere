@@ -30,6 +30,20 @@ gh api "/users/<owner>/packages/container/viadere%2Fviadere-server/versions" --j
 gh api "/users/<owner>/packages/container/viadere%2Fviadere-authority/versions" --jq '.[0].name'   # authority digest
 ```
 
+### 1b. Without GitHub-hosted Actions (local release from the Mac, staging only)
+
+When Actions cannot run (for example the account is locked over billing), build, scan, push and sign on the Mac, then deploy:
+
+```bash
+brew install cosign syft trivy
+gh auth refresh -s write:packages
+bash Infra/release-local.sh v0.1.0-staging.1
+az login && bash Infra/azure/deploy-staging.sh v0.1.0-staging.1
+```
+
+The signature is keyless with your own Sigstore identity, so `azure.yml`'s signature check (release workflow identity) refuses these
+images by design; `deploy-staging.sh` is the deploy path for them. Production stays CI-only (it also needs the SLSA provenance).
+
 ## 2. Azure, first time only (`AZURE-SETUP.md` sections 2 to 9)
 
 ```bash
