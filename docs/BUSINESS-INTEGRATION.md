@@ -222,7 +222,7 @@ def verify(header: str, raw_body: bytes, secrets: list[str], now: float | None =
 | `interaction.decided` | the customer decided | `InteractionOutcome` |
 | `interaction.expired` | no decision before expiry | `InteractionOutcome` |
 | `interaction.cancelled` | you cancelled, or the customer disconnected | `InteractionOutcome` |
-| `message.received` | the customer messaged you | `{sessionId, relationshipId, messageId, text, channel, receivedAt}` |
+| `message.received` | the customer messaged you | `{sessionId, relationshipId, messageId, text, channel, receivedAt, attachments?}`; `attachments` lists the customer's images as ids and metadata (never bytes or a URL); `text` may be empty when only images were sent |
 | `relationship.connected` / `.disconnected` | connection changes | `{relationshipId, source?, occurredAt}` |
 | `consent.updated` | a consent changed | `{relationshipId, purpose, granted, occurredAt}` |
 | `reward.redeemed` | you consumed a redemption code | `RedemptionReceipt` (pseudonymous) |
@@ -753,3 +753,18 @@ Viadere can deliver **your** magic link, **your** one-time code or a fixed-text 
 - [ ] Redemption codes are validated server-side with `consumeRedemption` (never trusted from the app) and `409`/`410` mean "do not hand over the reward".
 - [ ] If you use Verify: you handle `not_verified` without inferring why, retrieve each result exactly once and store only what you need, and you have your own legal basis for the age or identity check you run.
 - [ ] You monitor `429`s, your complaint rate and your opt-out rate; you rotate keys and webhook secrets on a schedule (webhook rotation keeps the old secret valid for 24 hours; API-key rotation keeps the old key for the overlap you choose) and use an IP allow-list and an expiry on live keys.
+
+## Images in conversations (SECURITY.md §2.113)
+
+Customers can send you images from the Viadere app, and you can send images back (key scope `messages:write`, capability `message.send`).
+
+* **Receive.** A `message.received` webhook names each image by id with `mediaType`, `byteSize`, `width`, `height` and `sha256`. Fetch the bytes with
+  `GET /v1/business/conversations/{sessionId}/attachments/{attachmentId}` and check them against `sha256`. Treat them as untrusted input even
+  though Viadere re-encoded them; never serve them from your own origin without `Content-Type` and `nosniff`.
+* **Send.** Upload the raw image to the conversation, `POST /v1/business/conversations/{sessionId}/attachments` with `Content-Type: image/png` or
+  `image/jpeg` (at most 2 MB, 8192 px per side, 25 megapixels), then send `POST /v1/business/messages` with the same `sessionId` and
+  `attachmentIds` (at most 4; `body` may then be empty) within an hour. Viadere re-encodes every image (longest side 2048 px, JPEG or PNG) and
+  removes location, camera and other metadata. An id uploaded to another conversation is `404`.
+* **Channels.** Customers who reach you by text never receive the image or a link: the text says an image is waiting in the Viadere app.
+* **Console.** *Conversations* shows images as thumbnails; *Add an image* attaches one to your next reply.
+* **Lifetime.** Images follow the conversation's retention and are deleted with the customer's account or your organization.

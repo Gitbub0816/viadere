@@ -1438,11 +1438,21 @@ A business without its own integration reads and answers customer messages in th
    kind `business`, metadata `via: console`); an API call can never set that field.
 6. **Storage.** `conversation_console_states` (session, business, assignee) and `conversation_console_reads` (session, business, staff member, read
    time); neither holds content.
+7. **Images (§2.113).** A thread shows each message's images as thumbnails whose `src` is the console's own route
+   `GET /dashboard/conversations/{session}/attachments/{attachment}` (same origin, so the console CSP's `img-src 'self'` covers it; never a storage
+   URL). The route needs `viewConversations`, re-checks the thread's organization and the image's conversation (another tenant's thread or image is
+   `404`), serves the stored bytes `inline` with the stored type, `nosniff`, `default-src 'none'; sandbox` and `private, no-store`. Alt text is fixed
+   copy ("Image from the customer", "Image you sent"); width and height come from the stored metadata; nothing else about an image is rendered.
+   Adding an image (`POST /dashboard/conversations/{session}/attachments`, multipart, the console's only multipart path besides the Brand Studio
+   upload) needs `replyConversations` and the CSRF field, collects at most 2 MiB plus framing before authentication reads the form, and goes through
+   `MessageAttachmentService.businessUpload` with the console principal (test/live as in item 5). Unsent console images are listed in the reply form
+   as ticked `image_{id}` checkboxes; only ids are read from the form and `businessSend` re-checks each one.
 
 **Tests.** `ConsoleConversationsTests`: another tenant's thread is `404` for the list, the thread, reply, assign, close and reopen; a viewer cannot reply,
 assign or close and a downgrade applies on the next request; replies go through `businessSend`, are idempotent, carry the API's attribution and audit the
 console user; bodies never appear in the audit chain or the logs and every read is audited; customer HTML is escaped and the customer appears only as
-the business's reference; a real customer cannot be answered without production access.
+the business's reference; a real customer cannot be answered without production access. `MessageAttachmentTests.testTheConsoleShowsEscapedThumbnailsThroughItsOwnTenantCheckedRoute`
+covers item 7.
 
 ### 2.109 Console rewards, loyalty and Wallet passes (G6; `Server/.../Dashboard/ConsoleBenefits.swift`)
 
@@ -1658,3 +1668,83 @@ fresh single-use challenge and a valid proof, refuses a pasted private key and a
 cannot register; configuration defaults and authority parsing); Swift SDK `RequestSigningSDKTests` and Node `http-signatures.test.ts` (vectors byte
 for byte, every attempt signed with a fresh nonce and verified by the profile, failing signer sends nothing; Node also runs every negative vector
 through its reference verifier).
+
+### 2.113 Message attachments (C4.3b; `ViadereCore/Models/MessageAttachments.swift`, `Server/.../Attachments/`, `BrandKits/BrandImagePipeline.swift` (`reencode`), `Storage/ObjectStore.swift` (`delete`), `Dashboard/ConsoleConversations.swift`, migration `MessageAttachments.v1`, `Kit/Stores/MessageAttachments.swift`, `App/.../Messages/MessagesView.swift`)
+
+Customers and businesses can send **images** in a conversation ("attachments where supported", product spec §9). Normative:
+
+1. **Types and limits** (`MessageAttachmentPolicy`, shared by server and app). Input PNG or JPEG only; SVG, HTML, XML, GIF, WebP, HEIC, PDF and
+   anything unrecognized are refused (the same `BrandAssetPolicy.precheck`: declared type and magic bytes must agree). At most **2 MiB** per upload
+   (the pipeline's existing cap; the app re-encodes a phone photo on the device first, so this is not a product limit in practice). Source at most
+   **8192 px per side and 25 megapixels**, checked from `IHDR`/`SOF` before any pixel buffer exists (decompression-bomb guard). Stored image at most
+   **2048 px** on the longest side (never upscaled) and **3 MiB**. At most **4 images per message**, **8 unsent uploads per conversation and side**,
+   an unsent upload **expires after 1 hour**. Rates: 60/hour per account (burst 20), 1200/hour per business (burst 120); at most 2 decodes at once per
+   process (`IngestGate`, separate from Brand Kits). Why these numbers: they are the Brand Kit pipeline's proven ceilings (ADR-0017, §2.93) except the
+   stored size, which is the smallest that keeps a receipt or a damaged item legible on a phone and in the console; 3 MiB bounds the worst-case JPEG
+   at that size.
+2. **Ingestion** (`BrandImagePipeline.reencode`, ADR-0017, no C codec): precheck, the strict PNG/JPEG front end (CRCs, chunk/segment structure,
+   no APNG, no `CgBI`, nothing after `IEND`/`EOI`), a rebuilt stream with only pixel chunks/segments reaches swift-png/swift-jpeg, resize, and a
+   **fresh encode**: baseline JPEG (4:2:0, no `APPn`, no `COM`, no JFIF) when every pixel is opaque, PNG (`IHDR`, `IDAT`, `IEND` only) otherwise.
+   The output is re-checked by the same front end (JPEG: rebuilding it must drop nothing). EXIF/GPS, ICC, XMP, text and comments never reach a
+   parser and are not in the output. EXIF orientation is ignored; the app redraws a photo before upload so it is applied. Every refusal is `422`
+   with a reason code and audited (`message.attachment_rejected`, metadata side and reason only).
+3. **Size before reading.** `RequestGuardMiddleware` refuses a `Content-Length` above the cap with `413` before any responder runs (authentication
+   collects the body only after that); a chunked body is collected with the same ceiling (`maxBodyBytes(forPath:)` raises the ceiling **only** for
+   `POST /v1/conversations/{uuid}/attachments`, `POST /v1/business/conversations/{uuid}/attachments` and the console upload path). On those API
+   paths the body must be declared `image/png` or `image/jpeg` (`415` otherwise; JSON is refused there); everywhere else stays JSON-only.
+4. **At rest.** The re-encoded image is sealed with the field cipher (AES-256-GCM, current data key) with additional data
+   `message_attachments.object:{business}#{attachment}` and written **create-only** to the private attachment store under
+   `attachments/{business}/{session}/{attachment}.bin` (`AZURE_ATTACHMENT_BLOB_ENDPOINT` + `AZURE_ATTACHMENT_BLOB_CONTAINER`, Entra only, a
+   container of its own: configuration refuses the audit-head and brand-asset containers; `ATTACHMENT_DIRECTORY` in development only; memory in
+   tests; staging and production without a store answer uploads `503`). The row (`message_attachments`) holds tenant, customer, conversation,
+   side, uploader reference, stored type, size, dimensions and the plaintext SHA-256; it is written **before** the object, so no object exists
+   without a row the sweep can find. Every read opens the object with its own tenant and row and compares size and SHA-256: a moved, swapped or
+   altered object serves nothing (`404`, logged). There is **no public URL** and no redirect to storage. Key rotation: objects keep the key they were
+   sealed with until they expire or are deleted, so a previous `DATA_ENCRYPTION_KEY` stays configured while attachments sealed under it exist
+   (`reencrypt-fields` does not rewrite objects).
+5. **Binding.** The tenant, the customer and the conversation are fixed at upload from the authenticated caller and a conversation it owns: the
+   customer's own session (device-signed bearer), or a session of the key's business on the key's side of the test/live line (API key with
+   `messages:write` and the `message.send` capability; the console principal of §2.108). A message names pending ids (`attachmentIds`, 1-4,
+   unique; the business must also name the `sessionId`): each must be a pending, unexpired upload **of the same side to the same conversation of
+   the same tenant**; it is claimed by compare-and-swap (`pending` to `attached`) inside the message's transaction, so an image is sent once and a
+   lost race rolls the message back. Unknown, foreign-tenant, other-conversation, other-side, expired and already-sent ids are the same `404`.
+   `body` may be empty only when images are present. The business request hash (idempotency) includes `attachmentIds`.
+6. **Download.** Only participants: the customer (`GET /v1/conversations/{session}/attachments/{id}`, their own session), the business
+   (`GET /v1/business/conversations/{session}/attachments/{id}`, `messages:write` + `message.send`, sandbox rule as for sending), console users with
+   `viewConversations` (§2.108 item 7). An attached image is readable by both sides; a **pending** one only by the side that uploaded it, until it
+   expires. Response: the stored bytes, `Content-Type` from the stored type (`image/png` or `image/jpeg` only), `Content-Disposition: attachment`
+   (API) or `inline` (console thumbnails), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+   `Cache-Control: private, no-store`, `Cross-Origin-Resource-Policy: same-origin`. The app shows bytes only when their size and SHA-256 match the
+   reference (`MessageAttachment.matches`).
+7. **Channels.** The app shows images in the thread. **SMS and RCS never carry an image or a link to one**: a business message with images sent into
+   an SMS thread carries the approved notice (UX_COPY SMS-09/SMS-10: "Viadere: {Business} sent you an image. Open the Viadere app to see it."), with
+   `{Business}` the verified name; an inbound MMS is never fetched (only the text is forwarded; media parameters are ignored). The push notice stays
+   the generic message notice. **Webhooks** (`message.received`) carry `attachments` as ids and metadata only (type, size, dimensions, SHA-256,
+   state): never bytes, never a URL; the business fetches bytes by id with its key. Message previews say "Image" (MSG-ATT-01).
+8. **Retention and deletion.** An attached image follows its message's `conversation_content` retention (the purge that erases a body marks its
+   images); account deletion marks every image in the person's conversations (both sides); tenant deletion marks every image of the organization.
+   Marked rows (`deleting`) and expired pending uploads are removed by the maintenance sweep (`MessageAttachmentService.sweep`, every maintenance run):
+   object first (`Delete Blob` with snapshots; a failure is retried next run), then the row. The account export lists images (type, size, digest), not
+   the pictures. Legal holds apply through the retention job as for message bodies.
+9. **Audit.** `message.attachment_uploaded` (side, session, type, size, dimensions; never the image or its digest) and
+   `message.attachment_rejected`; `message.business_sent` gains `images` (a count).
+
+**Residual risks.** The pure-Swift decoders are still parsers of hostile input: a bug there is bounded by the front end, the size and dimension
+caps, the concurrency gate and the fact that only re-encoded output is stored (R-ATT-1; fuzzing of the front end lives in
+`BrandAssetPipelineTests`). The server can read images (field encryption protects against storage and database leaks, not against the server);
+end-to-end encrypted media are a later step with E2EE messages (ADR-07). An image is personal data the business receives and may keep under its own
+policy once fetched.
+
+**Tests.** `MessageAttachmentTests` (exploit paths first): garbage and polyglot files named `.png` (HTML or ZIP after `IEND`, PNG signature then
+markup) refused with nothing stored; bodies over the cap refused from the declared length before the next responder runs, and a real oversized body
+`413`; decompression bombs (PNG and JPEG headers up to 2^31 px) refused from the header; SVG, HTML, GIF, WebP, PDF, JSON and multipart refused
+(`415` by declared type, `422` by content); EXIF GPS, XMP and comments absent from the stored JPEG and PNG bytes, the JPEG with no metadata segment;
+another tenant's image `404` on download (both sessions) and on attach, nothing written; another customer, another conversation and the other
+side's pending upload `404`; an upload to conversation A cannot be sent in B (customer and business), an image is sent once, duplicates and more than
+four are refused; the webhook carries ids and metadata, no bytes in any encoding and no URL, and the business fetches the bytes by id; stored objects
+are sealed, bound to their row (a swap serves neither); expired uploads are not readable or sendable and the sweep removes the objects; account
+deletion, tenant deletion and retention remove the stored objects (a bystander's image stays); the business API path is idempotent and the preview
+says "Image"; no store means `503` while text still works; the store configuration refuses the audit and brand containers and Azure deletes with
+snapshots. `SMSGatewayTests.testABusinessImageNeverReachesAnSMSThreadAndAnInboundMMSIsIgnored`: the SMS text has the notice and no URL, an MMS
+media URL is never fetched. Core `MessageAttachmentTests`, Kit `MessageAttachmentViewModelTests` (checks before upload, states, only uploaded images
+sent, mismatching bytes never shown).

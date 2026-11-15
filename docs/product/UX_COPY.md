@@ -250,10 +250,25 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | SMS-06 | Menu items "Account help" and "Manage businesses in app" (replaces the hand-off link) | Viadere: Open the Viadere app for account help and settings. |
 | SMS-07 | Pointer when a request needs an answer (ADR-0027 §4; used where SMS-04 does not apply) | Viadere: Open the Viadere app to respond. |
 | SMS-08 | Unlinked menu, first item (was "Link your account") | Get the Viadere app |
+| SMS-09 | Business message with images in an SMS thread, no text (SECURITY §2.113: SMS and RCS never carry an image or a link to one) | Viadere: {Business} sent you an image. Open the Viadere app to see it. · plural: Viadere: {Business} sent you {count} images. Open the Viadere app to see them. |
+| SMS-10 | Business message with text **and** images in an SMS thread | {the business's text}, a blank line, then SMS-09 |
 | W-LINK-RETIRED | `/l/` and `/h/` page title and body (410) | Title "This link is no longer used"; body "Open Viadere to see your requests." |
 | W-GET | `/get` page | Static page: what Viadere is, the App Store button, "Viadere never sends you a code or a sign-in link by text." |
 
 The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not used**: decisions 1 and 9 exclude SMS for authentication. No string in this file offers a text message as a sign-in method.
+
+### 5.1 Message images (SECURITY §2.113)
+
+| Id | Where | Copy |
+|---|---|---|
+| MSG-ATT-01 | Thread list preview of an image-only message | Image · {count} images |
+| MSG-ATT-02 | Composer photo button (accessibility label) | Add a photo |
+| MSG-ATT-03 | Composer thumbnail states (accessibility) | Image, adding · Image, ready to send |
+| MSG-ATT-04 | Composer thumbnail buttons | Remove image · Try again |
+| MSG-ATT-05 | Refusals before or after upload | That image is larger than 2 MB. · Send a photo or a PNG or JPEG image. · The file's type does not match its contents. Send a real PNG or JPEG. · That image is too large (at most 8192 pixels per side and 25 megapixels). · That image could not be read. · Animated images are not supported. · That image is too detailed to send. Try a smaller one. |
+| MSG-ATT-06 | More than four, upload failed, no attachments API | You can send up to 4 images in one message. · Couldn't add that image. Try again. · Images can't be sent from here. |
+| MSG-ATT-07 | Image in a bubble (accessibility label) · could not be shown | Image you sent / Image · Couldn't load this image. |
+| MSG-ATT-08 | Console: card, help, reply form, flash, alt text | "Add an image" · "Viadere removes location, camera and other hidden data from the image and sends it only to this customer in the Viadere app. Customers who reach you by text are told an image is waiting in the app." · "Images to send" / "Untick an image to leave it out. Images not sent within an hour are removed." · "Image added. It is sent with your next reply." · "Image from the customer" / "Image you sent" |
 
 ## 6. Errors and outage
 
