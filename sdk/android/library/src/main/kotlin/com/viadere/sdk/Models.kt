@@ -67,9 +67,15 @@ public enum class CompleteOutcome(override val wire: String) : WireValue { Succe
 public enum class WebhookEventType(override val wire: String) : WireValue {
     Created("auth.delivery.created"), Sent("auth.delivery.sent"), Delivered("auth.delivery.delivered"), Opened("auth.delivery.opened"),
     Completed("auth.delivery.completed"), Failed("auth.delivery.failed"), Denied("auth.delivery.denied"), Cancelled("auth.delivery.cancelled"),
-    Expired("auth.delivery.expired");
+    Expired("auth.delivery.expired"),
 
-    /** `opened` does not end a delivery: only the business's own `complete` does. */
+    /**
+     * Additive (contract v1.x): the code left by the email fallback this request asked for (`assurance: email`, ADR-0020 section 7). Sent once, when
+     * the email provider accepted the email; never when it was suppressed or failed. Not a state transition: it does not end the delivery.
+     */
+    FallbackUsed("auth.delivery.fallback_used");
+
+    /** `opened` does not end a delivery (only the business's own `complete` does), and neither does `fallback_used`. */
     public val endsDelivery: Boolean get() = this == Completed || this == Failed || this == Denied || this == Cancelled || this == Expired
 
     public companion object {

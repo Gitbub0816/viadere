@@ -136,6 +136,12 @@ describe("contract parity: webhook envelope", () => {
     assert.equal(event.additionalProperties, false);
     assert.deepEqual(event.required, ["id", "type", "version", "tenant_id", "request_id", "occurred_at"]);
   });
+  it("event types match ViadereCore's AuthDeliveryEventName, fallback_used included", () => {
+    const swift = readRepoFile("Packages/ViadereCore/Sources/ViadereCore/AuthDelivery/AuthDeliveryTypes.swift");
+    const names = [...swift.matchAll(/^\s*case \w+ = "(auth\.delivery\.[a-z_]+)"$/gm)].map((m) => m[1]);
+    assert.deepEqual(names, [...WEBHOOK_EVENT_TYPES]);
+    assert.ok((WEBHOOK_EVENT_TYPES as readonly string[]).includes("auth.delivery.fallback_used"));
+  });
   it("the display schema lists the same statuses", () => {
     const display = readRepoJson<{ properties: { status: { enum: string[] } } }>("contracts/schemas/auth-delivery-display-v1.schema.json");
     assert.deepEqual(display.properties.status.enum, [...STATUSES]);

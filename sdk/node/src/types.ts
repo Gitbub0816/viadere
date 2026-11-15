@@ -136,6 +136,12 @@ export const WEBHOOK_EVENT_TYPES = [
   "auth.delivery.denied",
   "auth.delivery.cancelled",
   "auth.delivery.expired",
+  /**
+   * Additive (contract v1.x): the code left by the email fallback this request asked for (`assurance: email`, ADR-0020 section 7). Sent once, when the
+   * email provider accepted the email; never when it was suppressed or failed. Not a state transition and it does not end the delivery. The envelope
+   * is opaque like the others: no address, no code.
+   */
+  "auth.delivery.fallback_used",
 ] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 

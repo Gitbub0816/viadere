@@ -118,8 +118,9 @@ class VerifierTest {
 
     @Test fun envelopeDecodingIsStrict() {
         val ok = base["body"] as String
-        assertEquals(null, null)
         assertTrue(AuthDeliveryEnvelope.decode(ok.toByteArray()) != null)
+        assertEquals(WebhookEventType.FallbackUsed, AuthDeliveryEnvelope.decode(ok.replace("auth.delivery.opened", "auth.delivery.fallback_used").toByteArray())?.type)
+        assertNull(AuthDeliveryEnvelope.decode(ok.replace("auth.delivery.opened", "auth.delivery.fallback_unknown").toByteArray()))
         assertNull(AuthDeliveryEnvelope.decode(ok.replace("2026-10-27", "2099-01-01").toByteArray()))
         assertNull(AuthDeliveryEnvelope.decode(ok.replace("}", ",\"result_ref\":\"x\"}").toByteArray()))
         assertNull(AuthDeliveryEnvelope.decode(ok.replace("\"id\":\"evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\",", "\"id\":\"evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\",\"id\":\"evt_x\",").toByteArray()))
@@ -164,6 +165,7 @@ class ThrottleAndKeysTest {
         th.reserve(subject, "198.51.100.1") // another prefix
         th.reserve("sub_" + "B".repeat(43), "203.0.113.7") // another account
         th.observe(WebhookEventType.Opened, "adl_0")
+        th.observe(WebhookEventType.FallbackUsed, "adl_0")
         try { th.reserve(subject, "203.0.113.7"); fail("opened does not free a slot") } catch (_: ThrottledException) {}
         th.observe(WebhookEventType.Denied, "adl_0")
         th.reserve(subject, "203.0.113.7")
@@ -231,6 +233,9 @@ class ContractParityTest {
         @Suppress("UNCHECKED_CAST")
         val props = readJson("contracts/schemas/auth-delivery-event-v1.schema.json")["properties"] as Map<String, Map<String, Any?>>
         assertEquals(WebhookEventType.entries.map { it.wire }, props["type"]!!["enum"])
+        assertEquals("auth.delivery.fallback_used", WebhookEventType.FallbackUsed.wire)
+        assertEquals(WebhookEventType.FallbackUsed, WebhookEventType.fromWire("auth.delivery.fallback_used"))
+        assertFalse("the email was sent: the delivery is still open", WebhookEventType.FallbackUsed.endsDelivery)
         assertEquals(AuthDeliveryEnvelope.VERSION, props["version"]!!["const"])
     }
 

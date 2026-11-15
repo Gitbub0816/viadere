@@ -199,6 +199,7 @@ describe("per-requester throttle (C-14), on by default", () => {
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) ids.push((await c.createAuthDelivery(validCreate({ request_id: `req-${i}` }), { requester: { clientAddress: ip } })).delivery.id);
     c.throttle!.observeEvent("auth.delivery.opened", ids[0]!);
+    c.throttle!.observeEvent("auth.delivery.fallback_used", ids[0]!); // the email was sent: the delivery is still open
     await assert.rejects(c.createAuthDelivery(validCreate({ request_id: "req-x" }), { requester: { clientAddress: ip } }), ViadereThrottledError);
     c.throttle!.observeEvent("auth.delivery.denied", ids[0]!);
     await c.createAuthDelivery(validCreate({ request_id: "req-y" }), { requester: { clientAddress: ip } });
