@@ -34,7 +34,7 @@ struct ConnectView: View {
                     case .review(let profile):
                         ConnectReview(vm: vm, profile: profile)
                     case .connected(let relationship):
-                        ConnectedState(relationship: relationship, model: model) { vm.reset() }
+                        ConnectedState(relationship: relationship, model: model, followUp: vm.followUpTab.flatMap { tab in vm.followUpTitle.map { (tab, $0) } }) { vm.reset() }
                     }
                 }
                 .padding(.horizontal, ViadereSpace.screen)
@@ -225,6 +225,8 @@ struct ConnectView: View {
 private struct ConnectedState: View {
     let relationship: Relationship
     let model: AppModel
+    /// A campaign's verified follow-up (tab and title), offered only now that the connection exists.
+    let followUp: (tab: AppTab, title: String)?
     let onDone: () -> Void
 
     var body: some View {
@@ -233,6 +235,15 @@ private struct ConnectedState: View {
             ViadereOutcome(.success, "Connected to \(relationship.business.safeName)",
                            detail: "Sign-in and approval requests will reach you here, usually as a notification you can answer in one tap.")
             VStack(spacing: ViadereSpace.xs) {
+                if let followUp {
+                    Button(followUp.title) {
+                        onDone()
+                        model.selectedTab = followUp.tab
+                        model.addBusinessPresented = false
+                        Task { await model.home.load() }
+                    }
+                    .buttonStyle(.viadere(.primary))
+                }
                 Button("Done") {
                     onDone()
                     model.selectedTab = .businesses
@@ -242,7 +253,7 @@ private struct ConnectedState: View {
                         await model.refreshOrganization()
                     }
                 }
-                .buttonStyle(.viadere(.primary))
+                .buttonStyle(.viadere(followUp == nil ? .primary : .secondary))
                 Button("Send a message") {
                     Task {
                         if await model.messages.start(with: relationship.business.id) != nil { model.selectedTab = .messages }
