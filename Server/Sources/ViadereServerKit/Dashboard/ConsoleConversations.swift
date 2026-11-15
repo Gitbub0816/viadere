@@ -162,11 +162,11 @@ enum ConsoleConversations {
         var assigneeName: String?
         if let assignee = detail.assigneeId { assigneeName = try await service.staffNames(businessId: businessId, ids: [assignee])[assignee] ?? "Team member" }
         let summary = ConsoleUI.card("Customer \(shortRef(detail.subjectRef))", actions: stateBadge(detail.session.state), ConsoleUI.keyValues([
-            ("Customer reference", "<code class=\"mono\">\(DashboardUI.esc(detail.subjectRef))</code>"),
             ("Channel", DashboardUI.esc(channelLabel(detail.session.channel)) + (detail.sandbox ? " " + ConsoleUI.pill("Test customer", .neutral) : "")),
             ("Assigned", DashboardUI.esc(detail.assigneeId == staff ? "You" : assigneeName ?? "Nobody")),
             ("Started", DashboardFormat.date(detail.session.createdAt)),
-        ]) + ConsoleUI.callout(.neutral, "<p class=\"sm\">Viadere never shows you the customer's phone number or account. Don't ask for passwords, card numbers or health details in a reply.</p>")
+        ]) + "<p class=\"sm mu\">Customer reference <code class=\"mono\">\(DashboardUI.esc(detail.subjectRef))</code></p>"
+            + ConsoleUI.callout(.neutral, "<p class=\"sm\">Viadere never shows you the customer's phone number or account. Don't ask for passwords, card numbers or health details in a reply.</p>")
             + "<h3>Messages</h3>" + thread)
         var actions = ""
         if p.can(.replyConversations) {
