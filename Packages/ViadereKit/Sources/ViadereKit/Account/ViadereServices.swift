@@ -39,6 +39,8 @@ public struct ViadereServices: Sendable {
     public var oidc: any OIDCDeviceAPI = UnavailableOIDCDeviceAPI()
     /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
+    /// The Home Screen widget's snapshot writer (numbers only). The app sets it; extensions, the App Clip and tests leave it `nil`.
+    public var homeWidget: HomeWidgetWriter?
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,

@@ -11,7 +11,7 @@ import ViadereCore
 @MainActor
 public final class HomeWidgetWriter {
     private let store: WidgetSnapshotStore
-    private let reload: @MainActor () -> Void
+    private let reload: @MainActor @Sendable () -> Void
     private let clock: @Sendable () -> Date
     private var alertExpiries: [Date?] = []
     private var deliveryExpiries: [Date] = []
@@ -20,7 +20,9 @@ public final class HomeWidgetWriter {
     /// - Parameters:
     ///   - store: the app group store (`WidgetSnapshotStore(persistence: UserDefaultsWidgetSnapshotPersistence(suiteName: …))`).
     ///   - reload: the App passes `{ WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshot.kind) }`.
-    public init(store: WidgetSnapshotStore, clock: @escaping @Sendable () -> Date = { Date() }, reload: @escaping @MainActor () -> Void) {
+    /// `nonisolated` so the app can build it inside its (nonisolated) services graph; it only stores its arguments.
+    public nonisolated init(store: WidgetSnapshotStore, clock: @escaping @Sendable () -> Date = { Date() },
+                            reload: @escaping @MainActor @Sendable () -> Void) {
         self.store = store
         self.clock = clock
         self.reload = reload

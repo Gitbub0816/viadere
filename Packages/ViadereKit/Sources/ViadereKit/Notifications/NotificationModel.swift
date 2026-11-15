@@ -54,7 +54,7 @@ public enum AuthNotificationCategory {
     /// "Sign in with Viadere" `login_hint` push (`ach` only). Review opens the confirm screen; there is no inline answer (the factor needs the
     /// approval key and the typed number).
     public static let oidc = OIDCPushPayloadPolicy.category
-    public static let all: Set<String> = [approve, link, code, oidc]
+    public static let all: Set<String> = [approve, link, code, notice, oidc]
 
     public static let reviewAction = "viadere.review"
     public static let openAction = "viadere.open"
@@ -120,7 +120,7 @@ extension PushPayload {
             if let id = requestId(from: userInfo) { return .approveRequest(id) }
             if let id = userInfo[interactionKey].flatMap({ InteractionID($0) }) { return .interaction(id) }
             return .pendingRequests
-        case AuthNotificationCategory.link, AuthNotificationCategory.code:
+        case AuthNotificationCategory.link, AuthNotificationCategory.code, AuthNotificationCategory.notice:
             if let id = deliveryId(from: userInfo) { return .authDelivery(id) }
             return .pendingRequests
         case AuthNotificationCategory.oidc:

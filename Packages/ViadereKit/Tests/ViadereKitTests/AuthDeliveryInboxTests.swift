@@ -468,6 +468,9 @@ struct AuthDeliveryNotificationTextTests {
         #expect(PushPayload.target(category: "viadere.auth.link", userInfo: ["adl": wireId]) == .authDelivery(id))
         #expect(PushPayload.target(category: "viadere.auth.code", userInfo: ["adl": wireId]) == .authDelivery(id))
         #expect(PushPayload.target(category: "viadere.auth.code", userInfo: ["adl": "adl_!!"]) == .pendingRequests)
+        // A tapped notice opens its delivery (the sheet shows N-06); it is an auth category for the action handler and the watch.
+        #expect(PushPayload.target(category: "viadere.auth.notice", userInfo: ["adl": wireId]) == .authDelivery(id))
+        #expect(AuthNotificationCategory.all.contains(AuthNotificationCategory.notice))
     }
 
     @Test func fetchedTextIsTheApprovedLineForTheMethodAndNeverACodeOrHost() {
