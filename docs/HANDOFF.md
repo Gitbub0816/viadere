@@ -6,6 +6,16 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**`auth.delivery.fallback_used` webhook and Kotlin request signing (2026-11-15).** When a delivery that asked for the email fallback had its email
+accepted by the provider, the business now receives `auth.delivery.fallback_used` once (v2 opaque envelope, ids only; never for a suppressed or
+failed email; no address or code in any encoding, tested). Additive in contract v1.x: event schema, test-event enum, Core
+`AuthDeliveryEventName.fallbackUsed`, Swift/TypeScript/Kotlin SDK event lists with parity tests. The Kotlin SDK (`sdk/android`) now signs requests
+with RFC 9421 (`RequestSigning.sign`, `RequestSigningKey`, `JcaRequestSigningKey`, `signingKeyProof`; `java.security` only), reproducing every
+positive vector byte for byte; its signatures were also accepted by the Node reference verifier. **The Kotlin SDK was built and tested for the first
+time** (Gradle resolved this time; 28/28 tests), with dependency locks and `verification-metadata.xml` committed. Open: `:library:lint` fails on two
+`AndroidGradlePluginVersion` errors (Gradle 9.9.1 and AGP 9.5.1 are out; a toolchain upgrade for `sdk/android` and `Packages/android/viadere-verify`
+together), and the CLAUDE.md "Kotlin SDK" row still says "not yet built". Normative: [`SECURITY.md`](SECURITY.md) §2.101 "Email fallback", §2.112.
+
 **Wallet credential status lists (2026-11-15, G24).** Verify (and profile verification) now checks an mdoc's issuer status list when the MSO names
 one (IETF Token Status List, draft-ietf-oauth-status-list-21, CWT form): fetched only from a host listed for that IACA
 (`WALLET_STATUS_LIST_HOSTS`) through the SSRF guard with address pinning and no redirects, signature verified to the **same** IACA, `lst`
@@ -22,7 +32,7 @@ and the tenant turned on Security → Email fallback (`allow_email_fallback`, de
 Viadere template (C-OTP-01 + C-OTP-03, new row C-OTP-05), no link, no code in the subject, MailerSend tracking off, sent at most once (the address
 leaves the sealed secret by compare-and-swap before the send), budgets per tenant, customer and address that suppress the email but never the
 delivery (`authdl-email-*`, fail closed). Normative: [`SECURITY.md`](SECURITY.md) §2.101 "Email fallback"; ADR-0020 implementation note (G23).
-Open: the `auth.delivery.fallback_used` webhook event (contract + SDK change); L-8 (owner); magic links by email are deliberately not built.
+Open: L-8 (owner); magic links by email are deliberately not built. (The `auth.delivery.fallback_used` webhook is now emitted; see below.)
 
 **Link service completed: same-device hand-off, cross-device creates, registration-nonce relay (2026-11-15).** A same-device link-service approval
 now finishes: after the authority **accepted** it, the phone opens the authority-signed `return_url` byte for byte with `#vdr_code=<32-byte code>`

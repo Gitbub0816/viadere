@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+### `auth.delivery.fallback_used` (contract v1.x, additive)
+
+- `WEBHOOK_EVENT_TYPES` (and `WebhookEventType`) gain `auth.delivery.fallback_used`: the code of a delivery that asked for the email fallback left
+  by email (`assurance: email`, ADR-0020 section 7), sent once when the provider accepted the email, never when it was suppressed or failed. Opaque
+  like every `auth.delivery.*` event; `verifyEnvelope` accepts it; it is not a state transition, so `RequesterThrottle.observeEvent` keeps the slot.
+  `parity.test.ts` also checks the list against ViadereCore's `AuthDeliveryEventName`.
+
 ### Message images (SECURITY section 2.113)
 
 - `uploadAttachment(sessionId, bytes, contentType)`, `downloadAttachment(reference)` and `attachmentIds` on `sendMessage`; `MessageAttachment` on

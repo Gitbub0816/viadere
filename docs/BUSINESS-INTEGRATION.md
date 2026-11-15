@@ -710,7 +710,8 @@ request carries one, it must verify (normative profile: `docs/SECURITY.md` §2.1
 1. Generate a P-256 key pair **where it will live** (your KMS or HSM; a software key only for development). Viadere never sees the private key.
 2. In the console, *Security > Request signing* (Owner or Security Admin; you confirm with your passkey): pick the API key the signing key is for and
    copy that key's challenge (it works once, for 15 minutes).
-3. Sign the challenge: Swift `try await HTTPSigningKeyProof.prove(challenge: challenge, key: signer)`, Node `await signingKeyProof(challenge, signer)`.
+3. Sign the challenge: Swift `try await HTTPSigningKeyProof.prove(challenge: challenge, key: signer)`, Node `await signingKeyProof(challenge, signer)`,
+   Kotlin `RequestSigning.signingKeyProof(challenge, key)`.
    (The signed message is `viadere-request-signing-key-v1` LF challenge LF your public key, base64url X9.63; the proof is base64url raw `r||s`.)
 4. Paste the public key (base64url X9.63 or a PEM `PUBLIC KEY`), the challenge and the proof, and register. The console shows the key id `vsk_...`;
    every Owner receives an email. Up to 5 active signing keys per API key; rotating the API key carries the binding to the new key (the old key keeps
@@ -729,6 +730,12 @@ let client = try ViadereBusinessClient(apiKey: liveKey, requestSigner: KMSSigner
 
 ```ts
 const client = new ViadereClient({ apiKey: process.env.VIADERE_API_KEY!, requestSigner: { keyId: "vsk_0123456789abcdef", publicKey, sign: (m) => kms.sign(m) } });
+```
+
+```kotlin
+// com.viadere.sdk (no HTTP client of its own): add the returned fields to each attempt, with exactly these values and the same body bytes.
+val key = JcaRequestSigningKey("vsk_0123456789abcdef", privateKey, publicKey)   // or your own RequestSigningKey over a KMS / the Android Keystore
+val fields = RequestSigning.sign(key, "POST", "https://viadere.com/v1/business/auth-deliveries", body)   // Content-Type, Content-Digest, Signature-Input, Signature
 ```
 
 The SDKs sign every attempt (retries get a fresh nonce) and check each signature against your public key before sending. Without an SDK, send:
@@ -754,7 +761,7 @@ Viadere can deliver **your** magic link, **your** one-time code or a fixed-text 
 3. **Create a delivery** (`POST /v1/business/auth-deliveries`, `Idempotency-Key` required). Methods: `otp` (you generate the code, 4 to 10 characters of `0-9A-Z`; Viadere shows it in the app only after the customer opens the item, never on the Lock Screen), `magic_link`, `notice`. Pick a Viadere template id (`auth.sign_in_code.v1`, `auth.sign_in_link.v1`, ...); you cannot supply message text. The tenant is your API key, never a field. Send `session_handle` (a MUST for sign-in flows: `base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" || initiating_session_id))`, never the raw session id) so a repeated request from the same sign-in page replaces the earlier prompt; requests without it never replace anything.
 4. **Magic links.** Register the hosts you send links to (they must be on your verified domain), generate a single-use URL on one of them and sign a destination statement with `signAuthDestination` (your key stays in your KMS). Until Viadere's authority publishes tenant destination keys (Stage 6) business-mode links are refused with `422 destination_signature_required`. Your redemption page must send `Referrer-Policy: no-referrer`, load nothing from third parties, and consume the token only on an explicit POST.
 5. **Never put contact data** (e-mail address, phone number, URL) in `variables`; they are refused, and what you send is personal data that is deleted when the delivery ends. `otpauth://` seeds are refused everywhere.
-6. **Follow the state.** Webhooks and `GET /v1/business/auth-deliveries/{id}` report `queued, sent, delivered, opened, denied, cancelled, expired, failed`. When the customer opened it, verify your own link or code, then `POST .../complete {"outcome":"succeeded"|"failed"}`. `denied` means the customer said "This wasn't me": treat the attempt as hostile.
+6. **Follow the state.** Webhooks and `GET /v1/business/auth-deliveries/{id}` report `queued, sent, delivered, opened, denied, cancelled, expired, failed`. If you asked for the email fallback on a request (`channels` with `email` and `fallback.email.address`, only where Viadere enabled it and your organization turned it on), `auth.delivery.fallback_used` tells you the code actually left by email (`assurance: email`, weaker than the app): it is sent once, when the email provider accepted the email, never when the email was suppressed or failed, and carries ids only (no address, no code). It does not change the state and does not end the delivery; treat an unknown `auth.delivery.*` type as not yours to act on. When the customer opened it, verify your own link or code, then `POST .../complete {"outcome":"succeeded"|"failed"}`. `denied` means the customer said "This wasn't me": treat the attempt as hostile.
 7. **Limits.** A flood above your tenant budget is `429`. Per-customer budgets never refuse: a delivery over budget is created and appears in the customer's inbox without an alert. Throttle unauthenticated sign-in triggers per client IP and per account on your side.
 
 ## 8c. SDKs for authentication delivery
@@ -766,7 +773,9 @@ Viadere can deliver **your** magic link, **your** one-time code or a fixed-text 
 - Idempotency keys default to a value derived from `request_id`, so a retry after a crash replays the original.
 - Verify with the negative vectors in `docs/protocol/vectors/webhook-v2-negative.json` (generated by `generate_webhook_v2_negative.py`).
 - **Request signing** (§8a-2): `ViadereBusinessClient(requestSigner:)` (Swift) and `new ViadereClient({ requestSigner })` (TypeScript) sign every request
-  with RFC 9421; both take a signer that can call your KMS. The Kotlin SDK does not sign yet.
+  with RFC 9421; both take a signer that can call your KMS. The Kotlin SDK has no HTTP client: `RequestSigning.sign(key, method, url, body)` returns
+  the fields to add to each attempt (`RequestSigningKey` over `java.security`, a KMS or the Android Keystore; DER or raw signatures, folded to low S
+  and checked against the public key before any field is returned).
 
 ## 9. Go-live checklist
 
