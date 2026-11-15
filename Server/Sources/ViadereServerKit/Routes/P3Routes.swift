@@ -51,7 +51,7 @@ enum WalletRoutes {
         }
         routes.api(APIRoutes.walletPass) { req in
             let id: WalletPassID = try req.uuidParameter("passId")
-            let result = try await WalletService(db: req.db, ctx: req.ctx).download(consumer: try req.consumer.consumerId, id: id)
+            let result = try await WalletService(db: req.db, ctx: req.ctx, brandRuntime: req.brandKits).download(consumer: try req.consumer.consumerId, id: id)
             return pkpass(result.data, updatedAt: result.pass.updatedAt)
         }
         registerWebService(routes)
@@ -164,7 +164,7 @@ enum WalletRoutes {
                 return Response(status: .notModified)
             }
             // A voided pass is still served (with `voided: true`) so Wallet can show it as void.
-            return pkpass(try await WalletService(db: req.db, ctx: req.ctx).pkpass(for: pass), updatedAt: pass.updatedAt)
+            return pkpass(try await WalletService(db: req.db, ctx: req.ctx, brandRuntime: req.brandKits).pkpass(for: pass), updatedAt: pass.updatedAt)
         }
         struct LogBody: Content { var logs: [String] }
         routes.grouped(logLimiter).grouped("wallet", "v1").post("log") { req async throws -> Response in

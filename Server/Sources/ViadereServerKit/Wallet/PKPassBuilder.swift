@@ -24,8 +24,13 @@ enum PKPassBuilder {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
-    static func build(passJSON: Data, signer: any PassSigner, at date: Date, localizations: [ZipArchive.Entry] = PassStrings.files()) throws -> Data {
-        var files = [ZipArchive.Entry(name: "pass.json", data: passJSON)] + icons() + localizations
+    /// `images` are the brand images of the pass (`PassBranding`): when they contain an icon it replaces Viadere's; logo and strip images are
+    /// added. Every file, images included, is listed in the signed manifest.
+    static func build(passJSON: Data, signer: any PassSigner, at date: Date, localizations: [ZipArchive.Entry] = PassStrings.files(),
+                      images: [ZipArchive.Entry] = []) throws -> Data {
+        let brandIcons = images.filter { $0.name.hasPrefix("icon") }
+        var files = [ZipArchive.Entry(name: "pass.json", data: passJSON)] + (brandIcons.isEmpty ? icons() : brandIcons)
+            + images.filter { !$0.name.hasPrefix("icon") } + localizations
         let manifest = try manifest(for: files)
         let signature = try signer.sign(manifest: manifest, at: date)
         files.append(ZipArchive.Entry(name: "manifest.json", data: manifest))
@@ -140,6 +145,8 @@ struct PassDescriptor {
     /// The signed presentation code (`WalletScanCode`). Absent on a void pass, so a void pass shows nothing to scan.
     var barcodeMessage: String?
     var voided = false
+    /// The approved Brand Kit colors (`PassBranding.colors`, contrast-checked); `nil` keeps Viadere's.
+    var colors: PassBranding.Colors?
 
     /// Wallet's `pass.json` style key for each kind.
     static func styleKey(_ kind: WalletPassKind) -> String {
@@ -184,9 +191,9 @@ struct PassDescriptor {
             "description": .string(description),
             "authenticationToken": .string(authenticationToken),
             "webServiceURL": .string(webServiceURL),
-            "backgroundColor": .string("rgb(31, 31, 31)"),
-            "foregroundColor": .string("rgb(247, 243, 235)"),
-            "labelColor": .string("rgb(201, 169, 110)"),
+            "backgroundColor": .string(colors.map { PassBranding.rgb($0.background) } ?? "rgb(31, 31, 31)"),
+            "foregroundColor": .string(colors.map { PassBranding.rgb($0.foreground) } ?? "rgb(247, 243, 235)"),
+            "labelColor": .string(colors.map { PassBranding.rgb($0.label) } ?? "rgb(201, 169, 110)"),
             // A pass is personal (a single-use coupon, a ticket): Wallet hides its Share button.
             "sharingProhibited": .bool(true),
             Self.styleKey(kind): .object(style),
