@@ -37,7 +37,7 @@ jobs:
         run: gitleaks git --redact --no-banner --report-format sarif --report-path gitleaks.sarif --exit-code 1 .
       - name: Upload SARIF
         if: always() && hashFiles('gitleaks.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: gitleaks.sarif
           category: gitleaks
@@ -63,13 +63,13 @@ jobs:
         run: osv-scanner scan source --recursive --format sarif --output-file osv.sarif . || echo "osv_failed=1" >> "$GITHUB_ENV"
       - name: Upload SARIF (grype)
         if: always() && hashFiles('grype.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: grype.sarif
           category: grype
       - name: Upload SARIF (osv-scanner)
         if: always() && hashFiles('osv.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: osv.sarif
           category: osv-scanner
@@ -103,7 +103,7 @@ jobs:
         run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 viadere-server:scan
       - name: Upload SARIF
         if: always() && hashFiles('trivy-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
@@ -126,7 +126,7 @@ jobs:
         run: trivy config --severity HIGH,CRITICAL --exit-code 1 .
       - name: Upload SARIF
         if: always() && hashFiles('trivy-config.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -151,7 +151,7 @@ jobs:
               Server Packages App Site Infra .github
       - name: Upload SARIF
         if: always() && hashFiles('semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: semgrep.sarif
           category: semgrep
