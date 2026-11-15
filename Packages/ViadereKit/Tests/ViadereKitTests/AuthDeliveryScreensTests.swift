@@ -15,7 +15,10 @@ actor RecordingAnswering: ApprovalAnswering {
 
 struct StubVerifier: DestinationVerifying {
     var result: DestinationCheck
+    /// What `verifyOpened` answers (the screen tests cover the flow; `DestinationVerifierTests` the byte check itself).
+    var opened = true
     func verify(_ display: AuthLinkDisplay) async -> DestinationCheck { result }
+    func verifyOpened(_ url: String, for display: AuthLinkDisplay) async -> Bool { opened }
 }
 
 @MainActor

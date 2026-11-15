@@ -43,14 +43,26 @@ public struct AuthLinkDisplay: Sendable, Equatable {
     public var host: String
     public var expiresAt: Date
     public var state: State
+    /// The compact `viadere-destination+jws` the api relays (class T, not a bearer value). Unverified until `DestinationVerifying` checked it.
+    public var destinationStatement: String?
+    /// The delivery's request id and purpose as the api states them: the statement's `brq` and `purpose` must equal them (ADR-0031 §4 step 4).
+    public var requestId: String?
+    public var purpose: AuthDeliveryPurpose?
+    /// A Viadere link-service delivery (`link_mode: "viadere"`): answered with an authority challenge, never by a business-signed destination. This
+    /// build has no link-service screen yet, so every verifier treats it as not supported (nothing opened, nothing reported).
+    public var linkService = false
 
-    public init(deliveryId: UUID, business: String, businessVerified: Bool, host: String, expiresAt: Date, state: State = .open) {
+    public init(deliveryId: UUID, business: String, businessVerified: Bool, host: String, expiresAt: Date, state: State = .open,
+                destinationStatement: String? = nil, requestId: String? = nil, purpose: AuthDeliveryPurpose? = nil) {
         self.deliveryId = deliveryId
         self.business = business
         self.businessVerified = businessVerified
         self.host = host
         self.expiresAt = expiresAt
         self.state = state
+        self.destinationStatement = destinationStatement
+        self.requestId = requestId
+        self.purpose = purpose
     }
 }
 
@@ -76,6 +88,11 @@ public struct AuthDeliveryItem: Sendable, Equatable, Identifiable {
     public var state: AuthLinkDisplay.State
     /// Delivered without an alert push (over a per-subject budget, ADR-0020 §8): the inbox is the only place it shows.
     public var silent: Bool
+    /// Links only: the business's request id and the relayed destination statement (verified on the link screen, never here).
+    public var requestId: String?
+    public var destinationStatement: String?
+    /// A link-service delivery (`link_mode: "viadere"`).
+    public var linkService = false
 
     public var id: UUID { deliveryId }
 
@@ -120,6 +137,11 @@ public struct AuthDeliveryItem: Sendable, Equatable, Identifiable {
         }
         self.init(deliveryId: display.id.uuid, kind: kind, businessId: display.businessId, business: display.businessName, host: host,
                   purpose: display.purpose, createdAt: display.createdAt, expiresAt: display.expiresAt, state: state, silent: display.silent)
+        if kind == .link {
+            requestId = display.requestId
+            destinationStatement = display.destinationStatement
+            linkService = display.linkMode == .viadere
+        }
     }
 
     static func isValidHost(_ host: String) -> Bool {
@@ -130,7 +152,10 @@ public struct AuthDeliveryItem: Sendable, Equatable, Identifiable {
     /// authority-signed tenant record's (ADR-0031, Stage 6), and nothing is opened on its strength.
     public var linkDisplay: AuthLinkDisplay? {
         guard kind == .link, let host else { return nil }
-        return AuthLinkDisplay(deliveryId: deliveryId, business: business, businessVerified: false, host: host, expiresAt: expiresAt, state: state)
+        var display = AuthLinkDisplay(deliveryId: deliveryId, business: business, businessVerified: false, host: host, expiresAt: expiresAt, state: state,
+                                      destinationStatement: destinationStatement, requestId: requestId, purpose: purpose)
+        display.linkService = linkService
+        return display
     }
 }
 
@@ -191,11 +216,18 @@ public protocol AuthDeliveryAPI: Sendable {
     /// `POST /v1/auth-deliveries/{id}/open` (device-signed): returns the URL once. Only called after an explicit tap, and only when the
     /// destination was verified on the device.
     func openLink(deliveryId: UUID) async throws -> URL
+    /// The same call, returning the URL **exactly as the service sent it** (the bytes the business-signed `url_sha256` commits to).
+    func openLinkRaw(deliveryId: UUID) async throws -> String
     /// `POST /v1/auth-deliveries/{id}/open` for a one-time code: returns the code **once** (a second call is `alreadyUsed`). Only called
     /// after an explicit tap on the code sheet.
     func openCode(deliveryId: UUID) async throws -> DeliveredCode
     /// Device-signed, reduce-only. For a link or a code this is the "This wasn't me" action (`report: true`).
     func reduce(_ target: AuthPushTarget, action: ReduceAction) async throws
+}
+
+extension AuthDeliveryAPI {
+    /// Fakes and previews: the URL's string form. `LiveAuthDeliveryAPI` returns the received string itself.
+    public func openLinkRaw(deliveryId: UUID) async throws -> String { try await openLink(deliveryId: deliveryId).absoluteString }
 }
 
 /// The live client, over the device-signed `APIClient` (the device `request` key; no approval key, no Face ID).
@@ -241,11 +273,18 @@ public struct LiveAuthDeliveryAPI: AuthDeliveryAPI {
     }
 
     public func openLink(deliveryId: UUID) async throws -> URL {
+        let raw = try await openLinkRaw(deliveryId: deliveryId)
+        guard let url = URL(string: raw) else { throw AuthDeliveryError.failed }
+        return url
+    }
+
+    public func openLinkRaw(deliveryId: UUID) async throws -> String {
         guard flags.destinationVerification else { throw AuthDeliveryError.unavailable }
         let opened = try await open(deliveryId)
-        guard opened.method == .magicLink, opened.code == nil, let raw = opened.url, Self.isStrictDestination(raw),
-              let url = URL(string: raw) else { throw AuthDeliveryError.failed }
-        return url
+        guard opened.method == .magicLink, opened.code == nil, let raw = opened.url, Self.isStrictDestination(raw), URL(string: raw) != nil else {
+            throw AuthDeliveryError.failed
+        }
+        return raw
     }
 
     public func openCode(deliveryId: UUID) async throws -> DeliveredCode {

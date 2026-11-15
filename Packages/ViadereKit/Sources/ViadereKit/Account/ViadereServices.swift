@@ -41,6 +41,9 @@ public struct ViadereServices: Sendable {
     public var safeActionReader: SafeActionReader?
     /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
+    /// The business-link destination check (ADR-0031 §4). `FailClosedDestinationVerifier` unless `authDeliveryFlags.destinationVerification` is on and the
+    /// build pins authority statement keys (`DestinationVerifiers.make`); every business link then fails closed and nothing is opened.
+    public var destinationVerifier: any DestinationVerifying = FailClosedDestinationVerifier()
     /// The Home Screen widget's snapshot writer (numbers only). The app sets it; extensions, the App Clip and tests leave it `nil`.
     public var homeWidget: HomeWidgetWriter?
     /// Device pairing (§2.107): adding a device from a trusted one. Fails closed when absent (extensions, the App Clip).
@@ -128,6 +131,10 @@ public struct ViadereServices: Sendable {
                                                          replay: PreferencesSafeActionReplayStore(preferences: services.preferences), transport: transport)
             services.devicePairingAPI = LiveDevicePairingAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
+            services.destinationVerifier = DestinationVerifiers.make(flags: services.authDeliveryFlags, fetcher: LiveTenantDestinationKeys(client: client),
+                                                                     secrets: secrets, environment: configuration.authorityEnvironment,
+                                                                     pinnedKeys: AuthorityStatementKeyPins.effective(configuration: configuration),
+                                                                     sealKids: AuthorityPinnedKeys.sealKids(configuration.authorityEnvironment))
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)
             services.brandKits = BrandKitStore(api: LiveBrandKitAPI(client: client), assets: TransportBrandAssetFetcher(transport: transport),
