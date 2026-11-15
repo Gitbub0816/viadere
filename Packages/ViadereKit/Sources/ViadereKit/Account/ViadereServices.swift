@@ -39,6 +39,8 @@ public struct ViadereServices: Sendable {
     public var oidc: any OIDCDeviceAPI = UnavailableOIDCDeviceAPI()
     /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
+    /// Device pairing (§2.105): adding a device from a trusted one. Fails closed when absent (extensions, the App Clip).
+    public var devicePairingAPI: any DevicePairingAPI = UnavailableDevicePairingAPI()
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -117,6 +119,7 @@ public struct ViadereServices: Sendable {
             services.approveAPI = LiveApproveAPI(client: client)
             services.authDelivery = LiveAuthDeliveryAPI(client: client)
             services.oidc = LiveOIDCDeviceAPI(client: client)
+            services.devicePairingAPI = LiveDevicePairingAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)
