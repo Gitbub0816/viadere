@@ -57,6 +57,11 @@ public struct NotificationActionHandler: Sendable {
         if AuthNotificationCategory.all.contains(response.categoryIdentifier) {
             return await handleAuthDelivery(response, fromWatch: fromWatch)
         }
+        // A pairing request has no subject either: a tap or "Review" opens Alerts, where the trusted device lists the request in its own
+        // device-signed session. Nothing about a pairing is answered from a notification (SECURITY.md §2.107).
+        if response.categoryIdentifier == DevicePairing.pushCategory || response.actionIdentifier == PairingPush.reviewActionIdentifier {
+            return response.actionIdentifier == NotificationActionID.systemDismiss ? .ignored : .open(nil)
+        }
         // A security push has no subject: tapping it or "Review" opens the app, which fetches the notices itself.
         if response.categoryIdentifier == SecurityPush.categoryIdentifier || response.actionIdentifier == SecurityPush.reviewActionIdentifier {
             return response.actionIdentifier == NotificationActionID.systemDismiss ? .ignored : .open(nil)

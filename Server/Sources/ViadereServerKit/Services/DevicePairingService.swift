@@ -19,7 +19,7 @@ struct DevicePairingService {
     let ctx: ServerContext
 
     static let pushBody = "Someone wants to add a device to your Viadere account. Open Viadere to review it."
-    static let pushCategory = "viadere.security.pairing"
+    static let pushCategory = DevicePairing.pushCategory
 
     static var noTrustedDevice: APIError {
         APIError(.conflict, .noTrustedDevice,

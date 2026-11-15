@@ -20,6 +20,9 @@ public enum DevicePairing {
     public static let statementDomain = "VIADERE-PAIR-V1"
     /// Domain separator of the comparison digest.
     public static let comparisonDomain = "VIADERE-PAIR-CODE-V1"
+    /// The push category for a pairing request on the trusted devices (no name, code or number in it; a tap opens Alerts, where the request
+    /// is listed in the device-signed session).
+    public static let pushCategory = "viadere.security.pairing"
 
     /// A pairing code lives 10 minutes: long enough to install Viadere on a new phone, short enough that a code seen over a shoulder goes stale.
     public static let invitationTTL: TimeInterval = 10 * 60

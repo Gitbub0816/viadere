@@ -228,11 +228,18 @@ public struct NotificationEnricher: Sendable {
     /// the authenticated API (`LoopNotificationRoute`).
     public static let loopCategory = NotificationCategoryModel(identifier: LoopNotificationRoute.category, actions: [])
 
+    /// A device pairing request on a trusted device (`viadere.security.pairing`, SECURITY.md §2.107): no subject in the push; "Review" opens
+    /// the app behind authentication, where the request is listed in Alerts. Nothing can be approved from the notification.
+    public static let pairingCategory = NotificationCategoryModel(
+        identifier: DevicePairing.pushCategory,
+        actions: [NotificationActionModel(identifier: PairingPush.reviewActionIdentifier, title: "Review", style: .normal,
+                                          requiresAuthentication: true, opensApp: true)])
+
     /// Everything the app registers at launch: the renderer's static categories plus the security-cancel and Loop categories and the
     /// authentication-delivery categories (`viadere.approve`, `viadere.auth.link`, `viadere.auth.code`; F-15: a push whose category is not
     /// registered shows no actions and falls through to Alerts).
     public static func registeredCategorySpecs() -> [NotificationCategoryModel] {
-        staticCategorySpecs() + [securityCancelCategory, loopCategory] + AuthNotificationCategory.categories
+        staticCategorySpecs() + [securityCancelCategory, loopCategory, pairingCategory] + AuthNotificationCategory.categories
     }
 
     /// Static categories (`ChannelRenderer.staticCategories`) with their actions, so the app registers the
@@ -274,6 +281,11 @@ public struct NotificationEnricher: Sendable {
         }
         return specs
     }
+}
+
+/// Identifiers for the device pairing push (`viadere.security.pairing`).
+public enum PairingPush {
+    public static let reviewActionIdentifier = "viadere.security.pairing.review"
 }
 
 /// Identifiers for the security-notice push (`viadere.security.cancel`).

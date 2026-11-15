@@ -688,6 +688,29 @@ struct NoticeRoutingTests {
         #expect(defaultTap == .open(nil))
     }
 
+    @Test func thePairingPushHasItsCategoryOpensAlertsAndAnswersNothing() async throws {
+        // The server sends exactly this category (SECURITY.md §2.107); a category the app does not register shows no actions.
+        #expect(DevicePairing.pushCategory == "viadere.security.pairing")
+        let category = try #require(NotificationEnricher.registeredCategorySpecs().first { $0.identifier == DevicePairing.pushCategory })
+        let action = try #require(category.actions.first)
+        #expect(category.actions.count == 1 && action.title == "Review")
+        #expect(action.opensApp && action.requiresAuthentication)
+
+        let services = await ViadereServices.mock()
+        let handler = services.notificationHandler
+        for id in [action.identifier, NotificationActionID.systemDefaultTap] {
+            let tapped = await handler.handle(NotificationResponseInfo(actionIdentifier: id, categoryIdentifier: DevicePairing.pushCategory, userInfo: [:]))
+            #expect(tapped == .open(nil), "a tap only opens Alerts")
+        }
+        let dismissed = await handler.handle(NotificationResponseInfo(actionIdentifier: NotificationActionID.systemDismiss,
+                                                                      categoryIdentifier: DevicePairing.pushCategory, userInfo: [:]))
+        #expect(dismissed == .ignored)
+        // Even a forged decision action under this category approves nothing: it can only open the app.
+        let forged = await handler.handle(NotificationResponseInfo(actionIdentifier: "viadere.approve", categoryIdentifier: DevicePairing.pushCategory,
+                                                                   userInfo: ["interactionId": InteractionID().description]))
+        #expect(forged == .open(nil))
+    }
+
     @Test func openingFromTheSecurityPushFetchesTheNotices() async throws {
         let api = MockViadereAPI(seed: false)
         let services = await ViadereServices.mock(api: api)
