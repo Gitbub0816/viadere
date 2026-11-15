@@ -6,6 +6,16 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Console conversations, benefits and RCS rich cards (2026-11-15).** A business without an integration can now read and answer customer messages in
+the console (`Dashboard/ConsoleConversations.swift`: list, thread, reply through `ConversationService.businessSend`, assign, close, reopen; reads
+audited, bodies decrypted only for the owning tenant, customers shown as `subject_ref`), and run its loyalty program, revoke rewards, void Wallet
+passes and check codes at the counter (`Dashboard/ConsoleBenefits.swift`, calling the business API's own service functions; revoke, void and check
+need a fresh passkey; live only after go-live approval). New permissions `viewConversations`, `replyConversations`, `viewBenefits`,
+`manageBenefits` (matrix in `docs/ops/CONSOLE-ROLES.md`); `BusinessPrincipal.consoleUserId` attributes console actions to the person in the audit
+chain. The RCS sender now sends the rich cards Core renders (`richCard` standalone or carousel, one token per target shared by chip and card,
+no links or media, plain resend on a 4xx). Normative: [`SECURITY.md`](SECURITY.md) §2.11, §2.108, §2.109. Not verified: the PostgreSQL run and a
+real RBM provider; screenshots of the new pages were checked in light and dark at 1280 px.
+
 **CKey and app polish (2026-11-14, branch `claude/tender-ritchie-c8ox1c`, which continues `claude/inspiring-cannon-t5hxfw`).** The app path of
 "Sign in with Viadere" draws its link as a CKey in the concept style (pure-Swift port in `ViadereCore/OpticalCode`, verified against the
 reference build), with the QR code one link away; the app has one scanner for the Viadere code and QR codes (`Features/Scan`), gated by

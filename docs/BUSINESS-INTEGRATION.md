@@ -349,6 +349,15 @@ the `ticket`, and `confirm`/`choose` actions (for example a `confirm` titled "Ch
 customer's Activity tab shows them as one item. A `status` whose `liveActivity` is set drives a Live Activity when its purpose is `transactional`, `accountService` or
 `support` and you use a live key; marketing, rewards and security statuses never do.
 
+### 7. In the console (no integration needed)
+**Rewards and passes** in the console shows your loyalty program (create or edit it: name, summary, terms version, time zone, tiers as
+`Name: points` lines; the same validation as `PUT /v1/business/loyalty/program`), the rewards you issued (revoke one: outstanding codes stop
+working and held points come back), your customers' Wallet passes (void one) and **Check a code**: type the redemption code a customer shows,
+or the code under their pass's barcode, to redeem it at the counter (each code works once; a loyalty card scan shows the member's points).
+Revoke, void and check ask for your passkey if you have not confirmed it in the last few minutes. Owners, Organization Admins and Messaging
+Operators act; Analysts and Read-only Auditors only read. Until your production access is approved the page works in test mode and cannot
+touch real customers' rewards or passes. Issuing rewards, adjusting points and issuing passes stay API-only.
+
 ## 5b. Verify: age thresholds and identity attributes
 
 Verify lets a connected customer prove one fact to you: that they meet an age threshold (`age.minimum`) or an identity attribute
@@ -563,6 +572,17 @@ Polling `client.approvalRequest(requestId:)` is fine for UX, but the only thing 
 
 Each customer has a different approval key and `subject_ref` for you; nothing links them to other businesses. Viadere clears displayed details at the terminal state and keeps requests for 400 days; the signed result is kept as evidence. In end-to-end mode Viadere never sees the amount or payee.
 
+
+## 5d. Customer conversations in the console
+Customers you are connected to can write to you from the Viadere app (and, where you use it, over SMS). With an integration, messages reach
+you as `message.received` webhooks and you answer with `POST /v1/business/messages`. Without one, use **Conversations** in the console: the
+thread list (unread, last activity, who it is assigned to, open or closed; filter by status, "Assigned to me", "Unassigned", "Unread"), the
+thread with every message in order and who sent it, and a reply form. A console reply is the same call as `POST /v1/business/messages`: the
+same 1-1600 character limit, consent check, delivery (SMS thread or app notification) and attribution (your verified name, plus the optional
+name you type). Submitting the same form twice sends one message. Customers appear as your `subjectRef` only, never a phone number or name.
+You can assign a thread to a teammate who can read conversations, close it (the customer's next message starts a new conversation) and
+reopen it. Owners, Organization Admins and Messaging Operators reply; Read-only Auditors read; every thread opened is recorded in your audit
+log (who and which thread, never the text).
 
 ## 6. Errors
 

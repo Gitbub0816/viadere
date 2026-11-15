@@ -454,12 +454,14 @@ Errors are always `{"error":{"code","message","requestId"}}` (`APIErrorResponse`
 
 Wallet pass signing (P3), Live Activity push, rewards and redemption, delegated access endpoints, a real Apple Messages for Business adapter
 (blocked on Apple's written policy approval), vendor-specific RCS adapters (the shipped one is a generic RBM-style REST + HMAC webhook contract;
-rich cards and carousels are not rendered), numbered-reply SMS for non-sensitive interactions (they become the "Open the Viadere app" notice),
+it sends text-only standalone cards and carousels, no media), numbered-reply SMS for non-sensitive interactions (they become the "Open the Viadere app" notice),
 DNS-pinned webhook connections (the destination is re-resolved and checked immediately before sending but is not pinned to the connection).
 WP6: `SERVER_PEPPER` rotation orphans the single-valued lookup hashes (docs/ops/KEY-ROTATION.md section 3); the Cloudflare to origin certificate leg (G-11) is open; the Terraform for the audit bucket and the mTLS hostname is not validated in CI yet; the consumer export has no web fallback (the app is required, by design).
 Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview
 only), no business-profile editing after verification, no operator-assisted recovery for a business user who loses every passkey (consumers have recovery codes),
-and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale).
+and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale). Console conversations (§2.108) reload to show new
+messages (no live updates), list the 200 most recent threads and show the last 200 messages of a thread; they never show a customer's shared profile.
+Console benefits (§2.109) do not issue rewards, adjust points or issue, update or rotate passes (API only); a test-mode organization sees no passes.
 
 Policy (WP2): `contact.reachable`, `consent.request`, `age.minimum` and `identity.*` are in the catalog and the engine but have no endpoints yet
 (Verify ships them); the baseline messaging capabilities cannot be revoked one by one (suspend the business, or use a kill switch); `SUBJECT_REF_KEY`

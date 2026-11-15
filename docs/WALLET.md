@@ -35,7 +35,7 @@ the `com.apple.developer.pass-type-identifiers` entitlement.
 * **Owner decision: Beta label.** Keep or drop (two switches above). Default: keep.
 * **Owner decision: location relevance.** Needs business places (and whether showing a pass near a store is wanted).
 * **Owner decision: one Pass Type ID or one per environment.** A single ID is simplest; separate IDs keep staging passes from looking like production ones.
-* **Not done: NFC (VAS) passes** (Apple entitlement and terminals), **brand-kit styling of the signed pass** (the in-app card has it), a dashboard UI for passes (API only), per-business pass images, an expiry metric for the pass certificate.
+* **Not done: NFC (VAS) passes** (Apple entitlement and terminals), **brand-kit styling of the signed pass** (the in-app card has it), per-business pass images, an expiry metric for the pass certificate.
 * **Residual risks** are listed in `SECURITY.md` (static QR between rotations; pepper rotation invalidates codes and tokens; voiding reaches the device only on refresh).
 
 ## Owner actions

@@ -444,6 +444,12 @@ vrp1.{base64url(32 CSPRNG bytes)}.{first 32 hex of HMAC-SHA256(serverPepper, "rc
 * Single use: consuming it is a compare-and-swap in the same transaction that records the decision.
 * Bound to the phone it was sent to, to the phone's **active menu version** (a newer menu supersedes older ones) and to the menu TTL.
 * Authenticates nothing about the person: a reply on RCS is `ProvidedAssurance.unauthenticatedReply`.
+* **Rich cards (G15b).** A standalone card (`status`, `reward`, `ticket`) or carousel (a `choose` whose options do not fit as chips) is sent as
+  RBM `contentMessage.richCard` instead of `text`. The router mints **one token per target**: a card suggestion carries the token of the chip with the
+  same target, never a second one, so single use and the menu-version binding cover chip and card alike. Card suggestions are replies only: the
+  adapter refuses a rich form with any URL or foreign-postback suggestion and the transport never emits `openUrlAction` from card content (no
+  `media` either). A carousel carries no message-level chips and sets `fallback` to the plain text. A 4xx (not 429) answer to a rich send is resent
+  once as plain text and chips with the same tokens; the SMS fallback rules are unchanged. Tests: `RCSRichCardSendTests`.
 
 ### 2.12 Dashboard sessions and CSRF
 
@@ -1401,3 +1407,61 @@ A device-first account (§2.5a) has no passkey, so a second device cannot sign i
 **Migration** `DevicePairing.v1` (additive, forward-only): tables `device_pairing_invitations` and `device_pairings`; partial unique index `uq_device_pairings_pending` on `(consumer_id) WHERE state = 'pending'`. Account deletion revokes open codes, cancels pending pairings and blanks reported names.
 
 **Residual and deferred.** B's approximate region (edge country header) is not shown yet; "Rotate keys" and per-device recent approvals (the WP-D1 lifecycle UI) are not part of this change; a QR form of the code (`/p/{code}`) needs the scanner and the router, which this change does not touch.
+
+### 2.108 Console conversations (G5; `Server/.../Dashboard/ConsoleConversations.swift`, `Services/ConversationService.businessSend`, migration `ConsoleConversations.v1`)
+
+A business without its own integration reads and answers customer messages in the console (`/dashboard/conversations`).
+
+1. **Tenant.** Every query filters on the session's organization. Another tenant's thread id is the same plain `404` as an unknown id for the list,
+   the thread, the reply, assignment, close and reopen; nothing is written and no read mark is recorded.
+2. **Permissions** (re-read on every request, so a role change or removal applies on the next request): `viewConversations` (Owner, Organization
+   Admin, Messaging Operator, Read-only Auditor) lists and reads; `replyConversations` (Owner, Organization Admin, Messaging Operator) replies, assigns,
+   closes and reopens. Assignment is only to a current member of the same organization whose role holds `viewConversations`.
+3. **Customer identity.** A customer appears only as this business's pairwise `subject_ref` (§2.30), the same value its API and webhooks use; never the
+   Viadere account id, a phone number or a name.
+4. **Bodies.** Message bodies stay field-encrypted (`conversation_messages.body`); they are decrypted only after the tenant check, for the owning
+   organization. Every thread opened writes `conversation.console_read` (actor = the staff member, subject = the session id, metadata = the message
+   count): never a body. Assign, close and reopen write `conversation.assigned`, `conversation.closed`, `conversation.reopened`. All output is escaped,
+   and the page has no script (CSP without `script-src`), so customer markup is inert.
+5. **Replies use the API's path.** The reply form calls `ConversationService.businessSend` with a console principal: the same body validation
+   (1-1600 characters, control characters removed), the same idempotency (key `console:` + a random form key generated with the page, 16-64 URL-safe
+   characters; the same key with the same body is a replay that sends nothing, with a different body the API's `409 idempotency_conflict`), the same
+   policy and support-consent check, the same channel routing (the active SMS thread or a push notice) and the same attribution (the verified business
+   name plus an optional agent name). Test and live stay apart as for keys: a sandbox customer is answered in test mode, a real customer only once the
+   organization's production access is approved (`OnboardingGate`). A closed thread takes no reply until reopened; reopening is refused when the
+   relationship has ended or a newer open thread exists. `message.business_sent` names the console user (`BusinessPrincipal.consoleUserId`, actor
+   kind `business`, metadata `via: console`); an API call can never set that field.
+6. **Storage.** `conversation_console_states` (session, business, assignee) and `conversation_console_reads` (session, business, staff member, read
+   time); neither holds content.
+
+**Tests.** `ConsoleConversationsTests`: another tenant's thread is `404` for the list, the thread, reply, assign, close and reopen; a viewer cannot reply,
+assign or close and a downgrade applies on the next request; replies go through `businessSend`, are idempotent, carry the API's attribution and audit the
+console user; bodies never appear in the audit chain or the logs and every read is audited; customer HTML is escaped and the customer appears only as
+the business's reference; a real customer cannot be answered without production access.
+
+### 2.109 Console rewards, loyalty and Wallet passes (G6; `Server/.../Dashboard/ConsoleBenefits.swift`)
+
+`/dashboard/benefits` (loyalty program and issued rewards), `/dashboard/benefits/passes` (Wallet passes) and `/dashboard/benefits/check` (check a code).
+
+1. **The API's functions.** Every page and action calls the business API's own service function with a console principal:
+   `RewardsService.upsertProgram` (its validation: name, summary, terms version, IANA time zone, at most 10 distinct tiers), `.listRewards`,
+   `.revokeReward`, `.consume`; `WalletService.businessList`, `.businessVoid`, `.scan`. Tenant isolation, single use (compare-and-swap
+   `issued -> consumed`, `used_at` from null), rate limits and audit events are therefore the API's; the audit actor is the console user.
+2. **Permissions.** `viewBenefits` (Owner, Organization Admin, Messaging Operator, Analyst, Read-only Auditor) reads; `manageBenefits` (Owner,
+   Organization Admin, Messaging Operator) edits the program, revokes, voids and checks codes.
+3. **Step-up.** Revoke, void and check-a-code change value: each needs a fresh passkey assertion within the re-authentication window and the
+   organization's privileged-inactivity limit (`DashboardActions.requireReauth`, the step-up used for keys and team changes); otherwise the
+   "Confirm it's you" page is returned (`403`) and nothing changes.
+4. **Test and live.** The console principal is live only when the organization's production access is approved (`OnboardingGate`), exactly what a
+   live key could be; otherwise it is test mode: the program cannot be changed, pass management is refused (`403`, `Sandbox.requireLive`), and a real
+   customer's reward, redemption code or pass code is not found (only sandbox customers' value can be touched).
+5. **Check a code.** A Wallet pass scan code (signed, recognised by `WalletService.verifyScanCode`) goes to the pass scan path (with the API's
+   capability check); anything else is a redemption code for `consume`. Unknown, malformed, another tenant's and test/live-mismatched codes are the
+   same "isn't valid here"; a used code says when; the result names the customer only by `subject_ref`.
+6. **Output.** Reward titles, program text and all business-supplied strings are escaped.
+
+**Tests.** `ConsoleBenefitsTests`: the role matrix (read vs act, developer sees nothing, downgrade on the next request); every route is tenant isolated
+(another tenant's reward and pass `404`, its codes not valid here and still usable by it, the program edit changes only the own program, the
+existing validation applies); revoke, void and consume need a fresh passkey and are audited to the person; a test-mode organization cannot change
+the program or redeem, revoke or void live value; consume is single use from the console and the API; business text is escaped.
+
