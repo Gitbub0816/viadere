@@ -1,7 +1,7 @@
 import Crypto
 import Foundation
 
-// Device pairing (implementation plan v3 WP-D1, SECURITY.md §2.105, vectors `docs/protocol/vectors/device-pairing-v1.json`).
+// Device pairing (implementation plan v3 WP-D1, SECURITY.md §2.107, vectors `docs/protocol/vectors/device-pairing-v1.json`).
 //
 // A new device (B) joins an account that has no passkey by approval from a trusted device (A, tier D1) of that account:
 //

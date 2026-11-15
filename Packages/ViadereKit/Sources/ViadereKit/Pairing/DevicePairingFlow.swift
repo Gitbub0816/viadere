@@ -4,7 +4,7 @@ import ViadereCore
 import Observation
 #endif
 
-// Device pairing (WP-D1, SECURITY.md §2.105, UX_COPY S-DEV-03..05 and S-PAIR-01..08).
+// Device pairing (WP-D1, SECURITY.md §2.107, UX_COPY S-DEV-03..05 and S-PAIR-01..08).
 //
 // * Trusted device (A): Settings → Trusted devices → "Add another device" makes a pairing code (`AddDeviceInviteViewModel`); the request then
 //   arrives by push and in Alerts and is answered on `PairingApprovalViewModel`, which asks for the number shown on the new device and **never

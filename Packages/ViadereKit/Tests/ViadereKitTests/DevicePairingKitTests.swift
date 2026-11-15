@@ -3,7 +3,7 @@ import Testing
 import ViadereCore
 @testable import ViadereKit
 
-/// Device pairing on the devices (WP-D1, SECURITY.md §2.105): the new device shows a code from its own keys only, stores nothing unless the
+/// Device pairing on the devices (WP-D1, SECURITY.md §2.107): the new device shows a code from its own keys only, stores nothing unless the
 /// added device holds exactly its keys; the trusted device never holds the code, signs only a consistent request of its own account, and keeps
 /// Deny / This wasn't me / Add device equal with the safe actions first.
 @Suite("Device pairing (Kit)")

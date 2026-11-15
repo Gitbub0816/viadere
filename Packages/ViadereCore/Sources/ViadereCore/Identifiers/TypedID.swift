@@ -93,5 +93,5 @@ public typealias CeremonyID = TypedID<IDTag.Ceremony>
 public typealias RedemptionID = TypedID<IDTag.Redemption>
 /// Identifies one account-recovery attempt (`RecoveryStatus.id`).
 public typealias RecoveryID = TypedID<IDTag.Recovery>
-/// Identifies one device pairing (`VIADERE-PAIR-V1`, SECURITY.md §2.105): a new device asking a trusted device of an account to add it.
+/// Identifies one device pairing (`VIADERE-PAIR-V1`, SECURITY.md §2.107): a new device asking a trusted device of an account to add it.
 public typealias DevicePairingID = TypedID<IDTag.DevicePairing>

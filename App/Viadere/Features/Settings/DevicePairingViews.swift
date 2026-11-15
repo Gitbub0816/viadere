@@ -3,7 +3,7 @@ import UIKit
 import ViadereCore
 import ViadereKit
 
-// Device pairing (SECURITY.md §2.105, UX_COPY S-PAIR-01..08 with S-DEV-03..05). Built from the shared comparison pieces in
+// Device pairing (SECURITY.md §2.107, UX_COPY S-PAIR-01..08 with S-DEV-03..05). Built from the shared comparison pieces in
 // `Approval/DeviceAddComparisonViews.swift` and the design system; facts above the decision, equal buttons with the safe actions first.
 
 /// Trusted device: Settings → Trusted devices → Add another device. Shows the code the person types on the new device.

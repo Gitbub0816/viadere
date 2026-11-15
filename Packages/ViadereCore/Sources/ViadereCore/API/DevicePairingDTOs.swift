@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Device pairing (WP-D1, SECURITY.md §2.105). Primitives in `Security/DevicePairing.swift`.
+// MARK: - Device pairing (WP-D1, SECURITY.md §2.107). Primitives in `Security/DevicePairing.swift`.
 
 /// `201` from `POST /v1/device-pairings/invitations` (a D1 device): the code the person types on the new device. Shown on this device only.
 /// Creating a new one revokes the previous open code of the account.

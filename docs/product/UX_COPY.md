@@ -154,7 +154,7 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | | Buttons (equal, safe action first) | This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
 | | Wrong number | That number doesn't match the new device. Check it and try again. (after 3: "Nothing was added. Start again on the new device.") |
 | S-DEV-05 | New device: the signed challenge does not list exactly this device's keys | We couldn't confirm this request belongs to this device, so nothing was added. Start again. |
-| S-PAIR-01 | Trusted device, Settings → Trusted devices (§2.105) | Add another device |
+| S-PAIR-01 | Trusted device, Settings → Trusted devices (§2.107) | Add another device |
 | | Body | On the new device, open Viadere, choose I already use Viadere and enter this code. It works once. |
 | | Code and expiry | {XXXX-XXXX-XXXX} · Works until {time}. Don't share it with anyone. |
 | S-PAIR-02 | No D1 device on the account (start or code refused, `no_trusted_device`) | None of your devices can approve a new one. To get back into your account, use account recovery with your recovery codes. |

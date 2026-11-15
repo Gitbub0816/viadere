@@ -4,7 +4,7 @@ import ViadereKit
 
 // Device-add comparison code (ADR-0033 §4.1, UX_COPY S-DEV-03..05). The key-log screens are not presented by anything yet (the authority side
 // arrives in Stage 6; `AuthDeliveryFlags.shipping.deviceAddComparison` is false). The shared pieces below are also what device pairing uses
-// (SECURITY.md §2.105, `DevicePairingViews.swift`), so both flows show the code and ask for it the same way.
+// (SECURITY.md §2.107, `DevicePairingViews.swift`), so both flows show the code and ask for it the same way.
 
 /// The comparison code as the new device shows it: two groups of three, monospaced, read digit by digit by VoiceOver.
 struct DeviceComparisonCode: View {

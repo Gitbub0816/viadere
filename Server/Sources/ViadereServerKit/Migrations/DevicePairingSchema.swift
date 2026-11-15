@@ -2,7 +2,7 @@ import Fluent
 import Foundation
 import SQLKit
 
-/// WP-D1 device pairing (SECURITY.md §2.105). **Additive and forward-only**: two new tables, nothing existing changes.
+/// WP-D1 device pairing (SECURITY.md §2.107). **Additive and forward-only**: two new tables, nothing existing changes.
 ///
 /// * `device_pairing_invitations`: the pairing codes trusted devices made (HMAC only), single use, 10 minutes.
 /// * `device_pairings`: the ceremonies and pairings; at most one `pending` pairing per account (partial unique index, PostgreSQL and SQLite).

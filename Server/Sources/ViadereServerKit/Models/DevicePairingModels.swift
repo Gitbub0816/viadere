@@ -2,7 +2,7 @@ import Fluent
 import Foundation
 import ViadereCore
 
-/// A pairing code a trusted device made (`device_pairing_invitations`, SECURITY.md §2.105). Only `HMAC(pepper, "device-pairing-code", code)` is
+/// A pairing code a trusted device made (`device_pairing_invitations`, SECURITY.md §2.107). Only `HMAC(pepper, "device-pairing-code", code)` is
 /// stored. `open` → `used` (compare-and-swap, once) or `revoked` (a newer code of the account).
 final class DevicePairingInvitationRecord: Model, @unchecked Sendable {
     static let schema = "device_pairing_invitations"

@@ -8,7 +8,7 @@ import ViadereKit
 struct AlertsView: View {
     @Bindable var model: AppModel
     @State private var path: [String] = []
-    /// Device pairing requests (§2.105); only a D1 device gets any.
+    /// Device pairing requests (§2.107); only a D1 device gets any.
     @State private var pairings: PairingRequestsViewModel?
 
     private var alerts: AlertsViewModel { model.alerts }

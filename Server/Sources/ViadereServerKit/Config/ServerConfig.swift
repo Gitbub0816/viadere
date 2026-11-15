@@ -465,7 +465,7 @@ public struct RateLimitSettings: Sendable {
     public var accountCreateGlobal: RateRule = .perHour(3000, burst: 300)
     /// Accounts created per App Attest environment (or "unattested") and network (/24 IPv4, /64 IPv6) per hour: the anti-farming budget.
     public var accountCreatePerBucket: RateRule = .perHour(20, burst: 10)
-    /// Device pairing (§2.105), all fail closed (`device-pairing*`). Ceremonies a client network may open per hour.
+    /// Device pairing (§2.107), all fail closed (`device-pairing*`). Ceremonies a client network may open per hour.
     public var devicePairingBeginPerIP: RateRule = .perHour(30, burst: 10)
     /// Pairings a client network may start per hour (each start also spends the code it names).
     public var devicePairingStartPerIP: RateRule = .perHour(10, burst: 5)

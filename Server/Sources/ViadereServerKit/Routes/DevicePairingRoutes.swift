@@ -3,7 +3,7 @@ import Foundation
 import Vapor
 import ViadereCore
 
-/// Device pairing (WP-D1, SECURITY.md §2.105). The new device's routes are public and budgeted per client network (fail closed); the trusted
+/// Device pairing (WP-D1, SECURITY.md §2.107). The new device's routes are public and budgeted per client network (fail closed); the trusted
 /// device's routes are device-signed.
 enum DevicePairingRoutes {
     static func register(_ routes: any RoutesBuilder) {

@@ -146,7 +146,7 @@ private struct WelcomeStep: View {
                 Button("I already have an account") { Task { await vm.signIn() } }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
-                // Device pairing (§2.105): an account without a passkey adds this device from one of its trusted devices.
+                // Device pairing (§2.107): an account without a passkey adds this device from one of its trusted devices.
                 Button("I already use Viadere") { pairing = vm.makeNewDevicePairing() }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)

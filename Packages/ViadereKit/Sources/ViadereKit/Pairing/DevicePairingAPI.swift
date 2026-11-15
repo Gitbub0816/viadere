@@ -1,7 +1,7 @@
 import Foundation
 import ViadereCore
 
-// Device pairing (WP-D1, SECURITY.md §2.105): the device's calls, kept behind a protocol so the screens are testable without a server.
+// Device pairing (WP-D1, SECURITY.md §2.107): the device's calls, kept behind a protocol so the screens are testable without a server.
 
 public enum DevicePairingError: Error, Equatable, Sendable {
     /// This build has no pairing client (extensions, the App Clip).

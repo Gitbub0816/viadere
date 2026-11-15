@@ -89,7 +89,7 @@ struct AccountService {
             try await PasskeyCredentialRecord.query(on: tx).filter(\.$consumerId == id).delete()
             // The synced credential vault (ciphertext, public keys, join requests) goes with the account.
             try await VaultService.wipe(consumer: id, on: tx)
-            // Device pairing (§2.105): open codes revoked, pending pairings cancelled, reported device names blanked.
+            // Device pairing (§2.107): open codes revoked, pending pairings cancelled, reported device names blanked.
             try await DevicePairingService.wipe(consumer: id, on: tx)
             // Approval keys are revoked, and what the relay kept of requests (details, nonces, ciphertext) is erased (WP1).
             try await ApproveKeyService.wipe(consumer: id, on: tx, ctx: ctx)

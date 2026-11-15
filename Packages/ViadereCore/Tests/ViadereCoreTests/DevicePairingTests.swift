@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import ViadereCore
 
-/// Device pairing (WP-D1, SECURITY.md §2.105) against the independently generated vectors `docs/protocol/vectors/device-pairing-v1.json`
+/// Device pairing (WP-D1, SECURITY.md §2.107) against the independently generated vectors `docs/protocol/vectors/device-pairing-v1.json`
 /// (`generate_device_pairing_v1.py`, Python standard library + `cryptography`), plus the exploit paths the shared contract closes.
 @Suite("Device pairing (VIADERE-PAIR-V1)")
 struct DevicePairingTests {

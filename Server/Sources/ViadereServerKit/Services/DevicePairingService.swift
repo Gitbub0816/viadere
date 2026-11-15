@@ -3,7 +3,7 @@ import Foundation
 import SQLKit
 import ViadereCore
 
-/// Device pairing (WP-D1, SECURITY.md §2.105): adds a device to an account that has no passkey, by approval from one of its D1 devices.
+/// Device pairing (WP-D1, SECURITY.md §2.107): adds a device to an account that has no passkey, by approval from one of its D1 devices.
 ///
 /// * **Only the server names the account.** A D1 device makes a pairing code; the new device sends the code, never an account id. Nothing the
 ///   new device says (a tier, a name, an account) decides anything.

@@ -58,7 +58,7 @@ public enum APIRoutes {
     public static let deviceRevoke = Endpoint<EmptyBody, EmptyBody>(
         "devices.revoke", .DELETE, "/v1/devices/{deviceId}", auth: .deviceSignedBearer)
 
-    // MARK: Device pairing (WP-D1, §2.105)
+    // MARK: Device pairing (WP-D1, §2.107)
     /// A trusted (D1) device creates the pairing code the person types on the new device (`201`). A new code revokes the previous one.
     public static let devicePairingInvite = Endpoint<EmptyBody, DevicePairingInvitation>(
         "devicePairings.invite", .POST, "/v1/device-pairings/invitations", auth: .deviceSignedBearer)

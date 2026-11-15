@@ -134,7 +134,7 @@ extension TestHarness {
     }
 }
 
-/// WP-D1 device pairing (SECURITY.md §2.105), server side. Each exploit-path test names the attack it closes; every one fails without the check
+/// WP-D1 device pairing (SECURITY.md §2.107), server side. Each exploit-path test names the attack it closes; every one fails without the check
 /// it names (verified by disabling the check while writing it).
 final class DevicePairingTests: XCTestCase {
     // MARK: The happy path
