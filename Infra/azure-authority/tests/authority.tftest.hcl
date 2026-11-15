@@ -132,8 +132,8 @@ run "enabled_lean_has_no_standby_role_and_no_public_ingress" {
     error_message = "the authority ingress must be internal and HTTPS only"
   }
   assert {
-    condition     = length(azapi_resource.kv_key) == 7 && length(azurerm_role_assignment.authority_key) == 5
-    error_message = "lean HPKE construction: 4 signing + kek (active) + 2 standby keys = 7 (one signing standby, one kek standby), roles on the 5 active keys only"
+    condition     = length(azapi_resource.kv_key) == 8 && length(azurerm_role_assignment.authority_key) == 6
+    error_message = "lean HPKE construction: 5 signing (with ckey-safe-action-signing) + kek (active) + 2 standby keys = 8 (one signing standby, one kek standby), roles on the 6 active keys only"
   }
 }
 
@@ -196,7 +196,7 @@ run "reconcile_job_enabled_has_no_key_vault_role" {
     error_message = "the reconciliation job runs `ViadereAuthority reconcile`"
   }
   assert {
-    condition     = length(azurerm_role_assignment.reconcile_logs) == 1 && length(azurerm_role_assignment.authority_key) == 5
+    condition     = length(azurerm_role_assignment.reconcile_logs) == 1 && length(azurerm_role_assignment.authority_key) == 6
     error_message = "the reconcile identity reads the workspace and gains no Key Vault role"
   }
 }

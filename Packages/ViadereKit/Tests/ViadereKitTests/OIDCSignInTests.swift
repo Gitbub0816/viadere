@@ -105,6 +105,56 @@ struct OIDCSignInTests {
         }
     }
 
+    // MARK: Opened by a verified Safe Action (UX_COPY OIDC-12)
+
+    @Test func aVerifiedSafeActionAddsContextAndReplacesNoCheck() async throws {
+        let (store, key) = try await keys()
+        let request = VerifiedSafeActionRequest(issuer: "viadere.com", requestId: ach, device: "Chrome on Windows", location: "United States",
+                                                requestedAt: Self.now.addingTimeInterval(-10))
+        func model(_ api: MockOIDCDeviceAPI, safeAction: VerifiedSafeActionRequest?, pinned: [P256.Signing.PublicKey]? = nil) -> OIDCSignInViewModel {
+            OIDCSignInViewModel(challengeId: ach, api: api, signer: DeviceKeyFactorSigner(keys: store), pinnedKeys: pinned ?? [statementKey.publicKey],
+                                environment: .staging, safeAction: safeAction, clock: { OIDCSignInTests.now })
+        }
+        // The statement is still fetched and verified, the number is still typed, and the answer is still signed by the device key.
+        let api = MockOIDCDeviceAPI()
+        await api.set(statement: try statement(), for: ach)
+        let opened = model(api, safeAction: request)
+        #expect(opened.safeActionContext { _ in "now" } == nil, "nothing is shown before the statement verified")
+        await opened.load()
+        #expect(opened.phase == .reviewing)
+        let context = try #require(opened.safeActionContext { _ in "8:14 PM" })
+        #expect(context.rows.map(\.label) == [OIDCCopy.requestedByLabel, OIDCCopy.deviceLabel, OIDCCopy.locationLabel, OIDCCopy.requestedAtLabel])
+        #expect(context.rows.map(\.value) == ["viadere.com (verified code)", "Chrome on Windows", "United States", "8:14 PM"])
+        #expect(context.warning == OIDCCopy.relayWarning)
+        #expect(!opened.canApprove, "a verified code never fills in the number")
+        await opened.approve()
+        #expect(await api.submitted.isEmpty)
+        opened.setEntry("4")
+        opened.setEntry("42")
+        await opened.approve()
+        #expect(opened.phase == .approved)
+        let factor = try FactorAssertion.parse(try #require(await api.submitted.first).factor)
+        #expect(factor.claims.match == "42" && factor.claims.decision == .approve)
+        try FactorAssertion.verifySignature(factor, loggedKey: try key.publicKey.signingKey())
+        #expect(opened.safeActionContext { _ in "now" } == nil, "the context belongs to the question only")
+
+        // A verified code does not make an unverifiable statement reviewable.
+        let bad = MockOIDCDeviceAPI()
+        await bad.set(statement: try statement(key: P256.Signing.PrivateKey()), for: ach)
+        let refused = model(bad, safeAction: request)
+        await refused.load()
+        #expect(refused.phase == .cannotVerify)
+        #expect(refused.safeActionContext { _ in "now" } == nil)
+
+        // A link or a push has no such rows, and a Safe Action for another challenge is not this review's context.
+        let plain = model(api, safeAction: nil)
+        await plain.load()
+        #expect(plain.phase == .reviewing && plain.safeActionContext { _ in "now" } == nil)
+        var foreign = request
+        foreign.requestId = AuthorityChallengeID.generate()
+        #expect(model(api, safeAction: foreign).safeAction == nil)
+    }
+
     @Test func expiredStatementAndMissingApprovalKeyStopBeforeSigning() async throws {
         let api = MockOIDCDeviceAPI()
         await api.set(statement: try statement(lifetime: 30), for: ach)

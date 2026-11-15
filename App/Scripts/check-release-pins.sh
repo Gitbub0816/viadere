@@ -15,6 +15,12 @@
 # publicKeys), comma separated, where publicKey is base64url of a 65-byte uncompressed P-256 point and kid, when given, is the base64url
 # SHA-256 of its SPKI. An empty or malformed value would silently make every Brand Kit neutral and every Loop unshowable. The App Clip
 # renders neither and is not checked for them.
+#
+# VIADERE_CKEY_SAFE_ACTION_KEYS (app target only, SECURITY.md §2.104): `keyId:alg:publicKey` entries, comma separated, keyId 1 to 32 of
+# A-Z a-z 0-9 . _ - and either ES256 with SEC 1 hex (02/03 + 64 hex digits, or 04 + 128) or Ed25519 with 64 hex digits. The app also
+# refuses a point off the curve, which this script cannot check. Empty is a warning in both configurations: the app then refuses every scanned
+# Safe Action and the sign-in code works only as a plain link or QR, and "Sign in with Viadere" is staging-only (ADR-0024), so a Release
+# archive must not need a key no production server can use. A malformed value is an error in both (the app would drop the whole list).
 set -eu
 
 # DER SubjectPublicKeyInfo header of an uncompressed P-256 key (id-ecPublicKey, prime256v1, BIT STRING), base64.
@@ -63,6 +69,42 @@ check_manifest_keys() { # name value
   return $status
 }
 
+check_safe_action_keys() { # value
+  case "${TARGET_NAME:-}" in
+    ViadereClip) return 0 ;;
+  esac
+  value="$1"
+  if [ -z "$value" ]; then
+    echo "warning: VIADERE_CKEY_SAFE_ACTION_KEYS is not set: this build refuses every scanned Safe Action (the sign-in link and QR still work)."
+    return 0
+  fi
+  case "$value" in
+    *REPLACE_ME*|*'$('*)
+      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS is a placeholder. Set it to keyId:alg:publicKey (from /.well-known/ckey-safe-actions.json) or leave it empty." >&2
+      return 1 ;;
+  esac
+  status=0
+  seen=","
+  old_ifs=$IFS; IFS=','
+  for entry in $value; do
+    entry=$(printf '%s' "$entry" | tr -d ' ')
+    if ! printf '%s' "$entry" | grep -Eq '^[A-Za-z0-9._-]{1,32}:(ES256:(0[23][0-9A-Fa-f]{64}|04[0-9A-Fa-f]{128})|Ed25519:[0-9A-Fa-f]{64})$'; then
+      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS has an entry that is not keyId:alg:publicKey (key id of 1 to 32 letters, digits, '.', '_' or '-'; ES256 with 66 or 130 SEC 1 hex digits, or Ed25519 with 64)." >&2
+      status=1; continue
+    fi
+    id="${entry%%:*}"
+    case "$seen" in
+      *",$id,"*) echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS lists the key id $id twice." >&2; status=1 ;;
+    esac
+    seen="$seen$id,"
+  done
+  IFS=$old_ifs
+  case "$value" in
+    *,) echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS ends with an empty entry." >&2; status=1 ;;
+  esac
+  return $status
+}
+
 check_all_manifest_keys() {
   case "${TARGET_NAME:-}" in
     ViadereClip) return 0 ;;
@@ -86,6 +128,7 @@ case "${CONFIGURATION:-}" in
       exit 1
     fi
     check_all_manifest_keys || exit 1
+    check_safe_action_keys "${VIADERE_CKEY_SAFE_ACTION_KEYS:-}" || exit 1
     exit 0
     ;;
   Staging)
@@ -129,6 +172,7 @@ case "${CONFIGURATION:-}" in
     else
       check_manifest_keys VIADERE_LOOP_PUBLICATION_KEYS "${VIADERE_LOOP_PUBLICATION_KEYS}" || fail=1
     fi
+    check_safe_action_keys "${VIADERE_CKEY_SAFE_ACTION_KEYS:-}" || fail=1
     exit "$fail"
     ;;
   *)

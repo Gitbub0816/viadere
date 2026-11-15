@@ -36,6 +36,14 @@ public enum OIDCCopy {
     public static let offline = "You're offline. Nothing was sent. Try again when you're connected."
     public static let noKey = "This device can't approve sign-ins yet."
 
+    /// OIDC-12: shown above the question only when the review was opened by a verified Viadere code (CKey Safe Action).
+    public static let requestedByLabel = "Requested by"
+    public static func requestedBy(issuer: String) -> String { "\(issuer) (verified code)" }
+    public static let deviceLabel = "Device"
+    public static let locationLabel = "Location"
+    public static let requestedAtLabel = "Requested"
+    public static let relayWarning = "Only continue if this is the device you are using right now. Someone may be showing you a code meant for their own session."
+
     /// OIDC-09.
     public static let listTitle = "Apps you've signed in to with Viadere"
     public static func listRow(client: String, lastUsed: String) -> String { "\(client), last used \(lastUsed)" }
@@ -66,6 +74,32 @@ public struct OIDCSignInDisplay: Sendable, Equatable {
         self.host = host
         redirectURI = redirect
         matchDigits = 2
+    }
+}
+
+/// What the review shows about a sign-in opened by a verified Safe Action (UX_COPY OIDC-12): who signed the code and what the issuer says
+/// about the browser that asked, so a person shown someone else's code can notice. It adds context; it replaces no check.
+public struct OIDCSafeActionContext: Sendable, Equatable {
+    public struct Row: Sendable, Equatable, Identifiable {
+        public var label: String
+        public var value: String
+        public var id: String { label }
+    }
+
+    /// "Requested by", then "Device", "Location" when the issuer gave one, and "Requested" in the phone's own time format.
+    public var rows: [Row]
+    public var warning: String
+
+    public init(request: VerifiedSafeActionRequest, formatTime: (Date) -> String) {
+        // The issuer is a DNS name verified against the pinned key; the rest came over the network and is sanitized again here.
+        var rows = [Row(label: OIDCCopy.requestedByLabel, value: OIDCCopy.requestedBy(issuer: UntrustedText.line(request.issuer, max: 253))),
+                    Row(label: OIDCCopy.deviceLabel, value: UntrustedText.line(request.device, max: CKeySafeActionRequestInfo.maxDeviceCharacters))]
+        if let location = UntrustedText.optionalLine(request.location, max: CKeySafeActionRequestInfo.maxLocationCharacters) {
+            rows.append(Row(label: OIDCCopy.locationLabel, value: location))
+        }
+        rows.append(Row(label: OIDCCopy.requestedAtLabel, value: formatTime(request.requestedAt)))
+        self.rows = rows
+        warning = OIDCCopy.relayWarning
     }
 }
 
@@ -103,6 +137,10 @@ public final class OIDCSignInViewModel {
     public private(set) var wrongEntries = 0
     public private(set) var notice: String?
 
+    /// Set when a verified Safe Action opened this review. Context only: `load()` still verifies the authority-signed statement, the number
+    /// is still typed, and the answer is still signed with the device key.
+    public let safeAction: VerifiedSafeActionRequest?
+
     private let challengeId: String
     private let api: any OIDCDeviceAPI
     private let signer: any AuthorityFactorSigning
@@ -113,7 +151,10 @@ public final class OIDCSignInViewModel {
     private var statement: AuthorityChallengeStatement?
 
     public init(challengeId: String, api: any OIDCDeviceAPI, signer: any AuthorityFactorSigning, pinnedKeys: [P256.Signing.PublicKey],
-                revokedKids: Set<String> = [], environment: AuthorityEnvironment, clock: @escaping @Sendable () -> Date = { Date() }) {
+                revokedKids: Set<String> = [], environment: AuthorityEnvironment, safeAction: VerifiedSafeActionRequest? = nil,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        // A Safe Action for another challenge is not this review's context.
+        self.safeAction = safeAction?.requestId == challengeId ? safeAction : nil
         self.challengeId = challengeId
         self.api = api
         self.signer = signer
@@ -129,6 +170,11 @@ public final class OIDCSignInViewModel {
     public var consentText: String? { showsConsent ? display.map { OIDCCopy.consent(client: $0.clientName, host: $0.host) } : nil }
     public var host: HostPresentation? { display.map { HostPresentation(host: $0.host) } }
     public var numberHelp: String { OIDCCopy.numberHelp(digits: display?.matchDigits ?? 2) }
+    /// The "Requested by … (verified code)" rows and the warning, shown above the question while reviewing. `nil` for a link or a push.
+    public func safeActionContext(formatTime: (Date) -> String) -> OIDCSafeActionContext? {
+        guard phase == .reviewing || phase == .submitting, let safeAction else { return nil }
+        return OIDCSafeActionContext(request: safeAction, formatTime: formatTime)
+    }
     public var canApprove: Bool { phase == .reviewing && display.map { entry.count == $0.matchDigits } == true }
     public var canRefuse: Bool { phase == .reviewing }
 

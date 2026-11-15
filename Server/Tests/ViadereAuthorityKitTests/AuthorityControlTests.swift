@@ -349,7 +349,7 @@ final class AuthorityControlTests: XCTestCase {
         let h = try await AuthorityHarness.make()
         let routes = Set(h.app.routes.all.map { "\($0.method.rawValue) /" + $0.path.map(\.description).joined(separator: "/") })
         XCTAssertEqual(routes, ["GET /healthz", "GET /readyz", "POST /v1/challenges", "POST /v1/evidence", "GET /v1/oidc/client-check", "POST /v1/oidc/token",
-                                "GET /v1/oidc/keys", "POST /v1/revocations",
+                                "GET /v1/oidc/keys", "GET /v1/ckey/keys", "POST /v1/revocations",
                                 // Key log, recovery and link service (S6-04, S6-05).
                                 "POST /v1/keylog/nonces", "POST /v1/keylog/genesis", "POST /v1/keylog/head", "POST /v1/keylog/challenges",
                                 "POST /v1/keylog/device-added", "POST /v1/keylog/evidence", "POST /v1/keylog/recovery/start",

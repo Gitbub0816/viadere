@@ -65,6 +65,7 @@ locals {
     AUTHORITY_KEY_OIDC_RS256       = "oidc-signing-rs256"
     AUTHORITY_KEY_OIDC_ES256       = "oidc-signing-es256"
     AUTHORITY_KEY_DEVICE_STATEMENT = "device-statement-signing"
+    AUTHORITY_KEY_CKEY_SAFE_ACTION = "ckey-safe-action-signing"
     AUTHORITY_KEY_SEAL_KEK         = local.p.jwe_rsa_seal ? "" : "recovery-seal-kek"
     AUTHORITY_KEY_SEAL_RSA         = local.p.jwe_rsa_seal ? "recovery-seal-rsa" : ""
   }

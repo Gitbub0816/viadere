@@ -71,7 +71,8 @@ enum OIDCMethodsFrontEnd {
     ///
     /// The link is drawn as a CKey in the concept style (`CKeySymbol`, read by the Viadere app's scanner). `qr` draws the same link as a QR
     /// code instead, for a phone whose camera app opens the universal link; the page offers the switch as an ordinary link, so it survives
-    /// the three-second refresh and needs no script. Both codes carry exactly `https://{link domain}/o/{ach}` and nothing else.
+    /// the three-second refresh and needs no script. The QR code carries exactly `https://{link domain}/o/{ach}`; so does the CKey unless
+    /// the row holds the authority-signed Safe Action for this challenge (`CKeySafeActionText`), which names the same challenge id and nothing else.
     static func appWaitingBody(row: OIDCAuthorizationRecord, linkDomain: LinkDomain, qr: Bool = false) -> String {
         let e = OIDCFrontEnd.escape
         var html = "<p>Open the Viadere app on your phone and approve the sign-in to \(e(row.clientName)).</p>"
@@ -86,7 +87,11 @@ enum OIDCMethodsFrontEnd {
                 html += "<p class=\"notice\">Scan with your phone's camera. Only scan a code on this page. Don't scan one that someone sent or showed you.</p>"
                 html += "<p class=\"notice\"><a href=\"\(status)\">Back to the Viadere code</a></p>"
             } else {
-                if let symbol = try? CKeySymbol.encode(link, level: .medium) {
+                // With the authority's issuer key the Viadere code is a CKey Safe Action for this challenge (signed once, with the challenge);
+                // without one it is the plain link, as is the QR code always (the phone's camera needs a link).
+                var payload = link
+                if let text = CKeySafeActionText.accepted(row.safeAction, challengeId: ach, linkDomain: linkDomain) { payload = text }
+                if let symbol = try? CKeySymbol.encode(payload, level: .medium) {
                     html += "<div class=\"ckey\">\(symbol.svg(style: .concept, label: "Viadere code to open this sign-in in the Viadere app"))</div>"
                 }
                 html += "<p class=\"notice\">Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you.</p>"

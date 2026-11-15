@@ -86,6 +86,10 @@ struct AuthorityClient {
     func oidcKeys() async throws -> AuthorityPublicKeySet {
         try json(AuthorityPublicKeySet.self, try await transport.send(method: .GET, path: AuthorityRoute.oidcKeys, contentType: nil, body: nil))
     }
+
+    func ckeySafeActionKeys() async throws -> AuthorityCKeyKeySet {
+        try json(AuthorityCKeyKeySet.self, try await transport.send(method: .GET, path: AuthorityRoute.ckeySafeActionKeys, contentType: nil, body: nil))
+    }
 }
 
 extension Application {

@@ -25,6 +25,8 @@ public enum AuthorityRoute {
     public static let oidcClientCheck = "/v1/oidc/client-check"
     public static let oidcToken = "/v1/oidc/token"
     public static let oidcKeys = "/v1/oidc/keys"
+    /// The CKey Safe Action issuer key (public half) the authority signs `signin.request` envelopes with (SECURITY.md §2.104).
+    public static let ckeySafeActionKeys = "/v1/ckey/keys"
     public static let revocations = "/v1/revocations"
     public static func challenge(_ id: String) -> String { "/v1/challenges/\(id)" }
 }
@@ -147,16 +149,22 @@ public struct AuthorityChallengeCreateResponse: Codable, Sendable, Hashable {
     /// `oidc_login` with a `login_hint`: true only when the authority verified the hint against the named account (only then may the api push to
     /// that account's devices). Absent otherwise.
     public var hintAccepted: Bool?
+    /// `oidc_login` only, when the authority holds the CKey Safe Action key: the `ckey-action:1:` text naming this challenge (`signin.request`,
+    /// cross-device, ES256), signed by the authority and verified once before it is returned. The api draws it and never signs. Absent otherwise.
+    public var safeAction: String?
 
-    public init(challengeId: String, statement: String, matchCode: String?, expiresAt: Int64, hintAccepted: Bool? = nil) {
+    public init(challengeId: String, statement: String, matchCode: String?, expiresAt: Int64, hintAccepted: Bool? = nil, safeAction: String? = nil) {
         self.challengeId = challengeId
         self.statement = statement
         self.matchCode = matchCode
         self.expiresAt = expiresAt
         self.hintAccepted = hintAccepted
+        self.safeAction = safeAction
     }
 
-    enum CodingKeys: String, CodingKey { case challengeId = "ach", statement, matchCode = "match_code", expiresAt = "expires_at", hintAccepted = "hint_accepted" }
+    enum CodingKeys: String, CodingKey {
+        case challengeId = "ach", statement, matchCode = "match_code", expiresAt = "expires_at", hintAccepted = "hint_accepted", safeAction = "safe_action"
+    }
 }
 
 /// `POST /v1/evidence`: a device factor JWS relayed unchanged. `account_id`, when the api names one, is checked against the signing key's
@@ -228,6 +236,17 @@ public struct AuthorityRevocationRequest: Codable, Sendable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kid = try c.decode(String.self, forKey: .kid)
         reason = try c.decode(String.self, forKey: .reason)
+    }
+}
+
+/// `GET /v1/ckey/keys`: the issuer the authority signs Safe Actions for (the link-domain host) and the public half of its key, as the api
+/// publishes it in `/.well-known/ckey-safe-actions.json`. `keys` is empty while the authority holds no Safe Action key.
+public struct AuthorityCKeyKeySet: Codable, Sendable, Equatable {
+    public var issuer: String?
+    public var keys: [CKeySafeActionKeyFile.Key]
+    public init(issuer: String?, keys: [CKeySafeActionKeyFile.Key]) {
+        self.issuer = issuer
+        self.keys = keys
     }
 }
 

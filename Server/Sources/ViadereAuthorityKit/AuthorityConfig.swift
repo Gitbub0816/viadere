@@ -71,6 +71,11 @@ public struct AuthorityConfig: Sendable {
     public var oidcRS256KeyName = "oidc-signing-rs256"
     public var oidcES256KeyName = "oidc-signing-es256"
     public var deviceStatementKeyName = "device-statement-signing"
+    /// The CKey Safe Action issuer key (EC P-256, ES256; SECURITY.md §2.104 "Safe Actions"). Used only with `ckeySafeActionIssuer` and a reviewed pin.
+    public var ckeySafeActionKeyName = "ckey-safe-action-signing"
+    /// `CKEY_SAFE_ACTION_ISSUER`: the api's link-domain host (`LINK_DOMAIN`), the only issuer the authority signs `signin.request` envelopes for.
+    /// `nil` (the default): no Safe Action is signed and the sign-in page draws the plain link.
+    public var ckeySafeActionIssuer: String?
 
     // Authority-only secrets (TRUST_BOUNDARIES §4.1).
     public var oidcPairwiseKey = SymmetricKey(size: .bits256)
@@ -178,6 +183,15 @@ public struct AuthorityConfig: Sendable {
         config.oidcRS256KeyName = try keyName("AUTHORITY_KEY_OIDC_RS256", config.oidcRS256KeyName)
         config.oidcES256KeyName = try keyName("AUTHORITY_KEY_OIDC_ES256", config.oidcES256KeyName)
         config.deviceStatementKeyName = try keyName("AUTHORITY_KEY_DEVICE_STATEMENT", config.deviceStatementKeyName)
+        config.ckeySafeActionKeyName = try keyName("AUTHORITY_KEY_CKEY_SAFE_ACTION", config.ckeySafeActionKeyName)
+        if let raw = env["CKEY_SAFE_ACTION_ISSUER"], !raw.isEmpty {
+            // A DNS name exactly as the envelope carries it (lower case, at least one dot), and the same host the api builds links on.
+            guard let domain = LinkDomain(raw), domain.host == raw, CKeySafeAction.isValid(Array(raw.utf8)[...], as: .issuer) else {
+                throw AuthorityConfigError.invalid("CKEY_SAFE_ACTION_ISSUER (the api's LINK_DOMAIN host, for example viadere.com)")
+            }
+            guard config.oidcEnabled else { throw AuthorityConfigError.refused("CKEY_SAFE_ACTION_ISSUER needs AUTHORITY_OIDC_ENABLED (Safe Actions exist only for sign-in)") }
+            config.ckeySafeActionIssuer = raw
+        }
 
         func secret(_ name: String) throws -> SymmetricKey? {
             guard let raw = env[name], !raw.isEmpty else {

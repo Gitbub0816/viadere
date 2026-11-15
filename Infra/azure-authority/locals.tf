@@ -72,6 +72,9 @@ locals {
     "oidc-signing-es256"       = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
     "oidc-signing-rs256"       = { kty = local.p.rsa_kty, curve = null, size = 3072, ops = ["sign", "verify"] }
     "device-statement-signing" = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
+    # CKey Safe Action issuer key (ES256, SECURITY.md 2.104): signs the `signin.request` envelope of an oidc_login challenge, nothing else.
+    # Unused until the admin job pins a version and authority_env sets CKEY_SAFE_ACTION_ISSUER (the api's LINK_DOMAIN host).
+    "ckey-safe-action-signing" = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }
   }
   standby_signing_keys = {
     "device-statement-signing-standby" = { kty = local.p.ec_kty, curve = "P-256", size = null, ops = ["sign", "verify"] }

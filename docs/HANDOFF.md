@@ -13,8 +13,18 @@ reference build), with the QR code one link away; the app has one scanner for th
 Verified here: Core 574, Kit 715, Server on SQLite (see the commit). **Not verified:** the app does not compile on Linux, so the scanner, the
 CKey package integration and the new components are syntax-parsed only; nothing has been scanned with a real phone. First device jobs:
 build in Xcode, scan the staging sign-in page from a laptop screen in bright and dim rooms, and keep the QR link until that passes.
-Open decisions for the owner: whether to adopt CKey Safe Actions (needs an Ed25519 issuer key, while `KeyManagementService` signs only with P-256 and RSA keys, and a
-request-info endpoint; refused by the scanner for now), and whether the Verify, Connect and dashboard codes should offer a CKey beside the QR.
+**CKey Safe Actions built (2026-11-14, owner decision).** With the authority's ES256 key `ckey-safe-action-signing` pinned and
+`CKEY_SAFE_ACTION_ISSUER` set on the authority, the Viadere code is a signed `signin.request` Safe Action for the challenge (the authority
+signs it with the challenge; the api only stores, draws and publishes it: `/.well-known/ckey-safe-actions.json`, `/ckey/requests/{id}`), and
+the app verifies it with its own Swift reader against pinned keys (`VIADERE_CKEY_SAFE_ACTION_KEYS`, `keyId:ES256:<SEC 1 hex>`) before
+opening the unchanged sign-in review. Off (plain link) until the owner pins the key. [`SECURITY.md`](SECURITY.md) §2.104 "Safe Actions" maps
+every spec rule to code and test. Owner follow-ups: (1) ES256 Safe Actions need CKey 0.1.0-build.118 or later, which is on CKey's scratch
+branch only: when the owner publishes the first Stable-Release build ≥ 118 (the earlier plan named build 115; ES256 needs 118), re-pin `App/project.yml` (`CKeyScanner`
+revision) to it, regenerate `docs/protocol/vectors/ckey-profile0-v1.json`, `ckey-safe-actions-v1.json` and `ckey-safe-actions-es256-v1.json`
+from that build, re-run the Core port tests, and update the CLAUDE.md CKey rows. Viadere's reader does not depend on the CKey build; other
+CKey readers do. (2) Before enabling: create the key (OpenTofu), pin its version with the admin job, set `CKEY_SAFE_ACTION_ISSUER` in
+`authority_env`, put the key file's entry into the app build, and only then turn it on. (3) Whether the Verify, Connect and dashboard codes
+should offer a CKey beside the QR.
 
 Built: the Swift stack in [`../README.md`](../README.md) — Core, Kit, BusinessSDK, Server (Vapor, Postgres 18), App (XcodeGen, iOS 17), Site (Swift static site), Infra (Fly.io, Cloudflare, Neon, Google Cloud KMS) — implementing [`COMPLETE-PRODUCT-SPEC.md`](COMPLETE-PRODUCT-SPEC.md), [`MESSAGING-GATEWAY-SPEC.md`](MESSAGING-GATEWAY-SPEC.md) and [`SECURITY-TRUST-PLATFORM-SPEC.md`](SECURITY-TRUST-PLATFORM-SPEC.md) per [`IMPLEMENTATION-PLAN-v2.md`](IMPLEMENTATION-PLAN-v2.md).
 

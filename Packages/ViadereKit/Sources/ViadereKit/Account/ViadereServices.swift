@@ -37,6 +37,8 @@ public struct ViadereServices: Sendable {
     public var localSecurityNotices: any LocalSecurityNoticePosting = NoLocalSecurityNotices()
     /// "Sign in with Viadere" on the device (ADR-0024): challenge statements, factor answers and the consent list. Fails closed when absent.
     public var oidc: any OIDCDeviceAPI = UnavailableOIDCDeviceAPI()
+    /// Reads CKey Safe Actions from the scanner (SECURITY.md §2.104). `nil` in the App Clip and extensions: every Safe Action is refused.
+    public var safeActionReader: SafeActionReader?
     /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
     public var authDeliveryFlags: AuthDeliveryFlags = .shipping
     /// The Home Screen widget's snapshot writer (numbers only). The app sets it; extensions, the App Clip and tests leave it `nil`.
@@ -119,6 +121,9 @@ public struct ViadereServices: Sendable {
             services.approveAPI = LiveApproveAPI(client: client)
             services.authDelivery = LiveAuthDeliveryAPI(client: client, flags: .forConfiguration(configuration))
             services.oidc = LiveOIDCDeviceAPI(client: client)
+            // Request information comes from the issuer's own host over the app's transport, with no session and no device signature.
+            services.safeActionReader = SafeActionReader(configuration: configuration,
+                                                         replay: PreferencesSafeActionReplayStore(preferences: services.preferences), transport: transport)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.organizationAPI = LiveOrganizationAPI(client: client)
             services.loopsAPI = LiveLoopsAPI(client: client)

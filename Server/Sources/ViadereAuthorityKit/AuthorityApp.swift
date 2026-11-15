@@ -167,6 +167,12 @@ public enum AuthorityApplication {
             let keys = try ctx.requireKeys()
             return try json(AuthorityPublicKeySet(keys: keys.oidcPublicJWKs), status: .ok)
         }
+        // The CKey Safe Action issuer key, public half only (SECURITY.md §2.104): the api publishes it at /.well-known/ckey-safe-actions.json.
+        evidence.get("v1", "ckey", "keys") { req async throws -> Response in
+            let ctx = req.application.authority
+            guard ctx.config.oidcEnabled else { throw Abort(.notFound) }
+            return try json(try ctx.requireKeys().safeActionKeys(config: ctx.config), status: .ok)
+        }
         // Reduce-only: the api and the worker (whose only route this is, ADR-0028 §9).
         let revocations = app.grouped(AuthorityRoleMiddleware(verifier: verifier, roles: [.revocations, .evidenceSubmit], callerNames: ["api", "worker"]))
         revocations.post("v1", "revocations") { req async throws -> Response in

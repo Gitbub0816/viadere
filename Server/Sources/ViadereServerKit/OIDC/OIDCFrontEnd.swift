@@ -26,6 +26,8 @@ enum OIDCFrontEnd {
         app.get("oidc", "logout") { req in try await logout(req) }
         // Passkey method, cancel, consents (ADR-0024 §4 method 1, §8).
         OIDCMethodsFrontEnd.register(app)
+        // The Viadere code as a CKey Safe Action: the issuer's key file and request information (SECURITY.md §2.104).
+        CKeySafeActionRoutes.register(app)
 
         app.api(APIRoutes.oidcChallengeGet) { req in
             _ = try OIDCGate.require(req)
@@ -237,9 +239,14 @@ enum OIDCFrontEnd {
             try await row.delete(on: req.db)
             return redirect(row.redirectURI, [("error", "access_denied")], state: row.state, issuer: ctx.config.oidc.issuer)
         }
+        // The Safe Action for this challenge was signed by the authority with the challenge; it is stored once and the waiting page redraws
+        // it on every refresh. It names the challenge id and nothing else, and dies with the challenge (120 s).
+        let safeAction = CKeySafeActionText.accepted(challenge.safeAction, challengeId: challenge.challengeId, linkDomain: ctx.config.linkDomain)
+        let device = OIDCRequestDevice.label(userAgent: req.headers.first(name: .userAgent))
         try await OIDCAuthorizationRecord.query(on: req.db).filter(\.$id == row.id!).filter(\.$status == "pending")
             .set(\.$status, to: "challenged").set(\.$challengeId, to: challenge.challengeId).set(\.$statement, to: challenge.statement)
-            .set(\.$matchCode, to: challenge.matchCode).update()
+            .set(\.$matchCode, to: challenge.matchCode).set(\.$safeAction, to: safeAction).set(\.$requestedDevice, to: device)
+            .set(\.$requestedCountry, to: OIDCRequestDevice.country(req)).update()
         if challenge.hintAccepted == true, let consumer = hinted {
             await OIDCMethodsFrontEnd.pushHinted(req, consumerId: consumer, clientId: row.clientId, challengeId: challenge.challengeId)
         }

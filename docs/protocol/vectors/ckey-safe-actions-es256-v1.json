@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "description": "ES256 Safe Action envelopes signed by Node's P-256 (random nonces, so written once), with the verdict a conforming reader must reach.",
+  "vectors": [
+    {
+      "name": "ES256 valid, uncompressed key",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ94GiEK0kk0zlYfQSlQFZJmSPBfMCGZS71YJ4IfzL5NlUD-PDZ4OoZFPCGKHL2v_haaSfow8Tff3ajmWGrvP9hlA",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "ok",
+      "fields": {
+        "scope": 0,
+        "issuer": "citeory.com",
+        "app": "com.viadere",
+        "action": "open.library",
+        "key_id": "vault-p256-1",
+        "request_id": "r_8f3K2pQ7xZ",
+        "issued_at": 1793999970,
+        "expires_at": 1794000090,
+        "params": "{\"item\":\"apa-7\"}"
+      }
+    },
+    {
+      "name": "ES256 valid cross-device, compressed key",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQELY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUOc2lnbmluLnJlcXVlc3QMdmF1bHQtcDI1Ni0xEnNlc3MtNDFmZDBhOWJlMmM3NAAAAABq7kRiAAAAAGruRNoAAN_XAJO26_e_mKITWHiPNLKhWlKNpvcxKtJOT60VM4UpYRdzBfTumMCFR6h0W-CcqMIcONNH4HlJiQKO_0zfUDM",
+      "public_key": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "ok",
+      "fields": {
+        "scope": 1,
+        "issuer": "citeory.com",
+        "app": "com.viadere",
+        "action": "signin.request",
+        "key_id": "vault-p256-1",
+        "request_id": "sess-41fd0a9be2c74",
+        "issued_at": 1793999970,
+        "expires_at": 1794000090,
+        "params": ""
+      }
+    },
+    {
+      "name": "ES256 high-S form of a valid signature",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ9p0n-LOOpxESt-qLJc9D33YTSber23Su0bR1qsosN8Jb7YQkv7bMSBht1YRi7RBZmRLtW4vEVgz6fMGNfdwmIzg",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "ES256 signed by a different key",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ942-rdtM0E2Wqdqyua87OZimgZkjG3UimQjPxiMjnG6Qy4D5XcDn1qk7ZTP7dDfOEJPEw6bOysXUx_FUK2cewOQ",
+      "public_key": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "ES256 action name changed after signing",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMbnBlbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ9A3Zg3tKVY19_JkJuB0QMhZJDDr3rSU2K8cAENvl0eaY41bht4kax1SKhJ_ahCslJr4YWdgcxHUhn3j-ISGqwZw",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "ES256 expired",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ9qi9lQWGt9lyQDjrmK7QJMZJOcaImnc1EMF2r2SbFZ_pVO4wnDudmOO0lRGv_EyCDmzOh1CNTM1JP-df3nJdHEA",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "now": 1794000091,
+      "max_lifetime": 600,
+      "expect": "expired"
+    },
+    {
+      "name": "Ed25519 envelope offered an ES256 key",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5BzIwMjYtMTEMcl84ZjNLMnBRN3haAAAAAGruRGIAAAAAau5E2gAQeyJpdGVtIjoiYXBhLTcifYin3GJXz9pBQbvVqH4mYNCUodLn-HjjmjzRjXmRlNufZtu-DYituFwmXxa-Hg4_igIYNE2hSgaJ8Z5nr6BdRQA",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "integrity"
+    },
+    {
+      "name": "ES256 key not on the curve",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ9Q46pv1GDwbc7ILV99RfwNGX3mE7u-QBVTKnJ0KnvHS1jT9C4PFkJh2NIPa8bfZ-Hxa_GrCN0agil1VVt3FbXng",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462298",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    },
+    {
+      "name": "ES256 key of the wrong length",
+      "alg": "ES256",
+      "payload": "ckey-action:1:AQALY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUMb3Blbi5saWJyYXJ5DHZhdWx0LXAyNTYtMQxyXzhmM0sycFE3eFoAAAAAau5EYgAAAABq7kTaABB7Iml0ZW0iOiJhcGEtNyJ9vc6_Ww9buv3L-cOvFHI2Ry7n666GSVdUiaBh9lfL5Qxq86W1Ecz6np-3yO0OdyDNDmsSWftG0_YM9HWOF7A0vQ",
+      "public_key": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d44622",
+      "now": 1794000000,
+      "max_lifetime": 600,
+      "expect": "invalid"
+    }
+  ]
+}
