@@ -154,22 +154,27 @@ public struct BusinessSendMessageRequest: Codable, Sendable, Hashable, SubjectAd
     public var body: String
     public var agentName: String?
     public var idempotencyKey: String
+    /// Images uploaded to the session named by `sessionId` (`business.attachments.upload`) and not yet sent, in display order (at most
+    /// `MessageAttachmentPolicy.maxPerMessage`). Needs `sessionId`. Part of the idempotency hash.
+    public var attachmentIds: [AttachmentID]?
     public init(relationshipId: RelationshipID, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String,
-                subjectRef: SubjectRef? = nil) {
+                subjectRef: SubjectRef? = nil, attachmentIds: [AttachmentID]? = nil) {
         self.relationshipId = relationshipId
         self.subjectRef = subjectRef
         self.sessionId = sessionId
         self.body = body
         self.agentName = agentName
         self.idempotencyKey = idempotencyKey
+        self.attachmentIds = attachmentIds
     }
     /// Addresses the customer by `subjectRef` alone.
-    public init(subjectRef: SubjectRef, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String) {
+    public init(subjectRef: SubjectRef, sessionId: SessionID? = nil, body: String, agentName: String? = nil, idempotencyKey: String,
+                attachmentIds: [AttachmentID]? = nil) {
         self.init(relationshipId: .unaddressed, sessionId: sessionId, body: body, agentName: agentName, idempotencyKey: idempotencyKey,
-                  subjectRef: subjectRef)
+                  subjectRef: subjectRef, attachmentIds: attachmentIds)
     }
 
-    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, sessionId, body, agentName, idempotencyKey, connectionId }
+    enum CodingKeys: String, CodingKey { case relationshipId, subjectRef, sessionId, body, agentName, idempotencyKey, connectionId, attachmentIds }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -178,6 +183,7 @@ public struct BusinessSendMessageRequest: Codable, Sendable, Hashable, SubjectAd
         body = try c.decode(String.self, forKey: .body)
         agentName = try c.decodeIfPresent(String.self, forKey: .agentName)
         idempotencyKey = try c.decode(String.self, forKey: .idempotencyKey)
+        attachmentIds = try c.decodeIfPresent([AttachmentID].self, forKey: .attachmentIds)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -187,6 +193,7 @@ public struct BusinessSendMessageRequest: Codable, Sendable, Hashable, SubjectAd
         try c.encode(body, forKey: .body)
         try c.encodeIfPresent(agentName, forKey: .agentName)
         try c.encode(idempotencyKey, forKey: .idempotencyKey)
+        try c.encodeIfPresent(attachmentIds, forKey: .attachmentIds)
     }
 }
 

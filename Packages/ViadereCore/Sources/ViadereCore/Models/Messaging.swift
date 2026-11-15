@@ -47,10 +47,14 @@ public struct ConversationMessage: Codable, Sendable, Hashable, Identifiable {
     public var deliveryStatus: DeliveryStatus
     /// Linked structured interaction, if any.
     public var interactionId: InteractionID?
+    /// Images sent with the message, in display order (SECURITY.md §2.113). Metadata only: the bytes are fetched by id from the conversation's
+    /// attachment route. Absent for text-only messages and from older servers.
+    public var attachments: [MessageAttachment]?
 
     public init(id: MessageID, sessionId: SessionID, businessId: BusinessID, direction: MessageDirection,
                 attribution: MessageAttribution, body: String, channel: Channel, createdAt: Date,
-                deliveredAt: Date? = nil, readAt: Date? = nil, deliveryStatus: DeliveryStatus, interactionId: InteractionID? = nil) {
+                deliveredAt: Date? = nil, readAt: Date? = nil, deliveryStatus: DeliveryStatus, interactionId: InteractionID? = nil,
+                attachments: [MessageAttachment]? = nil) {
         self.id = id
         self.sessionId = sessionId
         self.businessId = businessId
@@ -63,6 +67,7 @@ public struct ConversationMessage: Codable, Sendable, Hashable, Identifiable {
         self.readAt = readAt
         self.deliveryStatus = deliveryStatus
         self.interactionId = interactionId
+        self.attachments = attachments
     }
 }
 

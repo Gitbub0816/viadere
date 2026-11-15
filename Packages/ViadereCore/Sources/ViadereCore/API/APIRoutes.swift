@@ -188,6 +188,15 @@ public enum APIRoutes {
         "conversations.messages", .GET, "/v1/conversations/{sessionId}/messages", auth: .deviceSignedBearer)
     public static let conversationSend = Endpoint<SendMessageRequest, ConversationMessage>(
         "conversations.send", .POST, "/v1/conversations/{sessionId}/messages", auth: .deviceSignedBearer)
+    /// Uploads one image to this conversation (SECURITY.md §2.113). The body is the raw image (`Content-Type: image/png` or `image/jpeg`, at
+    /// most `MessageAttachmentPolicy.maxUploadBytes`); the device signature covers its digest. `201` with the **pending** attachment, which
+    /// is then named in `SendMessageRequest.attachmentIds` within an hour.
+    public static let conversationAttachmentUpload = Endpoint<Data, MessageAttachment>(
+        "conversations.attachments.upload", .POST, "/v1/conversations/{sessionId}/attachments", auth: .deviceSignedBearer)
+    /// The stored image bytes of an attachment of this conversation (`Content-Type` from the stored type, `nosniff`, `no-store`). A pending
+    /// upload is readable only by the participant who uploaded it.
+    public static let conversationAttachment = Endpoint<EmptyBody, Data>(
+        "conversations.attachments.get", .GET, "/v1/conversations/{sessionId}/attachments/{attachmentId}", auth: .deviceSignedBearer)
 
     // MARK: Rewards & Wallet
     /// Bare rewards without eligibility. `rewardsOverview` supersedes it for the app; kept for older clients.
@@ -255,6 +264,13 @@ public enum APIRoutes {
         "business.interactions.cancel", .POST, "/v1/business/interactions/{interactionId}/cancel", auth: .businessAPIKey)
     public static let businessSendMessage = Endpoint<BusinessSendMessageRequest, ConversationMessage>(
         "business.messages.send", .POST, "/v1/business/messages", auth: .businessAPIKey)
+    /// Uploads one image to a conversation of this business (`messages:write`, `message.send`; raw `image/png` or `image/jpeg` body). Send it
+    /// with `BusinessSendMessageRequest.attachmentIds` and the same `sessionId`.
+    public static let businessAttachmentUpload = Endpoint<Data, MessageAttachment>(
+        "business.attachments.upload", .POST, "/v1/business/conversations/{sessionId}/attachments", auth: .businessAPIKey)
+    /// The stored bytes of an image in a conversation of this business (a customer's image from a `message.received` webhook, or one's own).
+    public static let businessAttachment = Endpoint<EmptyBody, Data>(
+        "business.attachments.get", .GET, "/v1/business/conversations/{sessionId}/attachments/{attachmentId}", auth: .businessAPIKey)
     public static let businessUpdateStatus = Endpoint<BusinessStatusUpdateRequest, Interaction>(
         "business.statuses.update", .POST, "/v1/business/statuses", auth: .businessAPIKey)
     public static let businessIssueReward = Endpoint<IssueRewardRequest, Reward>(
@@ -488,6 +504,7 @@ public enum APIRoutes {
         consentsGet.descriptor, consentsUpdate.descriptor,
         interactionsList.descriptor, interactionGet.descriptor, interactionDecide.descriptor,
         conversationsList.descriptor, conversationStart.descriptor, conversationMessages.descriptor, conversationSend.descriptor,
+        conversationAttachmentUpload.descriptor, conversationAttachment.descriptor,
         rewardsList.descriptor, rewardsOverview.descriptor, loyaltyProgram.descriptor, loyaltyEnroll.descriptor,
         rewardClaim.descriptor, rewardRedeem.descriptor, walletPasses.descriptor, walletPassIssue.descriptor, walletPass.descriptor,
         household.descriptor, householdInvite.descriptor, householdInvitationPreview.descriptor,
@@ -495,7 +512,7 @@ public enum APIRoutes {
         apnsTokenRegister.descriptor, liveActivityTokenRegister.descriptor,
         delegationCreate.descriptor, delegationsList.descriptor, delegationRevoke.descriptor,
         businessIssueInteraction.descriptor, businessInteractionOutcome.descriptor, businessCancelInteraction.descriptor,
-        businessSendMessage.descriptor, businessUpdateStatus.descriptor, businessIssueReward.descriptor,
+        businessSendMessage.descriptor, businessAttachmentUpload.descriptor, businessAttachment.descriptor, businessUpdateStatus.descriptor, businessIssueReward.descriptor,
         businessRewardsList.descriptor, businessRewardRevoke.descriptor, businessLoyaltyProgramGet.descriptor,
         businessLoyaltyProgramPut.descriptor, businessAdjustPoints.descriptor, businessConsumeRedemption.descriptor,
         businessWalletPassIssue.descriptor, businessWalletPassesList.descriptor, businessWalletPassUpdate.descriptor,
