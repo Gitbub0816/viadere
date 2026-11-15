@@ -194,6 +194,8 @@ public final class AppModel {
         await alerts.refresh()
         await alerts.ensureLoaded(organization.effective)
         await benefits.load()
+        // Keep the Home Screen widget's waiting count current even when Alerts is not on screen (numbers only).
+        services.homeWidget?.publish(alerts: alerts, benefits: benefits)
         await notificationSettings.load()
         if services.loopsAPI != nil {
             await loopConsent.load()
@@ -504,6 +506,7 @@ public final class AppModel {
         organization.reset()
         alerts.reset()
         benefits.reset()
+        services.homeWidget?.clear()
         businesses.reset()
         notificationSettings.reset()
         loopConsent.clear()
