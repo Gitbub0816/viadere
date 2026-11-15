@@ -18,7 +18,26 @@ info:
     ## Authentication and tenancy
     Business routes take `Authorization: Bearer vdk_…`. **The tenant is the key's business, never a field of the payload**: `tenant_id` and
     `audience` in a body are `422 validation_failed`. A foreign delivery id is `404`, the same body as an unknown one. A live key additionally
-    needs mutual TLS (`401 signature_required` otherwise; request signatures follow in a later stage); a test key reaches sandbox customers only.
+    needs an **RFC 9421 HTTP Message Signature** with a request-signing key registered for that API key, or mutual TLS (Tier E)
+    (`AUTH_LIVE_KEY_ASSURANCE=mtls_or_signature`, the staging and production default; `401 signature_required` otherwise); a test key reaches
+    sandbox customers only.
+
+    ## Request signatures (RFC 9421, `docs/SECURITY.md` section 2.112)
+    Optional on every business route, verified whenever present (a signature that does not verify is `401` even where an unsigned request would pass),
+    and the alternative to mutual TLS for a live key on these routes. Fields:
+
+    ```
+    Content-Digest:  sha-256=:<base64 SHA-256 of the exact body>:            (only with a body; RFC 9530)
+    Signature-Input: sig1=("@method" "@authority" "@path" "@query" "content-digest" "content-type");created=<unix>;expires=<unix>;keyid="vsk_<16 hex>";nonce="<22-64 base64url>";tag="viadere-api-v1"
+    Signature:       sig1=:<base64 raw r||s, 64 bytes, low S>:
+    ```
+
+    Without a body the components are exactly `"@method" "@authority" "@path" "@query"` and `Content-Digest` is refused. `ecdsa-p256-sha256` only
+    (`alg` may be omitted or name it), one signature per request, no component parameters, no duplicated `Signature`, `Signature-Input`,
+    `Content-Digest` or `Content-Type` field line. `created` within 300 s either way, `created < expires <= created + 300`, `expires` not passed,
+    the nonce single use per key (600 s). `@authority` is Viadere's public host. Refusals: `401 signature_invalid` (structural reasons in
+    `details.reason`; key and signature failures carry none), `401 clock_skew`, `401 replay_detected`. Keys are registered in the console
+    (Security > Request signing) with a proof of possession; vectors: `docs/protocol/vectors/http-signatures-v1.json`.
 
     ## Grouping (ADR-0020 revisions 3 and 3.1)
     `session_handle` (optional, `base64url(HMAC-SHA256(K_sh, "viadere-session-handle-v1\n" || initiating_session_id))`, class T) is the only input to supersession: a new `sign_in` replaces an open one only when both carry the same handle; a handle seen on more than 3 distinct request ids for one customer within 10 minutes stops superseding. Nothing is refused or cancelled because of a per-customer count. The number-match tags and their three `409` answers (`match_code_in_use`, `match_digits_required`, `match_code_space_exhausted`) belong to `POST /v1/business/auth-approvals` (ADR-0020 section 2a, Stage 5) and are specified there.
@@ -410,7 +429,7 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      description: Business API key (see `docs/openapi.yaml`).
+      description: Business API key (see `docs/openapi.yaml`). A live key on these routes also needs an RFC 9421 request signature (`Signature-Input`, `Signature`, `Content-Digest`; see "Request signatures" above) or mutual TLS.
     deviceSignedBearer:
       type: http
       scheme: bearer
@@ -432,7 +451,7 @@ components:
       required: true
       schema: { type: string, format: uuid }
   responses:
-    Unauthorized: { description: "Missing, invalid or unsigned credentials (`401`)." }
+    Unauthorized: { description: "Missing or invalid credentials (`401`): `unauthorized`; `signature_required` (a live key without a request signature or mutual TLS); `signature_invalid`, `clock_skew`, `replay_detected` (an RFC 9421 request signature that does not verify)." }
     Forbidden: { description: "The key lacks the scope, capability or entitlement (`403`)." }
     NotFound: { description: "Unknown, or not yours (the same body)." }
     NotDeliverable: { description: "`not_deliverable`: unknown customer, no eligible app, paused or frozen (one body)." }

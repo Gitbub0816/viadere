@@ -1614,6 +1614,13 @@ components:
         overlap you choose (none, 1 hour, 1 day, 7 days or 30 days) before revoking it automatically. Every rejection (unknown, revoked, expired, wrong address, missing certificate) is the same
         `401`, so a probe learns nothing. Keys issued before key ids existed (`vdk_live_<43 characters>`) keep working. Required scope per operation is listed on each operation.
 
+        **RFC 9421 request signatures** (optional, `docs/SECURITY.md` section 2.112): a request may also carry `Signature-Input`, `Signature` and (with a body) `Content-Digest`
+        made with a P-256 key registered for this API key in the console (Security > Request signing). A signed request is verified on every route before any handler runs, and a
+        signature that does not verify is `401 signature_invalid` (`clock_skew`, `replay_detected` for the time window and a reused nonce). On the authentication routes of
+        `contracts/openapi/auth-delivery-v1.yaml` a live key needs a signature or mutual TLS. Profile: `ecdsa-p256-sha256` raw r||s low S; components exactly
+        `"@method" "@authority" "@path" "@query" "content-digest" "content-type"` (the first four without a body); parameters `created`, `expires`, `keyid` (`vsk_` + 16 hex),
+        `nonce`, `tag="viadere-api-v1"`; 300 s windows; single-use nonce.
+
   parameters:
     IdempotencyKey:
       name: Idempotency-Key

@@ -139,6 +139,25 @@ New fail-closed namespaces (added to the `DatabaseRateLimitStore` fail-closed li
 
 `contracts/openapi/auth-delivery-v1.yaml` (OpenAPI 3.1) for these routes, JSON Schemas for the create request, the display object, every event and the webhook envelope in `contracts/schemas/`, and a parity test against `APIRoutes` like the existing `OpenAPIParityTests`. `docs/openapi.yaml` links to it.
 
+### Implementation note (2026-11-15, G9; SECURITY §2.112)
+
+The RFC 9421 path of §3 is implemented. Where the shipped profile differs from the text above, §2.112 is normative and the differences are deliberate:
+
+- **Algorithm:** `ecdsa-p256-sha256` only; `ed25519` is not offered (no business asked for it, and one algorithm keeps the key registry and the vectors
+  single-shape). The algorithm comes from the registered key; `alg` may be omitted or must name it.
+- **Components:** `@authority`, `@path`, `@query` instead of `@target-uri` (the same information, but `@authority` is compared with Viadere's configured
+  public authorities, `REQUEST_SIGNATURE_AUTHORITIES` or the host of `PUBLIC_BASE_URL`, and never with `Host`), plus `content-type` with a body.
+  `idempotency-key` is **not** covered: the nonce already makes a captured request single use, and altering the key in flight gains nothing.
+- **Tag:** `viadere-api-v1` (not `viadere-biz-v1`): the tag names the API surface, not the party.
+- **S form:** low S is **required** (high S refused), not "both accepted": the signer is a business server whose SDK normalizes KMS output, so there is
+  no Secure Enclave reason to accept both, and one canonical byte string per signature costs nothing. Replay protection still rests on the nonce.
+- **Bodiless requests** omit `content-digest`, which is refused if present, as written; `expires` is required and at most `created + 300`, as written.
+- **Live-key assurance:** `AUTH_LIVE_KEY_ASSURANCE=mtls_or_signature` is the staging and production default; `mtls` keeps the certificate-only rule.
+- **Registration:** console only (Owner or Security Admin, passkey step-up, proof of possession over a single-use challenge, notice to the Owners),
+  bound to one API key and carried through key rotation. Two-person approval does not cover it yet.
+- **Vectors:** `docs/protocol/vectors/http-signatures-v1.json` from an independent Python implementation (deterministic RFC 6979). RFC 9421 Appendix B
+  has no request vector with this profile's components; the generator instead checks its serializer against the RFC's §2.5 example signature base.
+
 ## Consequences
 
 - Businesses must register a request-signing key before sending live auth deliveries; the Swift, TypeScript and Kotlin backend SDKs implement RFC 9421 signing (ADR-0030).
