@@ -26,12 +26,17 @@ public protocol KeyManagementService: Sendable {
     func signRS256(keyRef: String, digest: Data) async throws -> Data
     /// The public half of an RSA signing key (the version `keyRef` names).
     func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey
+    /// RSA-OAEP-256 (SHA-256 and MGF1-SHA-256) **decrypt** with a decrypt-only RSA key (the authority's `recovery-seal-rsa`, ADR-0034 §9): Key Vault
+    /// `POST keys/{name}/{version}/decrypt`. `keyRef` must name the version. Any failure is `KMSError.unwrapFailed`, whatever the HSM said (no oracle).
+    func decrypt(keyRef: String, ciphertext: Data) async throws -> Data
 }
 
 extension KeyManagementService {
     /// Services without RSA signing keys refuse.
     public func signRS256(keyRef: String, digest: Data) async throws -> Data { throw KMSError.wrongKeyType }
     public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey { throw KMSError.wrongKeyType }
+    /// Services without decrypt keys refuse.
+    public func decrypt(keyRef: String, ciphertext: Data) async throws -> Data { throw KMSError.wrongKeyType }
 }
 
 /// A wrapped value and the versioned key reference that unwraps it.
@@ -90,6 +95,7 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
     private var signing: [String: [(version: String, key: P256.Signing.PrivateKey)]] = [:]
     private var wrapping: [String: [(version: String, key: _RSA.Encryption.PrivateKey)]] = [:]
     private var rsaSigning: [String: [(version: String, key: _RSA.Signing.PrivateKey)]] = [:]
+    private var decryption: [String: [(version: String, key: _RSA.Encryption.PrivateKey)]] = [:]
 
     public init() {}
 
@@ -119,6 +125,28 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
         return version
     }
 
+    /// Adds a new version of a decrypt-only RSA key (3072 bits unless a key is given; Key Vault key operations `decrypt` only) and returns its version.
+    @discardableResult
+    public func createDecryptionKey(_ name: String, key: _RSA.Encryption.PrivateKey? = nil) throws -> String {
+        let version = Self.newVersion()
+        let material = try key ?? _RSA.Encryption.PrivateKey(keySize: .bits3072)
+        lock.withLock { decryption[name, default: []].append((version, material)) }
+        return version
+    }
+
+    private func decryptionKey(_ ref: String) throws -> _RSA.Encryption.PrivateKey {
+        guard let (name, version) = KMSKeyRef.parse(ref), let version else { throw KMSError.unknownKey }
+        return try lock.withLock {
+            guard let match = decryption[name]?.first(where: { $0.version == version }) else { throw KMSError.unknownKey }
+            return match.key
+        }
+    }
+
+    public func decrypt(keyRef: String, ciphertext: Data) async throws -> Data {
+        let key = try decryptionKey(keyRef)
+        do { return try key.decrypt(ciphertext, padding: .PKCS1_OAEP_SHA256) } catch { throw KMSError.unwrapFailed }
+    }
+
     private func rsaSigningKey(_ ref: String) throws -> _RSA.Signing.PrivateKey {
         guard let (name, version) = KMSKeyRef.parse(ref) else { throw KMSError.unknownKey }
         return try lock.withLock {
@@ -138,6 +166,7 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
     /// verify a reviewed inventory row).
     public func rsaPublicKey(keyRef: String) async throws -> _RSA.Signing.PublicKey {
         if let key = try? rsaSigningKey(keyRef) { return key.publicKey }
+        if let key = try? decryptionKey(keyRef) { return try _RSA.Signing.PublicKey(derRepresentation: key.publicKey.derRepresentation) }
         let (_, wrappingKey) = try wrappingKey(keyRef)
         return try _RSA.Signing.PublicKey(derRepresentation: wrappingKey.publicKey.derRepresentation)
     }
@@ -179,6 +208,7 @@ public final class LocalKMS: KeyManagementService, @unchecked Sendable {
             if let last = signing[name]?.last { return "\(name)/\(last.version)" }
             if let last = wrapping[name]?.last { return "\(name)/\(last.version)" }
             if let last = rsaSigning[name]?.last { return "\(name)/\(last.version)" }
+            if let last = decryption[name]?.last { return "\(name)/\(last.version)" }
             throw KMSError.unknownKey
         }
     }

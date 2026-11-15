@@ -107,9 +107,11 @@ final class AuthoritySignRecord: Model, @unchecked Sendable {
     static let schema = "authority_sign_records"
     @ID(key: .id) var id: UUID?
     @Field(key: "key_ref") var keyRef: String
-    /// `challenge`, `head`, `grant`, `id_token`, `access_token`, `unwrap`.
+    /// `challenge`, `head`, `grant`, `id_token`, `access_token`, `unwrap`, `decrypt` (ADR-0034 §9: one per challenge).
     @Field(key: "kind") var kind: String
     @Field(key: "at") var at: Date
+    /// `decrypt` records: the challenge whose envelope was opened (`Authority.v4`).
+    @OptionalField(key: "challenge_id") var challengeId: String?
     init() {}
 }
 
@@ -182,6 +184,9 @@ final class AuthorityChallengeBinding: Model, @unchecked Sendable {
     @OptionalField(key: "set_id") var setId: String?
     @OptionalField(key: "recovery_id") var recoveryId: String?
     @OptionalField(key: "entry_id") var entryId: String?
+    /// `keylog_passkey_added` (`Authority.v4`): the credential the app just created, stored before its challenge is signed.
+    @OptionalField(key: "passkey_credential_id") var passkeyCredentialId: String?
+    @OptionalField(key: "passkey_public_key") var passkeyPublicKey: String?
     init() {}
 }
 

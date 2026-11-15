@@ -20,6 +20,20 @@ public enum AuthorityDeployment: String, Sendable {
     public var statementEnvironment: AuthorityEnvironment { self == .production ? .production : .staging }
 }
 
+/// The recovery seal construction (ADR-0034). `hpke` (the lean default, §1-§5): a P-256 KEM key unwrapped into authority memory at start (R-23).
+/// `jweRSA` (§9, C-16): compact JWE `RSA-OAEP-256` + `A256GCM` to `recovery-seal-rsa`, whose private half stays in Key Vault; one `decrypt` per
+/// challenge. Chosen by which seal key name the infra sets (`AUTHORITY_KEY_SEAL_KEK` or `AUTHORITY_KEY_SEAL_RSA`, never both).
+public enum RecoverySealConstruction: String, Sendable {
+    case hpke
+    case jweRSA = "jwe-rsa"
+}
+
+/// App Attest at key-log genesis (ADR-0032 §1.3): `off` (development and tests only), `report` (verified when sent, an unattested genesis is
+/// accepted and audited as flagged), `require` (the strict default: no verified attestation, no account).
+public enum AuthorityAppAttestMode: String, Sendable {
+    case off, report, require
+}
+
 public enum AuthorityConfigError: Error, Sendable, Equatable, CustomStringConvertible {
     case missing(String)
     case invalid(String)
@@ -79,6 +93,19 @@ public struct AuthorityConfig: Sendable {
     /// `CKEY_SAFE_ACTION_ISSUER`: the api's link-domain host (`LINK_DOMAIN`), the only issuer the authority signs `signin.request` envelopes for.
     /// `nil` (the default): no Safe Action is signed and the sign-in page draws the plain link.
     public var ckeySafeActionIssuer: String?
+
+    /// The recovery seal construction (`hpke` unless `AUTHORITY_KEY_SEAL_RSA` names the RSA seal key).
+    public var recoverySeal: RecoverySealConstruction = .hpke
+    /// `AUTHORITY_KEY_SEAL_RSA`: the decrypt-only RSA 3072 seal key (ADR-0034 §9). Its version comes from the reviewed pin table like every key.
+    public var recoverySealRSAKeyName = "recovery-seal-rsa"
+
+    /// `AUTHORITY_APP_ATTEST_MODE` (default `require` in staging and production, `off` otherwise; `off` is refused in staging and production).
+    public var appAttestMode: AuthorityAppAttestMode = .off
+    /// `APP_ATTEST_ENVIRONMENT` (`development` or `production`; default `production` in production, otherwise `development`): which AAGUID counts.
+    public var appAttestProduction = false
+    /// `APPLE_TEAM_ID` (required when strict with the key log on): the App Attest `rpIdHash` is `SHA-256("{team}.{bundle}")` of the full app.
+    public var appleTeamID = "TEAMIDDEV0"
+    public var appBundleID = "\(ViadereCore.bundlePrefix).app"
 
     // Authority-only secrets (TRUST_BOUNDARIES §4.1).
     public var oidcPairwiseKey = SymmetricKey(size: .bits256)
@@ -190,6 +217,36 @@ public struct AuthorityConfig: Sendable {
         config.oidcES256KeyName = try keyName("AUTHORITY_KEY_OIDC_ES256", config.oidcES256KeyName)
         config.deviceStatementKeyName = try keyName("AUTHORITY_KEY_DEVICE_STATEMENT", config.deviceStatementKeyName)
         config.ckeySafeActionKeyName = try keyName("AUTHORITY_KEY_CKEY_SAFE_ACTION", config.ckeySafeActionKeyName)
+        let sealKEK = env["AUTHORITY_KEY_SEAL_KEK"] ?? "", sealRSA = env["AUTHORITY_KEY_SEAL_RSA"] ?? ""
+        if !sealRSA.isEmpty {
+            guard sealKEK.isEmpty else { throw AuthorityConfigError.refused("AUTHORITY_KEY_SEAL_KEK and AUTHORITY_KEY_SEAL_RSA together (one seal construction, ADR-0034)") }
+            config.recoverySealRSAKeyName = try keyName("AUTHORITY_KEY_SEAL_RSA", config.recoverySealRSAKeyName)
+            config.recoverySeal = .jweRSA
+        }
+
+        switch (env["AUTHORITY_APP_ATTEST_MODE"] ?? "").lowercased() {
+        case "": config.appAttestMode = strict ? .require : .off
+        case let raw:
+            guard let mode = AuthorityAppAttestMode(rawValue: raw) else { throw AuthorityConfigError.invalid("AUTHORITY_APP_ATTEST_MODE (off, report or require)") }
+            // `off` does not evaluate integrity at genesis at all: development and tests only.
+            guard !(strict && mode == .off) else { throw AuthorityConfigError.refused("AUTHORITY_APP_ATTEST_MODE=off in staging or production") }
+            config.appAttestMode = mode
+        }
+        switch (env["APP_ATTEST_ENVIRONMENT"] ?? "").lowercased() {
+        case "": config.appAttestProduction = deployment == .production
+        case "production": config.appAttestProduction = true
+        case "development":
+            guard deployment != .production else { throw AuthorityConfigError.refused("APP_ATTEST_ENVIRONMENT=development in production") }
+            config.appAttestProduction = false
+        default: throw AuthorityConfigError.invalid("APP_ATTEST_ENVIRONMENT (development or production)")
+        }
+        if let raw = env["APPLE_TEAM_ID"], !raw.isEmpty {
+            guard (1...20).contains(raw.count), raw.allSatisfy({ $0.isASCII && ($0.isUppercase || $0.isNumber) }) else { throw AuthorityConfigError.invalid("APPLE_TEAM_ID") }
+            config.appleTeamID = raw
+        } else if strict && config.keylogEnabled && config.appAttestMode != .off {
+            throw AuthorityConfigError.missing("APPLE_TEAM_ID (App Attest at key-log genesis)")
+        }
+
         if let raw = env["CKEY_SAFE_ACTION_ISSUER"], !raw.isEmpty {
             // A DNS name exactly as the envelope carries it (lower case, at least one dot), and the same host the api builds links on.
             guard let domain = LinkDomain(raw), domain.host == raw, CKeySafeAction.isValid(Array(raw.utf8)[...], as: .issuer) else {

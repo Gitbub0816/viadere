@@ -188,6 +188,39 @@ struct SealKeyHolder: Sendable {
     }
 }
 
+/// The `recovery-seal-rsa` key at its reviewed version: the public half (for its RFC 7638 thumbprint, the `kid` the device seals to) and the reference
+/// the authority asks Key Vault to `decrypt` with. The private half never leaves Key Vault.
+struct RSASealKey: Sendable {
+    let kid: String
+    let keyRef: String
+
+    /// Fails closed like the HPKE loader: no reviewed pin or a key that is not app-pinned for the environment loads nothing (recovery answers `503`);
+    /// a pinned version whose public key does not hash to the pinned thumbprint, or that is not RSA 3072, stops the start.
+    static func load(kms: any KeyManagementService, db: any Database, name: String, pinnedKids: [String]) async throws -> RSASealKey? {
+        guard let pin = try await AuthorityKeyPin.find(name, on: db) else { return nil }
+        let ref = "\(name)/\(pin.version)"
+        let key: _RSA.Signing.PublicKey
+        do { key = try await kms.rsaPublicKey(keyRef: ref) } catch { throw AuthorityKeyError.keyUnavailable(name) }
+        let primitives = try key.getKeyPrimitives()
+        let kid = JWKThumbprint.rsa(modulus: primitives.modulus, exponent: primitives.publicExponent)
+        guard ConstantTime.equals(kid, pin.thumbprint) else { throw AuthorityKeyError.thumbprintMismatch(name) }
+        guard JWKThumbprint.stripLeadingZeros(primitives.modulus).count == RecoverySealJWE.encryptedKeyBytes else { throw AuthorityKeyError.keyUnavailable("\(name) (RSA 3072)") }
+        guard pinnedKids.contains(kid) else { return nil }
+        return RSASealKey(kid: kid, keyRef: ref)
+    }
+}
+
+extension RSASealKey {
+    /// The one Key Vault `decrypt` of a JWE content key (ADR-0034 §9.3), made only through the recording KMS with the challenge it opens, so the
+    /// decrypt record `{ach, kid}` exists before the call. The envelope is a value Core's strict parse built, and the caller has already moved the
+    /// challenge `pending → opening`, so this runs at most once per challenge. Not a signing operation: it returns a 32-byte content key, never a
+    /// signature, and no other file reaches the KMS.
+    func contentKey(of envelope: RecoverySealJWE.Envelope, challengeId: String, through kms: any KeyManagementService) async throws -> Data {
+        guard let recording = kms as? RecordingKMS else { throw KMSError.wrongKeyType }
+        return try await recording.decrypt(keyRef: keyRef, ciphertext: envelope.encryptedKey, challengeId: challengeId)
+    }
+}
+
 /// ES256 and RS256 compact JWS through the KMS, verified locally against the pinned public key before it is returned.
 private enum KMSJWS {
     static func es256(kms: any KeyManagementService, key: PinnedP256Key, typ: String, payload: [String: JSONValue]) async throws -> String {
@@ -272,7 +305,7 @@ struct StatementBuilder {
     }
 }
 
-/// Wraps the authority's KMS: every `sign`, `signRS256` and `unwrap` first writes an `authority_sign_records` row (key reference and operation, never
+/// Wraps the authority's KMS: every `sign`, `signRS256`, `unwrap` and seal `decrypt` first writes an `authority_sign_records` row (key reference and operation, never
 /// the digest), and the call is refused when the row cannot be written. The Key Vault `AuditEvent` reconciliation (`AuthorityReconciliation`) matches
 /// every Key Vault operation against these rows; an operation without a row alerts (ADR-0023 §6, ADR-0028 §2, ADR-0034 §5.2).
 struct RecordingKMS: KeyManagementService {
@@ -280,13 +313,23 @@ struct RecordingKMS: KeyManagementService {
     let db: any Database
     let clock: @Sendable () -> Date
 
-    private func record(_ keyRef: String, _ kind: String) async throws {
+    private func record(_ keyRef: String, _ kind: String, challengeId: String? = nil) async throws {
         let row = AuthoritySignRecord()
         row.keyRef = keyRef
         row.kind = kind
         row.at = clock()
+        row.challengeId = challengeId
         try await row.create(on: db)
     }
+
+    /// A seal `decrypt` (ADR-0034 §9.3) is made only for one named challenge: its decrypt record `{ach, kid, requested_at}` is written first.
+    func decrypt(keyRef: String, ciphertext: Data, challengeId: String) async throws -> Data {
+        try await record(keyRef, "decrypt", challengeId: challengeId)
+        return try await base.decrypt(keyRef: keyRef, ciphertext: ciphertext)
+    }
+
+    /// Refused: a decrypt without the challenge it opens would have no record the reconciliation could match one to one.
+    func decrypt(keyRef: String, ciphertext: Data) async throws -> Data { throw KMSError.wrongKeyType }
 
     func sign(keyRef: String, digest: Data) async throws -> Data {
         try await record(keyRef, "sign")

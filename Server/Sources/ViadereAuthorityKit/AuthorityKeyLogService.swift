@@ -94,6 +94,8 @@ struct AuthorityHeads {
     func recoverySetState(_ accountRef: String) async throws -> String {
         let rows = try await AuthorityRecoveryCode.query(on: db).filter(\.$accountRef == accountRef).filter(\.$state ~~ ["active", "invalidated"]).all()
         if let active = rows.first(where: { $0.state == "active" }) {
+            // JWE construction: a set under the loaded `recovery-seal-rsa` key is active (a set under another key asks for a refresh).
+            if ctx.config.recoverySeal == .jweRSA { return active.sealKid == ctx.rsaSeal?.kid ? "active" : "refresh_suggested" }
             let seal = try await AuthoritySealKey.find(active.sealKid, on: db)
             return seal?.state == "ready" && seal?.role == "active" ? "active" : "refresh_suggested"
         }
@@ -199,14 +201,14 @@ struct AuthorityKeyLogService {
 
     /// Inserts keys into the current view and appends one entry per key (inside the caller's transaction).
     static func addKeys(_ tx: any Database, _ keys: [(kid: String, publicKey: String, purpose: String)], accountRef: String, entryType: String, group: String,
-                        usableFrom: Date, grantCapable: Bool, detail: [String: JSONValue], now: Date) async throws {
+                        usableFrom: Date, grantCapable: Bool, hardwareAttested: Bool = false, detail: [String: JSONValue], now: Date) async throws {
         for key in keys {
             let row = AuthorityKey()
             row.id = key.kid
             row.accountRef = accountRef
             row.publicKey = key.publicKey
             row.keyPurpose = key.purpose
-            row.hardwareAttested = false
+            row.hardwareAttested = hardwareAttested
             row.grantCapable = grantCapable
             row.usableFrom = usableFrom
             try await row.create(on: tx)
@@ -222,10 +224,11 @@ struct AuthorityKeyLogService {
 
     // MARK: Genesis (ADR-0032 §1.1-§1.3)
 
-    /// No caller-chosen account id: the authority mints it. Keys are not grant-capable until `enrollment_confirmed`.
+    /// No caller-chosen account id: the authority mints it. Keys are not grant-capable until `enrollment_confirmed`. `integrity` carries the App Attest
+    /// attestation over the genesis nonce and kids (required unless `AUTHORITY_APP_ATTEST_MODE` is `report` or `off`).
     func genesis(_ o: [String: JSONValue], caller: AuthorityCaller?) async throws -> [String: JSONValue] {
         _ = try requireEnabled()
-        guard Set(o.keys) == ["nonce_id", "keys"] else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
+        guard Set(o.keys) == ["nonce_id", "keys"] || Set(o.keys) == ["nonce_id", "keys", "integrity"] else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
         let keys = try SubmittedKey.parseList(o["keys"])
         let nonce = try await consumeNonce(try AuthorityBody.string(o, "nonce_id", max: 64), entryType: "genesis")
         guard verifyPoPs(keys, type: "genesis", nonce: nonce) else {
@@ -236,6 +239,7 @@ struct AuthorityKeyLogService {
             await AuthorityAudit.record(db, "authority.genesis", outcome: "denied", reason: "key_in_use", caller: caller?.name, at: ctx.now)
             throw error
         }
+        let attestation = try await GenesisAttestation(ctx: ctx, db: db).check(o["integrity"], nonce: nonce, kids: keys.map(\.kid), caller: caller)
         let accountId = UUID()
         let ref = OIDCProfile.accountRef(key: ctx.config.accountRefKey, accountId: accountId)
         let now = ctx.now
@@ -252,10 +256,13 @@ struct AuthorityKeyLogService {
             state.state = "unconfirmed"
             state.updatedAt = now
             try await state.create(on: tx)
+            try await GenesisAttestation.record(tx, attestation, accountRef: ref, production: ctx.config.appAttestProduction, now: now)
             try await Self.addKeys(tx, keys.map { ($0.kid, $0.publicKey.base64URL, $0.purpose) }, accountRef: ref, entryType: "genesis", group: "gen_" + ref,
-                                   usableFrom: now, grantCapable: false, detail: [:], now: now)
+                                   usableFrom: now, grantCapable: false, hardwareAttested: attestation.attested,
+                                   detail: ["attestation": .string(attestation.attested ? "apple_app_attest" : "none")], now: now)
         }
-        await AuthorityAudit.record(db, "authority.genesis", outcome: "success", accountRef: ref, caller: caller?.name, at: now)
+        await AuthorityAudit.record(db, "authority.genesis", outcome: "success", reason: attestation.attested ? nil : "unattested_\(attestation.reason)",
+                                    accountRef: ref, caller: caller?.name, at: now)
         let head = try await AuthorityHeads(ctx: ctx, db: db).signed(accountRef: ref)
         return ["account_id": .string(accountId.uuidString.lowercased()), "account_ref": .string(ref), "head": .string(head)]
     }
@@ -366,6 +373,11 @@ struct AuthorityKeyLogService {
             try await AuthorityDeviceAddEntry.query(on: db).filter(\.$id == entryId).filter(\.$challengeId == nil).filter(\.$state == "pending")
                 .set(\.$challengeId, to: challenge.id).update()
             guard try await AuthorityDeviceAddEntry.find(entryId, on: db)?.challengeId == challenge.id else { throw Abort(.conflict, reason: "challenge_exists") }
+        case .keylogPasskeyAdded:
+            let prepared = try await preparePasskeyAdded(o, accountRef: ref, binding: binding, caller: caller)
+            challenge.nonce = AuthorityNonce.generate()
+            statementKids = prepared.kids
+            display = prepared.display
         case .recoveryCodesSet, .recoveryCancel, .recoveryStarted:
             challenge.nonce = AuthorityNonce.generate()
             display = try await AuthorityRecoveryService(ctx: ctx, db: db).prepareChallenge(purpose, o, accountRef: ref, binding: binding)
@@ -454,6 +466,7 @@ struct AuthorityKeyLogService {
         switch claims.purpose {
         case .enrollmentConfirmed: return try await confirmEnrollment(checked, o, refuse: refuse)
         case .keylogDeviceAdded: return try await approveDeviceAdd(checked, refuse: refuse)
+        case .keylogPasskeyAdded: return try await approvePasskeyAdded(checked, refuse: refuse)
         case .recoveryCodesSet, .recoveryCancel:
             return try await AuthorityRecoveryService(ctx: ctx, db: db).evidence(checked, o, refuse: refuse, swap: swap)
         default: throw await refuse("purpose_not_supported", checked.key.accountRef)

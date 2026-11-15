@@ -13,13 +13,20 @@ public final class AuthorityContext: Sendable {
     let bulkhead: ChallengeBulkhead
     /// The active recovery-seal key in memory (`AUTHORITY_RECOVERY_ENABLED` only; ADR-0034 §5.2). `nil`: recovery routes fail closed.
     let seal: SealKeyHolder?
+    /// The `recovery-seal-rsa` key (`AUTHORITY_KEY_SEAL_RSA`, ADR-0034 §9): its public half and pinned version only; the private half stays in Key Vault.
+    let rsaSeal: RSASealKey?
+    /// App Attest at genesis: Apple's root (a test override otherwise). `nil` only when the root failed its fingerprint check (every attestation fails).
+    let appAttest: AppAttestAttestation?
 
-    init(config: AuthorityConfig, kms: any KeyManagementService, keys: AuthorityKeyRing?, clock: @escaping @Sendable () -> Date, seal: SealKeyHolder? = nil) {
+    init(config: AuthorityConfig, kms: any KeyManagementService, keys: AuthorityKeyRing?, clock: @escaping @Sendable () -> Date, seal: SealKeyHolder? = nil,
+         rsaSeal: RSASealKey? = nil, appAttest: AppAttestAttestation? = nil) {
         self.config = config
         self.kms = kms
         self.keys = keys
         self.clock = clock
         self.seal = seal
+        self.rsaSeal = rsaSeal
+        self.appAttest = appAttest
         bulkhead = ChallengeBulkhead(perTenantPerMinute: config.challengeBudgetPerTenantPerMinute)
     }
 

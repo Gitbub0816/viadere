@@ -69,6 +69,8 @@ final class AuthorityHarness: @unchecked Sendable {
         var idTokenAlg = "RS256"
         var confirmImportedKeys = true
         var mutateConfig: (@Sendable (inout AuthorityConfig) -> Void)?
+        /// A synthetic App Attest root (genesis attestation tests).
+        var appAttest: AppAttestAttestation?
     }
 
     static func make(_ options: Options = Options()) async throws -> AuthorityHarness {
@@ -132,6 +134,7 @@ final class AuthorityHarness: @unchecked Sendable {
         var overrides = AuthorityOverrides()
         overrides.kms = kms
         overrides.callerVerifier = StaticCallerVerifier()
+        overrides.appAttest = options.appAttest
         overrides.clock = { clock.now }
         let commit = Self.commit
         let pinList = pins, clientRegistration = clientChange

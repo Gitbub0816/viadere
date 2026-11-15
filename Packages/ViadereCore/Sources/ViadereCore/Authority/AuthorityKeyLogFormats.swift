@@ -38,6 +38,29 @@ public enum AuthorityKeyLogFormat {
         value.count == 37 && value.hasPrefix("acct_") && value.dropFirst(5).allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
     }
 
+    /// Strict unpadded base64url (SECURITY.md §2.1): the alphabet, no padding, a length that decodes, and the one canonical text form of the bytes
+    /// (re-encoding gives the same string, so no spare bits are set). Every binary member of a new key-log request goes through this.
+    public static func strictBytes(_ text: String, minBytes: Int = 1, maxBytes: Int = .max) -> Data? {
+        guard Base64URL.isValid(text), text.count % 4 != 1, let bytes = Base64URL.decode(text), (minBytes...maxBytes).contains(bytes.count),
+              Base64URL.encode(bytes) == text else { return nil }
+        return bytes
+    }
+
+    /// The `kid` of a passkey (ADR-0023 §2, `kid` rule 1): its COSE key converted to SPKI, then `KeyIdentifier`. `nil` for anything but a canonical
+    /// ES256 COSE key.
+    public static func passkeyKid(cose: Data) -> String? { PasskeyCOSE.es256PublicKey(cose).map { KeyIdentifier.make($0) } }
+
+    /// The App Attest `clientData` of a key-log genesis (ADR-0032 §1.3): `VIADERE-KEYLOG-ATTEST-V1\n{env}\ngenesis\n{nonce}\n{sorted kids, one per line}`.
+    /// The nonce is the authority's single-use genesis nonce and the kids are every key of the entry, so one attestation vouches for exactly one
+    /// genesis of exactly these keys. The device passes `SHA-256(clientData)` to `attestKey` (with an App Attest key of its own for the genesis).
+    public static func genesisAttestationClientData(environment: AuthorityEnvironment, nonce: String, kids: [String]) -> Data {
+        Data((["VIADERE-KEYLOG-ATTEST-V1", environment.rawValue, "genesis", nonce] + RecoverySeal.sortedKids(kids)).joined(separator: "\n").utf8)
+    }
+
+    public static func genesisAttestationClientDataHash(environment: AuthorityEnvironment, nonce: String, kids: [String]) -> Data {
+        Data(SHA256.hash(data: genesisAttestationClientData(environment: environment, nonce: nonce, kids: kids)))
+    }
+
     /// Device-reported names in a `device_added` display: 1-40 characters after NFC, no control, format (bidi, zero-width) or line characters.
     public static func reportedName(_ raw: String) -> String? {
         let name = raw.precomposedStringWithCanonicalMapping
@@ -45,6 +68,36 @@ public enum AuthorityKeyLogFormat {
             [.control, .format, .lineSeparator, .paragraphSeparator, .unassigned, .privateUse, .surrogate].contains($0.properties.generalCategory)
         }) else { return nil }
         return name
+    }
+}
+
+/// ES256 COSE public keys of passkeys (WebAuthn §6.5.1.1): exactly `{1: 2, 3: -7, -1: 1, -2: x(32), -3: y(32)}` in CTAP2 canonical order, with a
+/// point on P-256. What Viadere's passkey registrations store and the only form the authority logs.
+public enum PasskeyCOSE {
+    static let prefix: [UInt8] = [0xA5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]
+
+    public static func es256PublicKey(_ cose: Data) -> P256.Signing.PublicKey? {
+        let bytes = [UInt8](cose)
+        guard bytes.count == 77, Array(bytes[0..<10]) == prefix, bytes[42] == 0x22, bytes[43] == 0x58, bytes[44] == 0x20 else { return nil }
+        return try? P256.Signing.PublicKey(rawRepresentation: Data(bytes[10..<42]) + Data(bytes[45..<77]))
+    }
+}
+
+/// The members of a `keylog_passkey_added` challenge request (ADR-0023 §4 `passkey_added`): the credential the app just created, parsed strictly.
+public struct AuthorityPasskeyAdded: Sendable {
+    /// WebAuthn allows credential ids up to 1023 bytes.
+    public static let maxCredentialIdBytes = 1023
+    public let credentialId: String
+    public let cose: Data
+    public let publicKey: P256.Signing.PublicKey
+    public let kid: String
+
+    /// `credential_id`: strict unpadded base64url of 16-1023 bytes (no `+`, `/` or `=`, one text form). `public_key`: strict unpadded base64url of
+    /// a canonical ES256 COSE key.
+    public static func parse(credentialId: String, publicKey: String) -> AuthorityPasskeyAdded? {
+        guard AuthorityKeyLogFormat.strictBytes(credentialId, minBytes: 16, maxBytes: maxCredentialIdBytes) != nil,
+              let cose = AuthorityKeyLogFormat.strictBytes(publicKey, minBytes: 77, maxBytes: 77), let key = PasskeyCOSE.es256PublicKey(cose) else { return nil }
+        return AuthorityPasskeyAdded(credentialId: credentialId, cose: cose, publicKey: key, kid: KeyIdentifier.make(key))
     }
 }
 
@@ -78,6 +131,14 @@ extension AuthorityDisplay {
     /// `recovery_codes_set`: the device-generated set id and the code count.
     public static func recoveryCodesSet(setId: String, count: Int) -> JSONValue {
         .object(["v": .integer(1), "purpose": .string(AuthorityPurpose.recoveryCodesSet.rawValue), "set_id": .string(setId), "count": .integer(Int64(count))])
+    }
+
+    /// `keylog_passkey_added`: the new passkey's `kid` and the fixed label (ADR-0033 §1). Shown only by the app on the device that created the passkey,
+    /// which signs only when `kids` equal the credential it just created (ADR-0023 §4).
+    public static let passkeyAddedLabel = "New passkey on this phone"
+    public static func passkeyAdded(kid: String) -> JSONValue {
+        .object(["v": .integer(1), "purpose": .string(AuthorityPurpose.keylogPasskeyAdded.rawValue), "label": .string(passkeyAddedLabel),
+                 "kids": .array([.string(kid)])])
     }
 
     /// `recovery_cancel`: when the pending recovery started and when it would activate.
@@ -244,6 +305,9 @@ public enum AuthorityKeyLogRoute {
     public static let evidence = "/v1/keylog/evidence"
     public static let recoveryStart = "/v1/keylog/recovery/start"
     public static let recoveryLegacyStart = "/v1/keylog/recovery/legacy-start"
+    /// Passkey `recovery_cancel` (ADR-0023 §3a, §4): a WebAuthn challenge for one account's pending recovery, then the relayed assertion.
+    public static let passkeyCancelChallenges = "/v1/keylog/recovery/passkey-cancel/challenges"
+    public static let passkeyCancel = "/v1/keylog/recovery/passkey-cancel"
     public static let linkRedeem = "/v1/link/redeem"
 }
 

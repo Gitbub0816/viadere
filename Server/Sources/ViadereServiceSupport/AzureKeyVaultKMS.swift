@@ -158,6 +158,21 @@ public actor AzureKeyVaultKMS: KeyManagementService {
         return KMSWrappedKey(keyRef: "\(name)/\(version)", ciphertext: value)
     }
 
+    /// `POST keys/{name}/{version}/decrypt` with `RSA-OAEP-256` (ADR-0034 §9). The version is always explicit; a refusal of any kind is the one
+    /// `unwrapFailed`, so the caller cannot tell a padding failure from any other (no oracle; the authority also allows one call per challenge).
+    public func decrypt(keyRef: String, ciphertext: Data) async throws -> Data {
+        guard let (name, version) = KMSKeyRef.parse(keyRef), let version else { throw KMSError.unknownKey }
+        let object: [String: Any]
+        do {
+            object = try await call(.POST, "keys/\(name)/\(version)/decrypt", body: ["alg": "RSA-OAEP-256", "value": Base64URL.encode(ciphertext)])
+        } catch KMSError.service(let status) where status == 400 {
+            throw KMSError.unwrapFailed
+        }
+        guard let kid = object["kid"] as? String, let parsed = Self.parseKid(kid), parsed.name == name, parsed.version == version,
+              let value = (object["value"] as? String).flatMap(Base64URL.decode), !value.isEmpty else { throw KMSError.unwrapFailed }
+        return value
+    }
+
     public func unwrap(keyRef: String, ciphertext: Data) async throws -> Data {
         guard let (name, version) = KMSKeyRef.parse(keyRef), let version else { throw KMSError.unknownKey }
         let object: [String: Any]

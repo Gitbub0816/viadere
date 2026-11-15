@@ -166,6 +166,7 @@ public enum AuthorityReconciliation {
             switch op.operation {
             case "KeySign", "Sign": kind = "sign"
             case "KeyUnwrap", "UnwrapKey": kind = "unwrap"
+            case "KeyDecrypt", "Decrypt": kind = "decrypt"
             default: continue
             }
             let bucket = "\(kind)|\(op.keyRef)"
@@ -207,7 +208,7 @@ public struct AuthorityReconcileCommand: AsyncCommand {
         public init() {}
     }
 
-    public var help: String { "Reconciles Key Vault sign and unwrap operations against the authority's sign records (exit 1 on any unmatched operation)" }
+    public var help: String { "Reconciles Key Vault sign, unwrap and decrypt operations against the authority's sign records (exit 1 on any unmatched operation)" }
     public init() {}
 
     public func run(using context: CommandContext, signature: Signature) async throws {
@@ -218,7 +219,7 @@ public struct AuthorityReconcileCommand: AsyncCommand {
         // Log Analytics ingestion lags; reconcile a window that ended 10 minutes ago (the job runs hourly with an overlapping window).
         let until = Date().addingTimeInterval(-600), since = until.addingTimeInterval(-window)
         let query = """
-            AzureDiagnostics | where ResourceProvider == "MICROSOFT.KEYVAULT" and Category == "AuditEvent" and OperationName in ("KeySign", "Sign", "KeyUnwrap", "UnwrapKey") \
+            AzureDiagnostics | where ResourceProvider == "MICROSOFT.KEYVAULT" and Category == "AuditEvent" and OperationName in ("KeySign", "Sign", "KeyUnwrap", "UnwrapKey", "KeyDecrypt", "Decrypt") \
             | where TimeGenerated between (datetime(\(ISO8601DateFormatter().string(from: since))) .. datetime(\(ISO8601DateFormatter().string(from: until)))) \
             | project TimeGenerated, OperationName, id_s
             """

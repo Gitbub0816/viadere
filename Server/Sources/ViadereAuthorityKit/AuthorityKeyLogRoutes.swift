@@ -19,13 +19,13 @@ extension AuthorityApplication {
             guard Set(o.keys) == ["entry_type"], let type = o["entry_type"]?.stringValue else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
             return try await AuthorityKeyLogService(ctx: req.application.authority, db: req.db).issueNonce(entryType: type)
         }
-        post(AuthorityKeyLogRoute.genesis, allowed: ["nonce_id", "keys"]) { req, o in
+        post(AuthorityKeyLogRoute.genesis, allowed: ["nonce_id", "keys", "integrity"]) { req, o in
             try await AuthorityKeyLogService(ctx: req.application.authority, db: req.db).genesis(o, caller: req.authorityCaller)
         }
         post(AuthorityKeyLogRoute.head, allowed: ["account_id"]) { req, o in
             try await AuthorityKeyLogService(ctx: req.application.authority, db: req.db).headFor(o, caller: req.authorityCaller)
         }
-        post(AuthorityKeyLogRoute.challenges, allowed: ["purpose", "account_id", "kids", "entry_id", "set_id", "recovery_id"]) { req, o in
+        post(AuthorityKeyLogRoute.challenges, allowed: ["purpose", "account_id", "kids", "entry_id", "set_id", "recovery_id", "credential_id", "public_key"]) { req, o in
             try await AuthorityKeyLogService(ctx: req.application.authority, db: req.db).createChallenge(o, caller: req.authorityCaller)
         }
         post(AuthorityKeyLogRoute.deviceAdded, allowed: ["account_id", "nonce_id", "reported_name", "keys"]) { req, o in
@@ -39,6 +39,13 @@ extension AuthorityApplication {
         }
         post(AuthorityKeyLogRoute.recoveryLegacyStart, allowed: ["account_id", "recovery_id", "nonce_id", "keys"]) { req, o in
             try await AuthorityRecoveryService(ctx: req.application.authority, db: req.db).legacyStart(o, caller: req.authorityCaller)
+        }
+        post(AuthorityKeyLogRoute.passkeyCancelChallenges, allowed: ["account_id"]) { req, o in
+            try await PasskeyRecoveryCancel(ctx: req.application.authority, db: req.db).challenge(o, caller: req.authorityCaller)
+        }
+        api.post(AuthorityKeyLogRoute.passkeyCancel.split(separator: "/").map { PathComponent(stringLiteral: String($0)) }) { req async throws -> Response in
+            let body = try decodeStrict(AuthorityPasskeyEvidenceRequest.self, req)
+            return try jsonObject(try await PasskeyRecoveryCancel(ctx: req.application.authority, db: req.db).submit(body, caller: req.authorityCaller))
         }
         post(AuthorityKeyLogRoute.linkRedeem, allowed: ["link_client_id", "business_id", "code_verifier", "code", "ach"]) { req, o in
             try await AuthorityLinkService(ctx: req.application.authority, db: req.db).redeem(o, caller: req.authorityCaller)
