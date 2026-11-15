@@ -20,6 +20,10 @@ public enum AuthDeliveryCopy {
     /// N-06: a fixed template, never business text.
     public static func n06Body(business: String) -> String { "\(iso(business)) sent a security notice." }
     public static let n08Body = "You have a new security item. Open Viadere to review it."
+    /// N-02a, N-05a, N-06a: the same lines when "Show business names on the Lock Screen" is off (the default; title N-01 "Viadere").
+    public static let n02BodyNameless = "A sign-in link is ready. Tap to continue."
+    public static let n05BodyNameless = "Your code is ready. Open Viadere to see it."
+    public static let n06BodyNameless = "You have a new security notice."
     public static let n09Title = "Viadere"
     public static let n09Body = "Deny not sent yet. Open Viadere."
     public static let hiddenPreviewsPlaceholder = "You have a security item."

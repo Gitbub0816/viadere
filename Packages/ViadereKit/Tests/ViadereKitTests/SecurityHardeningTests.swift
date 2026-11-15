@@ -214,9 +214,22 @@ struct NotificationPreviewTests {
         return try #require(await NotificationEnricher(api: api, preferences: preferences).enrich(userInfo: ["iid": envelope.id.description]))
     }
 
+    /// "Show business names on the Lock Screen" on (it is off by default, `LockScreenBusinessNamesTests`).
+    static func names() -> InMemoryPreferences {
+        let prefs = InMemoryPreferences()
+        prefs.setBool(true, for: .lockScreenBusinessNames)
+        return prefs
+    }
+
     @Test func approvalsAreGenericOnTheLockScreenByDefault() async throws {
         for envelope in [PreviewData.authorize(sensitivity: .high), PreviewData.authenticate(sensitivity: .standard)] {
             for prefs in [nil, InMemoryPreferences()] as [InMemoryPreferences?] {
+                let result = try await fetch(preferences: prefs, envelope)
+                #expect(result.title == "Viadere" && !result.body.contains(envelope.business.displayName))
+                #expect(!result.body.contains("$") && !result.body.contains("Mesa") && !result.body.contains("Lisbon"))
+                #expect(result.userInfo[NotificationCard.userInfoKey] == nil)
+            }
+            for prefs in [Self.names()] {
                 let result = try await fetch(preferences: prefs, envelope)
                 #expect(result.body.hasSuffix("requested by \(envelope.business.displayName)"))
                 #expect(!result.body.contains("$") && !result.body.contains("Mesa") && !result.body.contains("Lisbon"))
@@ -225,10 +238,10 @@ struct NotificationPreviewTests {
                 #expect(result.requiresSecureFlow || !result.category.actions.isEmpty)
             }
         }
-        let authorize = try await fetch(preferences: nil, PreviewData.authorize())
+        let authorize = try await fetch(preferences: Self.names(), PreviewData.authorize())
         #expect(authorize.body == "Approval requested by Northfield Market")
         #expect(authorize.title == "Northfield Market")
-        let signIn = try await fetch(preferences: nil, PreviewData.authenticate())
+        let signIn = try await fetch(preferences: Self.names(), PreviewData.authenticate())
         #expect(signIn.body == "Sign-in approval requested by Harbor Bank")
     }
 
@@ -245,8 +258,10 @@ struct NotificationPreviewTests {
 
     @Test func unverifiedBusinessesAreNamedAsSuch() async throws {
         let envelope = UntrustedTextTests.envelope(verified: false)
-        let result = try await fetch(preferences: nil, envelope)
+        let result = try await fetch(preferences: Self.names(), envelope)
         #expect(result.body.contains("unverified business"))
+        // Without names the warning stays.
+        #expect(try await fetch(preferences: nil, envelope).body.contains("unverified business"))
         let prefs = InMemoryPreferences()
         prefs.setBool(true, for: .richNotificationPreviews)
         let rich = try await fetch(preferences: prefs, envelope)

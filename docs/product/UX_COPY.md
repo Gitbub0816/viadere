@@ -14,7 +14,7 @@
 2. **Name the action** ("sign-in", "payment", "sign-in link", "code"). Never "Approve" on a passive link notification; a tap to open a link is not an approval (spec §7).
 3. **No success claim Viadere cannot know.** Viadere never says "You're signed in", never predicts what a business will do, and never shows "Approved" before the relay accepted the signed answer. It says what it did ("Your answer was sent to {Business}", "Opened {host}").
 4. **No time-based trust claims.** Waiting never makes a device trusted (SECURITY §2.5a, §2.26, owner decision WP-B5). No string promises that an action becomes possible "after {date}" unless that is literally the rule (the recovery activation time and the phone-link cool-down are such rules; device trust for payments is not).
-5. **Lock Screen and notification text carry no code, number, amount, payee, URL or personal data.** The business name appears on a locked device **unless** the person hides previews (iOS "Show Previews: When Unlocked" or "Never" replaces title and body with the category placeholder "You have a security item."; Android follows the lock-screen setting with a generic public version) or turns off "Show business names on the Lock Screen" in Viadere Settings. Interruption level is `active`; nothing is time-sensitive.
+5. **Lock Screen and notification text carry no code, number, amount, payee, URL or personal data.** The business name appears on a locked device **unless** the person hides previews (iOS "Show Previews: When Unlocked" or "Never" replaces title and body with the category placeholder "You have a security item."; Android follows the lock-screen setting with a generic public version) or leaves "Show business names on the Lock Screen" (You → Notifications) **off, which is the default**: which businesses a person deals with is personal data, so off is the privacy-preserving value. Off, every notification is titled "Viadere", names no business (N-02a, N-05a, N-06a, N-03a) and carries no business logo; the business is shown once Viadere is open. A notification extension cannot tell whether the phone is locked, so off applies to every notification, locked or not. Turning names on needs Face ID or the passcode; turning them off never does. Detailed approval notifications ("Who, amount and place") name the business by definition. Interruption level is `active`; nothing is time-sensitive.
 6. **One safe-action vocabulary** (§0.1), **equal prominence** (§0.2), and Deny never needs unlocking-plus-Face-ID: from a notification it works on a locked phone (after first unlock since restart); only Review/Open need unlocking.
 7. **Businesses cannot edit** any string here, the warning hierarchy, or button roles. They supply only bounded variables: `{action}` (≤ 60 chars, e.g. "Sign in on Chrome, Mac") and `{reference}` (≤ 40 chars), validated (ADR-0020 §2).
 8. **Context only when reliably known.** Location or device lines appear only when the business supplied them in a business-signed (E2EE) request; otherwise they are omitted, never guessed.
@@ -44,10 +44,14 @@ Deny and Approve (or This wasn't me and Continue on link screens) are one compon
 |---|---|---|---|---|
 | N-01 | APNs/FCM payload as sent (before the NSE or the Android fetch runs); Android public version | Viadere | You have a new security item. | Generic; payload carries only the delivery id |
 | N-02 | Sign-in link, after fetch | {Business} | {Business} sign-in link is ready. Tap to continue. | spec §20 "Magic link"; actions **Open**, **This wasn't me** |
+| N-02a | Sign-in link, after fetch, business names off (default, §0 rule 5) | Viadere | A sign-in link is ready. Tap to continue. | Same actions |
 | N-03 | Push approval (sign-in), after fetch | {Business} | Sign-in request from {Business}. Only approve if you started this. | Actions **Review**, **Deny**. Rewritten (A6/A7 finding 7c) so the line reads correctly on the wrist, where Approve does not exist |
 | N-04 | Payment step-up | {Business} | Payment request from {Business}. Only approve if you started this. | No amount on the notification |
 | N-05 | One-time code | {Business} | Your {Business} code is ready. Open Viadere to see it. | Code never in the notification |
+| N-05a | One-time code, business names off | Viadere | Your code is ready. Open Viadere to see it. | |
 | N-06 | Notice (account notice from a business) | {Business} | {Business} sent a security notice. | Fixed template; never business text |
+| N-06a | Notice, business names off | Viadere | You have a new security notice. | |
+| N-03a | Interaction approval (sign-in or other approval), business names off | Viadere | Sign-in approval requested · Approval requested (either followed by " by an unverified business" when the business is not verified) | The unverified warning is kept without the name |
 | N-07 | Requests replaced (collapse) | {Business} | {Business} sent a new request. Earlier ones were replaced. | ADR-0022 §5.2; not sent while over budget |
 | N-08 | Fetch failed / offline / before first unlock | Viadere | You have a new security item. Open Viadere to review it. | Never shows a stale business name |
 | N-09 | Local notification: Deny could not be sent | Viadere | Deny not sent yet. Open Viadere. | ADR-0022 §5.6 |
@@ -55,6 +59,15 @@ Deny and Approve (or This wasn't me and Continue on link screens) are one compon
 | INB-01 | Inbox line for a request delivered silently (over budget) | — | You have a pending sign-in from {Business}. | ADR-0020 §8 |
 
 Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), **This wasn't me** (background, signed reduce-only, no unlock). `viadere.approve` → **Review** (foreground, needs unlock), **Deny** (background, signed reduce-only, no unlock). There is no Approve action on any notification.
+
+| Id | Element (You → Notifications, beside "Live Activity details") | Copy |
+|---|---|---|
+| N-SET-01 | Setting title (also the search row) | Show business names on the Lock Screen |
+| | Row detail (search) | Which business a notification is from |
+| | Option, off (default) | Just Viadere · Notifications don't say which business they're from until you open Viadere. |
+| | Option, on | The business name · See who it's from at a glance. Anyone who can see your phone sees it too. |
+| | Explanation | Notifications can name the business they're from, which anyone who can see your phone can read, or just say Viadere until you open the app. |
+| | Face ID / passcode reason (turning on) | Show business names on the Lock Screen |
 
 ## 2. Sign-in link screens (ADR-0021, ADR-0031)
 

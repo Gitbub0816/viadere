@@ -476,11 +476,11 @@ struct AuthDeliveryNotificationTextTests {
     }
 
     @Test func fetchedTextIsTheApprovedLineForTheMethodAndNeverACodeOrHost() {
-        let link = AuthDeliveryNotificationText.make(item: item(.link), category: "viadere.auth.link", now: t0)
+        let link = AuthDeliveryNotificationText.make(item: item(.link), category: "viadere.auth.link", now: t0, showsBusinessName: true)
         #expect(link == AuthDeliveryNotificationText(title: "Acme", body: AuthDeliveryCopy.n02Body(business: "Acme")))
-        let code = AuthDeliveryNotificationText.make(item: item(.code(.otp)), category: "viadere.auth.code", now: t0)
+        let code = AuthDeliveryNotificationText.make(item: item(.code(.otp)), category: "viadere.auth.code", now: t0, showsBusinessName: true)
         #expect(code == AuthDeliveryNotificationText(title: "Acme", body: AuthDeliveryCopy.n05Body(business: "Acme")))
-        let notice = AuthDeliveryNotificationText.make(item: item(.notice), category: "viadere.auth.notice", now: t0)
+        let notice = AuthDeliveryNotificationText.make(item: item(.notice), category: "viadere.auth.notice", now: t0, showsBusinessName: true)
         #expect(notice.body == AuthDeliveryCopy.n06Body(business: "Acme"))
         for text in [link, code, notice] {
             #expect(!text.body.contains("login.acme.com") && !text.title.contains("login.acme.com"))
@@ -493,16 +493,16 @@ struct AuthDeliveryNotificationTextTests {
         let generic = AuthDeliveryNotificationText.generic
         #expect(generic.title == "Viadere" && generic.body == "You have a new security item. Open Viadere to review it.")
         // The fetched method must be the one the push's category named.
-        #expect(AuthDeliveryNotificationText.make(item: item(.code(.otp)), category: "viadere.auth.link", now: t0) == generic)
-        #expect(AuthDeliveryNotificationText.make(item: item(.link), category: "viadere.auth.code", now: t0) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.code(.otp)), category: "viadere.auth.link", now: t0, showsBusinessName: true) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.link), category: "viadere.auth.code", now: t0, showsBusinessName: true) == generic)
         // Finished or expired: never a stale business name.
-        #expect(AuthDeliveryNotificationText.make(item: item(.link, state: .used), category: "viadere.auth.link", now: t0) == generic)
-        #expect(AuthDeliveryNotificationText.make(item: item(.link, expiresIn: -1), category: "viadere.auth.link", now: t0) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.link, state: .used), category: "viadere.auth.link", now: t0, showsBusinessName: true) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.link, expiresIn: -1), category: "viadere.auth.link", now: t0, showsBusinessName: true) == generic)
         // A name that imitates Viadere, or no name, never becomes the title.
-        #expect(AuthDeliveryNotificationText.make(item: item(.link, business: "V1adere Security"), category: "viadere.auth.link", now: t0) == generic)
-        #expect(AuthDeliveryNotificationText.make(item: item(.link, business: "\u{200B}"), category: "viadere.auth.link", now: t0) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.link, business: "V1adere Security"), category: "viadere.auth.link", now: t0, showsBusinessName: true) == generic)
+        #expect(AuthDeliveryNotificationText.make(item: item(.link, business: "\u{200B}"), category: "viadere.auth.link", now: t0, showsBusinessName: true) == generic)
         // Hostile characters are removed from what is shown.
-        let cleaned = AuthDeliveryNotificationText.make(item: item(.code(.otp), business: "Ac\u{202E}me"), category: "viadere.auth.code", now: t0)
+        let cleaned = AuthDeliveryNotificationText.make(item: item(.code(.otp), business: "Ac\u{202E}me"), category: "viadere.auth.code", now: t0, showsBusinessName: true)
         #expect(cleaned.title == "Acme")
     }
 

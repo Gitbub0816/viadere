@@ -157,8 +157,22 @@ public struct AuthDeliveryNotificationText: Sendable, Equatable {
     ///   - item: the fetched display object.
     ///   - category: the category the push arrived with. The fetched method must be the one the category names; a mismatch is generic.
     ///   - now: the device clock. A delivery that is no longer open or already expired is generic (never a stale business name).
-    public static func make(item: AuthDeliveryItem, category: String, now: Date) -> AuthDeliveryNotificationText {
+    ///   - showsBusinessName: "Show business names on the Lock Screen" (`PreferenceKey.lockScreenBusinessNames`, off by default). Off, the title
+    ///     is "Viadere" and the line names no business (N-02a, N-05a, N-06a).
+    public static func make(item: AuthDeliveryItem, category: String, now: Date, showsBusinessName: Bool) -> AuthDeliveryNotificationText {
         guard item.state == .open, item.expiresAt > now else { return .generic }
+        if !showsBusinessName {
+            switch item.kind {
+            case .link where category == AuthNotificationCategory.link:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n02BodyNameless)
+            case .code where category == AuthNotificationCategory.code:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n05BodyNameless)
+            case .notice where category == AuthNotificationCategory.notice:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n06BodyNameless)
+            default:
+                return .generic
+            }
+        }
         let name = UntrustedText.name(item.business, max: 40, attribution: nil)
         // A name that imitates Viadere never becomes a notification title.
         guard !name.impersonatesViadere, name.text != "Unnamed business" else { return .generic }

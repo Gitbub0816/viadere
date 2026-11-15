@@ -35,6 +35,8 @@ public final class SecuritySettingsViewModel {
     /// Show a pending request's business, question and answers in its Live Activity on the Lock Screen and in the Dynamic Island (F-09).
     /// Off by default: the Live Activity then only says that a decision is needed.
     public var liveActivityDetailsEnabled: Bool
+    /// Name the business in notifications (UX_COPY §0 rule 5). Off by default: notifications say "Viadere" until the app is open.
+    public var lockScreenBusinessNamesEnabled: Bool
     /// Recovery codes status (`nil` until loaded, or when the server doesn't offer recovery).
     public private(set) var recoveryInfo: RecoveryInfo?
     public private(set) var recoveryAvailable = true
@@ -54,6 +56,7 @@ public final class SecuritySettingsViewModel {
         appLockEnabled = services.preferences.bool(.appLockEnabled)
         richPreviewsEnabled = services.preferences.bool(.richNotificationPreviews)
         liveActivityDetailsEnabled = services.preferences.bool(.liveActivityLockScreenDetails)
+        lockScreenBusinessNamesEnabled = services.preferences.bool(.lockScreenBusinessNames)
         appLockMethod = services.appLock.methodName
         addPhone.onLinked = { [weak self] link in self?.phoneLinked(link) }
     }
@@ -322,6 +325,24 @@ public final class SecuritySettingsViewModel {
         }
         services.preferences.setBool(enabled, for: .liveActivityLockScreenDetails)
         liveActivityDetailsEnabled = enabled
+    }
+
+    /// Turning business names on needs a successful authentication (it tells anyone holding the phone which businesses send to this account);
+    /// turning them off never does. The notification service extension reads the preference from the app group for every notification.
+    public func setLockScreenBusinessNames(_ enabled: Bool) async {
+        guard enabled != services.preferences.bool(.lockScreenBusinessNames) else {
+            lockScreenBusinessNamesEnabled = enabled
+            return
+        }
+        if enabled {
+            guard await services.appLock.isAvailable(),
+                  await services.appLock.authenticate(reason: LockScreenBusinessNamesSetting.authenticationReason) else {
+                lockScreenBusinessNamesEnabled = false
+                return
+            }
+        }
+        services.preferences.setBool(enabled, for: .lockScreenBusinessNames)
+        lockScreenBusinessNamesEnabled = enabled
     }
 
     // MARK: New-device cool-down and confirmation

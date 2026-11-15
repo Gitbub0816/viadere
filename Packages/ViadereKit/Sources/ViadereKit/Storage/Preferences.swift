@@ -21,6 +21,10 @@ public enum PreferenceKey: String, CaseIterable, Sendable {
     /// Show a decision Live Activity's question and answers on the Lock Screen and in the Dynamic Island (F-09). Off by default: the neutral
     /// wording is shown instead. Read by the widget extension through the app group.
     case liveActivityLockScreenDetails
+    /// "Show business names on the Lock Screen" (UX_COPY §0 rule 5). Off by default: notifications are titled "Viadere" and their lines name no
+    /// business, so a locked phone does not reveal which businesses the person deals with. Read by the notification service extension through
+    /// the app group. An extension cannot tell whether the phone is locked, so off means no business name in any notification.
+    case lockScreenBusinessNames
     case lastKnownConsumerId
     /// The saved business context of the Organization views (`OrganizationContext` JSON). A filter only; never sent as authority.
     case organizationContext

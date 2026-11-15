@@ -25,7 +25,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
     // Security
     case appLock, approvals, devices, authenticator, recovery
     // Notifications
-    case notifications, lockScreenDetails, liveActivityDetails, businessNotifications, loops
+    case notifications, lockScreenDetails, lockScreenBusinessNames, liveActivityDetails, businessNotifications, loops
     // Privacy and sharing
     case profileReceipts, consents, verifications
     // Records
@@ -39,7 +39,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         switch self {
         case .profile, .household, .phones, .sessions: .account
         case .appLock, .approvals, .devices, .authenticator, .recovery: .security
-        case .notifications, .lockScreenDetails, .liveActivityDetails, .businessNotifications, .loops: .notifications
+        case .notifications, .lockScreenDetails, .lockScreenBusinessNames, .liveActivityDetails, .businessNotifications, .loops: .notifications
         case .profileReceipts, .consents, .verifications: .privacy
         case .acknowledgments, .dataExport: .records
         case .appearance: .appearance
@@ -59,6 +59,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "Recovery codes"
         case .notifications: "Notifications"
         case .lockScreenDetails: "Details on the lock screen"
+        case .lockScreenBusinessNames: "Show business names on the Lock Screen"
         case .liveActivityDetails: "Live Activity details"
         case .businessNotifications: "Business by business"
         case .loops: "Requests built by businesses"
@@ -85,6 +86,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "The way back in if you lose every device"
         case .notifications: "How and when Viadere interrupts you"
         case .lockScreenDetails: "What approval notifications show"
+        case .lockScreenBusinessNames: "Which business a notification is from"
         case .liveActivityDetails: "What a pending request shows on the Lock Screen"
         case .businessNotifications: "How loudly each business may interrupt"
         case .loops: "Short requests a business builds"
@@ -111,6 +113,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: "list.number"
         case .notifications: "bell"
         case .lockScreenDetails: "lock.rectangle"
+        case .lockScreenBusinessNames: "building.2.crop.circle"
         case .liveActivityDetails: "rectangle.badge.checkmark"
         case .businessNotifications: "building.2"
         case .loops: "square.stack"
@@ -137,6 +140,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
         case .recovery: ["lost phone", "recover", "backup codes", "passkey", "account recovery"]
         case .notifications: ["alerts", "sounds", "focus", "interrupt", "quiet", "mute", "quiet hours", "night", "sleep", "default level", "all businesses"]
         case .lockScreenDetails: ["preview", "amount", "lock screen", "privacy", "rich notifications"]
+        case .lockScreenBusinessNames: ["business name", "business names", "notification title", "hide names", "lock screen", "privacy", "previews"]
         case .liveActivityDetails: ["live activities", "dynamic island", "lock screen", "question", "answers", "privacy", "business name"]
         case .businessNotifications: ["mute", "quiet", "silence", "offers", "per business"]
         case .loops: ["loops", "built by", "forms", "business requests"]
@@ -153,7 +157,7 @@ public enum SettingsDestination: String, CaseIterable, Sendable, Hashable, Ident
     public var screen: SettingsDestination? {
         switch self {
         case .appLock: nil // an inline control on the You page itself
-        case .lockScreenDetails, .liveActivityDetails, .businessNotifications: .notifications
+        case .lockScreenDetails, .lockScreenBusinessNames, .liveActivityDetails, .businessNotifications: .notifications
         default: self
         }
     }
@@ -234,7 +238,7 @@ extension SettingsDestination {
     /// Whether the item is its own row on the You page (inline controls and items inside the Notifications screen are not).
     public var isTopLevel: Bool {
         switch self {
-        case .lockScreenDetails, .liveActivityDetails, .businessNotifications: false
+        case .lockScreenDetails, .lockScreenBusinessNames, .liveActivityDetails, .businessNotifications: false
         default: true
         }
     }
@@ -296,4 +300,21 @@ public enum LiveActivityDetailsSetting {
     public static let detailedDetail = "Answer from the Lock Screen. Anyone who can see your phone sees the details too."
     /// The reason shown by Face ID or the passcode prompt when turning details on.
     public static let authenticationReason = "Show request details on the Lock Screen"
+}
+
+// MARK: - Business names on the Lock Screen (UX_COPY §0 rule 5)
+
+/// "Show business names on the Lock Screen" (You → Notifications), as data. Off by default (`PreferenceKey.lockScreenBusinessNames`): which
+/// businesses a person deals with is personal, and a notification is read by whoever holds the phone. Off, every notification is titled
+/// "Viadere" and names no business, and no business logo is attached; the business is shown once Viadere is open. Turning names on needs
+/// Face ID or the passcode; turning them off never does. "Who, amount and place" (detailed approval notifications) includes the name.
+public enum LockScreenBusinessNamesSetting {
+    public static var label: String { SettingsDestination.lockScreenBusinessNames.title }
+    public static let explanation = "Notifications can name the business they're from, which anyone who can see your phone can read, or just say Viadere until you open the app."
+    public static let hiddenTitle = "Just Viadere"
+    public static let hiddenDetail = "Notifications don't say which business they're from until you open Viadere."
+    public static let shownTitle = "The business name"
+    public static let shownDetail = "See who it's from at a glance. Anyone who can see your phone sees it too."
+    /// The reason shown by Face ID or the passcode prompt when turning names on.
+    public static let authenticationReason = "Show business names on the Lock Screen"
 }
