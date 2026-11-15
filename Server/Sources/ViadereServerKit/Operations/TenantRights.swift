@@ -115,6 +115,10 @@ struct TenantDataRequests {
             try await BrandKitScheduleRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BrandKitRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BrandAssetRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            try await BusinessCodeStyleRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            // Campaigns go; relationship rows are dealt with below and only lose the reference here.
+            try await RelationshipRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$campaignId != nil).set(\.$campaignId, to: nil).update()
+            try await CampaignRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await OrgInviteRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$state == "open").set(\.$state, to: "revoked").update()
             try await ConsoleEnrollmentRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$state == "open").set(\.$state, to: "revoked").update()
             let members = try await OrgMembershipRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$removedAt == nil).all()

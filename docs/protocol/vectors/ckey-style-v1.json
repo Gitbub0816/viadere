@@ -1,0 +1,1990 @@
+{
+ "schema": 1,
+ "source": "clearkeysolutions/ckey v0.1.0-build.85 (ede38f57aa1a20c456b1858f4fccd919e98ef269): ckey_check_scalable_style (strict policy, no logo) and ckey_render_scalable_styled_svg at scale 16, built with GCC 13 on Linux x86-64. Material amounts are percent (the reference takes amount / 100.0).",
+ "checks": [
+  {
+   "name": "plain",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "concept",
+   "style": {
+    "background": "14161e",
+    "background_edge": "07080c",
+    "ink": "f6eee0",
+    "ink_shade": "c8b69a",
+    "accents": [
+     "a9b896",
+     "9ea1a6"
+    ],
+    "accent_percent": 18,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 60,
+    "shadow": 50,
+    "texture": 40
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 7.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "white-on-black",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "ffffff",
+    "ink_shade": "ffffff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "dark-on-light-at-3",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "949494",
+    "ink_shade": "949494",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 3.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "dark-on-light-below-3",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "959595",
+    "ink_shade": "959595",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #959595 on background #ffffff is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "dark-on-light-at-1.5",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "d2d2d2",
+    "ink_shade": "d2d2d2",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #d2d2d2 on background #ffffff is only 1.5:1; certify it to check that it scan"
+  },
+  {
+   "name": "dark-on-light-below-1.5",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "d3d3d3",
+    "ink_shade": "d3d3d3",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #d3d3d3 on background #ffffff is 1.5:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "light-on-dark-at-3",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "5a5a5a",
+    "ink_shade": "5a5a5a",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 3.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "light-on-dark-below-3",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "595959",
+    "ink_shade": "595959",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #595959 on background #000000 is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "light-on-dark-at-1.5",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "2c2c2c",
+    "ink_shade": "2c2c2c",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #2c2c2c on background #000000 is only 1.5:1; certify it to check that it scan"
+  },
+  {
+   "name": "light-on-dark-below-1.5",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "2b2b2b",
+    "ink_shade": "2b2b2b",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #2b2b2b on background #000000 is 1.5:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "navy-at-3",
+   "style": {
+    "background": "14161e",
+    "background_edge": "14161e",
+    "ink": "636363",
+    "ink_shade": "636363",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 3.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "navy-below-3",
+   "style": {
+    "background": "14161e",
+    "background_edge": "14161e",
+    "ink": "626262",
+    "ink_shade": "626262",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #626262 on background #14161e is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "ivory-at-3",
+   "style": {
+    "background": "f5f2ec",
+    "background_edge": "f5f2ec",
+    "ink": "8c8c8c",
+    "ink_shade": "8c8c8c",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 3.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "ivory-below-3",
+   "style": {
+    "background": "f5f2ec",
+    "background_edge": "f5f2ec",
+    "ink": "8d8d8d",
+    "ink_shade": "8d8d8d",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #8d8d8d on background #f5f2ec is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "same-colour",
+   "style": {
+    "background": "808080",
+    "background_edge": "808080",
+    "ink": "808080",
+    "ink_shade": "808080",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #808080 on background #808080 is 1.0:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "shade-too-faint",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "f0f0f0",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #f0f0f0 on background #ffffff is 1.1:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "shade-advice",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "959595",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #959595 on background #ffffff is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "edge-too-faint",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "101010",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #000000 on background #101010 is 1.1:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "edge-mixed-polarity",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "202020",
+    "ink": "808080",
+    "ink_shade": "808080",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "all inks must be lighter than the background, or all darker"
+  },
+  {
+   "name": "mixed-polarity-shade",
+   "style": {
+    "background": "808080",
+    "background_edge": "808080",
+    "ink": "ffffff",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "all inks must be lighter than the background, or all darker"
+  },
+  {
+   "name": "accent-too-faint",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "f4f4f4"
+    ],
+    "accent_percent": 20,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #f4f4f4 on background #ffffff is 1.1:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "accent-too-faint-but-unused",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "f4f4f4"
+    ],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "accent-advice",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "959595"
+    ],
+    "accent_percent": 20,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #959595 on background #ffffff is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "accent-wrong-polarity",
+   "style": {
+    "background": "808080",
+    "background_edge": "808080",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "ffffff"
+    ],
+    "accent_percent": 10,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "all inks must be lighter than the background, or all darker"
+  },
+  {
+   "name": "four-accents",
+   "style": {
+    "background": "101820",
+    "background_edge": "101820",
+    "ink": "f2f2f2",
+    "ink_shade": "f2f2f2",
+    "accents": [
+     "e0c080",
+     "80c0e0",
+     "c0e080",
+     "e080c0"
+    ],
+    "accent_percent": 100,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 6.8:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "five-accents",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "101010",
+     "202020",
+     "303030",
+     "404040",
+     "505050"
+    ],
+    "accent_percent": 10,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "accents: at most 4 colours and 100%"
+  },
+  {
+   "name": "accent-percent-101",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [
+     "101010"
+    ],
+    "accent_percent": 101,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "accents: at most 4 colours and 100%"
+  },
+  {
+   "name": "bevel-over-range",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 150,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "bevel, shadow, and texture must be 0..1"
+  },
+  {
+   "name": "shadow-negative",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": -10,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "bevel, shadow, and texture must be 0..1"
+  },
+  {
+   "name": "texture-over-range",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 101
+   },
+   "accepted": false,
+   "message": "bevel, shadow, and texture must be 0..1"
+  },
+  {
+   "name": "shadow-41-on-light",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 41,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but strong shadow on dark-on-light marks; certify it to check that it scans"
+  },
+  {
+   "name": "shadow-40-on-light",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 40,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "bevel-51-on-light",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 51,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but strong bevel on dark-on-light marks; certify it to check that it scans"
+  },
+  {
+   "name": "bevel-50-on-light",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 50,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "shadow-and-bevel-on-light",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 80,
+    "shadow": 80,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but strong shadow on dark-on-light marks; certify it to check that it scans"
+  },
+  {
+   "name": "full-materials-on-dark",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "ffffff",
+    "ink_shade": "ffffff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 100,
+    "shadow": 100,
+    "texture": 100
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "low-contrast-then-shadow",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "959595",
+    "ink_shade": "959595",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 90,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #959595 on background #ffffff is only 3.0:1; certify it to check that it scan"
+  },
+  {
+   "name": "faint-and-advice",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "f0f0f0",
+    "ink_shade": "959595",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #f0f0f0 on background #ffffff is 1.1:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "forest-on-cream",
+   "style": {
+    "background": "fff5d6",
+    "background_edge": "fff5d6",
+    "ink": "2f5d50",
+    "ink_shade": "2f5d50",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 6.9:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "cream-on-forest",
+   "style": {
+    "background": "2f5d50",
+    "background_edge": "1d3b33",
+    "ink": "fff5d6",
+    "ink_shade": "e8d9a8",
+    "accents": [
+     "f0b060"
+    ],
+    "accent_percent": 12,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 30,
+    "shadow": 20,
+    "texture": 10
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 4.0:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "red-on-white",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "c8102e",
+    "ink_shade": "c8102e",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 5.9:1; logo uses 0% of block correction"
+  },
+  {
+   "name": "yellow-on-white",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "ffd400",
+    "ink_shade": "ffd400",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": false,
+   "message": "ink #ffd400 on background #ffffff is 1.4:1, too faint to read (minimum 1.5:1)"
+  },
+  {
+   "name": "blue-on-black",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "0000ff",
+    "ink_shade": "0000ff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK, but ink #0000ff on background #000000 is only 2.4:1; certify it to check that it scan"
+  },
+  {
+   "name": "squares-dots-flat",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "dots",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "accepted": true,
+   "message": "style OK: contrast >= 21.0:1; logo uses 0% of block correction"
+  }
+ ],
+ "renders": [
+  {
+   "name": "plain-square/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "9b7f3eec7dec8efd1880820ee0374f69bd52e71ac1c527e9f160fd1ba5201663"
+  },
+  {
+   "name": "plain-square/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "9516f23c8c9d7017cacad6d93d3be9bccbe54900d73a8666370dc69df82307b9"
+  },
+  {
+   "name": "plain-square/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "9c4981fa7db0f44bb66315e4e1126bc3a8516dc7542aa282543671c8cc7ec2b0"
+  },
+  {
+   "name": "plain-circle/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "1fd5f01ccc4f383f1f8b831e41028407004cd94885efab48d430b69fc4d0b120"
+  },
+  {
+   "name": "plain-circle/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "f75b23d3cb773d8a881dae1272ebcc9d97e1d9f1ca44c967efe55031545cda61"
+  },
+  {
+   "name": "plain-circle/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "aa65b6ab4b926549b3d5e0efcad28f7e5a0051ed7e70aa75be3fcc76e1dc0278"
+  },
+  {
+   "name": "plain-diamond/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "diamond",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "c8d14c4bfe75d18c0c6a7586bec6dd3c873ed83a19e7de6fc29ab176b1e4229e"
+  },
+  {
+   "name": "plain-diamond/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "diamond",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "f7926f8ac74362c3c116c05f31a0655e7c162a4b12b1de0873b2123c8a0dcd8e"
+  },
+  {
+   "name": "plain-diamond/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "diamond",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "3cdab2f740464208d2357f1f6264efd7158c87625089a7a607a2b22e03a6d9f2"
+  },
+  {
+   "name": "plain-dots/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "d32367ddf52d8be50848d2740d7f645eae4c84cc9ab6c480750ff695be1a30de"
+  },
+  {
+   "name": "plain-dots/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "767c19d2ff04b76d5d68c873727ba21fd175784e0a3096d2c9fe466850089da6"
+  },
+  {
+   "name": "plain-dots/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "8180ab1dee9da7c36f0f1253a56c1b318d6f07bc5b630087896689c157f3693f"
+  },
+  {
+   "name": "plain-flat/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "ef31ab5cfcff2dc8e60aa3bbb7b6bd8056605a3266b86bc215b43f0d3a3aa15a"
+  },
+  {
+   "name": "plain-flat/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "dc1db710ef06af61bb60f495336c0e835ec9e0ceaaa95d21a0152847fa8cdcf3"
+  },
+  {
+   "name": "plain-flat/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "0892367a070d368029191f5142fe0cdf1329143bcb0a737fb3333392dce73503"
+  },
+  {
+   "name": "square-dots-flat/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "dots",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "22870d547a69121a59f760b3810aa853a5ffdcaf41b8a9e62b79321b50cd03e0"
+  },
+  {
+   "name": "square-dots-flat/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "dots",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "ae772bab1c104eb88ce4bf75faaba62318993f9a11a09777de055b25e7f0f501"
+  },
+  {
+   "name": "square-dots-flat/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "dots",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "ad250a41c7dc7547f8773d27142e4d26ce5f77b8813f2572c07077a35574d32a"
+  },
+  {
+   "name": "concept-diamond-dots/connect-link",
+   "style": {
+    "background": "14161e",
+    "background_edge": "07080c",
+    "ink": "f6eee0",
+    "ink_shade": "c8b69a",
+    "accents": [
+     "a9b896",
+     "9ea1a6"
+    ],
+    "accent_percent": 18,
+    "modules": "diamond",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 60,
+    "shadow": 50,
+    "texture": 40
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "d8cd9f1b4631f93d8a88af0b5548e5f5b23cd50021bea5c7feaae9c39a7235a4"
+  },
+  {
+   "name": "concept-diamond-dots/campaign-link",
+   "style": {
+    "background": "14161e",
+    "background_edge": "07080c",
+    "ink": "f6eee0",
+    "ink_shade": "c8b69a",
+    "accents": [
+     "a9b896",
+     "9ea1a6"
+    ],
+    "accent_percent": 18,
+    "modules": "diamond",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 60,
+    "shadow": 50,
+    "texture": 40
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "c45e82c73807bda5606f05b5106dff756b4c6bd5a73114e6c79dd5b32f3b215e"
+  },
+  {
+   "name": "concept-diamond-dots/v20",
+   "style": {
+    "background": "14161e",
+    "background_edge": "07080c",
+    "ink": "f6eee0",
+    "ink_shade": "c8b69a",
+    "accents": [
+     "a9b896",
+     "9ea1a6"
+    ],
+    "accent_percent": 18,
+    "modules": "diamond",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 60,
+    "shadow": 50,
+    "texture": 40
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "a6ba04d2d555244038f4b3eb76da13903ce55ae75a27b54ea9b860a4907daab2"
+  },
+  {
+   "name": "forest-on-cream/connect-link",
+   "style": {
+    "background": "fff5d6",
+    "background_edge": "fff5d6",
+    "ink": "2f5d50",
+    "ink_shade": "2f5d50",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "d216575de7c130fe1407475208dae4ca4385ecaf54bd1493ab1955a860698dff"
+  },
+  {
+   "name": "forest-on-cream/campaign-link",
+   "style": {
+    "background": "fff5d6",
+    "background_edge": "fff5d6",
+    "ink": "2f5d50",
+    "ink_shade": "2f5d50",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "0e9f7b46c69d090c3bed7c3060dcfc3f6963d06643acbdff338c0caf18170d72"
+  },
+  {
+   "name": "forest-on-cream/v20",
+   "style": {
+    "background": "fff5d6",
+    "background_edge": "fff5d6",
+    "ink": "2f5d50",
+    "ink_shade": "2f5d50",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "7cdc428b763dcf225def06f3e44611fc32e9814f066ebf7d4f566acb6945480c"
+  },
+  {
+   "name": "cream-on-forest/connect-link",
+   "style": {
+    "background": "2f5d50",
+    "background_edge": "1d3b33",
+    "ink": "fff5d6",
+    "ink_shade": "e8d9a8",
+    "accents": [
+     "f0b060"
+    ],
+    "accent_percent": 12,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 30,
+    "shadow": 20,
+    "texture": 10
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "53eb449ecb268ed0ccb5bf0b7a14a4ce1c989bc7cb53fc0d31a3a271bf310ef4"
+  },
+  {
+   "name": "cream-on-forest/campaign-link",
+   "style": {
+    "background": "2f5d50",
+    "background_edge": "1d3b33",
+    "ink": "fff5d6",
+    "ink_shade": "e8d9a8",
+    "accents": [
+     "f0b060"
+    ],
+    "accent_percent": 12,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 30,
+    "shadow": 20,
+    "texture": 10
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "bdf0a80d4dabb73e4f558e5970409f823edf9f82d33344baa3abd73f74703200"
+  },
+  {
+   "name": "cream-on-forest/v20",
+   "style": {
+    "background": "2f5d50",
+    "background_edge": "1d3b33",
+    "ink": "fff5d6",
+    "ink_shade": "e8d9a8",
+    "accents": [
+     "f0b060"
+    ],
+    "accent_percent": 12,
+    "modules": "circle",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 30,
+    "shadow": 20,
+    "texture": 10
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "1c621cfac83d27db0d8e45066c7fb58c61f87b9a97d40dc73cd1f83cad858014"
+  },
+  {
+   "name": "four-accents/connect-link",
+   "style": {
+    "background": "101820",
+    "background_edge": "101820",
+    "ink": "f2f2f2",
+    "ink_shade": "f2f2f2",
+    "accents": [
+     "e0c080",
+     "80c0e0",
+     "c0e080",
+     "e080c0"
+    ],
+    "accent_percent": 100,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "c5573b952c4f3d2646bfc8e379a75cad10a95820ce70a08a3ef53ebdc7f9f302"
+  },
+  {
+   "name": "four-accents/campaign-link",
+   "style": {
+    "background": "101820",
+    "background_edge": "101820",
+    "ink": "f2f2f2",
+    "ink_shade": "f2f2f2",
+    "accents": [
+     "e0c080",
+     "80c0e0",
+     "c0e080",
+     "e080c0"
+    ],
+    "accent_percent": 100,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "ebac4cb1f19d8ca36ff72186b351fa79e3034fa97dec127377f8c3cdd990b6b8"
+  },
+  {
+   "name": "four-accents/v20",
+   "style": {
+    "background": "101820",
+    "background_edge": "101820",
+    "ink": "f2f2f2",
+    "ink_shade": "f2f2f2",
+    "accents": [
+     "e0c080",
+     "80c0e0",
+     "c0e080",
+     "e080c0"
+    ],
+    "accent_percent": 100,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "flat",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "45f1b9fbd3eaf2768c140770f3a4270575125d96108d35a535962283e552d576"
+  },
+  {
+   "name": "vignette-only/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "e8e8e8",
+    "ink": "202020",
+    "ink_shade": "202020",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "54bc07a9d6f4d26c422ac78ed933cbf2003cff2bda8bbc736e745546f321b864"
+  },
+  {
+   "name": "vignette-only/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "e8e8e8",
+    "ink": "202020",
+    "ink_shade": "202020",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "10cc21cbbf72cf328a86c9e67c5b3f966a6593b283337c0a93d945d304a18cff"
+  },
+  {
+   "name": "vignette-only/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "e8e8e8",
+    "ink": "202020",
+    "ink_shade": "202020",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "3fd0e01e4ce7c96b990bbafc7069cf9ebd1f3f799409ab779b1e2dcc28311048"
+  },
+  {
+   "name": "sheen-only/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "101010",
+    "ink_shade": "404040",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "5544a2c93dc764193fdaa3995c5b3b34a9db3ec28b6f0880bda2fcc4137bbdc7"
+  },
+  {
+   "name": "sheen-only/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "101010",
+    "ink_shade": "404040",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "11a7241ab117eb21d0bc17062cd380dca9e4b16e299e481f9e6dc8f5272dd072"
+  },
+  {
+   "name": "sheen-only/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "101010",
+    "ink_shade": "404040",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "73469788af49b1a05ff5d48fb8930268f0e6027abcd0fc86b011cf22b96fcb76"
+  },
+  {
+   "name": "texture-only/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 25
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "14d4cdca72624bdd8e62d2f73184c432a03d1d0609f8be8837ef79d524e5e090"
+  },
+  {
+   "name": "texture-only/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 25
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "caf7326bad2d6d9cede4e71fcc3cbfc09c2affca0ea859224393096bc533e380"
+  },
+  {
+   "name": "texture-only/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 25
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "45532dcc82fa0790d9685a9d26b86995b1b99558a545a42d08101f4717ff95fe"
+  },
+  {
+   "name": "shadow-only/connect-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 40,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "584f18dd0d9658723adc855b91bdcf09808637b988b6af3886e000d15c7a46b7"
+  },
+  {
+   "name": "shadow-only/campaign-link",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 40,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "4d9b8ea40b831e8502e09495a96ec91ca170af576aee343a74a3614efec9b39f"
+  },
+  {
+   "name": "shadow-only/v20",
+   "style": {
+    "background": "ffffff",
+    "background_edge": "ffffff",
+    "ink": "000000",
+    "ink_shade": "000000",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 40,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "cd949de6bca316577924a6d4f71d48246e5b7168d88944741813e41f7999b6bc"
+  },
+  {
+   "name": "bevel-only/connect-link",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "ffffff",
+    "ink_shade": "ffffff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 100,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "f8e0230692cf6918d79e86bf90cdc5277626f414b94307ee46630688babf4d3a"
+  },
+  {
+   "name": "bevel-only/campaign-link",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "ffffff",
+    "ink_shade": "ffffff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 100,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "9ed3415d0e931e7fc67d2dd333c70920eee522e83b387cb8b6ed4f4f7d0e88ee"
+  },
+  {
+   "name": "bevel-only/v20",
+   "style": {
+    "background": "000000",
+    "background_edge": "000000",
+    "ink": "ffffff",
+    "ink_shade": "ffffff",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 100,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "fd020de4157e92ca0394e0eb6477636f7ea2ace24c9e244e986bb13d3925e788"
+  },
+  {
+   "name": "navy-at-3/connect-link",
+   "style": {
+    "background": "14161e",
+    "background_edge": "14161e",
+    "ink": "636363",
+    "ink_shade": "636363",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "26ef706367da0c32336cff2be4088382fbe5b8ac5d36f2d34e7dc2cfc8f70a88"
+  },
+  {
+   "name": "navy-at-3/campaign-link",
+   "style": {
+    "background": "14161e",
+    "background_edge": "14161e",
+    "ink": "636363",
+    "ink_shade": "636363",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "efee7a4b4a429bb7f0b6233dd43c63a2b571fadfe41cf0df0b2b1abb5eba22eb"
+  },
+  {
+   "name": "navy-at-3/v20",
+   "style": {
+    "background": "14161e",
+    "background_edge": "14161e",
+    "ink": "636363",
+    "ink_shade": "636363",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "square",
+    "rings": "joined",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "05a3cc88e87d35d1019ce7b173089cc04356d1a589a8b58adba74266786a357d"
+  },
+  {
+   "name": "ivory-at-3/connect-link",
+   "style": {
+    "background": "f5f2ec",
+    "background_edge": "f5f2ec",
+    "ink": "8c8c8c",
+    "ink_shade": "8c8c8c",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f414632333435",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "d9d809f84970c5eb99c3ef94e6132a992e536ecc5ff942521d0f81d72b6f308b"
+  },
+  {
+   "name": "ivory-at-3/campaign-link",
+   "style": {
+    "background": "f5f2ec",
+    "background_edge": "f5f2ec",
+    "ink": "8c8c8c",
+    "ink_shade": "8c8c8c",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "68747470733a2f2f766961646572652e636f6d2f632f4146323334353f6374783d65794a68593351694f694a6c626e4a7662477866636d563359584a6b63794973496d4e7463434936496e4e77636d6c755a79316d62486c6c63694973496d563463434936496a49774d6a59744d5449744d5452554d4441364d4441364d4441754d44417757694973496d6c6864434936496a49774d6a59744d5445744d5452554d4441364d4441364d4441754d44417757694973496d74705a434936496d4d78496e30267369673d41414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838",
+   "requested_version": 0,
+   "level": 1,
+   "svg_sha256": "0c3cb995fbf9c0109ba1c20585f774725c5dab916f77e82bca7884e835355aa0"
+  },
+  {
+   "name": "ivory-at-3/v20",
+   "style": {
+    "background": "f5f2ec",
+    "background_edge": "f5f2ec",
+    "ink": "8c8c8c",
+    "ink_shade": "8c8c8c",
+    "accents": [],
+    "accent_percent": 0,
+    "modules": "rounded",
+    "rings": "dots",
+    "rays": "round",
+    "bevel": 0,
+    "shadow": 0,
+    "texture": 0
+   },
+   "payload": "207bf742fe0ce079dc4e0dd7c2cb8a707ae94c6cbc62caf6953f5eb65aead64825705d39ba5bab47e0905a4cc0874b735c1f4cd8f4d9b6c84daab4b969f9fc4fa4fc3feb7ce0bd8268fde8640ec4a661ddd94f83b3be580638cf5ae0dd3b3f78e14b69568f8be6251c0e96bb36e3a54b1d48881434f9e79cf6952ddd65ba97bf179b038a9453595ac15d837839ce0f0a80689911818bdd13561bbebdd28c9981cfc8bf519bf7efc956ebd8d434586851e0c0031725e475ef24ad65b80d7232f63f6d9e3e8c8b8652c52231f1ec3800d186a122e1b2c698f3ec455c8208743d28208424c54b2a66d0a12eddc5903f1e7f9c2ce03fe432cc28eae9b1a37bf94eb35d7dafe2afeb929871aec7d77339395721b2f2cb7c2c2d1487bd9a3466a9d316550c4ec3afde9bdbec5519e5",
+   "requested_version": 20,
+   "level": 2,
+   "svg_sha256": "f7f305fe8430305628730b221b1a7fe9da8a4521843064d1ad503b4fd605a8c1"
+  }
+ ]
+}

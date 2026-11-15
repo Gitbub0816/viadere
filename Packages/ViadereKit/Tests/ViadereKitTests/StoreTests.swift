@@ -148,6 +148,65 @@ struct ConnectViewModelTests {
         await model.connect()
         guard case .connected(let relationship) = model.phase else { Issue.record("expected connected"); return }
         #expect(relationship.source == .qr)
+        #expect(model.followUp == nil)
+    }
+
+    // MARK: Campaign follow-up actions (docs/SECURITY.md §2.106)
+
+    /// A link whose own `ctx` claims `action`; its signature is not one the device can check (nor needs to).
+    func campaignLink(_ code: BusinessCode, action: String) throws -> ConnectLink {
+        let json = #"{"act":"\#(action)","cmp":"spring","iat":"2026-11-14T10:00:00.000Z"}"#
+        let ctx = Data(json.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        return try ConnectLink.parse("https://viadere.com/c/\(code.canonical)?ctx=\(ctx)&sig=\(String(repeating: "A", count: 43))")
+    }
+
+    @Test func aVerifiedActionIsOfferedOnlyAfterTheUnchangedConsentReviewAndConnecting() async throws {
+        let (model, api) = await make()
+        let code = try #require(BusinessCode(parsing: "LD2R56"))
+        let link = try campaignLink(code, action: "enroll_rewards")
+        await api.setVerifiedContext(ConnectContext(campaign: "spring", action: "enroll_rewards", issuedAt: Date()), for: link.urlString)
+        await model.open(code: code, link: link, source: .qr)
+        // The review is the ordinary one: nothing pre-selected, no follow-up yet.
+        guard case .review = model.phase else { Issue.record("expected review, got \(model.phase)"); return }
+        #expect(model.optIns.isEmpty)
+        #expect(model.followUp == nil && model.followUpTab == nil)
+        await model.connect()
+        guard case .connected(let relationship) = model.phase else { Issue.record("expected connected"); return }
+        #expect(model.followUp == .enrollRewards)
+        #expect(model.followUpTab == .benefits)
+        #expect(model.followUpTitle == "See rewards")
+        // "Enroll rewards" only opens Benefits: the rewards purpose stays off unless the customer turned it on.
+        let consents = try await api.consents(for: relationship.id)
+        #expect(consents.first { $0.purpose == .rewards }?.granted == false)
+        #expect(consents.first { $0.purpose == .marketing }?.granted == false)
+        model.reset()
+        #expect(model.followUp == nil)
+    }
+
+    @Test func anActionTheServerDidNotVerifyOrThatIsOffTheListIsIgnored() async throws {
+        let (model, api) = await make()
+        let code = try #require(BusinessCode(parsing: "LD2R56"))
+        // The link claims an action but the server verified no context (forged or expired): nothing.
+        await model.open(code: code, link: try campaignLink(code, action: "open_messages"), source: .qr)
+        await model.connect()
+        guard case .connected = model.phase else { Issue.record("expected connected"); return }
+        #expect(model.followUp == nil)
+        // A verified context naming something off Core's closed list: nothing.
+        let (other, otherAPI) = await make()
+        let offList = try campaignLink(code, action: "pay_now")
+        await otherAPI.setVerifiedContext(ConnectContext(campaign: "spring", action: "pay_now", issuedAt: Date()), for: offList.urlString)
+        await other.open(code: code, link: offList, source: .qr)
+        await other.connect()
+        #expect(other.followUp == nil)
+        // A verified action for a link that is not this connection's (typed code, no link): nothing.
+        _ = api
+        let (typed, typedAPI) = await make()
+        await typedAPI.setVerifiedContext(ConnectContext(campaign: "spring", action: "open_messages", issuedAt: Date()), for: ConnectLink(code: code).urlString)
+        typed.setInput("LD2R56")
+        await typed.submit()
+        await typed.connect()
+        guard case .connected = typed.phase else { Issue.record("expected connected"); return }
+        #expect(typed.followUp == nil)
     }
 }
 

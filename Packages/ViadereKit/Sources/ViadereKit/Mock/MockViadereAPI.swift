@@ -570,12 +570,16 @@ public actor MockViadereAPI: ViadereAPI {
         return PreviewData.profile(for: match)
     }
 
+    /// Contexts the mock server "verified", by link (tests). A link not listed resolves without a context, as a forged one would.
+    public private(set) var verifiedContexts: [String: ConnectContext] = [:]
+    public func setVerifiedContext(_ context: ConnectContext?, for link: String) { verifiedContexts[link] = context }
+
     public func resolve(input: String) async throws -> DirectoryResolveResponse {
         await pause()
         switch DirectoryInput(parsing: input) {
         case .link(let link):
             guard let match = directory.first(where: { $0.code == link.code }) else { throw Self.notFound() }
-            return DirectoryResolveResponse(method: .link, matches: [match])
+            return DirectoryResolveResponse(method: .link, matches: [match], context: verifiedContexts[input])
         case .handle(let handle):
             guard let match = directory.first(where: { $0.handle == handle }) else { throw Self.notFound() }
             return DirectoryResolveResponse(method: .handle, matches: [match])

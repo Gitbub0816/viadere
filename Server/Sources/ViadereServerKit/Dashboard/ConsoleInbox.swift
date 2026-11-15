@@ -207,18 +207,20 @@ enum ConsoleInbox {
         let published = try await LoopPublicationRecord.query(on: req.db).filter(\.$businessId == businessId)
             .filter(\.$status == LoopPublicationStatus.active.rawValue).sort(\.$revision, .descending).all()
         var linkCards: [String] = []
+        let codeStyle = try await BusinessCodeStyleService(db: req.db, ctx: req.ctx).effective(businessId: businessId)
         var seenLoops = Set<UUID>()
         for publication in published where seenLoops.insert(publication.definitionId).inserted {
             guard let url = LoopInstallLink(loopId: LoopDefinitionID(publication.definitionId)).url(domain: req.ctx.config.linkDomain) else { continue }
             let installs = try await LoopInstallRecord.query(on: req.db).filter(\.$definitionId == publication.definitionId).filter(\.$businessId == businessId)
                 .filter(\.$uninstalledAt == nil).count()
-            let qr = (try? QRCode.encode(url.absoluteString, errorCorrection: .medium))?.svg(title: "QR code for the install link of \(definitions[publication.definitionId] ?? "this Loop")") ?? ""
+            // The business's styled code first, a plain QR code always beside it (§2.105).
+            let codes = (try? DashboardRoutes.codePair(link: url.absoluteString, style: codeStyle, what: "the install link of \(definitions[publication.definitionId] ?? "this Loop")")) ?? ""
             linkCards.append("""
-            <div class="cols"><div><div class="qr">\(qr)</div></div><div><h3>\(DashboardUI.esc(definitions[publication.definitionId] ?? "Loop"))</h3>\
+            <div class="lc"><div>\(codes)</div><div><h3>\(DashboardUI.esc(definitions[publication.definitionId] ?? "Loop"))</h3>\
             <pre>\(DashboardUI.esc(url.absoluteString))</pre><p class="mu sm">\(installs) customers have this Loop installed\(publication.rolloutPercent < 100 ? ". Viadere is still rolling it out, so not every customer can add it yet" : "").</p></div></div>
             """)
         }
-        let linksCard = linkCards.isEmpty ? "" : ConsoleUI.card("Install links", description: "Share a link or QR code so customers can add a published Loop in the Viadere app, whether or not they're connected to you. Customers who add a Loop without connecting send you only their answers to it; you can't message them.", linkCards.joined())
+        let linksCard = linkCards.isEmpty ? "" : ConsoleUI.card("Install links", description: "Share a link or a code so customers can add a published Loop in the Viadere app, whether or not they're connected to you. Customers who add a Loop without connecting send you only their answers to it; you can't message them.", linkCards.joined())
         let body = linksCard + ConsoleUI.callout(.accent, title: "How review works", """
         <p class="sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer (two for high-risk actions), then a signed publication. \
         You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review. Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p>

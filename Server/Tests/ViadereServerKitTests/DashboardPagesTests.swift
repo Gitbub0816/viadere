@@ -499,14 +499,15 @@ final class DashboardPagesTests: XCTestCase {
             XCTAssertEqual(resolved.context?.campaign, "spring-flyer")
             XCTAssertEqual(resolved.matches.first?.id.uuid, aId)
             // The QR in the page is exactly the QR of that link (rebuilt from the SVG path).
-            let svgStart = try XCTUnwrap(result.text.range(of: "<svg xmlns"))
+            let qrFigure = try XCTUnwrap(result.text.range(of: "data-code=\"qr\""))
+            let svgStart = try XCTUnwrap(result.text.range(of: "<svg xmlns", range: qrFigure.upperBound..<result.text.endIndex))
             let svgEnd = try XCTUnwrap(result.text.range(of: "</svg>", range: svgStart.lowerBound..<result.text.endIndex))
             let svg = String(result.text[svgStart.lowerBound..<svgEnd.upperBound])
             let expected = try QRCode.encode(urlString, errorCorrection: .medium)
             XCTAssertEqual(Self.modules(fromSVG: svg, size: expected.size, border: 4), expected.modules)
             XCTAssertFalse(svg.contains("<script"))
             // Download returns the SVG as an attachment with a locked-down CSP.
-            let download = try await h.formPost("/dashboard/campaigns/download", owner, [("campaign", "spring-flyer"), ("action", "enroll_rewards"), ("days", "30")])
+            let download = try await h.formPost("/dashboard/campaigns/download", owner, [("campaign", "spring-flyer"), ("code", "qr")])
             XCTAssertEqual(download.status, .ok)
             XCTAssertEqual(download.headers.first(name: .contentType), "image/svg+xml")
             XCTAssertTrue(download.headers.first(name: .contentDisposition)?.hasPrefix("attachment") == true)

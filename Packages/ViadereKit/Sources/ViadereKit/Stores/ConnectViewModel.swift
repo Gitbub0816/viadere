@@ -28,6 +28,30 @@ public final class ConnectViewModel {
     public private(set) var scanError: String?
     /// Opt-in purposes chosen on the review screen. Security and account service are always on and not listed here.
     public var optIns: Set<InteractionPurpose> = []
+    /// Where a campaign link asks the app to go **after** the connection exists (docs/SECURITY.md §2.106). Set only once `connect()` has
+    /// succeeded, and only from the context the server verified for this business (`DirectoryResolveResponse.context`), on Core's closed
+    /// list. The link's own `ctx` is never read here. It never selects, skips or changes a consent choice: the review is the same with or
+    /// without it.
+    public private(set) var followUp: CampaignAction?
+
+    /// The tab the follow-up opens.
+    public var followUpTab: AppTab? {
+        switch followUp?.destination {
+        case .benefits?: .benefits
+        case .messages?: .messages
+        case nil: nil
+        }
+    }
+
+    /// The button title for the follow-up.
+    public var followUpTitle: String? {
+        switch followUp {
+        case .enrollRewards?: "See rewards"
+        case .openBenefits?: "Open Benefits"
+        case .openMessages?: "Open Messages"
+        case nil: nil
+        }
+    }
 
     private var source: ConnectSource = .search
     private var link: ConnectLink?
@@ -116,6 +140,7 @@ public final class ConnectViewModel {
             return
         }
         optIns = []
+        followUp = nil
         phase = .review(profile)
     }
 
@@ -162,13 +187,24 @@ public final class ConnectViewModel {
         phase = .connecting
         let request = ConnectRequest(businessId: profile.id, source: source, link: link?.urlString,
                                      optInPurposes: InteractionPurpose.allCases.filter { optIns.contains($0) })
+        followUp = nil
         do {
-            phase = .connected(try await services.api.connect(request))
+            let relationship = try await services.api.connect(request)
+            followUp = await verifiedFollowUp(for: profile)
+            phase = .connected(relationship)
         } catch let error as APIError {
             phase = .failed(error.userMessage)
         } catch {
             phase = .failed("Something went wrong.")
         }
+    }
+
+    /// The follow-up the server verified for the link this connection came through, if any. Asked only after connecting; any failure
+    /// means no follow-up, never a different one.
+    private func verifiedFollowUp(for profile: BusinessProfile) async -> CampaignAction? {
+        guard let link, let resolved = try? await services.api.resolve(input: link.urlString), resolved.method == .link,
+              resolved.matches.count == 1, resolved.matches.first?.id == profile.id else { return nil }
+        return CampaignAction(verified: resolved.context)
     }
 
     public func reset() {
@@ -178,11 +214,13 @@ public final class ConnectViewModel {
         phase = .entry
         link = nil
         optIns = []
+        followUp = nil
         scanError = nil
     }
 
     public func backToEntry() {
         phase = .entry
         optIns = []
+        followUp = nil
     }
 }

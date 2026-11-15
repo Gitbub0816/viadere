@@ -331,39 +331,72 @@ struct DashboardActions {
 
     // MARK: Campaign links
 
-    static let identifierCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
-
+    /// A stored campaign with everything its page shows: the signed link, the plain link, and the business's code style.
     struct Campaign {
+        var record: CampaignRecord
         var link: ConnectLink
         var plainLink: ConnectLink
-        var qr: QRCode
-        var expiresAt: Date?
+        var style: BusinessCodeStyle
+        var expiresAt: Date? { record.expiresAt }
     }
 
-    func campaign(name: String, action: String?, validDays: Int) async throws -> Campaign {
-        try require(.manageCampaigns)
-        try requireVerified()
-        func clean(_ value: String?, _ field: String) throws -> String? {
-            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-            guard value.count <= 64, value.unicodeScalars.allSatisfy({ Self.identifierCharacters.contains($0) }) else {
-                throw APIError.validation("Use up to 64 letters, digits, dots, dashes or underscores.", details: [field: "invalid"])
-            }
-            return value
-        }
-        guard let campaignId = try clean(name, "campaign") else {
-            throw APIError.validation("Give the campaign a short identifier.", details: ["campaign": "required"])
-        }
-        let actionId = try clean(action, "action")
+    private func businessCode() async throws -> BusinessCode {
         guard let codeRecord = try await BusinessCodeRecord.query(on: db).filter(\.$businessId == businessId).first(),
               let code = BusinessCode(parsing: codeRecord.canonical) else { throw APIError.notFound }
-        let now = ctx.now
-        let days = min(max(validDays, 0), 365)
-        let expires = days == 0 ? nil : now.addingTimeInterval(TimeInterval(days) * 86_400)
-        let context = ConnectContext(campaign: campaignId, action: actionId, issuedAt: now, expiresAt: expires)
-        let link = try ctx.connectKeys.link(code: code, context: context, domain: ctx.config.linkDomain)
-        let qr = try QRCode.encode(link.urlString, errorCorrection: .medium)
-        try await audit("campaign.link_created", subjectType: "campaign", subjectId: campaignId)
-        return Campaign(link: link, plainLink: ConnectLink(code: code, domain: ctx.config.linkDomain), qr: qr, expiresAt: expires)
+        return code
+    }
+
+    private func campaign(_ record: CampaignRecord) async throws -> Campaign {
+        let code = try await businessCode()
+        return Campaign(record: record, link: try CampaignService(db: db, ctx: ctx).link(for: record, code: code),
+                        plainLink: ConnectLink(code: code, domain: ctx.config.linkDomain),
+                        style: try await BusinessCodeStyleService(db: db, ctx: ctx).effective(businessId: businessId))
+    }
+
+    /// Creates and stores a campaign. `identifier` goes into the signed context; `action` must be on Core's closed list.
+    func createCampaign(identifier: String, name: String?, action: String?, validDays: Int) async throws -> Campaign {
+        try require(.manageCampaigns)
+        try requireVerified()
+        let publicId = try CampaignService.cleanIdentifier(identifier)
+        let record = try await CampaignService(db: db, ctx: ctx).create(businessId: businessId, publicId: publicId,
+                                                                         name: try CampaignService.cleanName(name, fallback: publicId),
+                                                                         action: try CampaignService.cleanAction(action), validDays: validDays, actor: actor)
+        return try await campaign(record)
+    }
+
+    func campaign(id: UUID) async throws -> Campaign {
+        try require(.manageCampaigns)
+        try requireVerified()
+        return try await campaign(try await CampaignService(db: db, ctx: ctx).find(businessId: businessId, id: id))
+    }
+
+    func campaign(identifier: String) async throws -> Campaign {
+        try require(.manageCampaigns)
+        try requireVerified()
+        guard let record = try await CampaignService(db: db, ctx: ctx).find(businessId: businessId, publicId: try CampaignService.cleanIdentifier(identifier)) else {
+            throw APIError.notFound
+        }
+        return try await campaign(record)
+    }
+
+    struct CampaignRow {
+        var record: CampaignRecord
+        var status: CampaignService.Status
+        var connects: Int
+    }
+
+    func campaigns() async throws -> [CampaignRow] {
+        try require(.manageCampaigns)
+        let service = CampaignService(db: db, ctx: ctx)
+        let counts = try await service.connectCounts(businessId: businessId)
+        return try await service.list(businessId: businessId).map {
+            CampaignRow(record: $0, status: CampaignService.status($0, now: ctx.now), connects: counts[$0.id ?? UUID()] ?? 0)
+        }
+    }
+
+    func archiveCampaign(id: UUID) async throws {
+        try require(.manageCampaigns)
+        try await CampaignService(db: db, ctx: ctx).archive(businessId: businessId, id: id, actor: actor)
     }
 
     // MARK: Team
