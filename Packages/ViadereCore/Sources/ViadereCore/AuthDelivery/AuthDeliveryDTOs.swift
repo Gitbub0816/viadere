@@ -405,12 +405,15 @@ public struct AuthDeliveryEventPayload: Codable, Sendable, Hashable {
     public var deliveryId: AuthDeliveryID
     public var status: AuthDeliveryStatus
     public var reason: String?
+    /// Only on `auth.delivery.fallback_used`: the weaker channel that carried the code (`email`). Never the address, its domain or the code.
+    public var assurance: String?
 
-    public init(deliveryId: AuthDeliveryID, status: AuthDeliveryStatus, reason: String? = nil) {
+    public init(deliveryId: AuthDeliveryID, status: AuthDeliveryStatus, reason: String? = nil, assurance: String? = nil) {
         self.deliveryId = deliveryId
         self.status = status
         self.reason = reason
+        self.assurance = assurance
     }
 
-    enum CodingKeys: String, CodingKey { case deliveryId = "delivery_id", status, reason }
+    enum CodingKeys: String, CodingKey { case deliveryId = "delivery_id", status, reason, assurance }
 }

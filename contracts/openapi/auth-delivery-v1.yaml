@@ -53,6 +53,12 @@ info:
     ## Secrets
     The magic-link URL and the code are never returned to a business, never in a webhook, never in a push and never in a log. The device receives
     them once, from `open`.
+
+    ## Email fallback event
+    `auth.delivery.fallback_used` (additive in contract v1.x) is sent once when the email fallback this request asked for (`channels` with `email` and
+    `fallback.email.address`) was accepted by the email provider: the code left Viadere by email (`assurance: email`, ADR-0020 section 7). It is not a
+    state transition and never fires when the email was suppressed (policy, budget, silent, sandbox) or failed. Like every `auth.delivery.*` event it
+    is the opaque v2 envelope: no address, no domain, no code.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -683,6 +689,7 @@ components:
             - auth.delivery.denied
             - auth.delivery.cancelled
             - auth.delivery.expired
+            - auth.delivery.fallback_used
     AuthWebhookTestResponse:
       type: object
       required: [event_id]
