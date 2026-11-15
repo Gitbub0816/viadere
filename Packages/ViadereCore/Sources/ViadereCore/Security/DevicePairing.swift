@@ -238,3 +238,40 @@ public struct DevicePairingApproval: Codable, Sendable, Hashable {
         guard let key = try? registeredKey.signingKey(), key.isValidSignature(decoded, for: signingInput()) else { throw Failure.badSignature }
     }
 }
+
+/// The QR form of a pairing code (SECURITY.md §2.107): exactly `https://{link domain}/p/{XXXX-XXXX-XXXX}`, the code in its displayed form
+/// (upper case, the recovery alphabet `0-9 A-Z` without `I L O U`, dashes after the 4th and 8th characters). Nothing else: no `www.`, no port,
+/// no user info, no query, no fragment, no trailing slash, no lower case and none of the typed-entry leniency (`I`/`L`/`O`, spaces): a printed
+/// code is always produced by `build`, so anything that differs was not. The trusted device shows it; only a new device's pairing entry reads it.
+public enum DevicePairingLink {
+    public static let prefix = "/p/"
+    static let displayLength = 14
+
+    public static func build(code: String, domain: LinkDomain = .current) -> String? {
+        guard isDisplayCode(code) else { return nil }
+        return domain.origin + prefix + code
+    }
+
+    /// The code, or `nil` unless `text` is byte for byte what `build` makes for this link domain.
+    public static func parse(_ text: String, domain: LinkDomain = .current) -> String? {
+        let head = domain.origin + prefix
+        guard text.utf8.count == head.utf8.count + displayLength, text.hasPrefix(head) else { return nil }
+        let code = String(text.dropFirst(head.count))
+        guard isDisplayCode(code), build(code: code, domain: domain) == text else { return nil }
+        return code
+    }
+
+    /// `XXXX-XXXX-XXXX` with every `X` in the alphabet, exactly as `DevicePairingCode.generate` writes it.
+    public static func isDisplayCode(_ code: String) -> Bool {
+        let bytes = Array(code.utf8)
+        guard bytes.count == displayLength else { return false }
+        for (index, byte) in bytes.enumerated() {
+            if index == 4 || index == 9 {
+                guard byte == UInt8(ascii: "-") else { return false }
+            } else {
+                guard RecoveryCodeFormat.alphabet.contains(Character(Unicode.Scalar(byte))) else { return false }
+            }
+        }
+        return true
+    }
+}

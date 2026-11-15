@@ -70,6 +70,19 @@ public final class OnboardingViewModel {
         NewDevicePairingViewModel(pairing: services.newDevicePairing, deviceName: deviceName, now: services.clock)
     }
 
+    /// The pairing entry on screen ("I already use Viadere"), when it is open.
+    public var pairing: NewDevicePairingViewModel?
+
+    public func openPairing() { if pairing == nil { pairing = makeNewDevicePairing() } }
+
+    /// A code from an opened `/p/{code}` link (`AppModel.pendingDevicePairingCode`): on the welcome step only, it opens the pairing entry with
+    /// the code filled in (the entry refuses it on an enrolled device). The person still taps Continue.
+    public func openPairing(prefilled code: String) async {
+        guard step == .welcome else { return }
+        openPairing()
+        await pairing?.prefill(code: code)
+    }
+
     public init(services: ViadereServices, deviceName: String = "My iPhone", start: OnboardingStep = .welcome) {
         self.services = services
         self.phoneLink = PhoneLinkViewModel(services: services)

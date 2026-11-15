@@ -48,8 +48,9 @@ public struct AuthLinkDisplay: Sendable, Equatable {
     /// The delivery's request id and purpose as the api states them: the statement's `brq` and `purpose` must equal them (ADR-0031 §4 step 4).
     public var requestId: String?
     public var purpose: AuthDeliveryPurpose?
-    /// A Viadere link-service delivery (`link_mode: "viadere"`): answered with an authority challenge, never by a business-signed destination. This
-    /// build has no link-service screen yet, so every verifier treats it as not supported (nothing opened, nothing reported).
+    /// A Viadere link-service delivery (`link_mode: "viadere"`): answered with an authority challenge on the link-service screen
+    /// (`LinkServiceViewModel`), never by a business-signed destination: every destination verifier treats it as not supported (nothing opened,
+    /// nothing reported).
     public var linkService = false
 
     public init(deliveryId: UUID, business: String, businessVerified: Bool, host: String, expiresAt: Date, state: State = .open,

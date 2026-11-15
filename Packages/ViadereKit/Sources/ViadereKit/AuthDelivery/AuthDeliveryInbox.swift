@@ -27,6 +27,9 @@ public struct AuthDeliveryInboxRow: Sendable, Equatable, Identifiable {
 /// Which sheet a delivery opens.
 public enum AuthDeliverySurface: Sendable, Equatable {
     case link
+    /// A Viadere link-service delivery (`link_mode: "viadere"`): answered on the link-service screen (`LinkServiceViewModel`), never opened.
+    /// Chosen from the delivery's `link_mode` only; the server refuses the mode unless `AUTH_LINK_SERVICE_ENABLED` is on.
+    case linkService
     case code
     /// A security notice (N-06): there is nothing to open; the sheet says who sent it. The name is already sanitized.
     case notice(business: String)
@@ -39,7 +42,7 @@ public enum AuthDeliverySurface: Sendable, Equatable {
             let item = try await api.item(deliveryId: deliveryId)
             // An expired or used link or code still goes to its own sheet, which says so in its own words (S-LINK-06/07, C-OTP-02).
             switch item.kind {
-            case .link: return .link
+            case .link: return item.linkService ? .linkService : .link
             case .code: return .code
             case .notice: return .notice(business: UntrustedText.name(item.business, max: 40, attribution: nil).text)
             }
@@ -55,7 +58,7 @@ public enum AuthDeliverySurface: Sendable, Equatable {
     /// The line for `.notice` (N-06) and `.none` (E-02, E-03).
     public var message: String? {
         switch self {
-        case .link, .code: return nil
+        case .link, .linkService, .code: return nil
         case .notice(let business): return AuthDeliveryCopy.n06Body(business: business)
         case .none(.offline): return AuthDeliveryCopy.offline
         case .none: return AuthDeliveryCopy.noLongerActive
@@ -157,8 +160,22 @@ public struct AuthDeliveryNotificationText: Sendable, Equatable {
     ///   - item: the fetched display object.
     ///   - category: the category the push arrived with. The fetched method must be the one the category names; a mismatch is generic.
     ///   - now: the device clock. A delivery that is no longer open or already expired is generic (never a stale business name).
-    public static func make(item: AuthDeliveryItem, category: String, now: Date) -> AuthDeliveryNotificationText {
+    ///   - showsBusinessName: "Show business names on the Lock Screen" (`PreferenceKey.lockScreenBusinessNames`, off by default). Off, the title
+    ///     is "Viadere" and the line names no business (N-02a, N-05a, N-06a).
+    public static func make(item: AuthDeliveryItem, category: String, now: Date, showsBusinessName: Bool) -> AuthDeliveryNotificationText {
         guard item.state == .open, item.expiresAt > now else { return .generic }
+        if !showsBusinessName {
+            switch item.kind {
+            case .link where category == AuthNotificationCategory.link:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n02BodyNameless)
+            case .code where category == AuthNotificationCategory.code:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n05BodyNameless)
+            case .notice where category == AuthNotificationCategory.notice:
+                return AuthDeliveryNotificationText(title: AuthDeliveryCopy.n01Title, body: AuthDeliveryCopy.n06BodyNameless)
+            default:
+                return .generic
+            }
+        }
         let name = UntrustedText.name(item.business, max: 40, attribution: nil)
         // A name that imitates Viadere never becomes a notification title.
         guard !name.impersonatesViadere, name.text != "Unnamed business" else { return .generic }

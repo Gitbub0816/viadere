@@ -11,7 +11,10 @@ struct NotificationBrandAttachmentTests {
         let authorize = PreviewData.authorize(business: PreviewData.northfield)
         await api.add(confirm)
         await api.add(authorize)
-        let enricher = NotificationEnricher(api: api)
+        // A logo names the business as plainly as its name: it is attached only with "Show business names on the Lock Screen" on.
+        let names = InMemoryPreferences()
+        names.setBool(true, for: .lockScreenBusinessNames)
+        let enricher = NotificationEnricher(api: api, preferences: names)
         let brandAPI = try await BK.served()
         let store = BK.store(api: brandAPI, assets: brandAPI)
         _ = await store.refresh(BK.business)

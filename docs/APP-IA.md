@@ -223,3 +223,17 @@ Rules the screens follow:
   detailed choice needs Face ID or the passcode.
 * **Home Screen widget** (small, medium): the count of waiting requests and, medium only, benefits available; neutral when signed out
   or a day stale. A tap opens the app. The app writes only numbers (`HomeWidgetWriter`, `WidgetSnapshot`).
+
+## 11. Link service, business names on the Lock Screen and the pairing QR (2026-11-15)
+
+* **Link-service deliveries** (`link_mode: "viadere"`): the delivery sheet now routes them to `LinkServiceScreen` (UX_COPY LS-01 to LS-08)
+  instead of "not supported". Same states and motion as the OIDC sheet (§9.1): `ViadereLoadingState` while the statement is checked, the
+  question, then one `ViadereOutcome` (success only for an accepted approval, neutral for Deny and This wasn't me, caution otherwise) and one
+  warning haptic for a wrong number. Footer: This wasn't me · Deny · Approve, one component of equal `.secondary` buttons, side by side until
+  they would truncate, then stacked; the number field only when the challenge asks for one. Nothing on it opens a URL.
+* **Show business names on the Lock Screen** (You → Notifications, beside "Live Activity details", searchable): two choice cards, "Just
+  Viadere" by default; "The business name" needs Face ID or the passcode. Off, every notification is titled "Viadere" and has no logo.
+* **Pairing QR**: Settings → Trusted devices → Add another device shows the code and, under it, the same code as a QR (`QRCodeView`, the
+  white plate of §9). The new device's pairing entry has "Scan the code" (the shared `CodeScannerScreen`, refusals in its fixed sentence);
+  a scan or an opened `/p/` link only fills the field, and Continue stays the person's tap. Any other scanner, or an enrolled device,
+  refuses it with the S-PAIR-10 line.

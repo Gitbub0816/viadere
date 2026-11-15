@@ -53,6 +53,9 @@ public final class AppModel {
     public var scannerPresented = false
     /// A handle or code read by the scanner, for Add business to look up.
     public var scannedLookup: String?
+    /// A pairing code from an opened `/p/{code}` link, for the new device's pairing entry in onboarding (`openDevicePairing`). Never set on an
+    /// enrolled device; onboarding takes it once and clears it.
+    public var pendingDevicePairingCode: String?
     /// What the scanner accepted, until the shell delivers it.
     public private(set) var scannedDecision: ScannedCodeDecision?
     /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
@@ -280,6 +283,7 @@ public final class AppModel {
         pendingVerificationSession = nil
         pendingAuthDelivery = nil
         pendingOIDCSignIn = nil
+        pendingDevicePairingCode = nil
         conversationToOpen = nil
         businessToOpen = nil
         addBusinessPresented = false
@@ -370,6 +374,8 @@ public final class AppModel {
     public func handle(_ link: DeepLink) async {
         // Nothing is routed, fetched or presented while locked: it waits for the unlock.
         guard !isLocked else { enqueueWhileLocked(link); return }
+        // A pairing code's link is never queued for later: it is for this moment's onboarding or for nothing.
+        if case .devicePairing(let code) = link { await openDevicePairing(code); return }
         guard phase == .ready else { queuedLink = link; return }
         switch link {
         case .connect(let code, let link):
@@ -411,6 +417,26 @@ public final class AppModel {
             pendingVerificationSession = PendingVerificationSession(code: code)
         case .oidcSignIn(let challengeId):
             pendingOIDCSignIn = PendingOIDCSignIn(challengeId: challengeId)
+        case .devicePairing:
+            // Handled above (`openDevicePairing`).
+            break
+        }
+    }
+
+    /// `/p/{code}` opened from the system camera or a tap (SECURITY.md §2.107). Only a device that is not enrolled (no session, no device record)
+    /// and is in onboarding takes it, and only as a code for its pairing entry, which still needs Continue. An enrolled device says so and keeps
+    /// nothing.
+    func openDevicePairing(_ code: String) async {
+        let signedIn = await services.sessions.isSignedIn
+        let record = try? await services.records.load()
+        guard !signedIn, record == nil else {
+            pendingDevicePairingCode = nil
+            toast = ScanRejection.pairingOnEnrolledDevice.message
+            return
+        }
+        switch phase {
+        case .onboarding, .launching: pendingDevicePairingCode = code
+        case .ready, .needsReenrollment: toast = ScanRejection.pairingOnEnrolledDevice.message
         }
     }
 
@@ -518,6 +544,7 @@ public final class AppModel {
         pendingLinkSession = nil
         pendingVerificationSession = nil
         pendingOIDCSignIn = nil
+        pendingDevicePairingCode = nil
         conversationToOpen = nil
         businessToOpen = nil
         lockedQueue.removeAll()

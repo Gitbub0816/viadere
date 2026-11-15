@@ -7,6 +7,7 @@ import UIKit
 struct QRCodeView: View {
     let payload: String
     var size: CGFloat = 188
+    var accessibilityText: String = "QR code for the business to scan"
 
     var body: some View {
         Group {
@@ -24,7 +25,7 @@ struct QRCodeView: View {
         .padding(ViadereSpace.m)
         .background(RoundedRectangle(cornerRadius: ViadereRadius.card, style: .continuous).fill(Color.white))
         .overlay(RoundedRectangle(cornerRadius: ViadereRadius.card, style: .continuous).strokeBorder(ViadereColor.hairline, lineWidth: 1))
-        .accessibilityLabel(Text("QR code for the business to scan"))
+        .accessibilityLabel(Text(accessibilityText))
     }
 
     private static let context = CIContext()

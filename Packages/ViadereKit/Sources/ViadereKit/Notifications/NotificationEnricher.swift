@@ -136,6 +136,12 @@ public struct NotificationEnricher: Sendable {
     }
 
     private var richPreviews: Bool { preferences?.bool(.richNotificationPreviews) ?? false }
+    /// "Show business names on the Lock Screen" (UX_COPY §0 rule 5): off by default and without a store. Detailed previews ("Who, amount and
+    /// place") are an explicit choice to show who is asking, so they name the business too.
+    private var businessNames: Bool { (preferences?.bool(.lockScreenBusinessNames) ?? false) || richPreviews }
+
+    /// The title of a notification that names no business (N-01).
+    public static let namelessTitle = AuthDeliveryCopy.n01Title
 
     /// Returns `nil` if the push carries no interaction id (leave the notification untouched).
     public func enrich(userInfo: [AnyHashable: Any]) async -> EnrichedNotification? {
@@ -150,7 +156,7 @@ public struct NotificationEnricher: Sendable {
 
         if envelope.status != .pending && envelope.interaction.kind != .status {
             return EnrichedNotification(
-                title: UntrustedText.name(envelope.business.displayName, max: 40).text, subtitle: "Already handled",
+                title: businessNames ? UntrustedText.name(envelope.business.displayName, max: 40).text : Self.namelessTitle, subtitle: "Already handled",
                 body: "This request was already handled.", threadIdentifier: "business.\(envelope.business.id)",
                 interruptionLevel: .passive, category: NotificationCategoryModel(identifier: "viadere.status", actions: []),
                 userInfo: ["interactionId": id.description, "businessId": envelope.business.id.description], requiresSecureFlow: false,
@@ -158,7 +164,7 @@ public struct NotificationEnricher: Sendable {
         }
         if envelope.interaction.isExpired(at: now) && envelope.interaction.kind != .status {
             return EnrichedNotification(
-                title: UntrustedText.name(envelope.business.displayName, max: 40).text, subtitle: "Expired",
+                title: businessNames ? UntrustedText.name(envelope.business.displayName, max: 40).text : Self.namelessTitle, subtitle: "Expired",
                 body: "This request has expired.", threadIdentifier: "business.\(envelope.business.id)",
                 interruptionLevel: .passive, category: NotificationCategoryModel(identifier: "viadere.status", actions: []),
                 userInfo: ["interactionId": id.description, "businessId": envelope.business.id.description], requiresSecureFlow: false,
@@ -179,7 +185,8 @@ public struct NotificationEnricher: Sendable {
                 }
             } else {
                 subtitle = InteractionPresentation.kindLabel(envelope.interaction)
-                body = Self.genericBody(for: envelope.interaction.kind, business: business.text, verified: envelope.business.isVerified)
+                body = businessNames ? Self.genericBody(for: envelope.interaction.kind, business: business.text, verified: envelope.business.isVerified)
+                    : Self.namelessBody(for: envelope.interaction.kind, verified: envelope.business.isVerified)
             }
         }
         let actions = rendering.category.actions.map { action -> NotificationActionModel in
@@ -188,13 +195,21 @@ public struct NotificationEnricher: Sendable {
             model.title = title.isEmpty ? "Option" : title
             return model
         }
+        // Without names there is no logo either: a logo says which business it is as plainly as its name.
         return EnrichedNotification(
-            title: business.text, subtitle: subtitle, body: body, threadIdentifier: rendering.threadIdentifier,
+            title: businessNames ? business.text : Self.namelessTitle, subtitle: subtitle, body: body, threadIdentifier: rendering.threadIdentifier,
             interruptionLevel: rendering.interruptionLevel,
             category: NotificationCategoryModel(identifier: rendering.category.identifier, actions: actions), userInfo: userInfo,
             requiresSecureFlow: rendering.requiresSecureFlow, isFallback: false,
-            brand: NotificationBrandContext(businessId: envelope.business.id, interactionId: envelope.interaction.id,
-                                            purpose: envelope.interaction.purpose, kind: envelope.interaction.kind))
+            brand: businessNames ? NotificationBrandContext(businessId: envelope.business.id, interactionId: envelope.interaction.id,
+                                                            purpose: envelope.interaction.purpose, kind: envelope.interaction.kind) : nil)
+    }
+
+    /// The lock-screen line for a sign-in or approval when business names are off: what kind of request, not who or what for. An unverified
+    /// business is still called out (the warning matters more than the name).
+    public static func namelessBody(for kind: InteractionKind, verified: Bool) -> String {
+        let base = kind == .authenticate ? "Sign-in approval requested" : "Approval requested"
+        return verified ? base : base + " by an unverified business"
     }
 
     /// Lock-screen text that names only who is asking, never what for.

@@ -107,7 +107,7 @@ struct SettingsView: View {
         case .devices: DevicesView(vm: vm)
         case .authenticator: AuthenticatorView(backTitle: "You")
         case .recovery: RecoveryCodesSettingsView(vm: vm)
-        case .notifications, .lockScreenDetails, .liveActivityDetails, .businessNotifications:
+        case .notifications, .lockScreenDetails, .lockScreenBusinessNames, .liveActivityDetails, .businessNotifications:
             NotificationSettingsView(model: model, vm: vm) { id in path.append(.business(id)) }
         case .loops: LoopSettingsView(model: model)
         case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
@@ -365,6 +365,23 @@ struct NotificationSettingsView: View {
                                              symbol: "rectangle.badge.checkmark"),
                                    ])
                 Text(LiveActivityDetailsSetting.explanation)
+                    .font(ViadereType.footnote)
+                    .foregroundStyle(ViadereColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, ViadereSpace.m)
+            // Business names on the Lock Screen (UX_COPY §0 rule 5): off by default; turning them on needs Face ID or the passcode.
+            VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+                ViadereChoiceCards(LockScreenBusinessNamesSetting.label,
+                                   selection: Binding(get: { vm.lockScreenBusinessNamesEnabled },
+                                                      set: { value in Task { await vm.setLockScreenBusinessNames(value) } }),
+                                   options: [
+                                       .init(false, LockScreenBusinessNamesSetting.hiddenTitle, detail: LockScreenBusinessNamesSetting.hiddenDetail,
+                                             symbol: "eye.slash"),
+                                       .init(true, LockScreenBusinessNamesSetting.shownTitle, detail: LockScreenBusinessNamesSetting.shownDetail,
+                                             symbol: SettingsDestination.lockScreenBusinessNames.symbol),
+                                   ])
+                Text(LockScreenBusinessNamesSetting.explanation)
                     .font(ViadereType.footnote)
                     .foregroundStyle(ViadereColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

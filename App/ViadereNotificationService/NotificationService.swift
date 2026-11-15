@@ -17,6 +17,10 @@ import ViadereKit
 /// no URL and no code) and shows the approved N-02, N-05 or N-06 line (`AuthDeliveryNotificationText`). It never calls `open`, so nothing
 /// is consumed and a code can never reach a notification. Any failure, a phone not unlocked since restart, a method that does not match
 /// the category, or the time limit leaves the generic N-08 line, with the category (and its actions) kept.
+///
+/// "Show business names on the Lock Screen" (`PreferenceKey.lockScreenBusinessNames`, off by default; UX_COPY §0 rule 5) is read from the app
+/// group (`services.preferences`): off, every title is "Viadere", no line names a business and no logo is attached (the Kit enricher and
+/// `AuthDeliveryNotificationText` apply it).
 final class NotificationService: UNNotificationServiceExtension {
     private static let services = ViadereServices.live(configuration: ViadereRuntime.configuration)
     private var pending: PendingDelivery?
@@ -32,10 +36,12 @@ final class NotificationService: UNNotificationServiceExtension {
             let delivery = PendingDelivery(content: mutable, handler: contentHandler, keepsCategory: true)
             pending = delivery
             let api = Self.services.authDelivery
+            // "Show business names on the Lock Screen" (off by default), read from the app group like every other preference here.
+            let showsBusinessName = Self.services.preferences.bool(.lockScreenBusinessNames)
             task = Task {
                 let text: AuthDeliveryNotificationText
                 if let item = try? await api.item(deliveryId: deliveryId) {
-                    text = AuthDeliveryNotificationText.make(item: item, category: category, now: Date())
+                    text = AuthDeliveryNotificationText.make(item: item, category: category, now: Date(), showsBusinessName: showsBusinessName)
                 } else {
                     text = .generic
                 }

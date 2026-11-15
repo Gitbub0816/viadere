@@ -156,7 +156,9 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
         // sqlite-kit backs `.memory` with a temporary file it never deletes, so every test run left one behind in /tmp (gigabytes
         // over a full suite). Own the file instead and remove it at shutdown.
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("viadere-test-\(UUID().uuidString).sqlite3").path
-        app.databases.use(.sqlite(.file(path)), as: .sqlite)
+        // One connection for the process: concurrent deferred transactions on separate connections deadlock in SQLite and fail at once with
+        // SQLITE_BUSY, which no busy timeout prevents (`SerializedSQLiteConfiguration`).
+        app.databases.use(SerializedSQLiteConfiguration.file(path), as: .sqlite)
         app.lifecycle.use(TemporaryDatabaseCleanup(path: path))
     }
     app.migrations.add(Migrations.all)

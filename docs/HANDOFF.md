@@ -6,6 +6,19 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Link-service screen, Lock Screen names, pairing QR, SQLite contention (2026-11-15).** A `link_mode: "viadere"` delivery now opens
+`LinkServiceScreen` (Kit `LinkServiceViewModel`): the relayed `link_open` challenge is verified against the pinned statement keys, the screen
+shows only the signed tenant, client and return host, a number is typed when the challenge asks for one, and the answer is a factor signed with
+the biometric approval key, sent to `link-evidence`. **It never opens a URL**, so a same-device approval registers the code hash but the business
+page never receives `#vdr_code` and cannot redeem: opening the signed return URL (ADR-0021 §5.3) is a decision for the owner and a separate,
+reviewed change (`LinkServiceViewModel.handoff` holds the URL in memory for it). "Show business names on the Lock Screen" exists (off by default:
+notifications say "Viadere", no logo), read by the notification service extension from the app group. The pairing code is also shown as a QR of
+`https://{link domain}/p/{code}`; only a new device's pairing entry reads it (scanner or universal link), an enrolled device refuses it everywhere,
+the server lists `/p/*` in the AASA with a fallback page that reads nothing, and log lines mask the code. SQLite (development and tests) runs on
+one connection per process: two connections deadlocked in deferred transactions and SQLite returned BUSY at once, which no busy timeout prevents
+(`SQLiteContentionTests`). Normative: [`SECURITY.md`](SECURITY.md) §2.104 (gate step 5), §2.107, §2.110 (device side); copy: UX_COPY §0 rule 5,
+N-02a/N-03a/N-05a/N-06a, N-SET-01, LS-01..08, S-PAIR-09/10, WEB-07. Not verified: the app build (syntax-parsed only), the PostgreSQL run.
+
 **Profile changes, console recovery, analytics rollups and branded passes (2026-11-15).** A verified business can ask to change its public name,
 handle or website from Organization; the change waits in `business_profile_changes` (customers never see it) until two different operators approve
 it under `/operator/profile-changes`, with the impersonation checks of verification re-run at each approval (Viadere look-alikes, names confusable
@@ -26,8 +39,8 @@ possession, attested DNS/well-known evidence, 13-month limit; reduce-only revoca
 `AuthDeliveryFlags.destinationVerification` and pinned keys, and checks the opened URL bytes against `url_sha256`. The link service
 (`link_mode: "viadere"`, `AUTH_LINK_SERVICE_ENABLED`, refused in production) creates deliveries with a business-bound authority challenge,
 relays the device's evidence and completes the delivery on redemption. Normative: [`SECURITY.md`](SECURITY.md) §2.110; owner steps:
-[`ops/AUTHORITY-OWNER-CHECKLIST.md`](ops/AUTHORITY-OWNER-CHECKLIST.md) section E2. Not built: the app's link-service screen, cross-device
-link-service creates, a business-facing relay for the registration nonce. Not verified: the PostgreSQL run, live DNS evidence fetching.
+[`ops/AUTHORITY-OWNER-CHECKLIST.md`](ops/AUTHORITY-OWNER-CHECKLIST.md) section E2. Not built: cross-device link-service creates, a business-facing
+relay for the registration nonce, and the same-device hand-off (the app's link-service screen exists since, but opens nothing). Not verified: the PostgreSQL run, live DNS evidence fetching.
 
 **Console conversations, benefits and RCS rich cards (2026-11-15).** A business without an integration can now read and answer customer messages in
 the console (`Dashboard/ConsoleConversations.swift`: list, thread, reply through `ConversationService.businessSend`, assign, close, reopen; reads
