@@ -6,6 +6,19 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**RFC 9421 request signatures and the `push_approval` view (2026-11-15, G9/G22).** A live API key can now send sign-in prompts with an HTTP
+Message Signature instead of mutual TLS: `AUTH_LIVE_KEY_ASSURANCE=mtls_or_signature` is the staging and production default (`mtls` keeps the
+certificate-only rule). Profile (`ecdsa-p256-sha256` raw `r||s` low S; exactly `@method @authority @path @query content-digest content-type`;
+`created`/`expires`/`keyid`/`nonce`/`tag="viadere-api-v1"`; 300 s windows; single-use nonce in the replay store) lives in Core and is verified by
+`BusinessAPIKeyMiddleware` before any handler; `@authority` comes from `REQUEST_SIGNATURE_AUTHORITIES` (default the host of `PUBLIC_BASE_URL`), never
+`Host`. Keys are registered under Security > Request signing (Owner or Security Admin, passkey step-up, proof of possession over a single-use
+challenge; bound to one API key and carried through rotation; audited, Owners mailed). Swift (`requestSigner:`) and TypeScript (`requestSigner`)
+SDKs sign opt-in with KMS-capable signers; vectors `docs/protocol/vectors/http-signatures-v1.json` come from an independent Python generator and
+are checked by Core, server, Swift SDK and Node tests. The `push_approval` record is readable through `GET /v1/business/auth-deliveries/{id}`
+(`ViewMethod`) and emits `auth.delivery.*` events. Normative: [`SECURITY.md`](SECURITY.md) §2.112, §2.103 (`push_approval` record); ADR-0020
+implementation note. Not done: Kotlin SDK signing (and the Kotlin `ViewMethod` change is unbuilt), two-person approval for signing-key
+registration, a business-wide "signatures on every route" switch. Verified 2026-11-15: Core 647 + 44, Business SDK 90 + 8, Server 1248 (9 skipped) + 109 on SQLite, Node 336. Not verified: the PostgreSQL run.
+
 **Profile changes, console recovery, analytics rollups and branded passes (2026-11-15).** A verified business can ask to change its public name,
 handle or website from Organization; the change waits in `business_profile_changes` (customers never see it) until two different operators approve
 it under `/operator/profile-changes`, with the impersonation checks of verification re-run at each approval (Viadere look-alikes, names confusable
