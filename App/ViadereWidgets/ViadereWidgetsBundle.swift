@@ -5,5 +5,6 @@ import WidgetKit
 struct ViadereWidgetsBundle: WidgetBundle {
     var body: some Widget {
         ViadereLiveActivityWidget()
+        ViadereRequestsWidget()
     }
 }
