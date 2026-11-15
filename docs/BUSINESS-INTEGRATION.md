@@ -604,8 +604,19 @@ Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `req
 
 Let customers connect from your site, email or print.
 
-* **Campaign links and QR** (dashboard → *Campaigns*): generates `https://viadere.com/c/{CODE}?ctx=…&sig=…` with a signed campaign context and renders the QR code
-  as an SVG on the server (nothing is sent to a third party). The context is optional; if it is missing, expired or invalid, the plain code still resolves.
+* **Campaign links and codes** (dashboard → *Campaigns*): creates a stored campaign and its link `https://viadere.com/c/{CODE}?ctx=…&sig=…` with a signed
+  campaign context, and draws your code and a plain QR code beside it as SVG on the server (nothing is sent to a third party); both download as SVG.
+  The context is optional; if it is missing, expired or invalid, the plain code still resolves.
+  * The list shows each campaign's status (active, expired, archived) and how many customers connected through it. A connection is counted only when
+    it came through the campaign's signed link while the campaign was active; archiving or expiry stops counting, and the link keeps connecting.
+    The overview's *Connections by campaign* card shows the same totals for the selected period. Viadere never shows who connected.
+  * *After connecting* (optional) is one of: show rewards (Benefits), open Benefits, open Messages. The app offers it as a button only after the
+    customer has reviewed your business and connected; it never changes what the customer consents to.
+* **Your code's look** (dashboard → *Brand Kits* → *Your code*; owners and organization admins): the Viadere code (default), black on white, a CKey in your
+  colours and shapes, or a QR code in your colours. Viadere checks every style so it stays scannable: CKey marks need a contrast of at least 3:1 against the
+  background and must be near white (on a dark field) or near black (on a light field); QR codes need dark squares on a light background at 4.5:1 or more.
+  Preview before saving; a refused style shows the reason. Sign-in, approval and verification pages always show Viadere's own code. Phone cameras read
+  QR codes only, so print the plain QR code next to your CKey (`docs/SECURITY.md` §2.105, §2.106).
 * **Web component** (no dependencies, no network calls, no tracking, no iframe):
 
 ```html
