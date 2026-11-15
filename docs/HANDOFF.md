@@ -6,6 +6,15 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Wallet credential status lists (2026-11-15, G24).** Verify (and profile verification) now checks an mdoc's issuer status list when the MSO names
+one (IETF Token Status List, draft-ietf-oauth-status-list-21, CWT form): fetched only from a host listed for that IACA
+(`WALLET_STATUS_LIST_HOSTS`) through the SSRF guard with address pinning and no redirects, signature verified to the **same** IACA, `lst`
+inflated strictly with a 4 MiB cap, cached at most an hour. Revoked and suspended are refused; an unobtainable list fails closed for high-assurance
+capabilities (every Verify capability). Only stricter settings exist (`WALLET_STATUS_FAIL_MODE=all`, `WALLET_STATUS_REQUIRED=true`, a shorter
+`WALLET_STATUS_LIST_MAX_CACHE_SECONDS`). Normative: [`SECURITY.md`](SECURITY.md) §2.60 "Wallet credential status". Open: the operator must list
+each issuer's status host before Wallet credentials that carry a reference can verify; no real Apple Wallet credential with a status reference has
+been tested (synthetic fixtures only); JWT-form lists and `identifier_list` are not supported.
+
 **Email fallback for one-time codes (2026-11-15, G23).** A business may ask, per `otp` auth delivery, for the code to be mailed to an address it
 supplies (`channels` with `email` and `fallback.email.address`), only while `AUTH_EMAIL_FALLBACK_ENABLED` is on (default off; **the server refuses it
 in staging and production** until the owner closes ledger L-8: MailerSend's storage location and retention recorded in `docs/ops/DATA-INVENTORY.md`)

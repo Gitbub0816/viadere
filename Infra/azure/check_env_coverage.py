@@ -55,6 +55,7 @@ EXEMPT = {
     "AZURE_KEY_VAULT_AUDIT_HEAD_KEY": "set on the worker (containerapps.tf process_env.worker)",
     "BRAND_MANIFEST_SIGNING_KEY": "replaced on Azure by the Key Vault key AZURE_KEY_VAULT_BRAND_MANIFEST_KEY (the server refuses both at once)",
     "BRAND_ASSET_DIRECTORY": "development only; refused in staging/production (Azure uses AZURE_BRAND_BLOB_*)",
+    "WALLET_STATUS_LIST_HOSTS": "only when Verify's Wallet method is enabled: plain configuration in app_env then (issuer status-list hosts)",
     "AUTH_EMAIL_FALLBACK_ENABLED": "default false; refused in staging/production until the email-fallback gate (ledger L-8) is recorded",
 }
 # Names the server reads that are not in .env.example.

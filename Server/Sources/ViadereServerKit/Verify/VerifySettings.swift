@@ -22,6 +22,18 @@ public struct VerifySettings: Sendable {
     public var walletIACADirectory: String?
     /// SHA-256 fingerprints (lowercase hex of the DER) the trust store is pinned to (`WALLET_IACA_SHA256`).
     public var walletIACAPinned: Set<String> = []
+    /// Wallet credential status (SECURITY §2.60 "Wallet credential status"). Hosts allowed to serve each issuer's status lists
+    /// (`WALLET_STATUS_LIST_HOSTS`, `<IACA sha256>:<host>` entries): a status `uri` on any other host is never fetched.
+    var walletStatusHosts = StatusListHostPolicy(hostsByAnchor: [:])
+    /// Upper bound on how long a verified list is reused (`WALLET_STATUS_LIST_MAX_CACHE_SECONDS`, 60-3600, default 3600): the token's own `ttl` and
+    /// `exp` shorten it, never lengthen it. One hour bounds how long a revocation can go unseen while keeping one fetch per issuer list per hour.
+    public var walletStatusMaxCache: TimeInterval = 3600
+    public static let walletStatusMaxCacheBounds: ClosedRange<Int> = 60...3600
+    /// When a list cannot be obtained or trusted (`WALLET_STATUS_FAIL_MODE`): `high_assurance` (default) refuses for `high`/`critical` capabilities,
+    /// `all` refuses for every capability. There is no fail-open setting.
+    var walletStatusFailMode: WalletStatusPolicy.FailMode = .highAssurance
+    /// `WALLET_STATUS_REQUIRED=true` refuses a Wallet credential that carries no status reference (default `false`).
+    public var walletStatusRequired = false
 
     // Didit
     public var diditAPIKey: String?
@@ -78,6 +90,29 @@ extension ServerConfig {
         settings.walletIACAPinned = Set(list("WALLET_IACA_SHA256").map { $0.lowercased().replacingOccurrences(of: ":", with: "") })
         guard settings.walletIACAPinned.allSatisfy({ $0.count == 64 && $0.allSatisfy(\.isHexDigit) }) else {
             throw ServerConfigError.invalid("WALLET_IACA_SHA256 (comma-separated SHA-256 fingerprints, 64 hex characters each)")
+        }
+        if let raw = value("WALLET_STATUS_LIST_HOSTS") {
+            settings.walletStatusHosts = try StatusListHostPolicy.parse(raw)
+            // A host bound to an issuer the trust store will never accept is a typo.
+            if !settings.walletIACAPinned.isEmpty, let stray = settings.walletStatusHosts.hostsByAnchor.keys.first(where: { !settings.walletIACAPinned.contains($0) }) {
+                throw ServerConfigError.invalid("WALLET_STATUS_LIST_HOSTS (\(stray.prefix(16)) is not one of WALLET_IACA_SHA256)")
+            }
+        }
+        if let raw = value("WALLET_STATUS_LIST_MAX_CACHE_SECONDS") {
+            guard let seconds = Int(raw), VerifySettings.walletStatusMaxCacheBounds.contains(seconds) else {
+                throw ServerConfigError.invalid("WALLET_STATUS_LIST_MAX_CACHE_SECONDS (60 to 3600; it can only shorten the default)")
+            }
+            settings.walletStatusMaxCache = TimeInterval(seconds)
+        }
+        switch value("WALLET_STATUS_FAIL_MODE")?.lowercased() {
+        case nil, "high_assurance": settings.walletStatusFailMode = .highAssurance
+        case "all": settings.walletStatusFailMode = .all
+        default: throw ServerConfigError.invalid("WALLET_STATUS_FAIL_MODE (high_assurance or all; there is no fail-open mode)")
+        }
+        switch value("WALLET_STATUS_REQUIRED")?.lowercased() {
+        case nil, "false": settings.walletStatusRequired = false
+        case "true": settings.walletStatusRequired = true
+        default: throw ServerConfigError.invalid("WALLET_STATUS_REQUIRED (true or false)")
         }
         settings.diditAPIKey = value("DIDIT_API_KEY")
         settings.diditNewSessionsEnabled = env["DIDIT_NEW_SESSIONS_ENABLED"] != "false"

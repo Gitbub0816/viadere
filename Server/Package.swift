@@ -64,6 +64,8 @@ let package = Package(
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "PNG", package: "swift-png"),
+                // The same package's pure-Swift ZLIB/DEFLATE inflater: Wallet status lists (draft-ietf-oauth-status-list, SECURITY §2.60).
+                .product(name: "LZ77", package: "swift-png"),
                 .product(name: "JPEG", package: "swift-jpeg"),
             ]
         ),

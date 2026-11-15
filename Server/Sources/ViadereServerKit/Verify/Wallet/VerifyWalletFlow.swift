@@ -76,9 +76,19 @@ extension VerifyService {
             // `opened.plaintext` is the only copy of the DeviceResponse; it is verified, reduced to the requested elements and dropped.
             let verification = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript,
                                                                            requested: WalletElementPlan.readableElements(for: plan), now: now)
-            claims = WalletClaims.claims(from: verification, plan: plan, now: now)
-            attempt.status = claims == nil ? "failed" : "succeeded"
-            attempt.failureReason = claims == nil ? MDocFailure.noRequestedElement.rawValue : nil
+            // The issuer's status list, when the credential names one (SECURITY §2.60 "Wallet credential status"). Revoked or suspended is always a
+            // refusal; an unobtainable list is one for high-assurance capabilities (the fail mode). The reason stays on the platform trail (F1).
+            let decision = await runtime.walletStatusDecision(verification, trust: trust, sensitivity: record.capabilityValue.definition?.sensitivity ?? .critical,
+                                                              settings: settings, now: now)
+            if decision.accepted {
+                claims = WalletClaims.claims(from: verification, plan: plan, now: now, revocation: decision.revocation)
+                attempt.status = claims == nil ? "failed" : "succeeded"
+                attempt.failureReason = claims == nil ? MDocFailure.noRequestedElement.rawValue : nil
+            } else {
+                claims = nil
+                attempt.status = "failed"
+                attempt.failureReason = decision.reason
+            }
         } catch let failure as MDocFailure {
             claims = nil
             attempt.status = "failed"
@@ -113,8 +123,8 @@ extension VerifyService {
 /// Reduces a verified presentation to `EvidenceClaims`: the requested elements, nothing else. The values are consumed by
 /// `ClaimsBuilder` and dropped.
 enum WalletClaims {
-    static func claims(from verification: MDocVerification, plan: WalletElementPlan.Request, now: Date) -> EvidenceClaims? {
-        var claims = EvidenceClaims(method: .walletMdoc, issuer: verification.issuerAnchor, verifiedAt: now, validUntil: verification.validUntil, revocation: .notChecked)
+    static func claims(from verification: MDocVerification, plan: WalletElementPlan.Request, now: Date, revocation: RevocationState = .notChecked) -> EvidenceClaims? {
+        var claims = EvidenceClaims(method: .walletMdoc, issuer: verification.issuerAnchor, verifiedAt: now, validUntil: verification.validUntil, revocation: revocation)
         claims.issuerCountry = verification.issuerCountry
         func text(_ id: String) -> String? { verification.elements[MDocElement(namespace: WalletElementPlan.isoNamespace, identifier: id)]?.textString }
         var present = false
