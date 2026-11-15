@@ -169,7 +169,69 @@ public final class ConversationViewModel {
 
     public var canSend: Bool {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !text.isEmpty && text.count <= Self.maxLength && !isSending
+        guard text.count <= Self.maxLength, !isSending, !images.contains(where: \.isUploading) else { return false }
+        return !text.isEmpty || images.contains { $0.attachment != nil }
+    }
+
+    // MARK: Images (SECURITY.md §2.113)
+
+    /// Images picked for the next message, in order.
+    public private(set) var images: [ComposerImage] = []
+    /// Decoded-and-verified bytes of attachments shown in the thread, by id (memory only).
+    public private(set) var loadedImages: [AttachmentID: Data] = [:]
+    public private(set) var imageErrors: Set<AttachmentID> = []
+
+    /// Whether the composer may offer the photo picker (an attachments API exists and fewer than the maximum are picked).
+    public var canAddImage: Bool { services.attachmentsAPI != nil && images.count < MessageAttachmentPolicy.maxPerMessage && !isSending }
+
+    /// Checks then uploads one picked image (already re-encoded by the app). Refusals are explained without a round trip.
+    public func addImage(_ data: Data, mediaType: String) async {
+        guard let api = services.attachmentsAPI else { errorMessage = ComposerImageRules.unavailable; return }
+        guard images.count < MessageAttachmentPolicy.maxPerMessage else { errorMessage = ComposerImageRules.tooMany; return }
+        let type: String
+        switch ComposerImageRules.check(data, declared: mediaType) {
+        case .failure(let rejection):
+            errorMessage = MessageAttachmentPolicy.message(rejection)
+            return
+        case .success(let detected): type = detected
+        }
+        let item = ComposerImage(id: UUID(), data: data, mediaType: type, status: .uploading)
+        images.append(item)
+        errorMessage = nil
+        await upload(item.id, api: api)
+    }
+
+    /// Retries a failed upload.
+    public func retryImage(_ id: UUID) async {
+        guard let api = services.attachmentsAPI, let index = images.firstIndex(where: { $0.id == id }), images[index].failure != nil else { return }
+        images[index].status = .uploading
+        await upload(id, api: api)
+    }
+
+    public func removeImage(_ id: UUID) { images.removeAll { $0.id == id } }
+
+    private func upload(_ id: UUID, api: any MessageAttachmentsAPI) async {
+        guard let item = images.first(where: { $0.id == id }) else { return }
+        let status: ComposerImage.Status
+        do {
+            status = .ready(try await api.upload(item.data, mediaType: item.mediaType, to: conversation.id))
+        } catch {
+            status = .failed((error as? APIError)?.userMessage ?? ComposerImageRules.uploadFailed)
+        }
+        if let index = images.firstIndex(where: { $0.id == id }) { images[index].status = status }
+    }
+
+    /// Fetches one attachment of this conversation for display. Bytes that do not match the reference (size, SHA-256) are never shown.
+    public func loadImage(_ attachment: MessageAttachment) async {
+        guard loadedImages[attachment.id] == nil, attachment.sessionId == conversation.id, let api = services.attachmentsAPI else { return }
+        do {
+            let data = try await api.download(attachment.id, in: conversation.id)
+            guard attachment.matches(data) else { imageErrors.insert(attachment.id); return }
+            loadedImages[attachment.id] = data
+            imageErrors.remove(attachment.id)
+        } catch {
+            imageErrors.insert(attachment.id)
+        }
     }
 
     public var remainingCharacters: Int { Self.maxLength - draft.count }
@@ -195,10 +257,14 @@ public final class ConversationViewModel {
         guard canSend else { return }
         isSending = true
         defer { isSending = false }
+        // Only uploaded images go; a failed one stays in the composer for the person to remove or retry.
+        let ids = images.compactMap { $0.attachment?.id }
         do {
             let message = try await services.api.sendMessage(in: conversation.id,
-                                                             SendMessageRequest(body: text, clientMessageId: UUID().uuidString.lowercased()))
+                                                             SendMessageRequest(body: text, clientMessageId: UUID().uuidString.lowercased(),
+                                                                                attachmentIds: ids.isEmpty ? nil : ids))
             rows.append(MessageRow(message: message, choice: nil))
+            images.removeAll { $0.attachment != nil }
             draft = ""
             errorMessage = nil
         } catch {

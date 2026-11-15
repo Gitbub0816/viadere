@@ -1,6 +1,10 @@
+import PhotosUI
 import SwiftUI
 import ViadereCore
 import ViadereKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Conversations with verified businesses (spec C4). Every thread is attributed to exactly one business; histories are never merged. In
 /// All, threads are grouped by business; the selector narrows to one business. Search runs on this device over the cached list (message
@@ -235,6 +239,8 @@ struct ConversationView: View {
     @State private var decoration: MessageCardDecoration
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// PhotosPicker selection (iOS 17); emptied once each item is handed to the view model.
+    @State private var pickedItems: [PhotosPickerItem] = []
 
     init(conversation: ConversationSummary, model: AppModel) {
         self.conversation = conversation
@@ -251,7 +257,8 @@ struct ConversationView: View {
                 ScrollView {
                     LazyVStack(spacing: ViadereSpace.s) {
                         ForEach(vm.rows) { row in
-                            MessageBubble(row: row, now: Date(), decoration: decoration) { option in
+                            MessageBubble(row: row, now: Date(), decoration: decoration, images: vm.loadedImages, failedImages: vm.imageErrors,
+                                          onLoadImage: { attachment in Task { await vm.loadImage(attachment) } }) { option in
                                 Task { await vm.choose(option, in: row) }
                             }
                             .id(row.id)
@@ -310,7 +317,24 @@ struct ConversationView: View {
     private var composer: some View {
         VStack(spacing: 0) {
             ViadereHairline()
+            if !vm.images.isEmpty { pendingImages }
             HStack(alignment: .bottom, spacing: ViadereSpace.xs) {
+                if vm.canAddImage {
+                    PhotosPicker(selection: $pickedItems, maxSelectionCount: MessageAttachmentPolicy.maxPerMessage - vm.images.count,
+                                 matching: .images, preferredItemEncoding: .compatible) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(ViadereColor.textSecondary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.viaderePressable)
+                    .accessibilityLabel(Text("Add a photo"))
+                    .onChange(of: pickedItems) { _, items in
+                        guard !items.isEmpty else { return }
+                        pickedItems = []
+                        Task { await addPicked(items) }
+                    }
+                }
                 TextField("Message", text: $vm.draft, axis: .vertical)
                     .lineLimit(1...5)
                     .font(ViadereType.body)
@@ -332,7 +356,7 @@ struct ConversationView: View {
                 .buttonStyle(.viaderePressable)
                 .disabled(!vm.canSend)
                 .accessibilityLabel(Text("Send"))
-                .accessibilityHint(Text(vm.canSend ? "" : (vm.remainingCharacters < 0 ? "The message is too long" : "Write a message first")))
+                .accessibilityHint(Text(vm.canSend ? "" : (vm.remainingCharacters < 0 ? "The message is too long" : "Write a message or add a photo first")))
             }
             .padding(.horizontal, ViadereSpace.m)
             .padding(.vertical, ViadereSpace.xs)
@@ -345,6 +369,149 @@ struct ConversationView: View {
         }
         .background(BrandStyle(decoration.style).canvas)
     }
+
+    /// Images waiting to be sent: a thumbnail each, its state, and Remove (MSG-ATT-03..06).
+    private var pendingImages: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ViadereSpace.xs) {
+                ForEach(vm.images) { item in
+                    ZStack(alignment: .topTrailing) {
+                        ComposerThumbnail(data: item.data)
+                            .overlay {
+                                if item.isUploading {
+                                    ProgressView().accessibilityLabel(Text("Adding image"))
+                                } else if item.failure != nil {
+                                    Button { Task { await vm.retryImage(item.id) } } label: {
+                                        Image(systemName: "arrow.clockwise").font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(ViadereColor.textPrimary)
+                                            .frame(width: 44, height: 44)
+                                            .background(Circle().fill(ViadereColor.surface.opacity(0.9)))
+                                    }
+                                    .accessibilityLabel(Text("Try again"))
+                                }
+                            }
+                        Button { vm.removeImage(item.id) } label: {
+                            Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(ViadereColor.textPrimary)
+                                .frame(width: 24, height: 24)
+                                .background(Circle().fill(ViadereColor.surface))
+                                .overlay(Circle().strokeBorder(ViadereColor.hairline, lineWidth: 1))
+                        }
+                        .frame(width: 44, height: 44, alignment: .topTrailing)
+                        .accessibilityLabel(Text("Remove image"))
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text(item.failure ?? (item.isUploading ? "Image, adding" : "Image, ready to send")))
+                }
+            }
+            .padding(.horizontal, ViadereSpace.m)
+            .padding(.top, ViadereSpace.xs)
+        }
+    }
+
+    /// Loads each picked photo, re-encodes it on the device (orientation applied, longest side 2048 px, JPEG, no metadata) and hands it to
+    /// the view model, which checks it again before uploading.
+    private func addPicked(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            guard let raw = try? await item.loadTransferable(type: Data.self) else { continue }
+            if let encoded = ComposerImageEncoder.jpeg(from: raw) {
+                await vm.addImage(encoded, mediaType: "image/jpeg")
+            } else {
+                await vm.addImage(raw, mediaType: raw.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg")
+            }
+        }
+    }
+}
+
+/// Re-encodes a picked photo before upload: redrawn (so EXIF orientation is applied and nothing but pixels survives), at most
+/// `MessageAttachmentPolicy.maxStoredDimension` on the longest side, JPEG. The server re-encodes again; this only keeps uploads small.
+enum ComposerImageEncoder {
+    static func jpeg(from data: Data) -> Data? {
+        #if canImport(UIKit)
+        guard let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
+        let longest = max(image.size.width, image.size.height)
+        let scale = min(1, CGFloat(MessageAttachmentPolicy.maxStoredDimension) / longest)
+        let size = CGSize(width: (image.size.width * scale).rounded(.down), height: (image.size.height * scale).rounded(.down))
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let redrawn = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        guard let out = redrawn.jpegData(compressionQuality: 0.8), out.count <= MessageAttachmentPolicy.maxUploadBytes else { return nil }
+        return out
+        #else
+        return nil
+        #endif
+    }
+}
+
+/// A square thumbnail of image bytes held in memory.
+private struct ComposerThumbnail: View {
+    let data: Data
+    var body: some View {
+        Group {
+            #if canImport(UIKit)
+            if let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ViadereColor.surface
+            }
+            #else
+            ViadereColor.surface
+            #endif
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(ViadereColor.hairline, lineWidth: 1))
+        .accessibilityHidden(true)
+    }
+}
+
+/// One image in a message: loaded through the conversation's attachment route, shown only once its bytes match the reference.
+private struct MessageImage: View {
+    let attachment: MessageAttachment
+    let data: Data?
+    let failed: Bool
+    let fromCustomer: Bool
+    let onLoad: (MessageAttachment) -> Void
+
+    var body: some View {
+        let ratio = CGFloat(max(1, attachment.width)) / CGFloat(max(1, attachment.height))
+        Group {
+            #if canImport(UIKit)
+            if let data, let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFit()
+            } else {
+                placeholder
+            }
+            #else
+            placeholder
+            #endif
+        }
+        .aspectRatio(ratio, contentMode: .fit)
+        .frame(maxWidth: 240, maxHeight: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ViadereColor.hairline, lineWidth: 1))
+        .accessibilityElement()
+        .accessibilityLabel(Text(fromCustomer ? "Image you sent" : "Image"))
+        .accessibilityAddTraits(.isImage)
+        .task { if data == nil && !failed { onLoad(attachment) } }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            ViadereColor.surface
+            if failed {
+                VStack(spacing: 4) {
+                    Image(systemName: "photo").foregroundStyle(ViadereColor.textTertiary).accessibilityHidden(true)
+                    Text("Couldn't load this image.").font(ViadereType.caption).foregroundStyle(ViadereColor.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(ViadereSpace.s)
+            } else {
+                ProgressView()
+            }
+        }
+    }
 }
 
 struct MessageBubble: View {
@@ -352,6 +519,10 @@ struct MessageBubble: View {
     let now: Date
     /// Brand decoration of business messages: an accent line beside the bubble. The sender line (name, verified mark) stays neutral.
     var decoration: MessageCardDecoration? = nil
+    /// Verified bytes of this thread's images by id, the ones that could not be shown, and the loader (SECURITY.md §2.113).
+    var images: [AttachmentID: Data] = [:]
+    var failedImages: Set<AttachmentID> = []
+    var onLoadImage: (MessageAttachment) -> Void = { _ in }
     let onChoose: (ChoiceOption) -> Void
     @Environment(\.brandStyle) private var brand
 
@@ -364,6 +535,12 @@ struct MessageBubble: View {
                     Image(systemName: "checkmark.seal.fill").font(.system(size: 10)).foregroundStyle(ViadereColor.accent).accessibilityHidden(true)
                 }
             }
+            ForEach(row.message.attachments ?? []) { attachment in
+                MessageImage(attachment: attachment, data: images[attachment.id], failed: failedImages.contains(attachment.id), fromCustomer: mine,
+                             onLoad: onLoadImage)
+                    .frame(maxWidth: 300, alignment: mine ? .trailing : .leading)
+            }
+            if !row.message.body.isEmpty || (row.message.attachments ?? []).isEmpty {
             HStack(alignment: .top, spacing: 6) {
                 if !mine { BrandAccentLine(decoration) }
                 Text(UntrustedText.paragraphs(row.message.body, max: 4_000))
@@ -376,6 +553,7 @@ struct MessageBubble: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 300, alignment: mine ? .trailing : .leading)
+            }
             let options = row.openOptions(now: now)
             if !options.isEmpty {
                 ViadereFlowLayout {
