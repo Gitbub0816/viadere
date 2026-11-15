@@ -116,6 +116,12 @@ enum DashboardUI {
             NavItem(title: "Consent", path: "/dashboard/consent", permissions: [.viewConsent]),
         ], group: "Customers", icon: .chat),
         NavSection(title: "Inbox", path: "/dashboard/inbox", permissions: [.viewInbox], children: [], group: "Customers", icon: .inbox),
+        NavSection(title: "Conversations", path: "/dashboard/conversations", permissions: [.viewConversations], children: [], group: "Customers", icon: .chat),
+        NavSection(title: "Rewards and passes", path: "/dashboard/benefits", permissions: [.viewBenefits], children: [
+            NavItem(title: "Loyalty and rewards", path: "/dashboard/benefits", permissions: []),
+            NavItem(title: "Wallet passes", path: "/dashboard/benefits/passes", permissions: []),
+            NavItem(title: "Check a code", path: "/dashboard/benefits/check", permissions: [.manageBenefits]),
+        ], group: "Customers", icon: .store),
         NavSection(title: "Loops", path: "/dashboard/loops", permissions: [.submitLoops, .viewLoops], children: [
             NavItem(title: "Your Loops", path: "/dashboard/loops", permissions: []),
             NavItem(title: "Loop Studio", path: "/dashboard/loops/studio", permissions: []),

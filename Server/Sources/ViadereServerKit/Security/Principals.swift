@@ -22,6 +22,15 @@ public struct BusinessPrincipal: Authenticatable, Sendable {
     /// The capabilities the key carries (SEC-API-003). A ceiling, not a grant: `PolicyService` intersects it with the business's
     /// current entitlements on every request.
     public var capabilities: Set<Capability> = []
+    /// Set only when the business console acts through the business-API code path (G5 replies, G6 benefits, §2.108/§2.109): the signed-in
+    /// staff member. Never set by the API-key middleware, so an API call can never be attributed to a person.
+    public var consoleUserId: UUID? = nil
+
+    /// Who the audit chain names for an action taken with this principal: the API key, or the console user acting through the same path.
+    public var auditActor: AuditActor {
+        if let consoleUserId { return AuditActor(kind: .business, id: consoleUserId.uuidString.lowercased()) }
+        return AuditActor(kind: .businessAPIKey, id: keyId.uuidString.lowercased())
+    }
 }
 
 extension Request {

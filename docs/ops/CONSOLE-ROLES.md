@@ -11,7 +11,7 @@
 | Owner | `owner` | Everything, including billing, contracts, going live and adding owners. At least one owner always exists. |
 | Organization Admin | `org_admin` | Team, organization profile, API keys, webhooks, contracts and audit. Cannot add Owners, Organization Admins or Security Admins. |
 | Developer | `developer` | API keys and webhooks within the standard messaging scopes, templates and campaign links. Cannot widen a key's scope or manage people. |
-| Messaging Operator | `messaging_operator` | Templates, campaigns, consent status and delivery reports. No credentials. |
+| Messaging Operator | `messaging_operator` | Templates, campaigns, consent status, delivery reports, customer conversations, rewards and passes. No credentials. |
 | Verification Compliance Admin | `verification_admin` | Verification settings, consent templates, compliance records and attestations. No credentials. |
 | Security Admin | `security_admin` | Sessions, IP and certificate restrictions, alerts, scope elevation and second-person approvals. Cannot manage people. |
 | Analyst | `analyst` | Aggregate analytics and usage. Read-only. |
@@ -88,4 +88,8 @@ templates, support).
 | `submitLoops` | x | x |  | x |  |  |  |  |  |
 | `viewLoops` | x | x |  | x |  | x |  |  | x |
 | `manageBrandKits` | x | x |  |  |  |  |  |  |  |
+| `viewConversations` | x | x |  |  |  | x |  |  | x |
+| `replyConversations` | x | x |  |  |  | x |  |  |  |
+| `viewBenefits` | x | x |  |  |  | x |  | x | x |
+| `manageBenefits` | x | x |  |  |  | x |  |  |  |
 <!-- matrix:end -->

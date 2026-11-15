@@ -158,7 +158,7 @@ struct WalletService {
         record.issuedBy = issuer == nil ? nil : BusinessWalletPass.Issuer.business.rawValue
         record.createdAt = now
         record.updatedAt = now
-        let actor = issuer.map { AuditActor(kind: .businessAPIKey, id: $0.keyId.uuidString.lowercased()) } ?? AuditActor(kind: .consumer, id: consumer.description)
+        let actor = issuer.map(\.auditActor) ?? AuditActor(kind: .consumer, id: consumer.description)
         do {
             try await db.transaction { tx in
                 try await record.create(on: tx)
@@ -397,7 +397,7 @@ struct WalletService {
         if !pass.voided {
             try await db.transaction { tx in
                 try await WalletService(db: tx, ctx: ctx).void(pass)
-                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_voided", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_voided", actor: principal.auditActor,
                     consumerId: ConsumerID(pass.consumerId), businessId: principal.businessId, subjectType: "wallet_pass", subjectId: id.description)
             }
         }
@@ -443,7 +443,7 @@ struct WalletService {
             try await WalletPassRecord.query(on: tx).filter(\.$id == pass.id!).set(\.$ticketVenue, to: pass.ticketVenue).set(\.$ticketSeat, to: pass.ticketSeat)
                 .set(\.$ticketStartsAt, to: pass.ticketStartsAt).set(\.$scanGeneration, to: pass.scanGeneration).update()
             try await WalletService(db: tx, ctx: ctx).touch(pass)
-            _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_updated", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+            _ = try await AuditService(db: tx, ctx: ctx).record("wallet.pass_updated", actor: principal.auditActor,
                 consumerId: ConsumerID(pass.consumerId), businessId: principal.businessId, subjectType: "wallet_pass", subjectId: id.description,
                 metadata: ["fields": changed.joined(separator: ",")])
         }
@@ -469,7 +469,7 @@ struct WalletService {
         let now = ctx.now
         let consumer = ConsumerID(pass.consumerId)
         let subjectRef = ctx.subjects.subjectRef(businessId: principal.businessId, consumerId: consumer)
-        let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
+        let actor = principal.auditActor
         func result(_ outcome: WalletScanResult.Outcome, title: String? = nil, points: Int? = nil, redemption: RedemptionReceipt? = nil) -> WalletScanResult {
             WalletScanResult(outcome: outcome, passId: WalletPassID(pass.id!), kind: pass.kindValue, relationshipId: RelationshipID(relationshipId),
                              subjectRef: subjectRef, title: title, pointsBalance: points, redemption: redemption, scannedAt: now)

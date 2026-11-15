@@ -210,9 +210,10 @@ struct ConversationService {
                 try await session.update(on: tx)
                 relationship.lastActivityAt = now
                 try await relationship.update(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("message.business_sent", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("message.business_sent", actor: principal.auditActor,
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "message",
-                    subjectId: record.id?.uuidString.lowercased())
+                    subjectId: record.id?.uuidString.lowercased(),
+                    metadata: ["via": principal.consoleUserId == nil ? "api" : "console", "session": session.id!.uuidString.lowercased()])
             }
         } catch {
             if error.isConstraintViolation, let existing = try await ConversationMessageRecord.query(on: db)

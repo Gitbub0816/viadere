@@ -66,7 +66,7 @@ public enum OrgRole: String, CaseIterable, Sendable, Comparable {
         case .owner: "Everything, including billing, contracts, going live and adding owners."
         case .orgAdmin: "Team, organization profile, API keys, webhooks, contracts and audit. Cannot add owners, Organization Admins or Security Admins."
         case .developer: "API keys and webhooks within the standard messaging scopes, templates and campaign links. Cannot widen a key's scope or manage people."
-        case .messagingOperator: "Templates, campaigns, consent status and delivery reports. No credentials."
+        case .messagingOperator: "Templates, campaigns, consent status, delivery reports, customer conversations, rewards and passes. No credentials."
         case .verificationAdmin: "Verification settings, consent templates, compliance records and attestations. No credentials."
         case .securityAdmin: "Sessions, IP and certificate restrictions, alerts, scope elevation and second-person approvals."
         case .analyst: "Aggregate analytics and usage. Read-only."
@@ -129,6 +129,15 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
     case viewLoops
     /// Brand Kit Studio (WP-2.5): upload images, edit kits and the schedule, submit for Viadere review. Never publishes unreviewed content.
     case manageBrandKits
+    /// Console conversation inbox (G5, §2.108): read customer threads (message bodies are decrypted for this organization only, and every
+    /// thread opened is audited).
+    case viewConversations
+    /// Reply to, assign, close and reopen customer threads. Replies go through the business API's own `sendMessage` path.
+    case replyConversations
+    /// Rewards, loyalty and Wallet pass pages (G6, §2.109): read the program, issued rewards and passes.
+    case viewBenefits
+    /// Edit the loyalty program, revoke rewards, void passes and check (consume) codes. Value-changing actions also need a fresh passkey.
+    case manageBenefits
 
     var roles: Set<OrgRole> {
         switch self {
@@ -166,6 +175,10 @@ public enum DashboardPermission: String, CaseIterable, Sendable {
         case .submitLoops: [.owner, .orgAdmin, .developer]
         case .viewLoops: [.owner, .orgAdmin, .developer, .messagingOperator, .auditor]
         case .manageBrandKits: [.owner, .orgAdmin]
+        case .viewConversations: [.owner, .orgAdmin, .messagingOperator, .auditor]
+        case .replyConversations: [.owner, .orgAdmin, .messagingOperator]
+        case .viewBenefits: [.owner, .orgAdmin, .messagingOperator, .analyst, .auditor]
+        case .manageBenefits: [.owner, .orgAdmin, .messagingOperator]
         }
     }
 }

@@ -356,7 +356,7 @@ struct RewardsService {
         let consumer = ConsumerID(consumerId)
         let (reward, summary) = try await visible(RewardID(rewardId), consumer: consumer, on: db)
         guard reward.businessId == principal.businessId.uuid else { throw APIError.notFound }
-        let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
+        let actor = principal.auditActor
         let current = try await currentEntry(reward, business: summary, consumer: consumer, on: db)
         if current.eligibility.state == .eligible, current.eligibility.nextAction == .claim {
             let claim = RewardClaimRecord()
@@ -545,7 +545,7 @@ struct RewardsService {
                 saved = existing
             }
         }
-        _ = try await AuditService(db: db, ctx: ctx).record("loyalty.program_updated", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+        _ = try await AuditService(db: db, ctx: ctx).record("loyalty.program_updated", actor: principal.auditActor,
             businessId: principal.businessId, subjectType: "loyalty_program", subjectId: saved.id?.uuidString.lowercased(), metadata: ["termsVersion": terms])
         return try await programDTO(saved)
     }
@@ -644,7 +644,7 @@ struct RewardsService {
         do {
             try await db.transaction { tx in
                 try await record.create(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("reward.created", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("reward.created", actor: principal.auditActor,
                     consumerId: consumerId.map { ConsumerID($0) }, businessId: principal.businessId, subjectType: "reward",
                     subjectId: record.id?.uuidString.lowercased(), metadata: ["kind": kind.rawValue, "targeted": consumerId == nil ? "false" : "true"])
             }
@@ -683,7 +683,7 @@ struct RewardsService {
                 for pass in try await WalletPassRecord.query(on: tx).filter(\.$rewardId == id.uuid).filter(\.$voided == false).all() {
                     try await WalletService(db: tx, ctx: ctx).void(pass)
                 }
-                _ = try await AuditService(db: tx, ctx: ctx).record("reward.revoked", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("reward.revoked", actor: principal.auditActor,
                     businessId: principal.businessId, subjectType: "reward", subjectId: id.description)
             }
             // Outstanding codes are refused at validation; release their reservations now so points come back.
@@ -748,7 +748,7 @@ struct RewardsService {
                 ledger.balanceAfter = balance
                 ledger.createdAt = now
                 try await ledger.create(on: tx)
-                _ = try await AuditService(db: tx, ctx: ctx).record("loyalty.points_adjusted", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("loyalty.points_adjusted", actor: principal.auditActor,
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "loyalty_account",
                     subjectId: account.id?.uuidString.lowercased(), metadata: ["delta": String(request.delta)])
                 try await WalletService(db: tx, ctx: ctx).touch(consumer: relationship.consumerId, businessId: businessId, kind: .storeCard)
@@ -805,7 +805,7 @@ struct RewardsService {
                 try await UsageMeter.record(.rewardRedemption, businessId: principal.businessId.uuid, livemode: principal.livemode,
                                             ref: rowId.uuidString.lowercased(), at: now, on: tx)
                 try await WebhookService(db: tx, ctx: ctx).enqueue(.rewardRedeemed, businessId: principal.businessId, payload: receipt)
-                _ = try await AuditService(db: tx, ctx: ctx).record("reward.redeemed", actor: AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased()),
+                _ = try await AuditService(db: tx, ctx: ctx).record("reward.redeemed", actor: principal.auditActor,
                     consumerId: ConsumerID(row.consumerId), businessId: principal.businessId, subjectType: "reward_redemption",
                     subjectId: rowId.uuidString.lowercased(), metadata: ["rewardId": reward.id!.uuidString.lowercased(), "points": String(row.pointsHeld)])
                 // A lifetime coupon is spent: void its pass. A points reward changed the balance on the loyalty card.
