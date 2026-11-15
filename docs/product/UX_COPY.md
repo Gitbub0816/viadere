@@ -154,6 +154,24 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | | Buttons (equal, safe action first) | This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
 | | Wrong number | That number doesn't match the new device. Check it and try again. (after 3: "Nothing was added. Start again on the new device.") |
 | S-DEV-05 | New device: the signed challenge does not list exactly this device's keys | We couldn't confirm this request belongs to this device, so nothing was added. Start again. |
+| S-PAIR-01 | Trusted device, Settings → Trusted devices (§2.105) | Add another device |
+| | Body | On the new device, open Viadere, choose I already use Viadere and enter this code. It works once. |
+| | Code and expiry | {XXXX-XXXX-XXXX} · Works until {time}. Don't share it with anyone. |
+| S-PAIR-02 | No D1 device on the account (start or code refused, `no_trusted_device`) | None of your devices can approve a new one. To get back into your account, use account recovery with your recovery codes. |
+| | Action | Use account recovery |
+| S-PAIR-03 | New device, onboarding (button "I already use Viadere") | Enter the code from your other device |
+| | Helper | On a device that already uses Viadere, open Settings, then Trusted devices, then Add another device. |
+| | Wrong, used or expired code | This code didn't work. Check it on your other device, or make a new one there. |
+| | While the code is shown (S-DEV-03 above) | Waiting for your other device… · Cancel |
+| S-PAIR-04 | New device, results | Added: This device was added to your account. · Denied: Your other device didn't add this one. Nothing was added. · Expired: This request expired and nothing was added. Make a new code on your other device. · Three wrong numbers: S-DEV-04 final line |
+| S-PAIR-05 | Trusted device, request (title and field: S-DEV-04; facts above the decision) | Rows: Name chosen on the new device: {name} · {platform} · Requested at {time} · Expires at {time} · Viadere verified this is a genuine Apple device. / Viadere couldn't verify this device. |
+| | Fatigue warning (third request in an hour) | You've had several requests to add a device. Only continue if you're setting one up right now. |
+| | Buttons (equal, safe actions first) | Deny · This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
+| | Line under the buttons | Deny says no. This wasn't me also reports it. |
+| S-PAIR-06 | Trusted device, results | Added: The new device was added. Your other devices were told. · Denied: Nothing was added. · Reported: Nothing was added. Your devices were told. · Request changed (`pairing_mismatch`): This request doesn't match the new device, so nothing was added. Start again on the new device. · No Face ID key: Adding a device needs Face ID or Touch ID on this device. |
+| S-PAIR-07 | Push to D1 devices (no name, code or number) | Viadere · Someone wants to add a device to your Viadere account. Open Viadere to review it. |
+| | Alerts row | A device is asking to join your account. |
+| S-PAIR-08 | In-app notice after "This wasn't me" (every device) | Someone tried to add a device to your Viadere account and you said it wasn't you. Nothing was added. Review your devices in Viadere. |
 | S-REC-01 | Recovery downgrade (spec §7) | Recovering with a code gives this device less access. |
 | | Detail | After a 72-hour wait, your other devices are signed out and this device takes over. It can message and deny requests, but it can't approve payments or other high-risk requests until each business sets it up again. Shared household access ends. Another trusted device of yours can cancel during the wait. |
 | | Detail, no other trusted device | You don't have another trusted device, so nobody can cancel this during the wait. |
