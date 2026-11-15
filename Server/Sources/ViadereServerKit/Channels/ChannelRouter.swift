@@ -261,9 +261,9 @@ struct ChannelRouter {
         let menuExpiry = min(interaction.expiresAt, now.addingTimeInterval(GatewayConfiguration().menuTTL))
         let tokens = RCSPostbackTokens(hasher: ctx.hasher)
         do {
-            outbound.suggestions = try await db.transaction { tx -> [OutboundSuggestion] in
-                var out: [OutboundSuggestion] = []
-                let replyCount = rendering.suggestions.filter { if case .reply = $0.action { true } else { false } }.count
+            outbound = try await db.transaction { tx -> OutboundChannelMessage in
+                let cardSuggestions = (rendering.card.map { [$0] } ?? rendering.carousel ?? []).flatMap(\.suggestions)
+                let replyCount = (rendering.suggestions + cardSuggestions).filter { if case .reply = $0.action { true } else { false } }.count
                 var version = endpoint.activeMenuVersion
                 if replyCount > 0 {
                     // A new menu supersedes every earlier one for this phone: bump the version by compare-and-swap.
@@ -274,27 +274,47 @@ struct ChannelRouter {
                     try await RCSPostbackRecord.query(on: tx).filter(\.$phoneHash == row.phoneHash).filter(\.$state == "open")
                         .set(\.$state, to: "revoked").update()
                 }
-                for suggestion in rendering.suggestions {
-                    switch suggestion.action {
-                    case .reply(let target):
-                        let token = tokens.mint()
-                        let postback = RCSPostbackRecord()
-                        postback.id = UUID()
-                        postback.tokenHash = RCSPostbackTokens.storedHash(token)
-                        postback.phoneHash = row.phoneHash
-                        postback.interactionId = row.interactionId
-                        postback.menuVersion = version
-                        postback.target = target.storageValue
-                        postback.state = "open"
-                        postback.expiresAt = menuExpiry
-                        postback.createdAt = now
-                        try await postback.create(on: tx)
-                        out.append(.reply(suggestion.text, token: token))
-                    case .openURL(let url):
-                        out.append(.openURL(suggestion.text, url: url))
-                    }
+                // One signed single-use token per **target**: a card suggestion gets the token of the chip with the same target, never a
+                // second one, so the first tap of either consumes the target and the menu-version binding covers both.
+                var tokenByTarget: [String: String] = [:]
+                func token(for target: RCSPostbackTarget) async throws -> String {
+                    if let existing = tokenByTarget[target.storageValue] { return existing }
+                    let token = tokens.mint()
+                    let postback = RCSPostbackRecord()
+                    postback.id = UUID()
+                    postback.tokenHash = RCSPostbackTokens.storedHash(token)
+                    postback.phoneHash = row.phoneHash
+                    postback.interactionId = row.interactionId
+                    postback.menuVersion = version
+                    postback.target = target.storageValue
+                    postback.state = "open"
+                    postback.expiresAt = menuExpiry
+                    postback.createdAt = now
+                    try await postback.create(on: tx)
+                    tokenByTarget[target.storageValue] = token
+                    return token
                 }
-                return out
+                func swapped(_ suggestions: [ChannelRendering.Suggestion]) async throws -> [OutboundSuggestion] {
+                    var out: [OutboundSuggestion] = []
+                    for suggestion in suggestions {
+                        switch suggestion.action {
+                        case .reply(let target): out.append(.reply(suggestion.text, token: try await token(for: target)))
+                        case .openURL(let url): out.append(.openURL(suggestion.text, url: url))
+                        }
+                    }
+                    return out
+                }
+                func swappedCard(_ card: ChannelRendering.Card) async throws -> OutboundCard {
+                    OutboundCard(title: card.title, description: card.description, suggestions: try await swapped(card.suggestions))
+                }
+                var message = OutboundChannelMessage(text: rendering.text, suggestions: try await swapped(rendering.suggestions))
+                if let card = rendering.card { message.card = try await swappedCard(card) }
+                if let carousel = rendering.carousel {
+                    var cards: [OutboundCard] = []
+                    for card in carousel { cards.append(try await swappedCard(card)) }
+                    message.carousel = cards
+                }
+                return message
             }
         } catch is ConcurrencyConflict {
             row.attempts += 1

@@ -28,14 +28,38 @@ public struct OutboundSuggestion: Sendable, Equatable {
     }
 }
 
+/// One rich card of an outbound RCS message: text only (no media member exists), and suggestions that are replies carrying the **same**
+/// opaque tokens as the message's chips (`ChannelRouter` mints one token per target). A transport must refuse a card that carries an
+/// `.openURL` suggestion rather than send it (§2.89 decision 9: no rendering carries a link).
+public struct OutboundCard: Sendable, Equatable {
+    public var title: String
+    public var description: String?
+    public var suggestions: [OutboundSuggestion]
+    public init(title: String, description: String? = nil, suggestions: [OutboundSuggestion] = []) {
+        self.title = title
+        self.description = description
+        self.suggestions = suggestions
+    }
+}
+
 /// A message ready for a channel transport.
+///
+/// `text` and `suggestions` are always the complete plain message. `card` (a standalone rich card) and `carousel` (2-10 cards) are optional
+/// rich forms of the same content, at most one set; a transport that cannot send them, or whose provider refuses them, sends the plain message.
 public struct OutboundChannelMessage: Sendable, Equatable {
     public var text: String
     public var suggestions: [OutboundSuggestion]
-    public init(text: String, suggestions: [OutboundSuggestion] = []) {
+    public var card: OutboundCard?
+    public var carousel: [OutboundCard]?
+    public init(text: String, suggestions: [OutboundSuggestion] = [], card: OutboundCard? = nil, carousel: [OutboundCard]? = nil) {
         self.text = text
         self.suggestions = suggestions
+        self.card = card
+        self.carousel = carousel
     }
+
+    /// The same message without its rich form (the plain text and chips).
+    public var plain: OutboundChannelMessage { OutboundChannelMessage(text: text, suggestions: suggestions) }
 }
 
 public struct ChannelSendResult: Sendable, Equatable {
@@ -112,17 +136,35 @@ public struct ChannelRendering: Sendable, Equatable {
         public var action: Action
     }
 
+    /// A rich card whose suggestions are replies only (reply targets stay server-side like the chips').
+    public struct Card: Sendable, Equatable {
+        public var title: String
+        public var description: String?
+        public var suggestions: [Suggestion]
+        public init(title: String, description: String? = nil, suggestions: [Suggestion] = []) {
+            self.title = title
+            self.description = description
+            self.suggestions = suggestions
+        }
+    }
+
     public var text: String
     public var suggestions: [Suggestion]
     public var isSecureHandoff: Bool
     /// Encoded length information for SMS metering (segments); 0 for non-SMS.
     public var smsSegments: Int
+    /// Optional standalone rich card (RCS `status`, `reward`, `ticket`): the same content as `text`.
+    public var card: Card?
+    /// Optional carousel (RCS `choose` whose options do not fit as chips): one card per option.
+    public var carousel: [Card]?
 
-    public init(text: String, suggestions: [Suggestion] = [], isSecureHandoff: Bool, smsSegments: Int = 0) {
+    public init(text: String, suggestions: [Suggestion] = [], isSecureHandoff: Bool, smsSegments: Int = 0, card: Card? = nil, carousel: [Card]? = nil) {
         self.text = text
         self.suggestions = suggestions
         self.isSecureHandoff = isSecureHandoff
         self.smsSegments = smsSegments
+        self.card = card
+        self.carousel = carousel
     }
 }
 

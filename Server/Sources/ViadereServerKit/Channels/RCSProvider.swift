@@ -60,6 +60,10 @@ public struct VaporRCSHTTPClient: RCSHTTPClient {
 /// * `GET  {base}/phones/{e164}/capabilities` → `200 {"features":[…]}` (capable if non-empty) or `404` (not capable).
 /// * `POST {base}/agentMessages` `{"agentId","to","messageId","contentMessage":{"text","suggestions":[
 ///   {"reply":{"text","postbackData"}} | {"action":{"text","openUrlAction":{"url"}}}]}}` → `{"messageId"}`.
+///   With a rich form, `contentMessage` carries `richCard` instead of `text` (mutually exclusive in RBM):
+///   `{"standaloneCard":{"cardOrientation":"VERTICAL","cardContent":{"title","description"?,"suggestions":[{"reply":…}]}}}` or
+///   `{"carouselCard":{"cardWidth":"MEDIUM","cardContents":[…]}}` plus `"fallback"` (the plain text) and no message-level chips.
+///   Cards carry no media and never an `openUrlAction`; a 4xx (not 429) answer to a rich send is resent once as plain text and chips.
 ///
 /// **Inbound** (`X-RCS-Signature: t={unix},v1={hex HMAC-SHA256("{t}." + body)}`, key = the shared secret;
 /// the timestamp window is 300 s and comparison is constant time — the same scheme as Viadere's own webhooks):
@@ -148,29 +152,83 @@ public struct GenericRBMProvider: RCSProvider {
         }
     }
 
-    public func send(_ message: OutboundChannelMessage, to phone: PhoneNumber, reference: String) async throws -> ChannelSendResult {
-        var suggestions: [[String: Any]] = []
-        for suggestion in message.suggestions.prefix(11) {
+    /// A rich card the transport refuses to encode (a URL suggestion, a missing token, too many suggestions or cards).
+    struct RichCardRefused: Error {}
+
+    /// The RBM `suggestions` array of the plain message: replies and (never produced by the renderer) open-URL actions.
+    static func chipJSON(_ suggestions: [OutboundSuggestion]) -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        for suggestion in suggestions.prefix(11) {
             switch suggestion.kind {
             case .reply:
                 guard let token = suggestion.postbackToken else { continue }
-                suggestions.append(["reply": ["text": suggestion.text, "postbackData": token]])
+                out.append(["reply": ["text": suggestion.text, "postbackData": token]])
             case .openURL:
                 guard let url = suggestion.url else { continue }
-                suggestions.append(["action": ["text": suggestion.text, "openUrlAction": ["url": url.absoluteString]]])
+                out.append(["action": ["text": suggestion.text, "openUrlAction": ["url": url.absoluteString]]])
             }
         }
-        var content: [String: Any] = ["text": message.text]
-        if !suggestions.isEmpty { content["suggestions"] = suggestions }
-        let payload: [String: Any] = ["agentId": config.agentId, "to": phone.e164, "messageId": reference, "contentMessage": content]
+        return out
+    }
+
+    /// One RBM `cardContent`: title, optional description, at most four reply suggestions and **no media**. Any suggestion that is not a
+    /// reply with a token is refused (never an `openUrlAction` from card content, §2.89 decision 9).
+    static func cardContentJSON(_ card: OutboundCard) throws -> [String: Any] {
+        guard !card.title.isEmpty, card.suggestions.count <= ChannelRenderer.maxRCSCardSuggestions else { throw RichCardRefused() }
+        var replies: [[String: Any]] = []
+        for suggestion in card.suggestions {
+            guard suggestion.kind == .reply, suggestion.url == nil, let token = suggestion.postbackToken else { throw RichCardRefused() }
+            replies.append(["reply": ["text": suggestion.text, "postbackData": token]])
+        }
+        var content: [String: Any] = ["title": card.title]
+        if let description = card.description { content["description"] = description }
+        if !replies.isEmpty { content["suggestions"] = replies }
+        return content
+    }
+
+    /// The RBM `contentMessage` for `message`: `richCard` (standalone or carousel) when the message has a rich form and it encodes,
+    /// otherwise `text` with chips. `richCard` and `text` are mutually exclusive in RBM. A carousel carries no message-level chips (each
+    /// card has its option's chip) and sets `fallback` to the plain text; a standalone card keeps the message's chips.
+    static func contentJSON(_ message: OutboundChannelMessage, rich: Bool) -> (content: [String: Any], isRich: Bool) {
+        let chips = chipJSON(message.suggestions)
+        if rich, let carousel = message.carousel {
+            if ChannelRenderer.rcsCarouselCards.contains(carousel.count), let cards = try? carousel.map(cardContentJSON) {
+                return (["richCard": ["carouselCard": ["cardWidth": RCSCardWidth.medium.rawValue, "cardContents": cards]], "fallback": message.text], true)
+            }
+        } else if rich, let card = message.card, let content = try? cardContentJSON(card) {
+            var out: [String: Any] = ["richCard": ["standaloneCard": ["cardOrientation": RCSCardOrientation.vertical.rawValue, "cardContent": content]]]
+            if !chips.isEmpty { out["suggestions"] = chips }
+            return (out, true)
+        }
+        var out: [String: Any] = ["text": message.text]
+        if !chips.isEmpty { out["suggestions"] = chips }
+        return (out, false)
+    }
+
+    public func send(_ message: OutboundChannelMessage, to phone: PhoneNumber, reference: String) async throws -> ChannelSendResult {
+        let first = Self.contentJSON(message, rich: true)
+        let response = try await post(first.content, to: phone, messageId: reference)
+        // The provider refused the rich card (the phone or agent lacks the rich-card feature, or any other 4xx): resend the same message
+        // as plain text and chips, with the same tokens. The SMS fallback rules then apply to the plain send exactly as before.
+        if first.isRich, (400..<500).contains(response.status), response.status != 429 {
+            let retry = reference + "-text"
+            return try Self.result(try await post(Self.contentJSON(message, rich: false).content, to: phone, messageId: retry), reference: retry)
+        }
+        return try Self.result(response, reference: reference)
+    }
+
+    private func post(_ content: [String: Any], to phone: PhoneNumber, messageId: String) async throws -> RCSHTTPResponse {
+        let payload: [String: Any] = ["agentId": config.agentId, "to": phone.e164, "messageId": messageId, "contentMessage": content]
         guard let body = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .withoutEscapingSlashes]) else {
             throw ChannelError.permanent("encode")
         }
         let url = config.baseURL.appendingPathComponent("agentMessages")
-        let response: RCSHTTPResponse
-        do { response = try await http.send(RCSHTTPRequest(method: "POST", url: url, headers: headers(), body: body)) } catch {
+        do { return try await http.send(RCSHTTPRequest(method: "POST", url: url, headers: headers(), body: body)) } catch {
             throw ChannelError.transient("network")
         }
+    }
+
+    private static func result(_ response: RCSHTTPResponse, reference: String) throws -> ChannelSendResult {
         switch response.status {
         case 200..<300:
             struct Sent: Decodable { var messageId: String? }
@@ -200,19 +258,40 @@ public struct RCSChannelAdapter: ChannelAdapter {
     /// Suggested replies and open-URL actions from `ChannelRenderer.rcs`. Reply targets are kept as typed
     /// `RCSPostbackTarget`s; the router swaps each for an opaque, signed, single-use token before sending.
     public func render(_ interaction: Interaction, business: BusinessSummary) -> ChannelRendering {
-        let rendering = ChannelRenderer.rcs(interaction, business: business)
+        Self.channelRendering(ChannelRenderer.rcs(interaction, business: business), interactionId: interaction.id)
+    }
+
+    /// Maps the Core rendering to the channel-neutral one. Chips and card suggestions map the same way (`.reply(target)` from
+    /// `target(forInteraction:)`). A rich form is carried only if **every** card suggestion is a reply whose target parses for this
+    /// interaction: a card with a URL suggestion (or anything else) is refused and only the plain message is sent.
+    static func channelRendering(_ rendering: RCSRendering, interactionId: InteractionID) -> ChannelRendering {
         var suggestions: [ChannelRendering.Suggestion] = []
         for suggestion in rendering.suggestions {
             switch suggestion.kind {
             case .reply:
-                if let target = suggestion.target(forInteraction: interaction.id) {
+                if let target = suggestion.target(forInteraction: interactionId) {
                     suggestions.append(.init(text: suggestion.text, action: .reply(target)))
                 }
             case .openURL:
                 if let url = suggestion.url { suggestions.append(.init(text: suggestion.text, action: .openURL(url))) }
             }
         }
-        return ChannelRendering(text: rendering.text, suggestions: suggestions, isSecureHandoff: rendering.isSecureHandoff)
+        func card(_ content: RCSCardContent) -> ChannelRendering.Card? {
+            var replies: [ChannelRendering.Suggestion] = []
+            for suggestion in content.suggestions {
+                guard suggestion.kind == .reply, suggestion.url == nil, let target = suggestion.target(forInteraction: interactionId) else { return nil }
+                replies.append(.init(text: suggestion.text, action: .reply(target)))
+            }
+            return ChannelRendering.Card(title: content.title, description: content.description, suggestions: replies)
+        }
+        var out = ChannelRendering(text: rendering.text, suggestions: suggestions, isSecureHandoff: rendering.isSecureHandoff)
+        guard !rendering.isSecureHandoff else { return out }
+        if let standalone = rendering.card { out.card = card(standalone.content) }
+        if let carousel = rendering.carousel {
+            let cards = carousel.cards.compactMap(card)
+            if cards.count == carousel.cards.count { out.carousel = cards }
+        }
+        return out
     }
 
     public func send(_ message: OutboundChannelMessage, to phone: PhoneNumber, environment: ChannelEnvironment) async throws -> ChannelSendResult {
