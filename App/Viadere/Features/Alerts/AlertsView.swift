@@ -5,9 +5,19 @@ import ViadereKit
 /// Alerts (spec C5): the durable inbox. "Needs you" holds what waits on the person (security first, then the soonest to expire); "History"
 /// holds everything else, including the orders, trips and bookings that used to be the Activity tab. The server list is the source of
 /// truth; a push only points here. Expired items never show an action, and nothing is actionable while offline.
+///
+/// Sign-in links, one-time codes and security notices (auth deliveries) are not in the Alerts read model: they come from their own inbox
+/// (`AuthDeliveryInboxViewModel`) and sit at the top of "Needs you". A row opens the same sheet as the push (`pendingAuthDelivery`), which
+/// fetches the display object only; nothing is opened or consumed from this list.
 struct AlertsView: View {
     @Bindable var model: AppModel
     @State private var path: [String] = []
+    @State private var inbox: AuthDeliveryInboxViewModel
+
+    init(model: AppModel) {
+        self.model = model
+        _inbox = State(initialValue: AuthDeliveryInboxViewModel(api: model.services.authDelivery, clock: model.services.clock))
+    }
 
     private var alerts: AlertsViewModel { model.alerts }
     private var context: OrganizationContext { model.organization.effective }
@@ -44,9 +54,18 @@ struct AlertsView: View {
             .scrollIndicators(.hidden)
             .viadereScreenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .refreshable { await model.refreshOrganization() }
+            .refreshable {
+                await model.refreshOrganization()
+                await refreshInbox()
+            }
+            .task { await refreshInbox() }
+            // A delivery sheet closed (opened, reported, expired, or just looked at): the list follows the server.
+            .onChange(of: model.pendingAuthDelivery) { _, now in
+                if now == nil { Task { await refreshInbox() } }
+            }
             .task(id: context) {
                 await alerts.ensureLoaded(context)
+                model.services.homeWidget?.publish(alerts: alerts, benefits: model.benefits)
                 // Rows on screen for a moment count as seen (per account; the server keeps the mark).
                 try? await Task.sleep(for: .seconds(1.5))
                 await alerts.markSeen(alerts.visible(context: context))
@@ -58,8 +77,13 @@ struct AlertsView: View {
         }
     }
 
+    private func refreshInbox() async {
+        await inbox.refresh()
+        model.services.homeWidget?.publish(deliveries: inbox)
+    }
+
     private var subtitle: String {
-        let count = alerts.needsYou(context: context).count
+        let count = alerts.needsYou(context: context).count + inbox.rows(business: context.businessFilter).count
         let scope = model.organization.selectedBusiness.map { " from \($0.safeName)" } ?? ""
         return count == 0 ? "Nothing needs you\(scope)" : (count == 1 ? "1 thing needs you\(scope)" : "\(count) things need you\(scope)")
     }
@@ -81,7 +105,28 @@ struct AlertsView: View {
 
     // MARK: Needs you
 
+    /// Pending sign-in links, codes and notices for this context, newest first; expired ones leave by the device clock.
+    @ViewBuilder private var deliveries: some View {
+        let rows = inbox.rows(business: context.businessFilter)
+        if !rows.isEmpty {
+            ViadereRowGroup {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    Button { model.pendingAuthDelivery = PendingAuthDelivery(id: row.id) } label: {
+                        ViadereRow(row.line, subtitle: AuthDeliveryCopy.expiresAt(row.expiresAt.formatted(date: .omitted, time: .shortened))) {
+                            ViadereIconTile(systemName: row.symbol)
+                        }
+                    }
+                    .buttonStyle(.viaderePressable)
+                    .disabled(!inbox.canOpen(row))
+                    if index < rows.count - 1 { ViadereHairline(inset: 50) }
+                }
+            }
+            .padding(.bottom, ViadereSpace.s)
+        }
+    }
+
     @ViewBuilder private var needsYou: some View {
+        deliveries
         let items = alerts.needsYou(context: context)
         let state = ScreenLoadState.resolve(isLoading: alerts.isLoading, isEmpty: alerts.isEmpty,
                                             errorMessage: alerts.isOffline ? nil : alerts.errorMessage)
@@ -91,7 +136,7 @@ struct AlertsView: View {
             ViadereErrorState("Couldn't load alerts", message: message) { await alerts.refresh() }
                 .padding(.top, ViadereSpace.m)
         } else if items.isEmpty {
-            emptyNeedsYou.padding(.top, ViadereSpace.xl)
+            if inbox.rows(business: context.businessFilter).isEmpty { emptyNeedsYou.padding(.top, ViadereSpace.xl) }
         } else {
             VStack(spacing: ViadereSpace.s) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in

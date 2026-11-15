@@ -10,4 +10,13 @@ enum SecurePasteboard {
             [[UTType.utf8PlainText.identifier: string]],
             options: [.localOnly: true, .expirationDate: SensitiveCopyPolicy.expiration()])
     }
+
+    /// A value whose own lifetime may be shorter than the policy's (a delivered one-time code): the item expires at `request.expiresAt`,
+    /// which `SensitiveCopy.make` already capped at the policy and at the value's expiry. Always local only.
+    @MainActor
+    static func copy(_ request: SensitiveCopy) {
+        UIPasteboard.general.setItems(
+            [[UTType.utf8PlainText.identifier: request.value]],
+            options: [.localOnly: request.localOnly, .expirationDate: request.expiresAt])
+    }
 }

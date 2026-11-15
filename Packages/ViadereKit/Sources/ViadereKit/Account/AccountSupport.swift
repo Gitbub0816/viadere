@@ -13,6 +13,9 @@ public protocol LocalResidueCleaner: Sendable {
     func clearWatchContext() async
     /// Removes the per-interaction dynamic notification categories (`viadere.choose.<id>`), keeping the static ones.
     func removeDynamicNotificationCategories() async
+    /// Clears what the app shares with its Home Screen widget (the count of waiting requests) and any in-memory list that belongs to the
+    /// account (the deliveries inbox). Optional: the default does nothing.
+    func clearSharedSnapshots() async
 }
 
 /// Does nothing (extensions, tests, previews).
@@ -31,7 +34,10 @@ extension LocalResidueCleaner {
         await endLiveActivities()
         await clearWatchContext()
         await removeDynamicNotificationCategories()
+        await clearSharedSnapshots()
     }
+
+    public func clearSharedSnapshots() async {}
 }
 
 /// Lets the networking layer tell the app that the server stopped trusting this device (repeated signature

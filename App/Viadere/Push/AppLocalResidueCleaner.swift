@@ -3,10 +3,11 @@ import Foundation
 import UserNotifications
 import ViadereKit
 import WatchConnectivity
+import WidgetKit
 
 /// What sign-out, account deletion and device revocation must erase beyond the Keychain: notifications still in
 /// Notification Center (they can show names, amounts and places), Live Activities on the Lock Screen, the pending
-/// list shared with the watch, and the per-interaction notification categories.
+/// list shared with the watch, the per-interaction notification categories and the Home Screen widget snapshot.
 struct AppLocalResidueCleaner: LocalResidueCleaner {
     func removeDeliveredNotifications() async {
         let center = UNUserNotificationCenter.current()
@@ -30,5 +31,18 @@ struct AppLocalResidueCleaner: LocalResidueCleaner {
 
     func removeDynamicNotificationCategories() async {
         await NotificationCategories.removeDynamic()
+    }
+
+    /// The Home Screen widget's snapshot (numbers only) goes, and the widget returns to its neutral face.
+    func clearSharedSnapshots() async {
+        let services = AppEnvironment.services
+        await MainActor.run {
+            if let writer = services.homeWidget {
+                writer.clear()
+            } else {
+                WidgetSnapshotStore(persistence: UserDefaultsWidgetSnapshotPersistence(suiteName: services.configuration.appGroupID)).clear()
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshot.kind)
+            }
+        }
     }
 }

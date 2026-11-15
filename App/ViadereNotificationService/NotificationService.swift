@@ -12,6 +12,11 @@ import ViadereKit
 /// Brand Kits (WP-2.7): a non-security request may carry the business's approved logo as an attachment, taken only from the verified
 /// local cache (`BrandKitStore`, re-hashed on read) under `BrandSurfacePolicy`; nothing is downloaded here, so branding can never delay
 /// or replace the notification. Sign-in approvals, payment authorizations and security purposes never get one.
+///
+/// Auth deliveries (`viadere.auth.link|code|notice`, key `adl`; ADR-0020 §6.2): the extension fetches the display object (who, what, when;
+/// no URL and no code) and shows the approved N-02, N-05 or N-06 line (`AuthDeliveryNotificationText`). It never calls `open`, so nothing
+/// is consumed and a code can never reach a notification. Any failure, a phone not unlocked since restart, a method that does not match
+/// the category, or the time limit leaves the generic N-08 line, with the category (and its actions) kept.
 final class NotificationService: UNNotificationServiceExtension {
     private static let services = ViadereServices.live(configuration: ViadereRuntime.configuration)
     private var pending: PendingDelivery?
@@ -20,6 +25,22 @@ final class NotificationService: UNNotificationServiceExtension {
     override func didReceive(_ request: UNNotificationRequest, withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         guard let mutable = request.content.mutableCopy() as? UNMutableNotificationContent else {
             contentHandler(request.content)
+            return
+        }
+        let category = request.content.categoryIdentifier
+        if let deliveryId = AuthDeliveryNotificationText.deliveryId(category: category, userInfo: request.content.userInfo) {
+            let delivery = PendingDelivery(content: mutable, handler: contentHandler, keepsCategory: true)
+            pending = delivery
+            let api = Self.services.authDelivery
+            task = Task {
+                let text: AuthDeliveryNotificationText
+                if let item = try? await api.item(deliveryId: deliveryId) {
+                    text = AuthDeliveryNotificationText.make(item: item, category: category, now: Date())
+                } else {
+                    text = .generic
+                }
+                delivery.deliver(text)
+            }
             return
         }
         guard let id = PushPayload.interactionId(from: request.content.userInfo) else {
@@ -49,10 +70,23 @@ private final class PendingDelivery: @unchecked Sendable {
     private var delivered = false
     private let content: UNMutableNotificationContent
     private let handler: (UNNotificationContent) -> Void
+    /// Auth deliveries keep the category the server sent (its actions: Open, This wasn't me) even on the generic fallback.
+    private let keepsCategory: Bool
 
-    init(content: UNMutableNotificationContent, handler: @escaping (UNNotificationContent) -> Void) {
+    init(content: UNMutableNotificationContent, handler: @escaping (UNNotificationContent) -> Void, keepsCategory: Bool = false) {
         self.content = content
         self.handler = handler
+        self.keepsCategory = keepsCategory
+    }
+
+    /// An auth delivery: the approved line after fetch, or N-08. Never a code, a URL or a host.
+    func deliver(_ text: AuthDeliveryNotificationText) {
+        guard claim() else { return }
+        content.title = text.title
+        content.subtitle = ""
+        content.body = text.body
+        content.interruptionLevel = .active
+        handler(content)
     }
 
     private func claim() -> Bool {
@@ -97,7 +131,7 @@ private final class PendingDelivery: @unchecked Sendable {
         guard claim() else { return }
         content.title = "Viadere"
         content.body = AuthDeliveryCopy.n08Body
-        content.categoryIdentifier = "viadere.unknown"
+        if !keepsCategory { content.categoryIdentifier = "viadere.unknown" }
         handler(content)
     }
 }

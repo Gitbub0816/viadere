@@ -107,7 +107,7 @@ struct SettingsView: View {
         case .devices: DevicesView(vm: vm)
         case .authenticator: AuthenticatorView(backTitle: "You")
         case .recovery: RecoveryCodesSettingsView(vm: vm)
-        case .notifications, .lockScreenDetails, .businessNotifications:
+        case .notifications, .lockScreenDetails, .liveActivityDetails, .businessNotifications:
             NotificationSettingsView(model: model, vm: vm) { id in path.append(.business(id)) }
         case .loops: LoopSettingsView(model: model)
         case .profileReceipts: ProfileReceiptsView(api: AppEnvironment.shared.profileAPI)
@@ -354,6 +354,22 @@ struct NotificationSettingsView: View {
                                              symbol: "text.viewfinder"),
                                    ])
             }
+            // Live Activity details (F-09): off by default (neutral wording); turning them on needs Face ID or the passcode.
+            VStack(alignment: .leading, spacing: ViadereSpace.xs) {
+                ViadereChoiceCards(LiveActivityDetailsSetting.label,
+                                   selection: Binding(get: { vm.liveActivityDetailsEnabled },
+                                                      set: { value in Task { await vm.setLiveActivityDetails(value) } }),
+                                   options: [
+                                       .init(false, LiveActivityDetailsSetting.neutralTitle, detail: LiveActivityDetailsSetting.neutralDetail, symbol: "eye.slash"),
+                                       .init(true, LiveActivityDetailsSetting.detailedTitle, detail: LiveActivityDetailsSetting.detailedDetail,
+                                             symbol: "rectangle.badge.checkmark"),
+                                   ])
+                Text(LiveActivityDetailsSetting.explanation)
+                    .font(ViadereType.footnote)
+                    .foregroundStyle(ViadereColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, ViadereSpace.m)
             accountLevel
             quietHours
             businessLevels
