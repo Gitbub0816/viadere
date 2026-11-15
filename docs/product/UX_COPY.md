@@ -186,6 +186,12 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | S-PAIR-07 | Push to D1 devices (no name, code or number) | Viadere · Someone wants to add a device to your Viadere account. Open Viadere to review it. |
 | | Alerts row | A device is asking to join your account. |
 | S-PAIR-08 | In-app notice after "This wasn't me" (every device) | Someone tried to add a device to your Viadere account and you said it wasn't you. Nothing was added. Review your devices in Viadere. |
+| S-PAIR-09 | Trusted device, under the code: the same code as a QR (`/p/{code}`, SECURITY §2.107) | Or scan this with the new device. It holds the same code. (VoiceOver: QR code holding the same code) |
+| | New device, pairing entry button | Scan the code |
+| | Scanner refusal in the pairing entry (anything but a pairing code) | That isn't a code for adding this device. Scan the code on your other device's screen. |
+| S-PAIR-10 | Pairing code on a device that already uses Viadere: app scanner / opened link | This code adds a new device to an account. Scan it with the device you're adding. Nothing was opened. |
+| | Pairing entry on an enrolled device (scan, link or Continue) | This device already uses Viadere, so it can't be added with a code. Nothing was opened. |
+| WEB-07 | `/p/{code}` opened in a browser (nothing looked up; the code is not shown) | Title: Open this in the Viadere app · On the new device, open Viadere, choose I already use Viadere and scan the code again, or type it. Nothing was added here. · Only scan a code shown on your own device. |
 | S-REC-01 | Recovery downgrade (spec §7) | Recovering with a code gives this device less access. |
 | | Detail | After a 72-hour wait, your other devices are signed out and this device takes over. It can message and deny requests, but it can't approve payments or other high-risk requests until each business sets it up again. Shared household access ends. Another trusted device of yours can cancel during the wait. |
 | | Detail, no other trusted device | You don't have another trusted device, so nobody can cancel this during the wait. |

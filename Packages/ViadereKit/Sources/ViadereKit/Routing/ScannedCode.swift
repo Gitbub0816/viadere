@@ -32,6 +32,10 @@ public enum ScanRejection: Sendable, Equatable {
     case unverifiedAction
     /// Longer than any Viadere code, or carrying control characters.
     case malformed
+    /// A pairing code's QR (`/p/…`) scanned on a device that is already enrolled: it only ever adds a *new* device (SECURITY.md §2.107).
+    case pairingOnEnrolledDevice
+    /// Anything other than a pairing code's QR, scanned in a new device's pairing entry.
+    case notAPairingCode
 
     /// What the scanner tells the person. It never repeats the scanned text.
     public var message: String {
@@ -40,6 +44,8 @@ public enum ScanRejection: Sendable, Equatable {
         case .retired: "This code is no longer used. Nothing was opened."
         case .unverifiedAction: SafeActionRejection.malformed.message
         case .malformed: "That code can't be read as a Viadere code. Nothing was opened."
+        case .pairingOnEnrolledDevice: "This code adds a new device to an account. Scan it with the device you're adding. Nothing was opened."
+        case .notAPairingCode: "That isn't a code for adding this device. Scan the code on your other device's screen."
         }
     }
 }
@@ -52,7 +58,16 @@ public enum ScanRejection: Sendable, Equatable {
 ///   install), each of which opens a review screen and decides nothing;
 /// - a CKey Safe Action (`ckey-action:`) is never acted on here: only an exact, well-formed version 1 envelope no longer than a sign-in
 ///   envelope for this link domain is handed on, unverified, to `SafeActionReader`; every other spelling is refused;
-/// - bounded length and no control characters, checked before any parser sees the text.
+/// - bounded length and no control characters, checked before any parser sees the text;
+/// - a pairing code's QR (`/p/{code}`, exact form) is accepted only in `ScanContext.newDevicePairing`, and that context accepts nothing else.
+/// Where the scanner was opened. The pairing code's QR is read only in a new device's pairing entry; everywhere else it is refused.
+public enum ScanContext: Sendable, Equatable {
+    /// The app's scanner (Alerts, Businesses, Add business): an enrolled device.
+    case app
+    /// The new device's pairing entry (onboarding, "I already use Viadere"): only `/p/{code}` is accepted.
+    case newDevicePairing
+}
+
 public enum ScannedCodePolicy {
     /// The longest Viadere link is an Approve enrollment link with its fragment secret, well under this.
     public static let maxPayloadBytes = 512
@@ -62,7 +77,18 @@ public enum ScannedCodePolicy {
     /// 264 for `viadere.com`, above 512 only for a link domain of 198 characters or more). Everything else keeps `maxPayloadBytes`.
     public static func maxSafeActionBytes(domain: LinkDomain) -> Int { ViadereSignInSafeAction.maxTextBytes(issuer: domain.host) }
 
-    public static func evaluate(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain = .current) -> ScannedCodeDecision {
+    public static func evaluate(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain = .current, context: ScanContext = .app) -> ScannedCodeDecision {
+        let decision = evaluateCode(payload, symbology: symbology, domain: domain)
+        switch (context, decision) {
+        case (.app, .open(.devicePairing)): return .rejected(.pairingOnEnrolledDevice)
+        case (.app, _): return decision
+        case (.newDevicePairing, .open(.devicePairing)): return decision
+        case (.newDevicePairing, .rejected(.malformed)): return decision
+        case (.newDevicePairing, _): return .rejected(.notAPairingCode)
+        }
+    }
+
+    private static func evaluateCode(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain) -> ScannedCodeDecision {
         let safeActionCap = maxSafeActionBytes(domain: domain)
         guard !payload.isEmpty, payload.utf8.count <= max(maxPayloadBytes, safeActionCap),
               payload.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && !(0x80...0x9F).contains($0.value) }) else {
@@ -81,7 +107,7 @@ public enum ScannedCodePolicy {
             guard payload.hasPrefix("https://"), let url = URL(string: payload), url.absoluteString == payload,
                   let link = DeepLinkRouter.route(url, domain: domain) else { return .rejected(.notViadere) }
             switch link {
-            case .connect, .linkSession, .verificationSession, .oidcSignIn, .approveEnrollment, .loopInstall:
+            case .connect, .linkSession, .verificationSession, .oidcSignIn, .approveEnrollment, .loopInstall, .devicePairing:
                 return .open(link)
             case .retiredLink:
                 return .rejected(.retired)

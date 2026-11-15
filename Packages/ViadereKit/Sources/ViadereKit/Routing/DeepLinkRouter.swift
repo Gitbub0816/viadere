@@ -33,6 +33,9 @@ public enum DeepLink: Sendable, Equatable {
     /// `https://{link domain}/o/{ach}` (the QR on the "Sign in with Viadere" page) or a tapped `viadere.oidc` push: the OIDC confirm screen
     /// (ADR-0024 §4 method 2). It approves nothing by itself: the app verifies the authority-signed statement and needs the number on the page.
     case oidcSignIn(challengeId: String)
+    /// `https://{link domain}/p/{XXXX-XXXX-XXXX}` (the QR a trusted device shows under its pairing code, SECURITY.md §2.107). Only a device that
+    /// is not enrolled uses it, and only to fill the code into its pairing entry; an enrolled device refuses it with a fixed message.
+    case devicePairing(code: String)
 }
 
 /// Strict URL → `DeepLink` mapping for universal links and the custom scheme.
@@ -89,6 +92,11 @@ public enum DeepLinkRouter {
             // Strict: the exact link domain, `/v/{CODE}`, no query, no fragment.
             guard let code = VerificationSessionLink.parse(url, domain: domain) else { return nil }
             return .verificationSession(code: code)
+        }
+        if components.path.hasPrefix(DevicePairingLink.prefix) {
+            // Strict: byte for byte `https://{link domain}/p/{XXXX-XXXX-XXXX}` (no `www.`, port, user info, query, fragment or lower case).
+            guard let code = DevicePairingLink.parse(url.absoluteString, domain: domain) else { return nil }
+            return .devicePairing(code: code)
         }
         // `/l/` and `/h/` tokens: the exact link domain only (never the `www.` alias).
         guard domain.matches(host), components.user == nil, components.password == nil, components.fragment == nil,

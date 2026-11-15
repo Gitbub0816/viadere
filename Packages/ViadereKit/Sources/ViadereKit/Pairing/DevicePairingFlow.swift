@@ -31,6 +31,12 @@ public enum PairingCopy {
     public static let expired = "This request expired and nothing was added. Make a new code on your other device."
     public static let cancelled = "Nothing was added."
     public static let attestation = "This device could not be verified. Update Viadere and try again on a genuine device."
+    /// S-PAIR-09: the QR under the code on the trusted device, and the new device's scan button.
+    public static let inviteQRLabel = "Or scan this with the new device. It holds the same code."
+    public static let inviteQRAccessibility = "QR code holding the same code"
+    public static let scanAction = "Scan the code"
+    /// S-PAIR-10: shown when this device already uses Viadere (a scanned or opened pairing code, or Continue).
+    public static let alreadyEnrolled = "This device already uses Viadere, so it can't be added with a code. Nothing was opened."
     // Approving device
     public static func requestedAt(_ time: String) -> String { "Requested at \(time)" }
     public static func expiresAt(_ time: String) -> String { "Expires at \(time)" }
@@ -87,9 +93,17 @@ public struct NewDevicePairing: Sendable {
         self.clock = clock
     }
 
+    /// Whether this device already has a session or a device record. A pairing code only ever adds a **new** device: an enrolled one never
+    /// starts a pairing (it would replace its own keys) and refuses a scanned or opened pairing code (SECURITY.md §2.107).
+    public func isEnrolled() async -> Bool {
+        if await sessions.isSignedIn { return true }
+        return (try? await records.load()) != nil
+    }
+
     /// Begin, create this device's keys (non-exportable where the hardware allows), prove them over the pairing id, attest, start with `code`.
     public func start(code: String, deviceName: String?) async throws -> Started {
         guard DevicePairingCode.normalize(code) != nil else { throw DevicePairingError.invalidCode }
+        guard await !isEnrolled() else { throw DevicePairingError.alreadyEnrolled }
         let opened = try await api.begin()
         let provisioned: DeviceKeyProvisioner.Result
         do {
@@ -218,6 +232,30 @@ public final class NewDevicePairingViewModel {
         entry = proposed.uppercased()
     }
 
+    /// A code read from the trusted device's QR (`ScannedCodePolicy`, context `.newDevicePairing`) or from an opened `/p/{code}` link. It only
+    /// fills the entry: the person still taps Continue. An enrolled device refuses it with a fixed line and keeps nothing.
+    public func prefill(code: String) async {
+        guard phase == .enteringCode, DevicePairingLink.isDisplayCode(code) else { return }
+        guard await !pairing.isEnrolled() else { notice = PairingCopy.alreadyEnrolled; return }
+        entry = code
+        notice = nil
+    }
+
+    /// What the scanner of this entry read. Only an exact `https://{link domain}/p/{code}` is accepted; everything else is refused with its
+    /// fixed message and nothing is filled.
+    public func scanned(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain = .current) async -> ScanRejection? {
+        switch ScannedCodePolicy.evaluate(payload, symbology: symbology, domain: domain, context: .newDevicePairing) {
+        case .open(.devicePairing(let code)):
+            guard await !pairing.isEnrolled() else { notice = PairingCopy.alreadyEnrolled; return .pairingOnEnrolledDevice }
+            await prefill(code: code)
+            return nil
+        case .rejected(let reason):
+            return reason
+        default:
+            return .notAPairingCode
+        }
+    }
+
     public func start() async {
         guard canContinue else { return }
         phase = .starting
@@ -229,6 +267,7 @@ public final class NewDevicePairingViewModel {
         } catch let error as DevicePairingError {
             switch error {
             case .noTrustedDevice: phase = .noTrustedDevice
+            case .alreadyEnrolled: phase = .enteringCode; notice = PairingCopy.alreadyEnrolled
             case .attestationRequired: phase = .enteringCode; notice = PairingCopy.attestation
             case .offline: phase = .enteringCode; notice = AuthDeliveryCopy.offline
             case .rateLimited: phase = .enteringCode; notice = "Too many attempts. Please wait a moment."

@@ -22,6 +22,8 @@ public enum DevicePairingError: Error, Equatable, Sendable {
     /// Already answered, or another device is being added right now.
     case conflict
     case rateLimited
+    /// This device already uses Viadere: a pairing code only adds a new device (nothing was sent).
+    case alreadyEnrolled
     case failed
 
     static func from(_ error: any Error) -> DevicePairingError {

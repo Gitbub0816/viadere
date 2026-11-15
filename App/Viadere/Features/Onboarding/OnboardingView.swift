@@ -18,6 +18,12 @@ struct OnboardingHost: View {
             .onAppear {
                 viewModel.onFinished = { Task { await model.completeOnboarding() } }
             }
+            // A pairing code from an opened `/p/{code}` link (never set on an enrolled device): open the pairing entry with it filled in.
+            .task(id: model.pendingDevicePairingCode) {
+                guard let code = model.pendingDevicePairingCode else { return }
+                model.pendingDevicePairingCode = nil
+                await viewModel.openPairing(prefilled: code)
+            }
     }
 }
 
@@ -120,7 +126,6 @@ private struct ErrorLine: View {
 
 private struct WelcomeStep: View {
     @Bindable var vm: OnboardingViewModel
-    @State private var pairing: NewDevicePairingViewModel?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -147,7 +152,7 @@ private struct WelcomeStep: View {
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
                 // Device pairing (§2.107): an account without a passkey adds this device from one of its trusted devices.
-                Button("I already use Viadere") { pairing = vm.makeNewDevicePairing() }
+                Button("I already use Viadere") { vm.openPairing() }
                     .buttonStyle(.viadere(.quiet))
                     .disabled(vm.isWorking)
                 Button("Lost your devices?") { vm.beginRecovery() }
@@ -157,10 +162,10 @@ private struct WelcomeStep: View {
             .padding(.horizontal, ViadereSpace.screen)
             .padding(.bottom, ViadereSpace.m)
         }
-        .sheet(isPresented: Binding(get: { pairing != nil }, set: { if !$0 { pairing = nil } })) {
-            if let pairing {
+        .sheet(isPresented: Binding(get: { vm.pairing != nil }, set: { if !$0 { vm.pairing = nil } })) {
+            if let pairing = vm.pairing {
                 ScrollView {
-                    NewDevicePairingView(model: pairing, onAdded: { self.pairing = nil; vm.onFinished?() })
+                    NewDevicePairingView(model: pairing, onAdded: { vm.pairing = nil; vm.onFinished?() })
                 }
                 .viadereScreenBackground()
             }

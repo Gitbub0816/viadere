@@ -20,6 +20,8 @@ public enum LogRedactor {
             (#"vds_[A-Za-z0-9_-]{16,}"#, "[redacted-session]"),
             (#"vrp1\.[A-Za-z0-9_.-]{20,}"#, "[redacted-postback]"),
             // Reward redemption codes (XXXXX-XXXXX), household invitation codes (XXXX-XXXX) and Wallet authentication tokens.
+            // Pairing codes and recovery IDs (`XXXX-XXXX-XXXX`, also in a `/p/{code}` path) before the shorter shapes, so no group is left behind.
+            (#"\b[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}\b"#, "[redacted-code]"),
             (#"\b[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}\b"#, "[redacted-code]"),
             (#"\b[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}\b"#, "[redacted-code]"),
             (#"ApplePass\s+[A-Za-z0-9_-]{16,}"#, "ApplePass [redacted]"),

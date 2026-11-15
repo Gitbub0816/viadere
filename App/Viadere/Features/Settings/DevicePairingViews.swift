@@ -29,6 +29,16 @@ struct AddDeviceInviteView: View {
                     .foregroundStyle(ViadereColor.textPrimary)
                     .accessibilityLabel(code.map { String($0) }.filter { $0 != "-" }.joined(separator: ", "))
                 if let line = model.expiryLine { Text(line).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary) }
+                // The same code as a QR (`https://{link domain}/p/{code}`, SECURITY.md §2.107): only a new device's pairing entry reads it.
+                if let link = DevicePairingLink.build(code: code) {
+                    VStack(spacing: ViadereSpace.xs) {
+                        QRCodeView(payload: link, size: 168, accessibilityText: PairingCopy.inviteQRAccessibility)
+                        Text(PairingCopy.inviteQRLabel).font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             case .noTrustedDevice:
                 ViadereNotice(PairingCopy.noTrustedDevice, kind: .info)
                 if let openRecovery { Button(PairingCopy.recoveryAction, action: openRecovery).buttonStyle(.viadere(.secondary)) }
@@ -121,6 +131,7 @@ struct NewDevicePairingView: View {
     @Bindable var model: NewDevicePairingViewModel
     var onAdded: () -> Void
     @State private var code = ""
+    @State private var scanning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: ViadereSpace.l) {
@@ -139,6 +150,10 @@ struct NewDevicePairingView: View {
                 Button(PairingCopy.continueAction) { Task { await model.start(); await model.waitForResult() } }
                     .buttonStyle(.viadere(.primary))
                     .disabled(!model.canContinue)
+                // The QR under the code on the other device. It only fills the field; Continue is still the person's tap.
+                Button(PairingCopy.scanAction) { scanning = true }
+                    .buttonStyle(.viadere(.secondary))
+                    .disabled(model.phase != .enteringCode)
             case .showing:
                 Text(AuthDeliveryCopy.newDeviceCodeTitle(code: "")).font(ViadereType.title).foregroundStyle(ViadereColor.textPrimary)
                 DeviceComparisonCode(display: model.displayCode ?? "", spoken: model.spokenCode ?? "")
@@ -155,5 +170,17 @@ struct NewDevicePairingView: View {
         .padding(ViadereSpace.screen)
         .privacySensitive()
         .viadereProtectedSurface()
+        .onChange(of: model.entry) { _, value in if code != value { code = value } }
+        .fullScreenCover(isPresented: $scanning) {
+            CodeScannerScreen { payload, symbology in
+                // `ScannedCodePolicy` in the pairing context accepts only `https://{link domain}/p/{code}`; the view model checks again,
+                // refuses it on an enrolled device, and fills the field.
+                if case .rejected(let reason) = ScannedCodePolicy.evaluate(payload, symbology: symbology, context: .newDevicePairing) { return reason }
+                scanning = false
+                Task { _ = await model.scanned(payload, symbology: symbology) }
+                return nil
+            } onClose: { scanning = false }
+            .viaderePullDownToDismiss()
+        }
     }
 }
