@@ -140,7 +140,9 @@ parties refetch on an unknown `kid`; the maximum exposure is the cache TTL plus 
   `seal-key create --role standby`. The change file carries the attested KEK **public** half (read once by the officer group, `GetKey` appears in `AuditEvent` and is
   reconciled); the admin identity holds no Key Vault role (`AUTH-ADMIN-NO-KV`). The job logs only the public JWK, thumbprint, KEK name/version and row id.
 * **Production (JWE-RSA construction):** `recovery-seal-rsa` (RSA-HSM 3072, `decrypt` only) and its standby; no KEK, no blob, no unwrap role. Production is blocked until this
-  ships with its tests or an owner exception exists (C-16, ledger L-13). Staging may move to it with `seal_construction = "jwe-rsa"` (A3 delta check).
+  ships with its tests or an owner exception exists (C-16, ledger L-13). Staging may move to it with `seal_construction = "jwe-rsa"` (A3 delta check). The authority
+  side is built (2026-11-15): pin the key with `key-version-pin` (`name: recovery-seal-rsa`, its version and RFC 7638 thumbprint); every `decrypt` writes a
+  `decrypt` sign record with its challenge id first, and `reconcile` matches `KeyDecrypt`/`Decrypt` operations one to one (an extra one alerts).
 * **Retirement:** destroy a retired seal key (delete the wrapped blob, disable the KEK version) once no supported app version pins it.
 
 ## 10. Standby rollover (reviewer-gated)

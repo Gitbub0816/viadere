@@ -100,6 +100,8 @@ The app fetches the signed head through the api (`GET /v1/security/key-log-head`
 
 **One account per key (revision 3.1, S3-A2-4).** The authority refuses `genesis`, `device_added` and `recovery_started` when any submitted `kid` appears in a non-revoked entry of **any** account, its own included (`409 key_in_use`, audited); the app then generates new keys. A `kid` therefore resolves to exactly one account, which the binding check of step 3a relies on. Accounts that never complete enrollment are closed after 24 h (ADR-0032 §1.5).
 
+**Implementation note (2026-11-15).** `passkey_added` and the passkey `recovery_cancel` are built in the authority (SECURITY.md §2.103). A passkey's `kid` in both entries is its COSE key as SPKI (`KeyIdentifier`, §2 rule 1), with the credential id in the entry detail; the reviewed import keeps its earlier `passkey:<credential_id>` reference. The passkey cancel uses its own WebAuthn challenge (`authority_passkey_challenges`, `purpose: recovery_cancel`, bound to the account and the pending recovery) and the §3a origin list (issuer origin and `https://<RP_ID>`); the passkey's account must equal the challenge's. Either cancel path is refused when the recovery is no longer pending, and neither needs the seal key.
+
 **Migration:** pre-existing device keys and passkeys are imported once by `ViadereAuthority admin keylog-import` from a reviewed snapshot that covers every consumer id, keyless ones included (residual R-16; ADR-0032 §1.6).
 
 ### 5. Grant `viadere-grant+jwt` (authority → business)
