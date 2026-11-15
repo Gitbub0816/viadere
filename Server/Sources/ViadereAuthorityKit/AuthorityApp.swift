@@ -55,6 +55,7 @@ public enum AuthorityApplication {
         app.migrations.add(CreateAuthoritySchema())
         app.migrations.add(CreateAuthorityKeyLogSchema())
         app.migrations.add(CreateAuthorityOIDCMethodsSchema())
+        app.migrations.add(CreateAuthorityTenantKeysSchema())
         if migrateInMemory {
             // Tests: a fresh schema every time (PostgreSQL test databases are reused between tests).
             try await app.autoRevert()
@@ -103,6 +104,7 @@ public enum AuthorityApplication {
         app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock, seal: seal)
         try routes(app, verifier: verifier)
         try keyLogRoutes(app, verifier: verifier)
+        try tenantKeyRoutes(app, verifier: verifier)
     }
 
     /// The complete route list (L-14: no debug endpoints; `AuthorityRouteListTests` pins it).

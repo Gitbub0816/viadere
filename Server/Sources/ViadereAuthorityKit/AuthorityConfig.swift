@@ -50,6 +50,9 @@ public struct AuthorityConfig: Sendable {
     /// `AUTHORITY_RECOVERY_ENABLED` (default **off**; refused with `ENVIRONMENT=production` until the HSM seal construction ships, ADR-0034 §9, C-16):
     /// sealed code sets, recovery starts, cancel and activation. Needs `RECOVERY_VERIFIER_KEY` and an app-pinned, unwrapped seal key.
     public var recoveryEnabled = false
+    /// `AUTHORITY_TENANT_KEYS_ENABLED` (default **off**): signed tenant records, the registration-nonce lookup and reduce-only tenant-key revocation
+    /// (ADR-0031 §1, §2). Off: those routes answer `404`. The admin commands that register keys run either way (they only write reviewed rows).
+    public var tenantKeysEnabled = false
     /// `OIDC_ISSUER`: the exact issuer string (`https://id.<staging domain>`, no trailing slash). Grants use `<issuer>/grant`.
     public var issuer = "https://id.viadere.test"
     /// `AUTHORITY_WEBAUTHN_RP_ID`: the existing Viadere WebAuthn RP id (so existing account passkeys work at `/oidc/authorize`, ADR-0024 §4 method 1).
@@ -114,6 +117,7 @@ public struct AuthorityConfig: Sendable {
         config.oidcEnabled = true
         config.keylogEnabled = true
         config.recoveryEnabled = true
+        config.tenantKeysEnabled = true
         return config
     }
 
@@ -135,6 +139,8 @@ public struct AuthorityConfig: Sendable {
         config.oidcEnabled = try flag("AUTHORITY_OIDC_ENABLED")
         config.keylogEnabled = try flag("AUTHORITY_KEYLOG_ENABLED")
         config.recoveryEnabled = try flag("AUTHORITY_RECOVERY_ENABLED")
+        config.tenantKeysEnabled = try flag("AUTHORITY_TENANT_KEYS_ENABLED")
+        if config.tenantKeysEnabled, !config.enabled { throw AuthorityConfigError.refused("AUTHORITY_TENANT_KEYS_ENABLED needs AUTHORITY_ENABLED (records are signed)") }
         if config.recoveryEnabled, deployment == .production {
             throw AuthorityConfigError.refused("AUTHORITY_RECOVERY_ENABLED is refused with ENVIRONMENT=production until the HSM seal construction ships (ADR-0034 section 9, C-16)")
         }

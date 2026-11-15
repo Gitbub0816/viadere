@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "Admin command (client-register, link-client-register, keylog-import, key-version-pin, key-inventory-record, seal-key-create, seal-key-exposed)"
+        description: "Admin command (client-register, link-client-register, keylog-import, key-version-pin, key-inventory-record, seal-key-create, seal-key-exposed, tenant-key-nonce, tenant-key-register, revoke-tenant-key, remove-tenant-host, device-key-revoke)"
         type: string
         required: true
       change_file:
@@ -70,6 +70,18 @@ jobs:
             echo "### Authority admin run"
             echo "Command: \`${COMMAND}\` — change file: \`${CHANGE_FILE}\` at \`${GITHUB_SHA}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Re-fetch the domain evidence of a destination-key registration (ADR-0031 section 1.2; outside the api and the dashboard)
+        if: inputs.command == 'tenant-key-register'
+        run: |
+          # Two DNS-over-HTTPS resolvers (or the host's well-known file over validated HTTPS) must name the thumbprint re-derived from the
+          # change file's public JWK, and agree with the evidence the reviewer committed; a DNSSEC-bogus answer is refused. The job then
+          # re-checks the committed evidence and the proof of possession over the nonce it issued (tenant-key-nonce).
+          python3 -I .github/scripts/destination_key_evidence.py --change-file "${CHANGE_FILE}" destination-key-evidence.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Attest the destination-key evidence
+        if: inputs.command == 'tenant-key-register'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: destination-key-evidence.json
       - name: Azure CLI login (workload identity federation, no secret)
         run: |
           az config set extension.use_dynamic_install=no core.only_show_errors=true > /dev/null

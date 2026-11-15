@@ -73,6 +73,13 @@ struct AuthorityChallengeService {
             guard let link = request.link, request.oidc == nil else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
             guard let client = try await AuthorityLinkClient.find(link.linkClientId, on: db), client.status == "active",
                   OIDCClientRules.jsonArray(client.returnURLs).contains(link.returnURL) else { throw Abort(.unprocessableEntity, reason: "invalid_client") }
+            // The creating business (named by the api from the authenticated key) must be the client's registered business: compared for equality,
+            // never a source. Without it a tenant could present another tenant's reviewed name and return URL to a customer.
+            guard let business = link.businessId, business == client.businessId else {
+                await AuthorityAudit.record(db, "authority.challenge_created", outcome: "denied", reason: "tenant_mismatch", tenant: client.tenantId,
+                                            caller: caller?.name, at: now)
+                throw Abort(.unprocessableEntity, reason: "invalid_client")
+            }
             guard AuthDeliveryID(link.deliveryId) != nil, OIDCProfile.isValidCodeChallenge(link.codeChallenge), ["sign_in", "step_up"].contains(link.purpose) else {
                 throw Abort(.unprocessableEntity, reason: "invalid_request")
             }
