@@ -46,6 +46,15 @@ public enum ViadereSDKError: Error, Sendable, Equatable {
     case invalidSigningKey
     /// The request signer failed, or returned a signature that does not verify under its public key; nothing was sent.
     case signingFailed
+    /// An image upload was refused before it was sent (`MessageAttachmentPolicy.precheck`: empty, over 2 MiB, not PNG or JPEG, or a declared
+    /// type that does not match the bytes). `MessageAttachmentPolicy.message(_:)` is the sentence to show.
+    case attachmentRejected(MessageAttachmentPolicy.Rejection)
+    /// A message names attachment ids without its `sessionId`, more than `MessageAttachmentPolicy.maxPerMessage`, or the same id twice; or it
+    /// has neither text nor images. Nothing was sent.
+    case invalidAttachmentIds
+    /// A downloaded image does not match its reference (size or SHA-256), or the server named another conversation or type. The bytes are
+    /// discarded, never returned.
+    case attachmentMismatch
 }
 
 /// Why a webhook was rejected. Respond `400` (or `401`) and do **not** process the event.

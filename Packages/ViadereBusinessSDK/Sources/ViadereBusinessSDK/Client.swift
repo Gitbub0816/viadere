@@ -173,8 +173,15 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     // MARK: Messages and statuses
 
     /// Sends a message into the customer's conversation with you (scope `messages:write`).
+    ///
+    /// Images: upload each with `uploadAttachment(sessionId:data:contentType:)` and name the ids in `request.attachmentIds` (1 to 4, no
+    /// duplicates) with the **same** `sessionId`; `body` may then be empty. Ids without a `sessionId`, too many or repeated ids are refused locally
+    /// (`ViadereSDKError.invalidAttachmentIds`) and nothing is sent.
     public func sendMessage(_ request: BusinessSendMessageRequest) async throws -> ConversationMessage {
-        try decode(ConversationMessage.self, try await perform(APIRoutes.businessSendMessage.descriptor, body: request, idempotencyKey: request.idempotencyKey))
+        if let ids = request.attachmentIds {
+            guard !ids.isEmpty, MessageAttachmentPolicy.validate(ids), request.sessionId != nil else { throw ViadereSDKError.invalidAttachmentIds }
+        }
+        return try decode(ConversationMessage.self, try await perform(APIRoutes.businessSendMessage.descriptor, body: request, idempotencyKey: request.idempotencyKey))
     }
 
     /// Updates an ongoing-event status; a newer update with the same `activityKey` replaces the earlier one (scope `statuses:write`).
@@ -314,27 +321,37 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     // MARK: Plumbing
 
     func perform<Body: Encodable>(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: Body?, idempotencyKey: String? = nil,
-                                  naturallyIdempotent: Bool = false) async throws -> BusinessHTTPResponse {
-        let path: String
-        do { path = try endpoint.path(parameters, query: query) } catch { throw ViadereSDKError.invalidPath }
-        guard let url = URL(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else { throw ViadereSDKError.invalidPath }
-        var headers = ["Authorization": "Bearer \(apiKey)", "Accept": "application/json", "User-Agent": Self.userAgent]
+                                  naturallyIdempotent: Bool = false, accept: String = "application/json") async throws -> BusinessHTTPResponse {
         var payload: Data?
         if let body {
             do { payload = try ViadereJSON.encode(body) } catch { throw ViadereSDKError.encodingFailed }
-            headers["Content-Type"] = "application/json"
         }
+        return try await performRaw(endpoint, parameters: parameters, query: query, body: payload.map { ($0, "application/json") }, idempotencyKey: idempotencyKey,
+                                    naturallyIdempotent: naturallyIdempotent, accept: accept)
+    }
+
+    func perform(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], naturallyIdempotent: Bool = false,
+                 accept: String = "application/json") async throws -> BusinessHTTPResponse {
+        try await perform(endpoint, parameters: parameters, query: query, body: Optional<EmptyBody>.none, naturallyIdempotent: naturallyIdempotent, accept: accept)
+    }
+
+    /// The one request path: a JSON body (above) or raw bytes with their own type (an image upload). The same rules apply to both: the key in
+    /// `Authorization`, retries only when the request is safe to repeat (`GET`, an idempotency key, or naturally idempotent), and, with a
+    /// request signer, an RFC 9421 signature whose `content-digest` covers exactly these bytes and whose `content-type` is this type.
+    func performRaw(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: (data: Data, contentType: String)?,
+                    idempotencyKey: String? = nil, naturallyIdempotent: Bool = false, accept: String = "application/json") async throws -> BusinessHTTPResponse {
+        let path: String
+        do { path = try endpoint.path(parameters, query: query) } catch { throw ViadereSDKError.invalidPath }
+        guard let url = URL(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else { throw ViadereSDKError.invalidPath }
+        var headers = ["Authorization": "Bearer \(apiKey)", "Accept": accept, "User-Agent": Self.userAgent]
+        if let body { headers["Content-Type"] = body.contentType }
         if let idempotencyKey {
             guard IdempotencyKey.isValid(idempotencyKey) else { throw ViadereAPIError(status: 400, code: .badRequest, message: "Invalid idempotency key.", requestId: nil, details: nil, retryAfter: nil) }
             headers[ViadereHeader.idempotencyKey] = idempotencyKey
         }
         let safeToRetry = endpoint.method == .GET || idempotencyKey != nil || naturallyIdempotent
-        let request = BusinessHTTPRequest(method: endpoint.method.rawValue, url: url, headers: headers, body: payload)
+        let request = BusinessHTTPRequest(method: endpoint.method.rawValue, url: url, headers: headers, body: body?.data)
         return try await send(request, retryable: safeToRetry)
-    }
-
-    func perform(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], naturallyIdempotent: Bool = false) async throws -> BusinessHTTPResponse {
-        try await perform(endpoint, parameters: parameters, query: query, body: Optional<EmptyBody>.none, naturallyIdempotent: naturallyIdempotent)
     }
 
     private func send(_ request: BusinessHTTPRequest, retryable: Bool) async throws -> BusinessHTTPResponse {
