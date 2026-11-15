@@ -8,19 +8,19 @@ struct UIApplicationURLOpener: SystemURLOpening {
     @MainActor func open(_ url: URL) async -> Bool { await UIApplication.shared.open(url, options: [:]) }
 }
 
-/// The sign-in link screen (UX_COPY S-LINK-01 and the failure screens, ADR-0021 §4): the verified business, the full destination host, the
+/// The sign-in link screen (shown by `LinkConfirmationSheet` once the delivery is known to be a link; UX_COPY S-LINK-01 and the failure screens, ADR-0021 §4): the verified business, the full destination host, the
 /// expiry, and two equal buttons with the safe action first. Opening the screen consumes nothing; only Continue asks for the URL, and
 /// Continue stays off until the destination was verified (until Stage 6 delivers the tenant record, every business link fails closed).
-struct LinkConfirmationSheet: View {
+struct LinkConfirmationScreen: View {
     @State private var model: LinkConfirmationViewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(pending: PendingAuthDelivery) {
+    init(deliveryId: UUID) {
         let services = AppEnvironment.services
         // Business-signed destinations are verified against an authority-signed tenant record (ADR-0031), which arrives in Stage 6: until
         // then `FailClosedDestinationVerifier` is the only verifier and nothing is ever opened.
         _model = State(initialValue: LinkConfirmationViewModel(
-            deliveryId: pending.id, api: services.authDelivery, verifier: FailClosedDestinationVerifier(), opener: UIApplicationURLOpener()))
+            deliveryId: deliveryId, api: services.authDelivery, verifier: FailClosedDestinationVerifier(), opener: UIApplicationURLOpener()))
     }
 
     var body: some View {

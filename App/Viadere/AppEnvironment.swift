@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import ViadereKit
+import WidgetKit
 
 /// The app's object graph. `services` is a plain `Sendable` value so background callbacks can use it directly;
 /// everything UI-related lives on the main actor.
@@ -16,9 +17,14 @@ final class AppEnvironment {
             notificationPermission: UserNotificationPermissionService(),
             appLock: LocalAuthenticationAppLock(),
             residue: AppLocalResidueCleaner())
-        // "Deny not sent yet" (N-09). `services.authDelivery` stays `UnavailableAuthDeliveryAPI` until the server's auth-delivery API exists,
-        // and `services.authDeliveryFlags` stays `.shipping` (device-add comparison and destination verification off, fail closed).
+        // "Deny not sent yet" (N-09). `services.authDelivery` is the live client from `ViadereServices.live` (inbox, display object,
+        // one-time codes, reduce-only answers); `services.authDeliveryFlags` stays `.shipping`, so destination verification is off and
+        // `openLink` never asks for a URL (fail closed).
         services.localSecurityNotices = LocalSecurityNotices()
+        // The Home Screen widget: numbers only, through the app group (`WidgetSnapshot`).
+        services.homeWidget = HomeWidgetWriter(
+            store: WidgetSnapshotStore(persistence: UserDefaultsWidgetSnapshotPersistence(suiteName: services.configuration.appGroupID)),
+            reload: { WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshot.kind) })
         return services
     }()
 
