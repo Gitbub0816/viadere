@@ -36,6 +36,18 @@ drafting assistant (WP-4.3), both blocked on the owner. Open: businesses get app
 (install-only customers have no pairwise approval key); the app changes are in ViadereKit only (the generic confirmation panel renders the estimate),
 not built in Xcode; the Postgres suite was not run for this change.
 
+**CKey 0.1.0-build.127 adopted (2026-11-15).** CKey moved from build 85 to the current Stable-Release, `v0.1.0-build.127` (commit
+`d7a068320f860d7ff06463fa53fc1447fc853413`). The `CKeyScanner` revision is re-pinned in `App/project.yml`. `ckey-profile0-v1.json` and
+`ckey-style-v1.json` were regenerated from build 127 with `CKEY_LAYOUT_STANDARD` by a small harness linked against its core. Every codeword,
+SVG hash, verdict and message came out identical to build 85, so neither the Swift port nor the JavaScript port changed. That holds for the
+Standard layout only. Build 127's encoder defaults to Auto (Arc, byte-grouped Format 0.33 from version 8), which Viadere does not draw. Its
+levels U and X are not ported either. The Safe Action vectors (Ed25519 and ES256) are byte-identical to build 127's `tests/vectors`. ES256
+Safe Actions are on Stable-Release from this build, and `CKeySafeAction` already enforces its rules. The app's call
+`CKeyDecoder.decode(pixelBuffer:)` and the result fields it reads still exist (`swiftc -parse` only). From build 127 that call runs the
+one-call frame scan, with the built-in ML locator, refiner and site model on by default. Whether to turn the ML part off is an owner decision:
+[`SECURITY.md`](SECURITY.md) §2.104, residual risk (1). Verified here: Core 657, Kit 842, browser `test_verify_button_v2.py` 12/12, and Server
+on SQLite 1323 + 109 (10 skipped, 0 failures). **Not verified:** the PostgreSQL run, an Xcode build against the new package revision, and scanning on a device.
+
 **`auth.delivery.fallback_used` webhook and Kotlin request signing (2026-11-15).** When a delivery that asked for the email fallback had its email
 accepted by the provider, the business now receives `auth.delivery.fallback_used` once (v2 opaque envelope, ids only; never for a suppressed or
 failed email; no address or code in any encoding, tested). Additive in contract v1.x: event schema, test-event enum, Core
@@ -171,11 +183,8 @@ build in Xcode, scan the staging sign-in page from a laptop screen in bright and
 signs it with the challenge; the api only stores, draws and publishes it: `/.well-known/ckey-safe-actions.json`, `/ckey/requests/{id}`), and
 the app verifies it with its own Swift reader against pinned keys (`VIADERE_CKEY_SAFE_ACTION_KEYS`, `keyId:ES256:<SEC 1 hex>`) before
 opening the unchanged sign-in review. Off (plain link) until the owner pins the key. [`SECURITY.md`](SECURITY.md) §2.104 "Safe Actions" maps
-every spec rule to code and test. Owner follow-ups: (1) ES256 Safe Actions need CKey 0.1.0-build.118 or later, which is on CKey's scratch
-branch only: when the owner publishes the first Stable-Release build ≥ 118 (the earlier plan named build 115; ES256 needs 118), re-pin `App/project.yml` (`CKeyScanner`
-revision) to it, regenerate `docs/protocol/vectors/ckey-profile0-v1.json`, `ckey-safe-actions-v1.json` and `ckey-safe-actions-es256-v1.json`
-from that build, re-run the Core port tests, and update the CLAUDE.md CKey rows. Viadere's reader does not depend on the CKey build; other
-CKey readers do. (2) Before enabling: create the key (OpenTofu), pin its version with the admin job, set `CKEY_SAFE_ACTION_ISSUER` in
+every spec rule to code and test. Owner follow-ups: (1) ~~ES256 Safe Actions need a Stable-Release CKey build ≥ 118~~ done 2026-11-15:
+CKey is on Stable-Release 0.1.0-build.127 (see the CKey 127 entry above). (2) Before enabling: create the key (OpenTofu), pin its version with the admin job, set `CKEY_SAFE_ACTION_ISSUER` in
 `authority_env`, put the key file's entry into the app build, and only then turn it on. (3) Whether the Verify, Connect and dashboard codes
 should offer a CKey beside the QR.
 

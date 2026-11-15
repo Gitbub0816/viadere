@@ -6,8 +6,10 @@ licence files; this file covers what is written into or pinned by the repository
 ## CKey (clearkeysolutions/ckey)
 
 - **Ported:** `Packages/ViadereCore/Sources/ViadereCore/OpticalCode/CKeySymbol.swift` and `CKeySVG.swift` are a Swift port of the CKey Profile 0
-  encoder and styled SVG renderer (`src/core_internal.inc`, `src/api_codec.inc`, `src/api_render.inc`) at tag `v0.1.0-build.85`
-  (commit `ede38f57aa1a20c456b1858f4fccd919e98ef269`). `docs/protocol/vectors/ckey-profile0-v1.json` was produced by that build.
+  encoder and styled SVG renderer (`src/core_internal.inc`, `src/api_codec.inc`, `src/api_render.inc`), ported at tag `v0.1.0-build.85`
+  and now checked against tag `v0.1.0-build.127` (commit `d7a068320f860d7ff06463fa53fc1447fc853413`, Stable-Release), which draws the
+  Standard layout identically. `docs/protocol/vectors/ckey-profile0-v1.json` was produced by build 127. The Safe Action conformance vectors
+  (`ckey-safe-actions-v1.json`, `ckey-safe-actions-es256-v1.json`) are copied unchanged from that build's `tests/vectors`.
   The renderer port also covers the reference's custom styles (module shapes, ring style, ray caps, colours and materials), and
   `CKeyStyleCheck.swift` ports its style check (`structural_problem` and the strict `safety_problem` in `src/core_internal.inc`);
   `docs/protocol/vectors/ckey-style-v1.json` (verdicts and styled SVGs) was produced by the same build.

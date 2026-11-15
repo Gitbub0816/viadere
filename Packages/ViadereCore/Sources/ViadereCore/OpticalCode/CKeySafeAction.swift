@@ -12,7 +12,7 @@ import Foundation
 ///                                                  Ed25519, or ES256 (ECDSA P-256 / SHA-256, raw r‖s, low-S)
 ///
 /// The envelope does not name the algorithm; the key does (`PublicKey`: the `alg` of the key file entry or of the app's pin). ES256 needs
-/// CKey 0.1.0-build.118 or later in other readers. This file parses, verifies and signs, in pure Swift (swift-crypto; no CKey C or C++ is linked). It decides nothing about whether an
+/// CKey 0.1.0-build.118 or later in other readers (on Stable-Release from 0.1.0-build.127). This file parses, verifies and signs, in pure Swift (swift-crypto; no CKey C or C++ is linked). It decides nothing about whether an
 /// action may run: that is the reader's job (`ViadereKit.SafeActionReader`, SECURITY.md §2.104). It reaches every verdict of the CKey
 /// conformance vectors (`docs/protocol/vectors/ckey-safe-actions-v1.json`; `CKeySafeActionTests`).
 public struct CKeySafeAction: Sendable, Equatable {

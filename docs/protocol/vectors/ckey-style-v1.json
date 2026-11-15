@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "source": "clearkeysolutions/ckey v0.1.0-build.85 (ede38f57aa1a20c456b1858f4fccd919e98ef269): ckey_check_scalable_style (strict policy, no logo) and ckey_render_scalable_styled_svg at scale 16, built with GCC 13 on Linux x86-64. Material amounts are percent (the reference takes amount / 100.0).",
+ "source": "clearkeysolutions/ckey v0.1.0-build.127 (d7a068320f860d7ff06463fa53fc1447fc853413): ckey_check_scalable_style (strict policy, no logo) and ckey_render_scalable_styled_svg at scale 16 (CKEY_LAYOUT_STANDARD), built with GCC 13 on Linux x86-64. Material amounts are percent (the reference takes amount / 100.0).",
  "checks": [
   {
    "name": "plain",
