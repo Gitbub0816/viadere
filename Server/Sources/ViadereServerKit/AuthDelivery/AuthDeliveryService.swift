@@ -39,13 +39,18 @@ struct AuthDeliveryService {
 
     // MARK: Business credentials
 
-    /// A live key needs mutual TLS on auth routes (ADR-0020 section 3) until request signatures exist; never a bearer alone. Test keys are exempt (sandbox only).
+    /// A live key needs an RFC 9421 request signature or mutual TLS on auth routes (ADR-0020 section 3, SECURITY §2.112); never a bearer alone. The
+    /// signature was verified by the API-key middleware before any handler ran (`requestSigningKeyId`); the mTLS binding was enforced there too.
+    /// Test keys are exempt (sandbox only).
     func requireLiveKeyAssurance(_ principal: BusinessPrincipal) async throws {
-        guard principal.livemode, settings.liveKeyAssurance == .mtls else { return }
+        guard principal.livemode, settings.liveKeyAssurance != .none else { return }
+        if settings.liveKeyAssurance == .mtlsOrSignature, principal.requestSigningKeyId != nil { return }
         let key = try await BusinessAPIKeyRecord.find(principal.keyId, on: db)
         let tenant = try await BusinessSecuritySettingsRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid).first()
         guard key?.requiresMTLS == true || tenant?.mtlsRequired == true else {
-            throw APIError(.unauthorized, .signatureRequired, "Live keys need mutual TLS on authentication delivery routes.")
+            throw APIError(.unauthorized, .signatureRequired, settings.liveKeyAssurance == .mtls
+                ? "Live keys need mutual TLS on authentication delivery routes."
+                : "Live keys need an HTTP message signature (RFC 9421) or mutual TLS on authentication delivery routes.")
         }
     }
 

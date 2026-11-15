@@ -15,6 +15,7 @@ final class MetricsRegistry: @unchecked Sendable {
         case apiKeyRejected = "api_key_rejected"
         case apiKeyIPDenied = "api_key_ip_denied"
         case apiKeyMTLSDenied = "api_key_mtls_denied"
+        case apiKeySignatureDenied = "api_key_signature_denied"
         case apiKeyCreated = "api_key_created"
         case apiKeyRevoked = "api_key_revoked"
         case apiKeyRotated = "api_key_rotated"

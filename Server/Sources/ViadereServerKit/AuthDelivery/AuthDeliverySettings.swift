@@ -24,9 +24,10 @@ public struct AuthDeliverySettings: Sendable {
     /// `AUTH_DESTINATION_SIGNATURE_REQUIRED` (ADR-0031 section 5): business-mode links need a business-signed destination statement. `false` exists only so the
     /// unit tests can exercise both paths; staging and production refuse it.
     public var destinationSignatureRequired = true
-    /// `AUTH_LIVE_KEY_ASSURANCE`: what a live API key must carry on auth routes. `mtls` (the default in staging and production) needs a key bound to mutual TLS
-    /// (Tier E); `none` is development and tests only. RFC 9421 request signatures (ADR-0020 section 3) follow in a later stage; until then a live key
-    /// without mutual TLS is refused (`401 signature_required`), never accepted on a bearer alone. Test keys reach sandbox customers only and are exempt.
+    /// `AUTH_LIVE_KEY_ASSURANCE`: what a live API key must carry on auth routes, besides itself (ADR-0020 section 3). `mtls_or_signature` (the default in
+    /// staging and production) accepts either a verified RFC 9421 request signature with a key registered for that API key (SECURITY §2.112) or a key bound
+    /// to mutual TLS (Tier E); `mtls` accepts mutual TLS only (stricter); `none` is development and tests only. Without one a live key is refused
+    /// (`401 signature_required`), never accepted on a bearer alone. Test keys reach sandbox customers only and are exempt.
     public var liveKeyAssurance: LiveKeyAssurance = .none
     /// `AUTH_SECRET_KEY`: AES-256-GCM key of the pending secrets (`auth_delivery_secrets`), independent of `DATA_ENCRYPTION_KEY`.
     public var secretKey = SymmetricKey(size: .bits256)
@@ -48,7 +49,11 @@ public struct AuthDeliverySettings: Sendable {
     /// T-class metadata of ended deliveries is deleted after this (owner decision 10).
     public var metadataRetention: TimeInterval = 30 * 86_400
 
-    public enum LiveKeyAssurance: String, Sendable { case mtls, none }
+    public enum LiveKeyAssurance: String, Sendable {
+        case mtlsOrSignature = "mtls_or_signature"
+        case mtls
+        case none
+    }
 
     public init() {}
 
@@ -95,12 +100,15 @@ extension ServerConfig {
         default: throw ServerConfigError.invalid("AUTH_DESTINATION_SIGNATURE_REQUIRED (true or false)")
         }
         switch env["AUTH_LIVE_KEY_ASSURANCE"].map({ $0.lowercased() }) {
-        case nil, "": authDelivery.liveKeyAssurance = production ? .mtls : .none
+        case nil, "": authDelivery.liveKeyAssurance = production ? .mtlsOrSignature : .none
         case let raw?:
-            guard let mode = AuthDeliverySettings.LiveKeyAssurance(rawValue: raw) else { throw ServerConfigError.invalid("AUTH_LIVE_KEY_ASSURANCE (mtls or none)") }
+            guard let mode = AuthDeliverySettings.LiveKeyAssurance(rawValue: raw) else {
+                throw ServerConfigError.invalid("AUTH_LIVE_KEY_ASSURANCE (mtls_or_signature, mtls or none)")
+            }
             guard !(production && mode == .none) else { throw ServerConfigError.invalid("AUTH_LIVE_KEY_ASSURANCE (none is not allowed in staging or production)") }
             authDelivery.liveKeyAssurance = mode
         }
+        if let raw = env["REQUEST_SIGNATURE_AUTHORITIES"], !raw.isEmpty { requestSignatures.authorities = try RequestSignatureSettings.parse(raw) }
         if let raw = env["AUTH_SECRET_KEY"], !raw.isEmpty {
             guard let bytes = Base64URL.decode(raw) ?? Data(base64Encoded: raw), bytes.count >= 32 else {
                 throw ServerConfigError.invalid("AUTH_SECRET_KEY (base64url, at least 32 bytes)")

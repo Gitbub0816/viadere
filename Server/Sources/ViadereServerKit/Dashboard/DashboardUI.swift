@@ -133,6 +133,7 @@ enum DashboardUI {
             NavItem(title: "Sessions", path: "/dashboard/security/sessions", permissions: []),
             NavItem(title: "Network", path: "/dashboard/security/network", permissions: []),
             NavItem(title: "Certificates", path: "/dashboard/security/certificates", permissions: []),
+            NavItem(title: "Request signing", path: "/dashboard/security/signing-keys", permissions: []),
             NavItem(title: "Alerts and contacts", path: "/dashboard/security/alerts", permissions: []),
             NavItem(title: "Approvals", path: "/dashboard/security/approvals", permissions: []),
             NavItem(title: "Audit log", path: "/dashboard/audit", permissions: [.viewAudit]),

@@ -90,6 +90,8 @@ struct APIKeyLifecycle {
         let issued = try await BusinessAPIKeys.issue(businessId: businessId, name: String(old.name.prefix(52)) + " (rotated)", live: old.livemode,
                                                      scopes: Array(old.scopeSet).sorted(), capabilities: Array(old.capabilitySet), now: now, options: options, on: db)
         old.rotatedTo = issued.record.id
+        // Request-signing keys follow the rotation (SECURITY §2.112): bound to the successor, still accepted from the predecessor during its overlap.
+        if let successor = issued.record.id { try await RequestSigningKeys(db: db, ctx: ctx).moveBindings(from: id, to: successor) }
         if overlap == 0 {
             old.revokedAt = now
             old.revokedBy = actor.label

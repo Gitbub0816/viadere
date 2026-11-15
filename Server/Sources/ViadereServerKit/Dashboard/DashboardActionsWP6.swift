@@ -125,6 +125,22 @@ extension DashboardActions {
         try await MTLSCertificates(db: db, ctx: ctx).revoke(businessId: businessId, id: id, by: userId)
     }
 
+    /// Registers an RFC 9421 request-signing key for one API key (SECURITY §2.112): Owner or Security Admin, a fresh passkey step-up, a proof of
+    /// possession over the challenge the page showed; audited, and every Owner is told.
+    func addSigningKey(apiKeyId: UUID, label: String, publicKey: String, challenge: String, proof: String) async throws -> BusinessRequestSigningKeyRecord {
+        try require(.manageSecurity)
+        try await requireReauth(next: "/dashboard/security/signing-keys")
+        return try await RequestSigningKeys(db: db, ctx: ctx).add(businessId: businessId, apiKeyId: apiKeyId, label: label, publicKey: publicKey, challenge: challenge,
+                                                                  proof: proof, by: userId)
+    }
+
+    /// Revoking is protective, but it stops live sign-in prompts, so it asks for the passkey like removing a certificate does.
+    func revokeSigningKey(id: UUID) async throws {
+        try require(.manageSecurity)
+        try await requireReauth(next: "/dashboard/security/signing-keys")
+        try await RequestSigningKeys(db: db, ctx: ctx).revoke(businessId: businessId, id: id, by: userId.uuidString.lowercased())
+    }
+
     /// Signs out one session. Everybody may end their own; ending someone else's is a Security Admin or Owner action and asks for the passkey.
     func revokeSession(id: UUID) async throws {
         guard let session = try await DashboardSessionRecord.query(on: db).filter(\.$id == id).filter(\.$businessId == businessId).first() else { throw APIError.notFound }

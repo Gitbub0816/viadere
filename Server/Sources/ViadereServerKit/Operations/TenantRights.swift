@@ -105,6 +105,7 @@ struct TenantDataRequests {
             if !hooks.isEmpty { try await WebhookSubscriptionRecord.query(on: tx).filter(\.$id ~~ hooks).delete() }
             try await BusinessDomainRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BusinessMTLSCertRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            try await BusinessRequestSigningKeyRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BusinessSecuritySettingsRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await SupportTicketRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await PendingChangeRecord.query(on: tx).filter(\.$businessId == businessId).delete()

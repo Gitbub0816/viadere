@@ -395,7 +395,7 @@ final class AuthDeliveryTests: AuthDeliveryTestBase {
         var c = ServerConfig.testing()
         try c.applyAuthDeliveryEnvironment([:], production: true)
         XCTAssertFalse(c.authDelivery.enabled)
-        XCTAssertEqual(c.authDelivery.liveKeyAssurance, .mtls)
+        XCTAssertEqual(c.authDelivery.liveKeyAssurance, .mtlsOrSignature, "RFC 9421 signature or mutual TLS (SECURITY §2.112)")
         XCTAssertThrowsError(try { var x = ServerConfig.testing(); try x.applyAuthDeliveryEnvironment(["AUTH_DESTINATION_SIGNATURE_REQUIRED": "false"], production: true) }())
         XCTAssertThrowsError(try { var x = ServerConfig.testing(); try x.applyAuthDeliveryEnvironment(["AUTH_LIVE_KEY_ASSURANCE": "none"], production: true) }())
         XCTAssertThrowsError(try { var x = ServerConfig.testing(); try x.applyAuthDeliveryEnvironment(["AUTH_DELIVERY_ENABLED": "true"], production: true) }(), "needs AUTH_SECRET_KEY")
