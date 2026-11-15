@@ -25,6 +25,8 @@ public struct OIDCProviderSettings: Sendable {
     public var hintPushRate: RateRule = .perHour(6, burst: 3)
     /// A pending browser authorization lives at most this long.
     public var authorizationLifetime: TimeInterval = 600
+    /// Request-information lookups per client address (`GET /ckey/requests/{request_id}`); fail closed (`oidc-` namespace).
+    public var requestInfoRate: RateRule = .perMinute(30, burst: 15)
 
     public init() {}
 }
@@ -94,6 +96,12 @@ final class OIDCAuthorizationRecord: Model, @unchecked Sendable {
     @OptionalField(key: "statement") var statement: String?
     @OptionalField(key: "match_code") var matchCode: String?
     @OptionalField(key: "code") var code: String?
+    /// The CKey Safe Action envelope the authority signed for `challengeId` when the browser chose the app (`OIDC.v3`); `nil` when Safe Actions are off.
+    @OptionalField(key: "safe_action") var safeAction: String?
+    /// "Chrome on Windows": a label from a fixed vocabulary for the browser that chose the app (`OIDC.v3`). Never the User-Agent.
+    @OptionalField(key: "requested_device") var requestedDevice: String?
+    /// The edge's two-letter country for that request, when it passed the origin lock (`OIDC.v3`).
+    @OptionalField(key: "requested_country") var requestedCountry: String?
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date
     init() {}
