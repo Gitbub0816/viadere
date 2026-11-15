@@ -50,6 +50,8 @@ public struct ViadereServices: Sendable {
     public var homeWidget: HomeWidgetWriter?
     /// Device pairing (§2.107): adding a device from a trusted one. Fails closed when absent (extensions, the App Clip).
     public var devicePairingAPI: any DevicePairingAPI = UnavailableDevicePairingAPI()
+    /// Message images (SECURITY.md §2.113). `nil` in the App Clip and extensions: the composer then offers no photo picker.
+    public var attachmentsAPI: (any MessageAttachmentsAPI)?
 
     public var account: AccountService {
         AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
@@ -133,6 +135,7 @@ public struct ViadereServices: Sendable {
             services.safeActionReader = SafeActionReader(configuration: configuration,
                                                          replay: PreferencesSafeActionReplayStore(preferences: services.preferences), transport: transport)
             services.devicePairingAPI = LiveDevicePairingAPI(client: client)
+            services.attachmentsAPI = LiveMessageAttachmentsAPI(client: client)
             services.authDeliveryFlags = .forConfiguration(configuration)
             services.destinationVerifier = DestinationVerifiers.make(flags: services.authDeliveryFlags, fetcher: LiveTenantDestinationKeys(client: client),
                                                                      secrets: secrets, environment: configuration.authorityEnvironment,

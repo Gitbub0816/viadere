@@ -209,13 +209,17 @@ public struct StartConversationRequest: Codable, Sendable, Hashable {
 }
 
 public struct SendMessageRequest: Codable, Sendable, Hashable {
-    /// ≤ 1600 characters.
+    /// ≤ 1600 characters. May be empty only when `attachmentIds` names at least one image.
     public var body: String
     /// Client-generated idempotency id.
     public var clientMessageId: String
-    public init(body: String, clientMessageId: String) {
+    /// Images uploaded to **this** conversation (`conversations.attachments.upload`) and not yet sent, in display order
+    /// (at most `MessageAttachmentPolicy.maxPerMessage`). Absent for a text-only message (and from older clients).
+    public var attachmentIds: [AttachmentID]?
+    public init(body: String, clientMessageId: String, attachmentIds: [AttachmentID]? = nil) {
         self.body = body
         self.clientMessageId = clientMessageId
+        self.attachmentIds = attachmentIds
     }
 }
 

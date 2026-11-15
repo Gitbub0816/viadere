@@ -56,6 +56,11 @@ final class MemoryObjectStore: ObjectStore, @unchecked Sendable {
         return lock.withLock { objects[name]?.0 }
     }
 
+    func delete(name: String) async throws {
+        guard ObjectNames.isValid(name) else { throw ObjectStoreError.invalidName }
+        _ = lock.withLock { objects.removeValue(forKey: name) }
+    }
+
     var names: [String] { lock.withLock { Array(objects.keys) } }
 }
 

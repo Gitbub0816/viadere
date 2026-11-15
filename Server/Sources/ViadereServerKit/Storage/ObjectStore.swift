@@ -11,6 +11,9 @@ public protocol ObjectStore: Sendable {
     func create(name: String, data: Data, contentType: String) async throws
     /// Reads an object; `nil` when it does not exist.
     func read(name: String) async throws -> Data?
+    /// Deletes an object. Deleting a name that does not exist succeeds (deletion jobs are retried). Only stores whose content has a lifetime
+    /// use it (message attachments, SECURITY.md §2.113); the audit container refuses it at the storage layer (immutability policy).
+    func delete(name: String) async throws
 }
 
 public enum ObjectStoreError: Error, Sendable, Equatable {
@@ -52,6 +55,13 @@ public struct DirectoryObjectStore: ObjectStore {
     public func read(name: String) async throws -> Data? {
         guard ObjectNames.isValid(name) else { throw ObjectStoreError.invalidName }
         return FileManager.default.contents(atPath: URL(fileURLWithPath: directory).appendingPathComponent(name).path)
+    }
+
+    public func delete(name: String) async throws {
+        guard ObjectNames.isValid(name) else { throw ObjectStoreError.invalidName }
+        let path = URL(fileURLWithPath: directory).appendingPathComponent(name).path
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        try FileManager.default.removeItem(atPath: path)
     }
 }
 
@@ -131,6 +141,20 @@ public struct AzureBlobObjectStore: ObjectStore {
         switch response.status {
         case 200: return response.body
         case 404: return nil
+        default: throw ObjectStoreError.unavailable(status: response.status)
+        }
+    }
+
+    /// `Delete Blob` with its snapshots. `202` deleted, `404` already gone; anything else is retried by the caller's job.
+    public func delete(name: String) async throws {
+        guard ObjectNames.isValid(name) else { throw ObjectStoreError.invalidName }
+        let token = try await tokens.token(for: .storage)
+        let response = try await http.send(method: .DELETE, url: url(name), headers: [
+            "Authorization": "Bearer \(token)", "x-ms-version": Self.serviceVersion, "x-ms-date": Self.httpDate(now()),
+            "x-ms-delete-snapshots": "include",
+        ], body: nil)
+        switch response.status {
+        case 200, 202, 404: return
         default: throw ObjectStoreError.unavailable(status: response.status)
         }
     }

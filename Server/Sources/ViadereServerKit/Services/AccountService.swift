@@ -165,6 +165,8 @@ struct AccountService {
                 message.bodyCiphertext = try ctx.cipher.seal("[deleted]", context: "conversation_messages.body", rowId: message.id!)
                 try await message.update(on: tx)
             }
+            // Images in this person's conversations, both sides: marked in this transaction, objects removed by the attachment sweep (§2.113).
+            try await MessageAttachmentService.markDeleting(MessageAttachmentRecord.query(on: tx).filter(\.$consumerId == id), now: now)
             try await ConversationSessionRecord.query(on: tx).filter(\.$consumerId == id).filter(\.$state != "closed")
                 .set(\.$state, to: "closed").set(\.$closedAt, to: now).update()
             // Interaction payloads can contain personal context (devices, locations, amounts): erase them.

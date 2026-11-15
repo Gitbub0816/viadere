@@ -50,6 +50,7 @@ enum Routes {
         RelationshipRoutes.register(api)
         InteractionRoutes.register(api)
         ConversationRoutes.register(api)
+        MessageAttachmentRoutes.register(api)
         BusinessRoutes.register(api)
         ProviderRoutes.register(api)
         DashboardRoutes.register(app)

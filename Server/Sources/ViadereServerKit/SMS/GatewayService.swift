@@ -14,6 +14,8 @@ struct MessageReceivedPayload: Codable, Sendable {
     var text: String
     var channel: Channel
     var receivedAt: Date
+    /// Images the customer sent in the app (SECURITY.md §2.113): ids and metadata only, never bytes or a URL. Absent for text and SMS.
+    var attachments: [MessageAttachment]? = nil
 }
 
 /// Runs the pure `SMSGatewayEngine` against persisted state and executes its effects.

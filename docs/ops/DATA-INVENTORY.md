@@ -281,3 +281,14 @@ Migration `BrandKits.v1`. Business-supplied appearance data only; no customer da
 | `brand_manifests` | every signed manifest version (canonical JSON, JWS, hash, kid, lifetime) or a withdrawal | OPS | | integrity by signature | Deleted with the tenant | gap: no age-based purge of superseded versions yet |
 | `interactions.brand_kit_pin` | the kit id pinned to an interaction | OPS | | none | With the interaction row | |
 | Blob container `brand-assets` | re-encoded PNGs (`brand/{business}/{sha256}.png`), no metadata | OPS | | private container, Entra only, create-only writes | **gap**: blobs are not deleted with the tenant or after a takedown (no delete path in the store); never served without an approved row | add a purge job |
+
+## 11. Addendum (2026-11-15, message attachments; SECURITY.md §2.113)
+
+Migration `MessageAttachments.v1`.
+
+| Table / store | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `message_attachments` | per image: business, customer, conversation, message and position, side, uploader reference (device, key or console user id), stored type, size, dimensions, SHA-256 of the stored image, object name, state and times | SMP | P | none (no content; the image is in the store) | Pending: expired after 1 hour and removed by the attachment sweep. Attached: marked with its message by `conversation_content` retention; marked by account deletion (the person's conversations, both sides) and tenant deletion; the sweep deletes the object, then the row | the digest is of the re-encoded image, not of what the person uploaded |
+| Blob container (attachment store, `AZURE_ATTACHMENT_BLOB_CONTAINER`) | re-encoded images (no metadata), each sealed with the field cipher bound to tenant and row | SMP | P | private container, Entra only, create-only writes, AES-256-GCM per object | Deleted by the sweep when the row is marked | gap: the container (and whether blob soft delete is off for it) is not yet in `Infra/azure`; with soft delete on, deleted blobs stay recoverable for the soft-delete period |
+| Webhook deliveries (`message.received`) | attachment ids and metadata only | SMP | P | sealed body (existing) | existing webhook retention | never bytes, never a URL |
+| Account export | per message: image id, type, size, dimensions, digest | SMP | P | export encryption (existing) | existing | the pictures themselves are not in the export |

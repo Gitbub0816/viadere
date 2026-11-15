@@ -79,6 +79,7 @@ Native actionable notifications (approve/deny/reply), MFA, context-rich transact
 - iMessage apps/extensions can support interactive experiences in compatible client contexts but cannot be used by a server-owned SMS number to push arbitrary interactive blue-bubble iMessages.
 - RCS agent verification/carrier launch requirements and tariffs vary by provider/carrier; use contractual pricing, not illustrative rates, for budgeting.
 - SMS is the reliable lowest-common-denominator launch channel; MMS is optional for media, not needed for numbered choices.
+- **Images never travel over SMS or RCS** (SECURITY.md §2.113): SMS cannot carry attachments, and Viadere does not use MMS. A business image sent into an SMS thread becomes the approved text notice (UX_COPY SMS-09/SMS-10, no link); an inbound MMS is forwarded as text only and its media are never fetched. Images exist only in the Viadere app, the business API and the console.
 
 ## Proposed initial backend objects
 `Business`, `BusinessHandle`, `BusinessCode`, `BusinessVerification`, `ConsumerIdentity`, `PhoneLink`, `ConsentGrant`, `ChannelEndpoint`, `ConversationSession`, `ConversationState`, `MenuInteraction`, `MessageEnvelope`, `RoutingEvent`, `DeliveryAttempt`, `WebhookSubscription`, `AuditEvent`.

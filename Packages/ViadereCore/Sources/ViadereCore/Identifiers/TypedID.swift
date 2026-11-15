@@ -68,6 +68,7 @@ public enum IDTag {
     public enum Redemption {}
     public enum Recovery {}
     public enum DevicePairing {}
+    public enum Attachment {}
 }
 
 public typealias BusinessID = TypedID<IDTag.Business>
@@ -95,3 +96,5 @@ public typealias RedemptionID = TypedID<IDTag.Redemption>
 public typealias RecoveryID = TypedID<IDTag.Recovery>
 /// Identifies one device pairing (`VIADERE-PAIR-V1`, SECURITY.md §2.107): a new device asking a trusted device of an account to add it.
 public typealias DevicePairingID = TypedID<IDTag.DevicePairing>
+/// One image attached to a conversation message (SECURITY.md §2.113). Bound to one conversation of one business from upload on.
+public typealias AttachmentID = TypedID<IDTag.Attachment>

@@ -718,7 +718,10 @@ public actor MockViadereAPI: ViadereAPI {
         let message = ConversationMessage(
             id: MessageID(), sessionId: session, businessId: business.id, direction: .consumerToBusiness,
             attribution: MessageAttribution(senderType: .consumer, displayName: "You"), body: request.body, channel: .inApp,
-            createdAt: clock(), deliveryStatus: .sent)
+            createdAt: clock(), deliveryStatus: .sent,
+            attachments: request.attachmentIds.flatMap { ids in ids.isEmpty ? nil : ids.map {
+                MessageAttachment(id: $0, sessionId: session, mediaType: "image/jpeg", byteSize: 1, width: 1, height: 1, sha256: String(repeating: "0", count: 64), state: .attached)
+            } })
         messageStore[session, default: []].append(message)
         conversationList[index].lastMessagePreview = request.body
         conversationList[index].lastMessageAt = message.createdAt

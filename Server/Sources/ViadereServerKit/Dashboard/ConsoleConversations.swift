@@ -13,6 +13,8 @@ private struct ConversationReplyForm: Content {
 
 private struct ConversationAssignForm: Content { var assignee: String? }
 
+private struct ConversationImageForm: Content { var file: File }
+
 /// The console conversation inbox (G5, docs/SECURITY.md §2.108): a business without its own integration reads and answers customer messages.
 ///
 /// * Tenant: every query filters on the session's organization; another tenant's thread id is the same plain `404` as an unknown one, for
@@ -24,23 +26,67 @@ private struct ConversationAssignForm: Content { var assignee: String? }
 ///   never a body); output is escaped.
 /// * A reply goes through `ConversationService.businessSend`, the business API's `sendMessage` path: the same validation, idempotency,
 ///   policy and consent check, test/live separation, channel routing (SMS thread or push) and attribution (the verified business name).
+/// * Images (SECURITY.md §2.113): an upload goes through `MessageAttachmentService.businessUpload` with the same console principal; a
+///   thumbnail is the console download route (same origin, `viewConversations`, tenant-checked), never a storage URL. Nothing about an image
+///   is rendered but its dimensions and the escaped, fixed alt text.
 enum ConsoleConversations {
     static let path = "/dashboard/conversations"
+    /// The image plus multipart framing.
+    static let uploadBodyLimit = MessageAttachmentPolicy.maxUploadBytes + 64 * 1024
 
     static let messages: [String: String] = [
         "sent": "Reply sent.", "duplicate": "That reply was already sent.", "assigned": "Assignment updated.",
         "closed": "Conversation closed. The customer can start a new one.", "reopened": "Conversation reopened.",
+        "image": "Image added. It is sent with your next reply.",
     ]
+
+    /// `POST /dashboard/conversations/{uuid}/attachments`: the console's only multipart path besides the Brand Studio upload.
+    static func isUploadPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 5 && parts[0].isEmpty && parts[1] == "dashboard" && parts[2] == "conversations"
+            && UUID(uuidString: String(parts[3])) != nil && parts[4] == "attachments"
+    }
+
+    static func attachmentPath(session: UUID, attachment: AttachmentID) -> String {
+        "\(path)/\(session.uuidString.lowercased())/attachments/\(attachment)"
+    }
+
+    /// `POST /dashboard/conversations/:id/attachments` (multipart), on a route group that collects the bounded body before authentication.
+    static func registerUpload(_ group: any RoutesBuilder) {
+        group.on(.POST, "dashboard", "conversations", ":id", "attachments", body: .collect(maxSize: ByteCount(value: uploadBodyLimit))) { req -> Response in
+            let (_, business, staff) = try act(req)
+            let id = try req.uuid("id")
+            let form: ConversationImageForm
+            do { form = try req.content.decode(ConversationImageForm.self) } catch { throw APIError.validation("Choose an image file.", details: ["file": "missing"]) }
+            let declared = form.file.contentType.map { "\($0.type)/\($0.subType)" } ?? ""
+            _ = try await ConsoleConversationService(db: req.db, ctx: req.ctx)
+                .upload(business: business, staffId: staff, sessionId: id, data: Data(buffer: form.file.data), contentType: declared, runtime: req.attachments)
+            return DashboardResponses.redirect("\(path)/\(id.uuidString.lowercased())?cm=image")
+        }
+    }
 
     static func register(_ pages: any RoutesBuilder) {
         pages.get("dashboard", "conversations") { req in try await list(req) }
         pages.get("dashboard", "conversations", ":id") { req in try await thread(req) }
+        pages.get("dashboard", "conversations", ":id", "attachments", ":attachmentId") { req -> Response in
+            let (p, businessId) = try req.businessDashboard
+            guard p.can(.viewConversations) else { throw APIError.forbidden }
+            let session = try await ConsoleConversationService(db: req.db, ctx: req.ctx).owned(businessId: businessId, sessionId: try req.uuid("id"))
+            guard let attachmentId = req.parameters.get("attachmentId").flatMap(AttachmentID.init) else { throw APIError.notFound }
+            let (row, data) = try await MessageAttachmentService(db: req.db, ctx: req.ctx, runtime: req.attachments)
+                .businessDownload(businessId: businessId, session: session, attachmentId: attachmentId)
+            return MessageAttachmentService.imageResponse(data, row: row, disposition: .inline)
+        }
         pages.post("dashboard", "conversations", ":id", "reply") { req -> Response in
             let (p, business, staff) = try act(req)
             let id = try req.uuid("id")
             let form = try req.content.decode(ConversationReplyForm.self)
+            // Ticked images are `image_<id>` checkboxes (only ids are read; the service re-checks every one).
+            let fields = (try? req.content.decode([String: String].self)) ?? [:]
+            let images = fields.keys.filter { $0.hasPrefix("image_") }.sorted().compactMap { AttachmentID(String($0.dropFirst(6))) }
             let created = try await ConsoleConversationService(db: req.db, ctx: req.ctx)
-                .reply(business: business, staffId: staff, sessionId: id, body: form.body, agentName: form.agent_name, formKey: form.idempotency_key)
+                .reply(business: business, staffId: staff, sessionId: id, body: form.body, agentName: form.agent_name, formKey: form.idempotency_key,
+                       attachmentIds: images)
             _ = p
             return DashboardResponses.redirect("\(path)/\(id.uuidString.lowercased())?cm=\(created ? "sent" : "duplicate")")
         }
@@ -156,7 +202,9 @@ enum ConsoleConversations {
             }
             let text = m.erased ? "<em class=\"mu\">This message was removed.</em>" : DashboardUI.esc(m.message.body)
             let cls = m.message.direction == .businessToConsumer ? "out" : (m.message.direction == .system ? "sys" : "in")
-            return "<li class=\"\(cls)\"><p class=\"m\">\(DashboardUI.esc(who)) · <time>\(DashboardFormat.date(m.message.createdAt))</time></p><p class=\"b\">\(text)</p></li>"
+            let images = imagesHTML(m.message.attachments ?? [], session: detail.session.id!, from: m.message.direction == .consumerToBusiness ? "customer" : "you")
+            let bodyHTML = m.message.body.isEmpty && !images.isEmpty ? "" : "<p class=\"b\">\(text)</p>"
+            return "<li class=\"\(cls)\"><p class=\"m\">\(DashboardUI.esc(who)) · <time>\(DashboardFormat.date(m.message.createdAt))</time></p>\(bodyHTML)\(images)</li>"
         }
         let thread = entries.isEmpty ? ConsoleUI.empty("No messages yet") : "<ol class=\"thread\" aria-label=\"Messages, oldest first\">\(entries.joined())</ol>"
         var assigneeName: String?
@@ -172,11 +220,24 @@ enum ConsoleConversations {
         if p.can(.replyConversations) {
             let csrf = DashboardUI.csrf(p)
             if open && detail.canReply {
+                let pending = try await service.pendingUploads(businessId: businessId, sessionId: detail.session.id!)
+                let pendingHTML = pending.isEmpty ? "" : "<fieldset class=\"attq\"><legend>Images to send</legend>" + pending.enumerated().map { index, a in
+                    ConsoleUI.checkbox("image_\(a.id)", label: "Image \(index + 1)", checked: true,
+                                       labelHTML: thumbnail(a, session: detail.session.id!, alt: "Image \(index + 1) to send", size: 72) + " Image \(index + 1) · \(a.width) × \(a.height)")
+                }.joined() + "<p class=\"help\">Untick an image to leave it out. Images not sent within an hour are removed.</p></fieldset>"
                 actions += ConsoleUI.card("Reply", description: "Sent as \(detail.businessName). The customer sees your verified name.", ConsoleUI.form("\(path)/\(id)/reply", csrf: csrf,
                     ConsoleUI.hidden("idempotency_key", SecureToken.generate(byteCount: 18))
-                    + ConsoleUI.textarea("body", label: "Message", id: "rb", help: "Up to \(ConversationService.maxBody) characters.", required: true, attrs: ["maxlength": String(ConversationService.maxBody), "rows": "4"])
+                    + pendingHTML
+                    + ConsoleUI.textarea("body", label: "Message", id: "rb", help: pending.isEmpty ? "Up to \(ConversationService.maxBody) characters." : "Up to \(ConversationService.maxBody) characters. You can send images without a message.",
+                                         required: pending.isEmpty, attrs: ["maxlength": String(ConversationService.maxBody), "rows": "4"])
                     + ConsoleUI.input("agent_name", label: "Your name", id: "an", help: "Shown to the customer next to your organization's name.", optional: true, attrs: ["maxlength": "40"])
                     + ConsoleUI.formActions(ConsoleUI.button("Send reply"))))
+                if pending.count < MessageAttachmentPolicy.maxPerMessage {
+                    actions += ConsoleUI.card("Add an image", description: "Viadere removes location, camera and other hidden data from the image and sends it only to this customer in the Viadere app. Customers who reach you by text are told an image is waiting in the app.",
+                        ConsoleUI.form("\(path)/\(id)/attachments", csrf: csrf, multipart: true,
+                            ConsoleUI.input("file", label: "Image file", id: "img", type: "file", help: "PNG or JPEG, up to 2 MB.", required: true, attrs: ["accept": "image/png,image/jpeg"])
+                            + ConsoleUI.formActions(ConsoleUI.button("Add image", .secondary))))
+                }
             } else if open {
                 actions += ConsoleUI.callout(.warning, "<p>This customer is no longer connected to you, so you can't reply.</p>")
             }
@@ -191,6 +252,22 @@ enum ConsoleConversations {
         let body = actions.isEmpty ? summary : "<div class=\"split\"><div>\(summary)</div><div>\(actions)</div></div>"
         return DashboardUI.businessPage(p, title: "Conversation", active: path, actions: ConsoleUI.linkButton("Back to conversations", href: path, small: true),
                                         flash: flash(req), body: body)
+    }
+
+    /// A thumbnail through the console download route. The alt text is fixed copy (customers' images have no business-visible name).
+    static func thumbnail(_ a: MessageAttachment, session: UUID, alt: String, size: Int) -> String {
+        let scale = Double(size) / Double(max(a.width, a.height, 1))
+        let w = max(1, Int((Double(a.width) * min(1, scale)).rounded())), h = max(1, Int((Double(a.height) * min(1, scale)).rounded()))
+        return "<img src=\"\(DashboardUI.esc(attachmentPath(session: session, attachment: a.id)))\" alt=\"\(DashboardUI.esc(alt))\" width=\"\(w)\" height=\"\(h)\" loading=\"lazy\" decoding=\"async\">"
+    }
+
+    static func imagesHTML(_ attachments: [MessageAttachment], session: UUID, from: String) -> String {
+        guard !attachments.isEmpty else { return "" }
+        let label = from == "customer" ? "Image from the customer" : "Image you sent"
+        return "<ul class=\"att\" aria-label=\"Images\">" + attachments.enumerated().map { index, a in
+            let alt = attachments.count == 1 ? label : "\(label), \(index + 1) of \(attachments.count)"
+            return "<li><a href=\"\(DashboardUI.esc(attachmentPath(session: session, attachment: a.id)))\" target=\"_blank\" rel=\"noopener noreferrer\">\(thumbnail(a, session: session, alt: alt, size: 240))<span class=\"vh\"> (opens the full image)</span></a></li>"
+        }.joined() + "</ul>"
     }
 
     static func stateBadge(_ state: String) -> String {
@@ -271,8 +348,9 @@ struct ConsoleConversationService {
                 if let subject = event.subjectId, let user = event.actorId.flatMap(UUID.init(uuidString:)) { senders[subject] = names[user] ?? "a former team member" }
             }
         }
+        let refs = try await MessageAttachmentService.references(messageIds: rows.compactMap(\.id), on: db)
         let messages = try rows.map { row in
-            ThreadMessage(message: try conversations.dto(row), erased: row.contentErased, sentBy: senders[row.id!.uuidString.lowercased()])
+            ThreadMessage(message: try conversations.dto(row, attachments: refs[row.id!]), erased: row.contentErased, sentBy: senders[row.id!.uuidString.lowercased()])
         }
         let now = ctx.now
         if let read = try await ConversationConsoleReadRecord.query(on: db).filter(\.$sessionId == sessionId).filter(\.$staffId == staffId).first() {
@@ -312,25 +390,49 @@ struct ConsoleConversationService {
     }
 
     /// Replies through the business API's `sendMessage` path. Returns false when the same form was submitted again (idempotent replay).
-    func reply(business: BusinessRecord, staffId: UUID, sessionId: UUID, body: String, agentName: String?, formKey: String) async throws -> Bool {
+    func reply(business: BusinessRecord, staffId: UUID, sessionId: UUID, body: String, agentName: String?, formKey: String,
+               attachmentIds: [AttachmentID] = []) async throws -> Bool {
         guard let businessId = business.id else { throw APIError.forbidden }
         let session = try await owned(businessId: businessId, sessionId: sessionId)
         guard Self.validFormKey(formKey) else { throw APIError.validation("Reload the page and try again.", details: ["idempotency_key": "invalid"]) }
         guard session.state != "closed" else { throw APIError.conflict("This conversation is closed. Reopen it to reply.") }
+        let (principal, relationship) = try await consolePrincipal(business: business, staffId: staffId, session: session)
+        let agent = agentName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = BusinessSendMessageRequest(relationshipId: RelationshipID(relationship.id!), sessionId: SessionID(sessionId), body: body,
+                                                 agentName: (agent?.isEmpty ?? true) ? nil : agent, idempotencyKey: "console:" + formKey,
+                                                 attachmentIds: attachmentIds.isEmpty ? nil : attachmentIds)
+        return try await ConversationService(db: db, ctx: ctx).businessSend(principal: principal, request: request, headerKey: nil).created
+    }
+
+    /// The principal a console action uses on the business-API path. Test and live stay apart exactly as for API keys: a sandbox customer is
+    /// answered in test mode, a real customer only once the organization's production access is approved.
+    func consolePrincipal(business: BusinessRecord, staffId: UUID, session: ConversationSessionRecord) async throws -> (BusinessPrincipal, RelationshipRecord) {
+        guard let businessId = business.id else { throw APIError.forbidden }
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == session.relationshipId).filter(\.$businessId == businessId).first(),
               let consumer = try await ConsumerRecord.find(relationship.consumerId, on: db) else { throw APIError.notFound }
-        // Test and live stay apart exactly as for API keys: a sandbox customer is answered in test mode, a real customer only once the
-        // organization's production access is approved.
         let livemode = !consumer.isSandbox
         guard try await OnboardingGate.allows(business: business, livemode: livemode, on: db) else {
             throw APIError(.forbidden, .forbidden, livemode ? "Replying to customers is available after your go-live review." : "Verify a domain you control to use the sandbox.")
         }
         let principal = BusinessPrincipal(businessId: BusinessID(businessId), keyId: Self.consoleKeyId, livemode: livemode, scopes: [BusinessAPIKeys.Scope.messagesWrite],
                                           businessName: business.displayName, capabilities: [.messageSend], consoleUserId: staffId)
-        let agent = agentName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = BusinessSendMessageRequest(relationshipId: RelationshipID(relationship.id!), sessionId: SessionID(sessionId), body: body,
-                                                 agentName: (agent?.isEmpty ?? true) ? nil : agent, idempotencyKey: "console:" + formKey)
-        return try await ConversationService(db: db, ctx: ctx).businessSend(principal: principal, request: request, headerKey: nil).created
+        return (principal, relationship)
+    }
+
+    /// An image for the next reply (the console's `businessUpload`).
+    func upload(business: BusinessRecord, staffId: UUID, sessionId: UUID, data: Data, contentType: String, runtime: AttachmentRuntime) async throws -> MessageAttachment {
+        guard let businessId = business.id else { throw APIError.forbidden }
+        let session = try await owned(businessId: businessId, sessionId: sessionId)
+        guard session.state != "closed" else { throw APIError.conflict("This conversation is closed. Reopen it to reply.") }
+        let (principal, _) = try await consolePrincipal(business: business, staffId: staffId, session: session)
+        return try await MessageAttachmentService(db: db, ctx: ctx, runtime: runtime).businessUpload(principal: principal, sessionId: SessionID(sessionId), data: data, contentType: contentType)
+    }
+
+    /// Images added in the console to this thread and not sent yet (any team member's: the thread is the team's).
+    func pendingUploads(businessId: UUID, sessionId: UUID) async throws -> [MessageAttachment] {
+        try await MessageAttachmentRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$sessionId == sessionId).filter(\.$side == "business")
+            .filter(\.$state == "pending").filter(\.$expiresAt > ctx.now).sort(\.$createdAt, .ascending).all()
+            .filter { $0.uploaderRef.hasPrefix("console:") }.map(MessageAttachmentService.dto)
     }
 
     /// The key id a console principal carries. Not a key: no key row has it, and audit events name the console user instead.

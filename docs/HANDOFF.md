@@ -16,6 +16,17 @@ the api and the authority refuse an answer in the other mode's shape. Businesses
 `AUTH_LINK_SERVICE_ENABLED` / `AUTH_DESTINATION_RECORDS_ENABLED` / `AUTHORITY_TENANT_KEYS_ENABLED` (off). Normative: [`SECURITY.md`](SECURITY.md)
 §2.110; ADR-0021 and ADR-0031 implementation notes; copy LS-09, LS-10. Not verified: the app build (syntax-parsed only), the PostgreSQL run.
 
+**Message attachments (2026-11-15, C4.3b).** Customers and businesses can send images in a conversation: app (device-signed raw upload, PhotosPicker
+composer, image bubbles), business API (`POST`/`GET /v1/business/conversations/{sessionId}/attachments[/{id}]`, `attachmentIds` on
+`sendMessage`) and console (thumbnails through `/dashboard/conversations/{id}/attachments/{aid}`, "Add an image" before a reply). Every upload is
+size-capped from `Content-Length` before the body is read, decoded by the Brand Kit front end and pure-Swift codecs, dimension-capped,
+re-encoded without metadata (JPEG when opaque, PNG with transparency), sealed with the field cipher bound to tenant and row, and stored in a
+private attachment store; it is bound to one conversation, one tenant and one side and claimed by compare-and-swap when sent; unsent uploads expire
+after an hour. Webhooks carry ids and metadata only; SMS threads get SMS-09/SMS-10 with no link; MMS media are ignored. Retention, account and
+tenant deletion mark rows and the maintenance sweep deletes the objects. Normative: [`SECURITY.md`](SECURITY.md) §2.113 (and §2.108 item 7); copy
+UX_COPY SMS-09, SMS-10, MSG-ATT-01..08; data inventory §11. Open: the Azure container (`AZURE_ATTACHMENT_BLOB_*`) is not in `Infra/azure` yet;
+Node and Swift SDK helpers for the two routes; the app build (syntax-parsed only) and the PostgreSQL run.
+
 **Link-service screen, Lock Screen names, pairing QR, SQLite contention (2026-11-15).** A `link_mode: "viadere"` delivery now opens
 `LinkServiceScreen` (Kit `LinkServiceViewModel`): the relayed `link_open` challenge is verified against the pinned statement keys, the screen
 shows only the signed tenant, client and return host, a number is typed when the challenge asks for one, and the answer is a factor signed with

@@ -121,6 +121,8 @@ struct TenantDataRequests {
             try await BrandKitRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BrandAssetRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BusinessCodeStyleRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            // Conversation images of this tenant, both sides (SECURITY.md §2.113): marked here, objects removed by the attachment sweep.
+            try await MessageAttachmentService.markDeleting(MessageAttachmentRecord.query(on: tx).filter(\.$businessId == businessId), now: now)
             // Campaigns go; relationship rows are dealt with below and only lose the reference here.
             try await RelationshipRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$campaignId != nil).set(\.$campaignId, to: nil).update()
             try await CampaignRecord.query(on: tx).filter(\.$businessId == businessId).delete()

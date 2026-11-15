@@ -51,10 +51,15 @@ public struct RequestGuardMiddleware: AsyncMiddleware {
                 }
             } else if hasBody && isWebForm {
                 // Multipart only on the one upload route (brand images, WP-2.2).
-                let multipartAllowed = request.url.path == ConsoleBrandStudio.uploadPath
+                let multipartAllowed = request.url.path == ConsoleBrandStudio.uploadPath || ConsoleConversations.isUploadPath(request.url.path)
                 guard let type = request.headers.contentType, (type.type == "application" && (type.subType == "json" || type.subType == "x-www-form-urlencoded"))
                     || (multipartAllowed && type.type == "multipart" && type.subType == "form-data") else {
                     throw APIError(.unsupportedMediaType, .badRequest, "Unsupported content type.")
+                }
+            } else if hasBody && MessageAttachmentRoutes.isUploadPath(request.url.path) {
+                // Message attachment uploads (SECURITY.md §2.113) are the raw image and nothing else; the pipeline checks the bytes agree.
+                guard let type = request.headers.contentType, type.type == "image", type.subType == "png" || type.subType == "jpeg" else {
+                    throw APIError(.unsupportedMediaType, .badRequest, "Content-Type must be image/png or image/jpeg.")
                 }
             } else if hasBody && !isProvider {
                 guard let type = request.headers.contentType, type.type == "application", type.subType == "json" else {

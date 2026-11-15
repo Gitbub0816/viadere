@@ -25,7 +25,9 @@ Alerts · Messages · Benefits · Businesses · You
 ```
 
 * **Alerts** (first, and where the app opens): *Needs you* / *History* (History is the old Activity). Badge = actionable count.
-* **Messages**: conversations, grouped by business in All. Badge = unread.
+* **Messages**: conversations, grouped by business in All. Badge = unread. In a thread the composer has a photo button (PhotosPicker, up to 4
+  images per message, each redrawn on the device to a JPEG without metadata, shown as thumbnails with Remove and Try again); images appear in
+  their message bubbles and are fetched from the conversation's own route (SECURITY.md §2.113). An image-only message previews as "Image".
 * **Benefits**: coupons, rewards, loyalty, Wallet passes; filters Available / Saved / Ready now / Used / Expired.
 * **Businesses**: Discover (Loops, reserved), then the directory (favorites, everyone else, no longer connected), Add business.
 * **You**: the account. Badge dot when an account notice (new device, recovery in progress) waits.

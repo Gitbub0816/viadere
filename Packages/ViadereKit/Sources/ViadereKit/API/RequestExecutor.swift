@@ -47,7 +47,7 @@ public struct RequestExecutor: Sendable {
     /// - Parameter extraHeaders: request headers that are not part of the signature string (`If-None-Match`). They can never replace the
     ///   authentication, signature, content-type or accept headers set here.
     public func run(_ endpoint: AnyEndpoint, pathAndQuery: String, body: Data?, bearer: String?,
-                    signsWhenEnrolled: Bool = false, extraHeaders: [String: String] = [:]) async throws -> HTTPResponse {
+                    signsWhenEnrolled: Bool = false, extraHeaders: [String: String] = [:], bodyContentType: String? = nil) async throws -> HTTPResponse {
         var base = baseURL.absoluteString
         while base.hasSuffix("/") { base.removeLast() }
         guard pathAndQuery.hasPrefix("/"), let url = URL(string: base + pathAndQuery) else {
@@ -57,7 +57,8 @@ public struct RequestExecutor: Sendable {
         for (name, value) in extraHeaders where Self.allowedExtraHeaders.contains(name.lowercased()) { headers[name] = value }
         headers["Accept"] = "application/json"
         headers["User-Agent"] = userAgent
-        if body != nil { headers["Content-Type"] = "application/json" }
+        // JSON unless the endpoint takes a raw body (an image upload, SECURITY.md §2.113): only image types may replace it.
+        if body != nil { headers["Content-Type"] = bodyContentType.flatMap { MessageAttachmentPolicy.storedMediaTypes.contains($0) ? $0 : nil } ?? "application/json" }
 
         switch endpoint.auth {
         case .bearer, .deviceSignedBearer:

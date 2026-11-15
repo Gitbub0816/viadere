@@ -15,7 +15,7 @@ struct ConversationService {
 
     // MARK: Mapping
 
-    func dto(_ record: ConversationMessageRecord) throws -> ConversationMessage {
+    func dto(_ record: ConversationMessageRecord, attachments: [MessageAttachment]? = nil) throws -> ConversationMessage {
         let body = (try? ctx.cipher.openString(record.bodyCiphertext, context: "conversation_messages.body", rowId: record.id!)) ?? ""
         return ConversationMessage(
             id: MessageID(record.id!), sessionId: SessionID(record.sessionId), businessId: BusinessID(record.businessId),
@@ -24,13 +24,20 @@ struct ConversationService {
                                             displayName: record.displayName, agentName: record.agentName),
             body: body, channel: Channel(rawValue: record.channel) ?? .inApp, createdAt: record.createdAt,
             deliveredAt: record.deliveredAt, readAt: record.readAt, deliveryStatus: DeliveryStatus(rawValue: record.deliveryStatus) ?? .queued,
-            interactionId: record.interactionId.map { InteractionID($0) })
+            interactionId: record.interactionId.map { InteractionID($0) }, attachments: attachments.flatMap { $0.isEmpty ? nil : $0 })
     }
 
-    static func cleanBody(_ raw: String) throws -> String {
+    /// `dto` with the message's attached images (one query for the page).
+    func dtos(_ records: [ConversationMessageRecord]) async throws -> [ConversationMessage] {
+        let refs = try await MessageAttachmentService.references(messageIds: records.compactMap(\.id), on: db)
+        return try records.map { try dto($0, attachments: refs[$0.id!]) }
+    }
+
+    /// `allowEmpty`: a message that carries images may have no text (SECURITY.md §2.113).
+    static func cleanBody(_ raw: String, allowEmpty: Bool = false) throws -> String {
         let scalars = raw.unicodeScalars.filter { $0 == "\n" || $0 == "\t" || ($0.value >= 0x20 && $0.value != 0x7F) }
         let text = String(String.UnicodeScalarView(scalars)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text.count <= maxBody else {
+        guard !text.isEmpty || allowEmpty, text.count <= maxBody else {
             throw APIError.validation("A message must be 1 to \(maxBody) characters.", details: ["body": "invalid"])
         }
         return text
@@ -50,8 +57,12 @@ struct ConversationService {
             let last = try await ConversationMessageRecord.query(on: db).filter(\.$sessionId == id).sort(\.$createdAt, .descending).first()
             let unread = try await ConversationMessageRecord.query(on: db).filter(\.$sessionId == id)
                 .filter(\.$direction == MessageDirection.businessToConsumer.rawValue).filter(\.$readAt == nil).count()
-            let preview = last.flatMap { try? ctx.cipher.openString($0.bodyCiphertext, context: "conversation_messages.body", rowId: $0.id!) }
+            var preview = last.flatMap { try? ctx.cipher.openString($0.bodyCiphertext, context: "conversation_messages.body", rowId: $0.id!) }
                 .map { SMSEncoding.field($0, maxLength: 80) }
+            if let last, preview?.isEmpty ?? true {
+                let images = try await MessageAttachmentRecord.query(on: db).filter(\.$messageId == last.id!).filter(\.$state == "attached").count()
+                if images > 0 { preview = MessageAttachmentCopy.preview(count: images) }
+            }
             out.append(ConversationSummary(id: SessionID(id), business: business, state: ConversationSummary.State(rawValue: session.state) ?? .closed,
                                            lastMessagePreview: preview, lastMessageAt: session.lastMessageAt, unreadCount: unread))
         }
@@ -93,11 +104,11 @@ struct ConversationService {
             row.deliveryStatus = DeliveryStatus.read.rawValue
             try await row.update(on: db)
         }
-        return Page(items: try page.map(dto), nextCursor: rows.count > limit ? String(offset + limit) : nil)
+        return Page(items: try await dtos(page), nextCursor: rows.count > limit ? String(offset + limit) : nil)
     }
 
     func send(consumer: ConsumerID, sessionId: SessionID, request: SendMessageRequest) async throws -> ConversationMessage {
-        let body = try Self.cleanBody(request.body)
+        let body = try Self.cleanBody(request.body, allowEmpty: !(request.attachmentIds ?? []).isEmpty)
         guard !request.clientMessageId.isEmpty, request.clientMessageId.count <= 64,
               request.clientMessageId.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "-_.:".unicodeScalars.contains($0)) })
         else { throw APIError.validation("clientMessageId is invalid.", details: ["clientMessageId": "invalid"]) }
@@ -107,8 +118,10 @@ struct ConversationService {
             .filter(\.$consumerId == consumer.uuid).first(), relationship.isActive,
               try await DirectoryService(db: db).verified(id: session.businessId) != nil else { throw APIError.conflict("You are not connected to this business.") }
         if let existing = try await ConversationMessageRecord.query(on: db).filter(\.$sessionId == session.id!)
-            .filter(\.$clientMessageId == request.clientMessageId).first() { return try dto(existing) }
+            .filter(\.$clientMessageId == request.clientMessageId).first() { return try await dtos([existing])[0] }
         let now = ctx.now
+        // Every image must be the customer's own pending upload to this conversation (SECURITY.md §2.113).
+        let images = try await MessageAttachmentService.pendingRows(request.attachmentIds, session: session, side: .consumer, now: now, on: db)
         let record = ConversationMessageRecord()
         record.id = UUID()
         record.sessionId = session.id!
@@ -125,21 +138,24 @@ struct ConversationService {
         do {
             try await db.transaction { tx in
                 try await record.create(on: tx)
+                try await MessageAttachmentService.claim(images, messageId: record.id!, now: now, on: tx)
                 session.lastMessageAt = now
                 try await session.update(on: tx)
                 relationship.lastActivityAt = now
                 try await relationship.update(on: tx)
+                // The webhook names the images by id with their metadata; never the bytes, never a URL.
                 try await WebhookService(db: tx, ctx: ctx).enqueue(.messageReceived, businessId: BusinessID(session.businessId),
                     payload: MessageReceivedPayload(sessionId: sessionId, relationshipId: RelationshipID(relationship.id!),
                                                     subjectRef: ctx.subjects.subjectRef(businessId: BusinessID(relationship.businessId), consumerId: ConsumerID(relationship.consumerId)),
-                                                    messageId: MessageID(record.id!), text: body, channel: .inApp, receivedAt: now))
+                                                    messageId: MessageID(record.id!), text: body, channel: .inApp, receivedAt: now,
+                                                    attachments: images.isEmpty ? nil : images.map(MessageAttachmentService.dto)))
             }
         } catch {
             if error.isConstraintViolation, let existing = try await ConversationMessageRecord.query(on: db)
-                .filter(\.$sessionId == session.id!).filter(\.$clientMessageId == request.clientMessageId).first() { return try dto(existing) }
+                .filter(\.$sessionId == session.id!).filter(\.$clientMessageId == request.clientMessageId).first() { return try await dtos([existing])[0] }
             throw error
         }
-        return try dto(record)
+        return try dto(record, attachments: images.map(MessageAttachmentService.dto))
     }
 
     // MARK: Business API
@@ -151,14 +167,18 @@ struct ConversationService {
         guard !request.idempotencyKey.isEmpty, request.idempotencyKey.count <= 128 else {
             throw APIError.validation("idempotencyKey is required.", details: ["idempotencyKey": "invalid"])
         }
-        let body = try Self.cleanBody(request.body)
+        let hasImages = !(request.attachmentIds ?? []).isEmpty
+        let body = try Self.cleanBody(request.body, allowEmpty: hasImages)
+        if hasImages, request.sessionId == nil {
+            throw APIError.validation("attachmentIds needs the sessionId the images were uploaded to.", details: ["sessionId": "required"])
+        }
         let hash = SecureToken.sha256Hex(try ViadereJSON.encode(request))
         if let existing = try await ConversationMessageRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid)
             .filter(\.$idempotencyKey == request.idempotencyKey).first() {
             guard let stored = existing.requestHash, ConstantTime.equals(stored, hash) else {
                 throw APIError(.conflict, .idempotencyConflict, "This Idempotency-Key was already used with a different request.")
             }
-            return (try dto(existing), false)
+            return (try await dtos([existing])[0], false)
         }
         guard let relationship = try await RelationshipRecord.query(on: db).filter(\.$id == request.relationshipId.uuid)
             .filter(\.$businessId == principal.businessId.uuid).first() else { throw APIError.notFound }
@@ -186,6 +206,8 @@ struct ConversationService {
             try await session.create(on: db)
         }
         let now = ctx.now
+        // Every image must be this business's pending upload to this very session (SECURITY.md §2.113).
+        let images = try await MessageAttachmentService.pendingRows(request.attachmentIds, session: session, side: .business, now: now, on: db)
         let agent = request.agentName.map { SMSEncoding.field($0, maxLength: 40) }.flatMap { $0.isEmpty ? nil : $0 }
         let record = ConversationMessageRecord()
         record.id = UUID()
@@ -206,6 +228,7 @@ struct ConversationService {
         do {
             try await db.transaction { tx in
                 try await record.create(on: tx)
+                try await MessageAttachmentService.claim(images, messageId: record.id!, now: now, on: tx)
                 session.lastMessageAt = now
                 try await session.update(on: tx)
                 relationship.lastActivityAt = now
@@ -213,7 +236,8 @@ struct ConversationService {
                 _ = try await AuditService(db: tx, ctx: ctx).record("message.business_sent", actor: principal.auditActor,
                     consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "message",
                     subjectId: record.id?.uuidString.lowercased(),
-                    metadata: ["via": principal.consoleUserId == nil ? "api" : "console", "session": session.id!.uuidString.lowercased()])
+                    metadata: ["via": principal.consoleUserId == nil ? "api" : "console", "session": session.id!.uuidString.lowercased(),
+                               "images": String(images.count)])
             }
         } catch {
             if error.isConstraintViolation, let existing = try await ConversationMessageRecord.query(on: db)
@@ -221,14 +245,16 @@ struct ConversationService {
                 guard existing.requestHash == hash else {
                     throw APIError(.conflict, .idempotencyConflict, "This Idempotency-Key was already used with a different request.")
                 }
-                return (try dto(existing), false)
+                return (try await dtos([existing])[0], false)
             }
             throw error
         }
         // Delivery: SMS thread if this session is the active SMS session, otherwise a generic push.
         // Test-mode messages never reach a real SMS thread (and sandbox consumers have none).
+        // An SMS thread never carries an image or a link to one: the text says it is waiting in the app (UX_COPY SMS-09/SMS-10).
+        let smsText = MessageAttachmentCopy.smsText(body: body, business: principal.businessName, count: images.count)
         let viaSMS = principal.livemode ? try await GatewayService(db: db, ctx: ctx).deliverBusinessMessage(
-            businessId: principal.businessId, sessionId: SessionID(session.id!), text: body, messageId: record.id) : false
+            businessId: principal.businessId, sessionId: SessionID(session.id!), text: smsText, messageId: record.id) : false
         if !viaSMS {
             // In-app / history-only messages are "delivered" once stored; SMS ones follow provider receipts.
             record.deliveryStatus = DeliveryStatus.delivered.rawValue
@@ -238,7 +264,7 @@ struct ConversationService {
                 await pushMessageNotice(consumerId: relationship.consumerId, businessId: principal.businessId)
             }
         }
-        return (try dto(record), true)
+        return (try dto(record, attachments: images.map(MessageAttachmentService.dto)), true)
     }
 
     private func pushMessageNotice(consumerId: UUID, businessId: BusinessID) async {

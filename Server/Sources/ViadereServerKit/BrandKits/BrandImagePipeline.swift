@@ -15,6 +15,10 @@ import ViadereCore
 ///    `IEND`; JPEG: tables, frame, scans): metadata (EXIF/GPS, ICC, text, XMP, comments, compressed text chunks) never reaches a parser.
 /// 4. Decode with the pure-Swift codecs (swift-png, swift-jpeg), resize to the slot (area average, premultiplied alpha, never upscale), and
 ///    encode a **fresh** PNG with no metadata. The output is re-checked by the same front end and must contain exactly `IHDR`, `IDAT`, `IEND`.
+///
+/// Message attachments (SECURITY.md §2.113) run the same steps 1-3 through `reencode`, with their own size ceiling, and may be encoded as a
+/// fresh baseline JPEG when the image is opaque (a photo as PNG would be several times larger). A JPEG output is re-checked the same way: the
+/// front end must accept it, its size must match, and rebuilding it must drop nothing (no `APPn` or `COM` segment was written).
 enum BrandImagePipeline {
     struct Output: Sendable, Equatable {
         var png: Data
@@ -32,6 +36,32 @@ enum BrandImagePipeline {
     static let outputLevel = 7
 
     static func process(_ data: Data, declaredContentType: String, slot: BrandAssetSlot) -> Result<Output, Rejection> {
+        switch reencode(data, declaredContentType: declaredContentType, maxDimension: slot.maxDimension, maxStoredBytes: slot.maxStoredBytes, encoding: .png) {
+        case .failure(let rejection): return .failure(rejection)
+        case .success(let out): return .success(Output(png: out.data, sha256: out.sha256, width: out.width, height: out.height))
+        }
+    }
+
+    /// What the re-encoder may write.
+    enum OutputEncoding: Sendable {
+        /// Always PNG (brand assets).
+        case png
+        /// JPEG when every pixel is opaque, PNG otherwise (message attachments).
+        case jpegWhenOpaque
+    }
+
+    struct Encoded: Sendable, Equatable {
+        var data: Data
+        /// `image/png` or `image/jpeg`.
+        var mediaType: String
+        /// Lowercase hex SHA-256 of `data`.
+        var sha256: String
+        var width: Int
+        var height: Int
+    }
+
+    /// Precheck, strict front end, decode, resize (longest side at most `maxDimension`, never upscaled) and a fresh encode with no metadata.
+    static func reencode(_ data: Data, declaredContentType: String, maxDimension: Int, maxStoredBytes: Int, encoding: OutputEncoding) -> Result<Encoded, Rejection> {
         let format: BrandAssetPolicy.DetectedFormat
         switch BrandAssetPolicy.precheck(declaredContentType: declaredContentType, byteCount: data.count, prefix: data.prefix(64)) {
         case .failure(let rejection): return .failure(rejection)
@@ -47,15 +77,31 @@ enum BrandImagePipeline {
         switch decoded {
         case .failure(let rejection): return .failure(rejection)
         case .success(let pixels):
-            let target = BrandAssetPolicy.targetSize(width: pixels.width, height: pixels.height, slot: slot)
-            let resized = pixels.resized(to: target)
+            let resized = pixels.resized(to: targetSize(width: pixels.width, height: pixels.height, maxDimension: maxDimension))
+            if encoding == .jpegWhenOpaque, resized.isOpaque {
+                guard let jpeg = encodeJPEG(resized) else { return .failure(.decodeFailed) }
+                guard jpeg.count <= maxStoredBytes else { return .failure(.outputTooLarge) }
+                // Defense in depth: our own output must pass our own front end, and rebuilding it must drop nothing (no metadata segment).
+                guard case .success(let parsed) = JPEGStructure.parse([UInt8](jpeg)), parsed.pixelStream == [UInt8](jpeg),
+                      parsed.width == resized.width, parsed.height == resized.height else { return .failure(.decodeFailed) }
+                return .success(Encoded(data: jpeg, mediaType: "image/jpeg", sha256: Hex.encode(Data(SHA256.hash(data: jpeg))), width: resized.width, height: resized.height))
+            }
             guard let png = encodePNG(resized) else { return .failure(.decodeFailed) }
-            guard png.count <= slot.maxStoredBytes else { return .failure(.outputTooLarge) }
+            guard png.count <= maxStoredBytes else { return .failure(.outputTooLarge) }
             // Defense in depth: our own output must pass our own front end and carry nothing but pixels.
             guard case .success(let parsed) = PNGStructure.parse([UInt8](png)), parsed.chunkTypes.allSatisfy({ ["IHDR", "IDAT", "IEND"].contains($0) }),
                   parsed.width == resized.width, parsed.height == resized.height else { return .failure(.decodeFailed) }
-            return .success(Output(png: png, sha256: Hex.encode(Data(SHA256.hash(data: png))), width: resized.width, height: resized.height))
+            return .success(Encoded(data: png, mediaType: BrandAssetPolicy.outputContentType, sha256: Hex.encode(Data(SHA256.hash(data: png))),
+                                    width: resized.width, height: resized.height))
         }
+    }
+
+    /// The same rule as `BrandAssetPolicy.targetSize` for any ceiling: keep the aspect ratio, never upscale.
+    static func targetSize(width: Int, height: Int, maxDimension: Int) -> (width: Int, height: Int) {
+        let longest = max(width, height)
+        guard longest > maxDimension else { return (width, height) }
+        let scale = Double(maxDimension) / Double(longest)
+        return (max(1, Int((Double(width) * scale).rounded(.down))), max(1, Int((Double(height) * scale).rounded(.down))))
     }
 
     // MARK: Pixels
@@ -143,6 +189,24 @@ enum BrandImagePipeline {
 
     // MARK: JPEG
 
+    /// JPEG quantization scale for attachment output (swift-jpeg's level; 0 is the finest). 0.5 keeps photos legible at a fraction of the PNG size.
+    static let jpegLevel = 0.5
+
+    /// A fresh baseline JPEG (4:2:0, one interleaved scan) with **no** metadata segment: no JFIF, no EXIF, no ICC, no comment.
+    static func encodeJPEG(_ pixels: Pixels) -> Data? {
+        let layout = JPEG.Layout<JPEG.Common>(format: .ycc8, process: .baseline,
+                                              components: [1: (factor: (2, 2), qi: 0), 2: (factor: (1, 1), qi: 1), 3: (factor: (1, 1), qi: 1)],
+                                              scans: [.sequential((1, \.0, \.0), (2, \.1, \.1), (3, \.1, \.1))])
+        var rgb = [JPEG.RGB]()
+        rgb.reserveCapacity(pixels.width * pixels.height)
+        for i in stride(from: 0, to: pixels.rgba.count, by: 4) { rgb.append(JPEG.RGB(pixels.rgba[i], pixels.rgba[i + 1], pixels.rgba[i + 2])) }
+        let image = JPEG.Data.Rectangular<JPEG.Common>.pack(size: (pixels.width, pixels.height), layout: layout, metadata: [], pixels: rgb)
+        var sink = ByteSink()
+        guard (try? image.compress(stream: &sink, quanta: [0: JPEG.CompressionLevel.luminance(jpegLevel).quanta,
+                                                           1: JPEG.CompressionLevel.chrominance(jpegLevel).quanta])) != nil else { return nil }
+        return Data(sink.bytes)
+    }
+
     static func decodeJPEG(_ bytes: [UInt8]) -> Result<Pixels, Rejection> {
         let structure: JPEGStructure
         switch JPEGStructure.parse(bytes) {
@@ -177,7 +241,7 @@ struct ByteSource: PNG.BytestreamSource, JPEG.Bytestream.Source {
     }
 }
 
-struct ByteSink: PNG.BytestreamDestination {
+struct ByteSink: PNG.BytestreamDestination, JPEG.Bytestream.Destination {
     var bytes: [UInt8] = []
     mutating func write(_ buffer: [UInt8]) -> Void? {
         bytes.append(contentsOf: buffer)

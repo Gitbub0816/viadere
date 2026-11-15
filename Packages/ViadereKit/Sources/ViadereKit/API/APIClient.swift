@@ -40,6 +40,12 @@ public final class APIClient: Sendable {
         return try decode(Res.self, from: data)
     }
 
+    /// A raw image body (`image/png` or `image/jpeg`; message attachments). The device signature covers the bytes like any body.
+    public func upload<Res: Decodable & Sendable>(_ endpoint: Endpoint<Data, Res>, params: [String: String] = [:], body: Data, contentType: String) async throws -> Res {
+        let data = try await performResponse(endpoint.descriptor, params: params, query: [], body: body, extraHeaders: [:], accepting: [], bodyContentType: contentType).body
+        return try decode(Res.self, from: data)
+    }
+
     /// Binary responses (Wallet `.pkpass`).
     public func data(_ endpoint: Endpoint<EmptyBody, Data>, params: [String: String] = [:]) async throws -> Data {
         try await perform(endpoint.descriptor, params: params, query: [], body: nil)
@@ -67,7 +73,7 @@ public final class APIClient: Sendable {
     }
 
     private func performResponse(_ descriptor: AnyEndpoint, params: [String: String], query: [(String, String)], body: Data?,
-                                 extraHeaders: [String: String], accepting extraStatuses: Set<Int>) async throws -> HTTPResponse {
+                                 extraHeaders: [String: String], accepting extraStatuses: Set<Int>, bodyContentType: String? = nil) async throws -> HTTPResponse {
         let path: String
         do { path = try descriptor.path(params, query: query) } catch { throw APIError.invalidRequest("path") }
         let usesBearer = descriptor.auth == .bearer || descriptor.auth == .deviceSignedBearer
@@ -78,7 +84,7 @@ public final class APIClient: Sendable {
         while true {
             var bearer: String?
             if usesBearer { bearer = try await sessions.validAccessToken() }
-            let response = try await executor.run(descriptor, pathAndQuery: path, body: body, bearer: bearer, extraHeaders: extraHeaders)
+            let response = try await executor.run(descriptor, pathAndQuery: path, body: body, bearer: bearer, extraHeaders: extraHeaders, bodyContentType: bodyContentType)
             if (200..<300).contains(response.status) || extraStatuses.contains(response.status) { return response }
 
             let error = RequestExecutor.error(from: response)

@@ -21,7 +21,10 @@ final class SecurityTests: XCTestCase {
                 for name in endpoint.parameterNames { path = path.replacingOccurrences(of: "{\(name)}", with: id) }
                 let method = NIOHTTP1.HTTPMethod(rawValue: endpoint.method.rawValue)
                 let body: Data? = endpoint.method == .GET || endpoint.method == .DELETE ? nil : Data("{}".utf8)
-                let response = try await h.request(method, path, body: body)
+                // Image uploads (SECURITY.md §2.113) take a raw image body; any other type is refused before authentication (415).
+                let upload = MessageAttachmentRoutes.isUploadPath(path)
+                let response = try await h.request(method, path, body: upload ? Data(PNGStructure.signature) : body, contentType: upload ? "image/png" : "application/json")
+                if upload { try await eq(try await h.request(method, path, body: body).status, .unsupportedMediaType, endpoint.name) }
                 switch endpoint.auth {
                 case .bearer, .deviceSigned, .deviceSignedBearer, .businessAPIKey:
                     XCTAssertEqual(response.status, .unauthorized, "\(endpoint.name) must require authentication")
