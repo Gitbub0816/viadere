@@ -129,6 +129,13 @@ struct SecuritySettings {
         try await touch(row, by: userId, action: "security.mtls_required_set", businessId: businessId, metadata: ["required": required ? "true" : "false"])
     }
 
+    /// Tenant policy `allow_email_fallback` (ADR-0020 section 7). Default off; audited both ways.
+    func setEmailFallbackAllowed(businessId: UUID, allowed: Bool, by userId: UUID) async throws {
+        let row = try await settings(businessId: businessId)
+        row.allowEmailFallback = allowed
+        try await touch(row, by: userId, action: "security.email_fallback_set", businessId: businessId, metadata: ["allowed": allowed ? "true" : "false"])
+    }
+
     private func touch(_ row: BusinessSecuritySettingsRecord, by userId: UUID, action: String, businessId: UUID, metadata: [String: String]) async throws {
         row.updatedAt = ctx.now
         row.updatedBy = userId

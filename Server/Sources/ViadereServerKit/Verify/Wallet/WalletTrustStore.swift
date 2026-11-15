@@ -147,6 +147,25 @@ struct IACATrustStore: Sendable {
     /// by the IACA (the validated path is exactly DS → IACA; no intermediates, which Annex B does not define), and the document signer's
     /// country equals the IACA's.
     func validate(chain: [Certificate], now: Date) async throws -> ValidatedIssuer {
+        try await validate(chain: chain, now: now, requireDocumentSignerEKU: true)
+    }
+
+    /// The signer of a Status List Token (`StatusListToken`): the same path rules as a document signer, and in addition the anchor must be **the
+    /// IACA that anchored the credential** (`anchor`). When the MSO designates a signing certificate (`designated`, DER), the leaf must be exactly
+    /// that certificate and the document-signer EKU is not required (the issuer named it); otherwise the leaf must be a document signer.
+    func validateStatusSigner(chain: [Certificate], now: Date, anchor: String, designated: Data?) async throws -> ValidatedIssuer {
+        guard let leaf = chain.first else { throw MDocFailure.noIssuerCertificate }
+        if let designated {
+            var serializer = DER.Serializer()
+            try serializer.serialize(leaf)
+            guard ConstantTime.equals(Data(serializer.serializedBytes), designated) else { throw MDocFailure.untrustedIssuer }
+        }
+        let issuer = try await validate(chain: chain, now: now, requireDocumentSignerEKU: designated == nil)
+        guard issuer.anchorFingerprint == anchor else { throw MDocFailure.untrustedIssuer }
+        return issuer
+    }
+
+    private func validate(chain: [Certificate], now: Date, requireDocumentSignerEKU: Bool) async throws -> ValidatedIssuer {
         guard let leaf = chain.first, chain.count <= 3 else { throw MDocFailure.noIssuerCertificate }
         guard !entries.isEmpty else { throw MDocFailure.untrustedIssuer }
         var verifier = Verifier(rootCertificates: CertificateStore(roots)) { RFC5280Policy(fixedExpiryValidationTime: now) }
@@ -158,9 +177,14 @@ struct IACATrustStore: Sendable {
         let anchor = SecureToken.sha256Hex(serializer.serializedBytes)
         // The anchor must be one we loaded (not merely an equal-looking certificate supplied in the chain).
         guard fingerprints.contains(anchor) else { throw MDocFailure.untrustedIssuer }
-        guard let usage = try? leaf.extensions.keyUsage, usage.digitalSignature,
-              let eku = try? leaf.extensions.extendedKeyUsage, eku.contains(ExtendedKeyUsage.Usage(oid: Self.documentSignerEKU)),
-              COSEVerificationKey(certificateKey: leaf.publicKey) != nil else { throw MDocFailure.badIssuerCertificateUsage }
+        guard let usage = try? leaf.extensions.keyUsage, usage.digitalSignature, COSEVerificationKey(certificateKey: leaf.publicKey) != nil else {
+            throw MDocFailure.badIssuerCertificateUsage
+        }
+        if requireDocumentSignerEKU {
+            guard let eku = try? leaf.extensions.extendedKeyUsage, eku.contains(ExtendedKeyUsage.Usage(oid: Self.documentSignerEKU)) else {
+                throw MDocFailure.badIssuerCertificateUsage
+            }
+        }
         if case .isCertificateAuthority? = try? leaf.extensions.basicConstraints { throw MDocFailure.badIssuerCertificateUsage }
         guard let country = Self.country(of: leaf), country == Self.country(of: validated.last!) else { throw MDocFailure.issuerCountryMismatch }
         return ValidatedIssuer(leaf: leaf, anchorFingerprint: anchor, country: country)

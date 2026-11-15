@@ -19,6 +19,9 @@ final class VerifyRuntime: @unchecked Sendable {
     private var _keys: (any WalletEncryptionKeySource)?
     private var _keyUnwrapper: (any WalletKeyUnwrapper)?
     private var loadedWalletFromConfig = false
+    private var _statusFetcher: any StatusListFetcher = GuardedStatusListFetcher(destinationGuard: .fromEnvironment())
+    /// Verified Wallet status lists (SECURITY §2.60 "Wallet credential status"), per issuer and list.
+    let statusCache = StatusListCache()
     let logger = Logger(label: "viadere.verify")
 
     var didit: (any DiditAPI)? {
@@ -30,6 +33,12 @@ final class VerifyRuntime: @unchecked Sendable {
     var trust: IACATrustStore? {
         get { lock.withLock { _trust } }
         set { lock.withLock { _trust = newValue } }
+    }
+
+    /// Fetches Wallet status lists; the network fetcher (pinned, SSRF-guarded) unless a test replaces it.
+    var statusFetcher: any StatusListFetcher {
+        get { lock.withLock { _statusFetcher } }
+        set { lock.withLock { _statusFetcher = newValue } }
     }
 
     var walletKeys: (any WalletEncryptionKeySource)? {

@@ -18,6 +18,10 @@ struct MDocVerification: Sendable {
     /// The issuing country (ISO 3166-1 alpha-2): the document signer's and the IACA's `countryName`, which agree (and agree with the
     /// `issuing_country` element when the response carries it).
     var issuerCountry: String
+    /// Lowercase hex SHA-256 of the trust anchor (the whole value; `issuerAnchor` is its prefix): the IACA a status list must chain to.
+    var anchorFingerprint: String = ""
+    /// The MSO's issuer-signed status reference (SECURITY §2.60 "Wallet credential status"); checked by `MDocStatusChecker` after verification.
+    var status: MDocStatusField = .none
 }
 
 /// Verifies an ISO/IEC 18013-5 `DeviceResponse` (the plaintext Apple Wallet's identity presentment produces, no ISO session encryption):
@@ -94,7 +98,8 @@ struct MDocVerifier: Sendable {
         try Self.verifyDeviceAuth(deviceSigned: deviceSigned, deviceSignedRaw: deviceSignedRaw, deviceKey: mso.deviceKey, docType: docType,
                                   sessionTranscript: sessionTranscript)
         return MDocVerification(docType: docType, issuerAnchor: String(issuer.anchorFingerprint.prefix(16)), signedAt: mso.signed,
-                                validFrom: mso.validFrom, validUntil: mso.validUntil, elements: elements, issuerCountry: issuer.country)
+                                validFrom: mso.validFrom, validUntil: mso.validUntil, elements: elements, issuerCountry: issuer.country,
+                                anchorFingerprint: issuer.anchorFingerprint, status: mso.status)
     }
 
     // MARK: Issuer certificate chain
@@ -121,6 +126,7 @@ struct MDocVerifier: Sendable {
         var signed: Date
         var validFrom: Date
         var validUntil: Date
+        var status: MDocStatusField = .none
     }
 
     static func parseMSO(_ payload: Data, docType: String) throws -> MSO {
@@ -145,7 +151,9 @@ struct MDocVerifier: Sendable {
             }
             digests[namespace] = ids
         }
-        return MSO(digestAlgorithm: algorithm, valueDigests: digests, deviceKey: deviceKey, signed: signed, validFrom: from, validUntil: until)
+        // `status` (optional): the issuer's status list reference; a malformed one refuses the MSO.
+        let status = try MDocStatusReference.parse(mso["status"])
+        return MSO(digestAlgorithm: algorithm, valueDigests: digests, deviceKey: deviceKey, signed: signed, validFrom: from, validUntil: until, status: status)
     }
 
     static func digestLength(_ algorithm: String) -> Int {

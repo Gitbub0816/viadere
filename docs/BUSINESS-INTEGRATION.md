@@ -404,8 +404,11 @@ rule exists for the capability, requests are refused (`403 policy_denied`) rathe
 every time zone (UTC-12), so a result can arrive up to 12 hours after the birthday in your customer's own zone.
 
 **Wallet IDs and revocation.** An ID in Apple Wallet is verified against the issuing authority's certificates and validity dates.
-Viadere does not yet check the issuer's revocation (status list) for the credential, so a `verified` Wallet result does not prove the ID
-has not been revoked since it was issued. Do not rely on it for that.
+When the ID names an issuer status list (the IETF Token Status List that mdoc issuers publish), Viadere fetches that list from the issuer's
+own listed host, verifies the issuer's signature on it and refuses a revoked or suspended ID; if the list cannot be fetched or trusted the
+request ends `not_verified` (age and identity checks fail closed). A list may be cached for up to an hour, so a revocation in the last hour
+can be missed, and an ID that names no status list cannot be checked for revocation. Do not treat a `verified` Wallet result as proof that
+the ID was not revoked in the last hour.
 
 **What the customer is told.** For a name or an address the Wallet sheet says the data may be stored, because you receive it and may
 keep it under your own terms. For an age threshold or a verified-ID check only a yes or no is kept.

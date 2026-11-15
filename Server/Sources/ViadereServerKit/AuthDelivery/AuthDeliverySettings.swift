@@ -24,6 +24,12 @@ public struct AuthDeliverySettings: Sendable {
     /// `AUTH_DESTINATION_SIGNATURE_REQUIRED` (ADR-0031 section 5): business-mode links need a business-signed destination statement. `false` exists only so the
     /// unit tests can exercise both paths; staging and production refuse it.
     public var destinationSignatureRequired = true
+    /// `AUTH_EMAIL_FALLBACK_ENABLED` (ADR-0020 section 7, decision 13, S1-A10-6), default **off** everywhere. On, a business whose tenant policy
+    /// `allow_email_fallback` is on may ask, per `otp` request, for its code to be mailed to an address it supplies (`channels` with `email` and
+    /// `fallback.email.address`). Off, such a request is `422 email_unavailable` as before. **Refused in staging and production** (strict
+    /// `ENVIRONMENT`) until the owner records where the email provider stores message content and activity (IMPLEMENTATION_LEDGER L-8,
+    /// `docs/ops/DATA-INVENTORY.md`) and lifts the refusal by a reviewed change.
+    public var emailFallbackEnabled = false
     /// `AUTH_LIVE_KEY_ASSURANCE`: what a live API key must carry on auth routes, besides itself (ADR-0020 section 3). `mtls_or_signature` (the default in
     /// staging and production) accepts either a verified RFC 9421 request signature with a key registered for that API key (SECURITY §2.112) or a key bound
     /// to mutual TLS (Tier E); `mtls` accepts mutual TLS only (stricter); `none` is development and tests only. Without one a live key is refused
@@ -49,6 +55,15 @@ public struct AuthDeliverySettings: Sendable {
     public var reportThreshold = 3
     public var reportWindow: TimeInterval = 3600
     public var maxDispatchAttempts = 3
+    /// Email fallback budgets (namespaces `authdl-email-*`, so they fail closed when the shared rate-limit store is down). Over any of them the
+    /// delivery is still created and openable in the app, but **no email is sent** and the address is not stored; never a refusal, like the alert
+    /// budgets (S1-A2-6). Per tenant, per (tenant, customer) and per recipient address (keyed hash), because the address is business-supplied.
+    public var emailTenantRate: RateRule = .perHour(200, burst: 50)
+    public var emailSubjectRate = RateRule(capacity: 3, perMinute: 0.3)              // 3 per 10 minutes
+    public var emailSubjectDailyRate = RateRule(capacity: 10, perMinute: 10.0 / 1440) // 10 per day
+    public var emailAddressRate: RateRule = .perHour(5, burst: 3)
+    /// A code sent by email lives at most this long (ADR-0020 section 7, S1-A10-6: at most 15 minutes).
+    public static let maxEmailLifetime = 900
     /// T-class metadata of ended deliveries is deleted after this (owner decision 10).
     public var metadataRetention: TimeInterval = 30 * 86_400
 
@@ -93,6 +108,17 @@ extension ServerConfig {
         case "true": authDelivery.destinationRecordsEnabled = true
         case "false", nil, "": authDelivery.destinationRecordsEnabled = false
         default: throw ServerConfigError.invalid("AUTH_DESTINATION_RECORDS_ENABLED (true or false)")
+        }
+        switch env["AUTH_EMAIL_FALLBACK_ENABLED"]?.lowercased() {
+        case "true":
+            // Email fallback gate (ADR-0020 section 7, decision 13): disabled in staging and production until the owner verifies and records the
+            // email provider's storage location and retention (ledger L-8). Lifting this refusal is a reviewed code change, not a setting.
+            guard !production else {
+                throw ServerConfigError.invalid("AUTH_EMAIL_FALLBACK_ENABLED (refused in staging and production until the email-fallback gate, ledger L-8, is recorded)")
+            }
+            authDelivery.emailFallbackEnabled = true
+        case "false", nil, "": authDelivery.emailFallbackEnabled = false
+        default: throw ServerConfigError.invalid("AUTH_EMAIL_FALLBACK_ENABLED (true or false)")
         }
         switch env["AUTH_DESTINATION_SIGNATURE_REQUIRED"] {
         case "true", nil, "": authDelivery.destinationSignatureRequired = true

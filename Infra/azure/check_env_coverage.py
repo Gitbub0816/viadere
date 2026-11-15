@@ -57,6 +57,8 @@ EXEMPT = {
     "BRAND_ASSET_DIRECTORY": "development only; refused in staging/production (Azure uses AZURE_BRAND_BLOB_*)",
     "REQUEST_SIGNATURE_AUTHORITIES": "optional: defaults to the host of PUBLIC_BASE_URL (SECURITY.md 2.112); set in app_env to accept more hosts",
     "ATTACHMENT_DIRECTORY": "development only; refused in staging/production (Azure uses AZURE_ATTACHMENT_BLOB_*)",
+    "WALLET_STATUS_LIST_HOSTS": "only when Verify's Wallet method is enabled: plain configuration in app_env then (issuer status-list hosts)",
+    "AUTH_EMAIL_FALLBACK_ENABLED": "default false; refused in staging/production until the email-fallback gate (ledger L-8) is recorded",
 }
 # Names the server reads that are not in .env.example.
 EXTRA_KNOWN = {"AUDIT_CHAIN_LEGACY_THROUGH_SEQ", "PASS_CERTIFICATE_PEM", "PASS_PRIVATE_KEY_PEM", "PASS_WWDR_CERTIFICATE_PEM",

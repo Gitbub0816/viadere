@@ -40,8 +40,10 @@ final class VerifyFlowTests: XCTestCase {
         var hookSecret: String
     }
 
-    func withVerify(enabled: Bool = true, wallet: Bool = true, didit: Bool = true, _ body: (TestHarness, FakeDidit) async throws -> Void) async throws {
+    func withVerify(enabled: Bool = true, wallet: Bool = true, didit: Bool = true, configure: @escaping (inout ServerConfig) -> Void = { _ in },
+                    _ body: (TestHarness, FakeDidit) async throws -> Void) async throws {
         try await withHarness({ config in
+            configure(&config)
             config.verify.enabled = enabled
             if wallet {
                 config.verify.walletMerchantIdentifier = TestWalletSealer.merchant

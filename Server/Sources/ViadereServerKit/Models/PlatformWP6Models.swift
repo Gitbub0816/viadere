@@ -117,6 +117,10 @@ final class BusinessSecuritySettingsRecord: Model, @unchecked Sendable {
     @Field(key: "alert_subscriptions") var alertSubscriptions: String
     /// Sealed JSON array of security-contact email addresses (row-bound).
     @OptionalField(key: "contacts_ciphertext") var contactsCiphertext: String?
+    /// Tenant policy `allow_email_fallback` (ADR-0020 section 7, S1-A10-6): `nil` and `false` are off (the default). Only an Owner or Security Admin
+    /// turns it on, after a fresh passkey, in the console (which explains the privacy difference); it has an effect only while
+    /// `AUTH_EMAIL_FALLBACK_ENABLED` is on. Migration `AuthEmailFallback.v1`.
+    @OptionalField(key: "allow_email_fallback") var allowEmailFallback: Bool?
     @Field(key: "updated_at") var updatedAt: Date
     @OptionalField(key: "updated_by") var updatedBy: UUID?
 

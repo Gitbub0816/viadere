@@ -76,6 +76,13 @@ enum ConsoleSecurity {
             try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).setMTLSRequired(form.enabled == "1")
             return DashboardResponses.redirect("/dashboard/security/certificates?m=saved")
         }
+        pages.get("dashboard", "security", "email-fallback") { req in try await emailFallbackPage(req) }
+        pages.post("dashboard", "security", "email-fallback") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            let form = try req.content.decode(ToggleForm.self)
+            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).setEmailFallbackAllowed(form.enabled == "1")
+            return DashboardResponses.redirect("/dashboard/security/email-fallback?m=saved")
+        }
         pages.get("dashboard", "security", "signing-keys") { req in try await signingKeysPage(req) }
         pages.post("dashboard", "security", "signing-keys") { req -> Response in
             let (p, _) = try req.businessDashboard
@@ -150,6 +157,8 @@ enum ConsoleSecurity {
             + item(settings.consoleIPAllowlist.isEmpty ? .neutral : .success, .lock, "Console network", settings.consoleIPAllowlist.isEmpty ? "Anywhere" : "Allow-list", "Restrict the console to your networks.", "/dashboard/security/network", "Manage")
             + item(certs.isEmpty ? .neutral : .success, .document, "Client certificates", settings.mtlsRequired ? "Required" : "\(certs.count) active", "Mutual TLS for enterprise API clients.", "/dashboard/security/certificates", "Manage")
             + item(signingKeys == 0 ? .neutral : .success, .key, "Request signing", "\(signingKeys) active", "RFC 9421 signatures that let a live key send sign-in prompts without mutual TLS.", "/dashboard/security/signing-keys", "Manage")
+            + item(settings.allowEmailFallback == true ? .warning : .success, .megaphone, "Email fallback", settings.allowEmailFallback == true ? "Allowed" : "Off",
+                   "One-time codes by email when a request asks for it. Weaker than the app.", "/dashboard/security/email-fallback", "Manage")
             + item(settings.twoPersonRequired ? .success : .neutral, .users, "Two-person approval", settings.twoPersonRequired ? "On" : "Off", "Keys and roles need a second person.", "/dashboard/security/approvals", "Manage")
             + item(contacts.isEmpty ? .warning : .success, .megaphone, "Alerts and contacts", contacts.isEmpty ? "No contact" : "\(contacts.count) contact\(contacts.count == 1 ? "" : "s")",
                    "New-device sign-ins, key and role changes, webhook and assurance notices by email.", "/dashboard/security/alerts", "Manage")
@@ -249,6 +258,34 @@ enum ConsoleSecurity {
                         + ConsoleUI.formActions(ConsoleUI.button("Save", .secondary, passkey: true) + ConsoleUI.passkeyNote()))) + "</div>"
         }
         return DashboardUI.businessPage(p, title: "Client certificates", active: "/dashboard/security/certificates", subtitle: "Mutual TLS for enterprise API clients.", flash: DashboardFormat.flash(req), body: body)
+    }
+
+    // MARK: Email fallback for one-time codes (ADR-0020 section 7, S1-A10-6)
+
+    private static func emailFallbackPage(_ req: Request) async throws -> Response {
+        let (p, businessId) = try req.businessDashboard
+        try p.require(.viewSecurity)
+        let settings = try await SecuritySettings(db: req.db, ctx: req.ctx).settings(businessId: businessId)
+        let allowed = settings.allowEmailFallback == true
+        let available = req.ctx.config.authDelivery.emailFallbackEnabled
+        var body = ""
+        if !available {
+            body += ConsoleUI.callout(.accent, title: "Not available yet", "<p>Viadere has not enabled email fallback in this environment. Your setting is kept and takes effect once it is.</p>")
+        }
+        // The privacy difference, stated before the switch (S1-A10-6).
+        body += ConsoleUI.callout(.warning, title: "Email is weaker than the Viadere app",
+            "<p>When you ask for it on a sign-in request, Viadere also emails the one-time code to the address you send. The email holds the code and no link. "
+            + "Email is easier to intercept than the app, the address comes from you, and our email provider (MailerSend) keeps the recipient address and delivery records "
+            + "for its retention period. Only ask for it when your customer chose email on your page, and never for payments or account recovery.</p>")
+        let manage = p.can(.manageSecurity)
+        body += ConsoleUI.card("Email fallback for one-time codes", description: "Off by default. Codes sent by email expire within 15 minutes and are limited per customer, per address and per organization.",
+            manage
+                ? ConsoleUI.form("/dashboard/security/email-fallback", csrf: DashboardUI.csrf(p),
+                    ConsoleUI.checkbox("enabled", label: "Allow email fallback on one-time code requests that ask for it", checked: allowed)
+                    + ConsoleUI.formActions(ConsoleUI.button("Save", .secondary, passkey: true) + ConsoleUI.passkeyNote()))
+                : "<p>\(allowed ? "Allowed" : "Off"). An Owner or Security Admin can change this.</p>")
+        return DashboardUI.businessPage(p, title: "Email fallback", active: "/dashboard/security", subtitle: "One-time codes by email, only when you ask for it.",
+                                        flash: DashboardFormat.flash(req), body: body)
     }
 
     // MARK: Request signing (SECURITY §2.112)

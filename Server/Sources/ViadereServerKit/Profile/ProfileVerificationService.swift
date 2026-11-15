@@ -115,9 +115,12 @@ struct ProfileVerificationService {
             let requested = plans.reduce(into: Set<MDocElement>()) { $0.formUnion(WalletElementPlan.readableElements(for: $1)) }
             let verification = try await MDocVerifier(trust: trust).verify(plaintext: opened.plaintext, sessionTranscript: opened.sessionTranscript,
                                                                            requested: requested, now: now)
+            // The issuer's status list (SECURITY §2.60 "Wallet credential status"): a revoked, suspended or unverifiable credential keeps nothing.
+            // Verified profile facts are identity evidence, so they take the high-assurance fail mode.
+            let status = await runtime.walletStatusDecision(verification, trust: trust, sensitivity: .high, settings: settings, now: now)
             // Each plan reduces the same verified presentation; the claims are merged in memory and dropped after `finish`.
-            for plan in plans {
-                guard let part = WalletClaims.claims(from: verification, plan: plan, now: now) else { continue }
+            for plan in plans where status.accepted {
+                guard let part = WalletClaims.claims(from: verification, plan: plan, now: now, revocation: status.revocation) else { continue }
                 if claims == nil { claims = part; continue }
                 claims!.ageOver.merge(part.ageOver) { a, _ in a }
                 claims!.ageInYears = claims!.ageInYears ?? part.ageInYears
@@ -126,7 +129,7 @@ struct ProfileVerificationService {
                 claims!.familyName = claims!.familyName ?? part.familyName
                 claims!.documentPresented = claims!.documentPresented || part.documentPresented
             }
-            if claims == nil { reason = MDocFailure.noRequestedElement.rawValue }
+            if claims == nil { reason = status.accepted ? MDocFailure.noRequestedElement.rawValue : status.reason }
         } catch let failure as MDocFailure {
             reason = failure.rawValue
         } catch {

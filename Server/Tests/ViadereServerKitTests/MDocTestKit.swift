@@ -125,6 +125,8 @@ struct TestMDoc {
         var shortRandom = false
         var documentErrors = false
         var algorithmInUnprotected = false
+        /// The MSO's `status` member (a status list reference), when set.
+        var msoStatus: CBORValue?
     }
     var flaws = Flaws()
 
@@ -180,7 +182,7 @@ struct TestMDoc {
                 }
             }
         }
-        let mso = CBORValue.textMap([
+        var msoMembers: [(String, CBORValue)] = [
             ("version", .text("1.0")), ("digestAlgorithm", .text(flaws.digestAlgorithm)),
             ("valueDigests", .map(digestIDs.map { namespace, ids in
                 CBORValue.Entry(key: .text(namespace), value: .map(ids.sorted { $0.key < $1.key }.map { CBORValue.Entry(key: .unsigned($0.key), value: .bytes($0.value)) }))
@@ -189,7 +191,9 @@ struct TestMDoc {
             ("docType", .text(flaws.msoDocType ?? docType)),
             ("validityInfo", .textMap([("signed", tdate(flaws.signed ?? now.addingTimeInterval(-3600))), ("validFrom", tdate(flaws.validFrom ?? now.addingTimeInterval(-3600))),
                                        ("validUntil", tdate(flaws.validUntil ?? now.addingTimeInterval(86_400 * 30)))])),
-        ])
+        ]
+        if let status = flaws.msoStatus { msoMembers.append(("status", status)) }
+        let mso = CBORValue.textMap(msoMembers)
         let msoPayload = CBOR.encode(.tagged(24, .bytes(CBOR.encode(mso))))
         let signerPKI = flaws.otherPKI ?? pki
         let protectedHeader = CBORValue.intMap([(1, flaws.issuerAlgorithm >= 0 ? .unsigned(UInt64(flaws.issuerAlgorithm)) : .negative(flaws.issuerAlgorithm))])

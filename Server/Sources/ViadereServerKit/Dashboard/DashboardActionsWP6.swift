@@ -85,6 +85,13 @@ extension DashboardActions {
         try await settingsService.setMTLSRequired(businessId: businessId, required: required, by: userId)
     }
 
+    /// Tenant policy `allow_email_fallback` (ADR-0020 section 7): Owner or Security Admin (`manageSecurity`) with a fresh passkey, audited.
+    func setEmailFallbackAllowed(_ allowed: Bool) async throws {
+        try require(.manageSecurity)
+        try await requireReauth(next: "/dashboard/security/email-fallback")
+        try await settingsService.setEmailFallbackAllowed(businessId: businessId, allowed: allowed, by: userId)
+    }
+
     /// Needs a fresh passkey assertion (a stolen cookie must not silence alerts or add a contact) and always tells the owners, security admins and
     /// organization admins when the subscriptions or contacts changed, whatever the new subscriptions are (platform gate M2). The notice carries
     /// no contact address.
