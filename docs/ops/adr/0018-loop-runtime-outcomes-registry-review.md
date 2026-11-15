@@ -24,3 +24,5 @@ Loops let businesses compose interactions from Viadere components. Businesses mu
 - Rule changes (terms, registry, limits) are Core changes with tests and vectors; a reviewer cannot widen them.
 - The content word lists are a tripwire, not the control; the control is that forbidden data has no field and forbidden operations have no action. Customers can still type anything into a short text field, hence the "Don't share health details here" notice, the AUP and the report path.
 - `approve_estimate` and connected routing stay unavailable until Phase 4 (`LoopPlatformPhase`).
+
+**Implementation note (2026-11-15, owner decision).** `approve_estimate` was built on the interaction decision machinery (single-use, amount-bound, device-bound biometric decision), not Approve v2: install-only customers have no pairwise approval key. The business receives the approval facts over its authenticated API, not an offline-verifiable `ApprovalResult`. See SECURITY.md §2.115.
