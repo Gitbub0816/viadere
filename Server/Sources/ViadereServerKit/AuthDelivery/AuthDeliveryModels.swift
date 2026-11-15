@@ -37,6 +37,9 @@ final class AuthDeliveryRecord: Model, @unchecked Sendable {
     @OptionalField(key: "link_challenge_id") var linkChallengeId: String?
     @OptionalField(key: "link_statement") var linkStatement: String?
     @OptionalField(key: "link_client_id") var linkClientId: String?
+    /// Link service, cross device (ADR-0021 §6, `AuthLinkService.v2`): the authority asks the phone for the number the business shows; no code is
+    /// opened on the phone. `nil` or `false`: same device. The number itself is sealed with the delivery's secret (`AuthSecretPayload.matchCode`).
+    @OptionalField(key: "link_cross_device") var linkCrossDevice: Bool?
     @OptionalField(key: "code_kind") var codeKind: String?
     /// Delivered without an alert push because a per-subject budget was exhausted (the inbox still shows it).
     @Field(key: "silent") var silent: Bool

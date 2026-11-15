@@ -15,11 +15,12 @@ final class AuthLinkServiceTests: AuthDeliveryTestBase {
     static var challenge: String { Base64URL.encode(Data(SHA256.hash(data: Data(verifier.utf8)))) }
 
     func linkServiceBody(_ s: Scene, id: String = UUID().uuidString, client: String = AuthLinkRedemptionTests.linkClient,
-                         returnURL: String = AuthLinkRedemptionTests.returnURL, purpose: String = "sign_in") -> Data {
-        try! JSONSerialization.data(withJSONObject: ["method": "magic_link", "request_id": id, "subject_ref": s.subject.rawValue, "purpose": purpose,
-                                                     "template": "auth.sign_in_link.v1",
-                                                     "destination": ["link_mode": "viadere", "link_client_id": client, "return_url": returnURL,
-                                                                     "code_challenge": Self.challenge, "code_challenge_method": "S256"]])
+                         returnURL: String = AuthLinkRedemptionTests.returnURL, purpose: String = "sign_in", crossDevice: Bool? = nil) -> Data {
+        var destination: [String: Any] = ["link_mode": "viadere", "link_client_id": client, "return_url": returnURL,
+                                          "code_challenge": Self.challenge, "code_challenge_method": "S256"]
+        if let crossDevice { destination["cross_device"] = crossDevice }
+        return try! JSONSerialization.data(withJSONObject: ["method": "magic_link", "request_id": id, "subject_ref": s.subject.rawValue, "purpose": purpose,
+                                                            "template": "auth.sign_in_link.v1", "destination": destination])
     }
 
     func linkHarness(_ body: (TestHarness) async throws -> Void) async throws {
@@ -51,6 +52,19 @@ final class AuthLinkServiceTests: AuthDeliveryTestBase {
         let claims = try FactorAssertionClaims.answering(verified, decision: .approve, userVerification: .biometric, match: nil,
                                                          codeHash: Base64URL.encode(Data(SHA256.hash(data: Data(code.utf8)))), now: AuthLinkRedemptionTests.now)
         return try await FactorAssertion.sign(claims, with: key ?? authority.deviceKey)
+    }
+
+    /// The device answering any challenge with exactly the members given (to exercise every mismatch between the two modes).
+    func answer(_ authority: AuthLinkRedemptionTests.Authority, statement: String, decision: FactorDecision = .approve, match: String?, codeHash: String?) async throws -> String {
+        let verified = try AuthorityStatementVerifier.verifyChallenge(statement, pinnedKeys: [authority.statementKey], environment: .staging, now: AuthLinkRedemptionTests.now)
+        let claims = try FactorAssertionClaims.answering(verified, decision: decision, userVerification: .biometric, match: match, codeHash: codeHash,
+                                                         now: AuthLinkRedemptionTests.now)
+        return try await FactorAssertion.sign(claims, with: authority.deviceKey)
+    }
+
+    func redeem(_ h: TestHarness, _ b: TestBusiness, ach: String, verifier: String = AuthLinkServiceTests.verifier) async throws -> HTTPResult {
+        try await h.business(b, .POST, "/v1/business/auth-links/redeem",
+                             body: try ViadereJSON.encode(AuthLinkRedeemRequest(linkClientId: AuthLinkRedemptionTests.linkClient, ach: ach, codeVerifier: verifier)))
     }
 
     func evidence(_ h: TestHarness, _ s: Scene, _ id: AuthDeliveryID, _ factor: String) async throws -> HTTPResult {
@@ -88,6 +102,131 @@ final class AuthLinkServiceTests: AuthDeliveryTestBase {
             // Single use: the same code again is refused, and the delivery stays completed.
             await XCTAssertEqualAsync(try await redeem(h, s.b, code: code).status, .badRequest)
             try await eq(try await get(h, s, view.id).status, .completed)
+            try await authority.app.asyncShutdown()
+        }
+    }
+
+    // MARK: Cross device (ADR-0021 §6)
+
+    func testCrossDeviceTheBusinessShowsTheNumberThePhoneTypesItAndTheSessionRedeemsWithoutACode() async throws {
+        try await linkHarness { h in
+            let (s, authority) = try await setUp(h)
+            let created = try await create(h, s.b, linkServiceBody(s, crossDevice: true))
+            XCTAssertEqual(created.status, .created, created.text)
+            let view = try created.json(AuthDeliveryView.self)
+            // The business gets the number to show on its initiating screen and the challenge reference to redeem with.
+            let cross = try XCTUnwrap(view.crossDevice)
+            XCTAssertTrue(AuthorityChallengeID.isValid(cross.ach))
+            let number = try XCTUnwrap(cross.matchCode)
+            XCTAssertTrue(number.count == 2 && number.allSatisfy(\.isNumber), number)
+            try await h.runJobs()
+            // The phone sees the authority's statement asking for a number; the api never hands the number to the phone.
+            let shown = try await h.signed(s.consumer, .GET, "/v1/auth-deliveries/\(view.id)")
+            XCTAssertFalse(shown.text.contains("match_code") || shown.text.contains(cross.ach), shown.text)
+            let statement = try XCTUnwrap(try shown.json(AuthDeliveryDisplay.self).authorityChallenge)
+            let verified = try AuthorityStatementVerifier.verifyChallenge(statement, pinnedKeys: [authority.statementKey], environment: .staging, now: AuthLinkRedemptionTests.now)
+            XCTAssertTrue(verified.matchRequired)
+            // Typed correctly: accepted, and the answer carries a decision only (no code, no grant, nothing to open).
+            let answered = try await evidence(h, s, view.id, try await answer(authority, statement: statement, match: number, codeHash: nil))
+            XCTAssertEqual(answered.status, .ok, answered.text)
+            XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(answered.text.utf8)) as? [String: String], ["decision": "approve"])
+            // The initiating session polls, sees `opened`, and redeems with the challenge reference and its PKCE verifier.
+            let polled = try await get(h, s, view.id)
+            XCTAssertEqual(polled.status, .opened)
+            XCTAssertEqual(polled.crossDevice?.ach, cross.ach)
+            XCTAssertNil(polled.crossDevice?.matchCode, "the number is gone once the delivery is answered")
+            let grant = try await redeem(h, s.b, ach: cross.ach)
+            XCTAssertEqual(grant.status, .ok, grant.text)
+            XCTAssertEqual(try grant.json(AuthLinkRedeemResponse.self).deliveryId, view.id.description)
+            try await eq(try await get(h, s, view.id).status, .completed)
+            // Single use.
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: cross.ach).status, .badRequest)
+            try await authority.app.asyncShutdown()
+        }
+    }
+
+    func testACrossDeviceApprovalNeverRevealsOrRegistersACode() async throws {
+        try await linkHarness { h in
+            let (s, authority) = try await setUp(h)
+            let view = try await create(h, s.b, linkServiceBody(s, crossDevice: true)).json(AuthDeliveryView.self)
+            let number = try XCTUnwrap(view.crossDevice?.matchCode)
+            let statement = try await challengeStatement(h, s, view.id)
+            // A phone (or a relay) that also slips in a code hash is refused: the cross-device path never registers a code.
+            let code = Base64URL.encode(SecureToken.randomBytes(32))
+            let hash = Base64URL.encode(Data(SHA256.hash(data: Data(code.utf8))))
+            await XCTAssertEqualAsync(try await evidence(h, s, view.id, try await answer(authority, statement: statement, match: number, codeHash: hash)).status, .unauthorized)
+            // The genuine answer is accepted; the code above was never registered, so it redeems nothing.
+            await XCTAssertEqualAsync(try await evidence(h, s, view.id, try await answer(authority, statement: statement, match: number, codeHash: nil)).status, .ok)
+            await XCTAssertEqualAsync(try await redeem(h, s.b, code: code).status, .badRequest)
+            try await eq(try await get(h, s, view.id).status, .opened)
+            try await authority.app.asyncShutdown()
+        }
+    }
+
+    func testASameDeviceChallengeCannotBeAnsweredAsCrossDeviceAndViceVersa() async throws {
+        try await linkHarness { h in
+            let (s, authority) = try await setUp(h)
+            // Same device (the default): a number and no code hash is refused, and the challenge reference never redeems it.
+            let same = try await create(h, s.b, linkServiceBody(s)).json(AuthDeliveryView.self)
+            XCTAssertNil(same.crossDevice, "a same-device delivery shows no number and no challenge reference")
+            let sameStatement = try await challengeStatement(h, s, same.id)
+            await XCTAssertEqualAsync(try await evidence(h, s, same.id, try await answer(authority, statement: sameStatement, match: "42", codeHash: nil)).status, .unauthorized)
+            await XCTAssertEqualAsync(try await evidence(h, s, same.id, try await answer(authority, statement: sameStatement, match: nil, codeHash: nil)).status, .unauthorized)
+            let code = Base64URL.encode(SecureToken.randomBytes(32))
+            await XCTAssertEqualAsync(try await evidence(h, s, same.id, try await factor(authority, statement: sameStatement, code: code)).status, .ok)
+            let sameRow = try await AuthDeliveryRecord.find(same.id.uuid, on: h.app.db)
+            let sameAch = try XCTUnwrap(sameRow?.linkChallengeId)
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: sameAch).status, .badRequest)
+            await XCTAssertEqualAsync(try await redeem(h, s.b, code: code).status, .ok)
+            // Cross device: a code hash without the number is refused, and so is an approve without the number.
+            let cross = try await create(h, s.b, linkServiceBody(s, crossDevice: true)).json(AuthDeliveryView.self)
+            let crossStatement = try await challengeStatement(h, s, cross.id)
+            let hash = Base64URL.encode(Data(SHA256.hash(data: Data(code.utf8))))
+            await XCTAssertEqualAsync(try await evidence(h, s, cross.id, try await answer(authority, statement: crossStatement, match: nil, codeHash: hash)).status, .unauthorized)
+            await XCTAssertEqualAsync(try await evidence(h, s, cross.id, try await answer(authority, statement: crossStatement, match: nil, codeHash: nil)).status, .unauthorized)
+            try await eq(try await get(h, s, cross.id).status, .delivered)
+            // `cross_device` belongs to the link service only.
+            let business = try JSONSerialization.data(withJSONObject: ["method": "magic_link", "request_id": "bm", "subject_ref": s.subject.rawValue, "purpose": "sign_in",
+                                                                       "template": "auth.sign_in_link.v1",
+                                                                       "destination": ["link_mode": "business", "url": "https://\(s.host)/x", "cross_device": true]])
+            await XCTAssertEqualAsync(try await create(h, s.b, business).status, .unprocessableEntity)
+            try await authority.app.asyncShutdown()
+        }
+    }
+
+    func testCrossDeviceRelayAndReplayAreRefused() async throws {
+        try await linkHarness { h in
+            let (s, authority) = try await setUp(h)
+            let view = try await create(h, s.b, linkServiceBody(s, crossDevice: true)).json(AuthDeliveryView.self)
+            let cross = try XCTUnwrap(view.crossDevice)
+            let number = try XCTUnwrap(cross.matchCode)
+            let statement = try await challengeStatement(h, s, view.id)
+            // Before the phone answered there is nothing to redeem.
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: cross.ach).status, .badRequest)
+            // Another business cannot see the delivery (so not its number or reference) nor redeem the reference.
+            let other = try await scene(h, name: "Globex", handle: "globex")
+            await XCTAssertEqualAsync(try await h.business(other.b, .GET, "/v1/business/auth-deliveries/\(view.id)").status, .notFound)
+            let accepted = try await answer(authority, statement: statement, match: number, codeHash: nil)
+            await XCTAssertEqualAsync(try await evidence(h, s, view.id, accepted).status, .ok)
+            await XCTAssertEqualAsync(try await redeem(h, other.b, ach: cross.ach).status, .badRequest)
+            // A session without the initiating browser's PKCE verifier cannot redeem.
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: cross.ach, verifier: String(repeating: "x", count: 43)).status, .badRequest)
+            // The accepted answer replayed: refused on this delivery, and never relayed under another one.
+            await XCTAssertEqualAsync(try await evidence(h, s, view.id, accepted).status, .conflict)
+            let second = try await create(h, s.b, linkServiceBody(s, crossDevice: true)).json(AuthDeliveryView.self)
+            await XCTAssertEqualAsync(try await evidence(h, s, second.id, accepted).status, .unauthorized)
+            // The genuine session redeems once; the reference cannot be redeemed again.
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: cross.ach).status, .ok)
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: cross.ach).status, .badRequest)
+            // Three wrong numbers end the second challenge: the right number afterwards is refused too.
+            let secondStatement = try await challengeStatement(h, s, second.id)
+            let right = try XCTUnwrap(second.crossDevice?.matchCode)
+            let wrong = right == "10" ? "11" : "10"
+            for _ in 0..<3 {
+                await XCTAssertEqualAsync(try await evidence(h, s, second.id, try await answer(authority, statement: secondStatement, match: wrong, codeHash: nil)).status, .unauthorized)
+            }
+            await XCTAssertEqualAsync(try await evidence(h, s, second.id, try await answer(authority, statement: secondStatement, match: right, codeHash: nil)).status, .unauthorized)
+            await XCTAssertEqualAsync(try await redeem(h, s.b, ach: try XCTUnwrap(second.crossDevice?.ach)).status, .badRequest)
             try await authority.app.asyncShutdown()
         }
     }

@@ -10,7 +10,8 @@ import Observation
 // A link-service delivery holds no URL: it carries the authority's signed `link_open` challenge, relayed unchanged by the api. The phone answers it
 // the way it answers an OIDC sign-in (`OIDCSignInViewModel`): verify the statement against the build-pinned statement keys, show who is asking and
 // where from the authority-built display only, type the number when the challenge asks for one, and sign a `viadere-factor+jws` with the biometric
-// approval key, sent to `POST /v1/auth-deliveries/{id}/link-evidence`. Nothing here opens a URL.
+// approval key, sent to `POST /v1/auth-deliveries/{id}/link-evidence`. Only after the authority **accepted** a same-device approval does the phone
+// open the signed return URL with the one-time code in the fragment, once, through the system opener (`LinkServiceHandoff`); nothing else opens.
 
 /// UX_COPY LS-01 to LS-08 (the link-service screen). `{Business}` is the authority-signed `tenant_name`, never an api display field.
 public enum LinkServiceCopy {
@@ -39,6 +40,12 @@ public enum LinkServiceCopy {
     public static let cannotVerify = OIDCCopy.cannotVerify
     public static let offline = AuthDeliveryCopy.offline
     public static let noKey = "Approving sign-ins needs Face ID or Touch ID on this device."
+    /// LS-09: same device, after the system opened the signed return URL.
+    public static func opened(host: String) -> String { AuthDeliveryCopy.linkOpened(host: host) }
+    /// LS-10: the hand-off could not be made (the system did not open it, the request ran out, or the URL would not be the signed one). The code is gone.
+    public static func notFinished(host: String) -> String {
+        "We couldn't open \(AuthDeliveryCopy.iso(host)), so you're not signed in. Ask for a new link where you started signing in."
+    }
 }
 
 /// What the phone shows for a verified `link_open` statement: only values from the authority-built, authority-signed display.
@@ -80,14 +87,22 @@ public struct LinkServiceDisplay: Sendable, Equatable {
     }
 }
 
-/// What the device keeps after the authority accepted a same-device approval: the exact signed return URL with the code in the fragment
-/// (ADR-0021 §5.3). **This build never opens it** (nothing in the Kit or the App does); it is kept in memory only, and its descriptions are
-/// redacted so no log line or interpolation can carry the code.
-public struct LinkServiceHandoff: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
-    public let url: String
-    public var description: String { "LinkServiceHandoff(redacted)" }
-    public var debugDescription: String { description }
-    public var customMirror: Mirror { Mirror(self, children: [:]) }
+/// The same-device hand-off of ADR-0021 §5.3: the exact signed return URL with the one-time code in the fragment, `<return_url>#vdr_code=<link_code>`.
+/// The fragment keeps the code out of the first request, the business's access logs and any `Referer`; the business page's own script reads it.
+public enum LinkServiceHandoff {
+    /// `link_code`: 32 random bytes, base64url without padding (43 characters).
+    public static func isValidCode(_ code: String) -> Bool { Base64URL.isValid(code, minLength: 43, maxLength: 43) && Base64URL.decode(code)?.count == 32 }
+
+    /// The URL the system is asked to open, or `nil` when it would not be exactly the signed one: `returnURL` must be https (lowercase scheme, as
+    /// signed) on exactly `host` (the signed `return_host`), without user info, a port other than 443 or a fragment of its own; the result must be
+    /// `returnURL` byte for byte followed by `#vdr_code=` and the code (Foundation must not rewrite a single byte), at most 2048 bytes.
+    public static func url(returnURL: String, host: String, code: String) -> URL? {
+        guard isValidCode(code), returnURL.hasPrefix("https://"), !returnURL.contains("#") else { return nil }
+        let raw = returnURL + "#vdr_code=" + code
+        guard let url = URL(string: raw), url.absoluteString == raw, LinkConfirmationViewModel.isAcceptable(url, host: host),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.percentEncodedFragment == "vdr_code=" + code else { return nil }
+        return url
+    }
 }
 
 /// The link-service delivery as the device fetches it (`GET /v1/auth-deliveries/{id}`): only what the screen needs, the signed statement unverified.
@@ -208,9 +223,9 @@ public actor MockLinkServiceDeviceAPI: LinkServiceDeviceAPI {
     }
 }
 
-/// The link-service screen (UX_COPY LS-01 to LS-08). Deny, Approve and This wasn't me carry equal weight (one component, safe actions first);
+/// The link-service screen (UX_COPY LS-01 to LS-10). Deny, Approve and This wasn't me carry equal weight (one component, safe actions first);
 /// Approve is disabled until the number is complete when the challenge asks for one. Nothing is signed until a tap, "Approved" appears only after
-/// the authority accepted the answer, and no URL is ever opened here.
+/// the authority accepted the answer, and the only URL ever opened is the same-device hand-off (`LinkServiceHandoff`), once, after that acceptance.
 @MainActor
 #if canImport(Observation) && !os(Linux)
 @Observable
@@ -220,7 +235,12 @@ public final class LinkServiceViewModel {
         case loading
         case reviewing
         case submitting
+        /// Cross device: accepted; nothing opens on the phone.
         case approved
+        /// Same device: accepted, and the system opened the signed return URL with the code.
+        case opened
+        /// Same device: the hand-off could not be made; the code was discarded and the person is told the sign-in did not finish.
+        case notFinished
         case denied
         case reported
         /// Three refused numbers: the authority fails the challenge at its third signature-valid wrong number.
@@ -242,8 +262,6 @@ public final class LinkServiceViewModel {
     public private(set) var entry = ""
     public private(set) var wrongEntries = 0
     public private(set) var notice: String?
-    /// Kept after a same-device approval; never opened by this build (see `LinkServiceHandoff`).
-    public private(set) var handoff: LinkServiceHandoff?
 
     private let deliveryId: UUID
     private let api: any LinkServiceDeviceAPI
@@ -251,13 +269,19 @@ public final class LinkServiceViewModel {
     private let pinnedKeys: [P256.Signing.PublicKey]
     private let revokedKids: Set<String>
     private let environment: AuthorityEnvironment
+    private let opener: any SystemURLOpening
     private let clock: @Sendable () -> Date
     private let makeCode: @Sendable () -> String
     private var statement: AuthorityChallengeStatement?
+    private var deliveryExpiresAt: Date?
+    /// Set once the hand-off was attempted: it is never made twice, whatever happens next.
+    private var handedOff = false
 
-    /// - Parameter makeCode: the same-device link code (32 random bytes, base64url; ADR-0021 §5.3). Replaceable only for tests.
+    /// - Parameters:
+    ///   - opener: the system opener (`UIApplication.open` in the App; never a web view). Called at most once, for the same-device hand-off.
+    ///   - makeCode: the same-device link code (32 random bytes, base64url; ADR-0021 §5.3). Replaceable only for tests.
     public init(deliveryId: UUID, api: any LinkServiceDeviceAPI, signer: any AuthorityFactorSigning, pinnedKeys: [P256.Signing.PublicKey],
-                revokedKids: Set<String> = [], environment: AuthorityEnvironment, clock: @escaping @Sendable () -> Date = { Date() },
+                revokedKids: Set<String> = [], environment: AuthorityEnvironment, opener: any SystemURLOpening, clock: @escaping @Sendable () -> Date = { Date() },
                 makeCode: @escaping @Sendable () -> String = { Base64URL.encode(SecureToken.randomBytes(32)) }) {
         self.deliveryId = deliveryId
         self.api = api
@@ -265,6 +289,7 @@ public final class LinkServiceViewModel {
         self.pinnedKeys = pinnedKeys
         self.revokedKids = revokedKids
         self.environment = environment
+        self.opener = opener
         self.clock = clock
         self.makeCode = makeCode
     }
@@ -299,6 +324,8 @@ public final class LinkServiceViewModel {
         switch phase {
         case .loading, .reviewing, .submitting: return nil
         case .approved: return display.map { LinkServiceCopy.approved(business: $0.business) }
+        case .opened: return display.map { LinkServiceCopy.opened(host: $0.host) }
+        case .notFinished: return display.map { LinkServiceCopy.notFinished(host: $0.host) }
         case .denied: return LinkServiceCopy.denied
         case .reported: return display.map { LinkServiceCopy.reported(business: $0.business) } ?? LinkServiceCopy.denied
         case .stopped: return display.map { LinkServiceCopy.stopped(business: $0.business) }
@@ -351,34 +378,54 @@ public final class LinkServiceViewModel {
         guard await signer.userVerification() != nil else { phase = .noKey; return }
         statement = verified
         display = shown
+        deliveryExpiresAt = fetched.expiresAt
         phase = .reviewing
     }
 
     public func tryAgain() async { await load() }
 
     public func approve() async {
-        guard canApprove, let display else { return }
+        guard canApprove, !handedOff, let display else { return }
         let match = display.matchDigits == nil ? nil : entry
-        // Same device: a fresh link code; only its hash is signed and sent (the authority records the hash, ADR-0021 §5.3).
+        // Same device: a fresh link code, held only in this call; only its hash is signed and sent (the authority records the hash, ADR-0021 §5.3).
+        // The hand-off URL is built before anything is signed: a code or return URL that could not be opened exactly as signed is never registered.
         let code = display.matchDigits == nil ? makeCode() : nil
+        if let code, LinkServiceHandoff.url(returnURL: display.returnURL, host: display.host, code: code) == nil {
+            phase = .notFinished
+            return
+        }
         let codeHash = code.map { Base64URL.encode(Data(SHA256.hash(data: Data($0.utf8)))) }
         guard let outcome = await answer(.approve, match: match, codeHash: codeHash) else { return }
         switch outcome {
         case .approve:
-            if let code { handoff = LinkServiceHandoff(url: display.returnURL + "#vdr_code=" + code) }
-            phase = .approved
+            if let code { await handOff(code: code, display: display) } else { phase = .approved }
         case .deny, .report:
             phase = .denied
         }
     }
 
+    /// ADR-0021 §5.3, only after the authority accepted this approval: opens `<signed return_url>#vdr_code=<code>` once through the system opener.
+    /// Nothing is logged. If the request ran out meanwhile, the URL is not exactly the signed one, or the system cannot open it, the code is dropped
+    /// (it lives only in this call) and the person is told the sign-in did not finish.
+    private func handOff(code: String, display: LinkServiceDisplay) async {
+        guard !handedOff else { return }
+        handedOff = true
+        let now = clock()
+        guard let statement, Int64(now.timeIntervalSince1970) <= statement.expiresAt, let deliveryExpiresAt, now < deliveryExpiresAt,
+              let url = LinkServiceHandoff.url(returnURL: display.returnURL, host: display.host, code: code) else {
+            phase = .notFinished
+            return
+        }
+        phase = await opener.open(url) ? .opened : .notFinished
+    }
+
     public func deny() async {
-        guard canRefuse, await answer(.deny, match: nil, codeHash: nil) != nil else { return }
+        guard canRefuse, !handedOff, await answer(.deny, match: nil, codeHash: nil) != nil else { return }
         phase = .denied
     }
 
     public func thisWasntMe() async {
-        guard canRefuse, await answer(.report, match: nil, codeHash: nil) != nil else { return }
+        guard canRefuse, !handedOff, await answer(.report, match: nil, codeHash: nil) != nil else { return }
         phase = .reported
     }
 

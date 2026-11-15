@@ -61,6 +61,14 @@ struct AuthDeliveryDeviceService {
         let invalid = APIError(.unauthorized, .unauthorized, "The answer could not be accepted.", details: ["error": "evidence_invalid"])
         // The factor must answer this delivery's challenge: a factor for another delivery's challenge is never relayed under this one.
         guard let parsed = try? FactorAssertion.parse(body.factor), parsed.claims.purpose == .linkOpen, ConstantTime.equals(parsed.claims.challengeId, challengeId) else { throw invalid }
+        // The mode is the one the authority signed at create (ADR-0021 §5.3, §6), checked here too before anything is relayed: same device approves with
+        // a code hash and no number, cross device with a number and never a code hash; deny and report carry neither. The authority enforces the same.
+        let claims = parsed.claims
+        if claims.decision == .approve {
+            guard row.linkCrossDevice == true ? (claims.match != nil && claims.codeHash == nil) : (claims.codeHash != nil && claims.match == nil) else { throw invalid }
+        } else {
+            guard claims.codeHash == nil, claims.match == nil else { throw invalid }
+        }
         guard let transport else { throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.") }
         let answer: AuthorityEvidenceResponse?
         do { answer = try await AuthorityClient(transport: transport).submitEvidence(AuthorityEvidenceRequest(factor: body.factor, accountId: principal.consumerId.uuid)) } catch {

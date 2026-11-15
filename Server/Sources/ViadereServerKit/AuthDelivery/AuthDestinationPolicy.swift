@@ -75,6 +75,8 @@ struct AuthDestinationCheck {
         var clientId: String
         var returnURL: String
         var codeChallenge: String
+        /// ADR-0021 §6: the authority asks the phone for the business's number; nothing is opened on the phone.
+        var crossDevice: Bool
     }
 
     func validate(_ destination: AuthDestinationRequest, request: AuthDeliveryCreateRequest, businessId: BusinessID, expiresAt: Date) async throws -> Result {
@@ -84,7 +86,8 @@ struct AuthDestinationCheck {
         case .business:
             break
         }
-        guard destination.linkClientId == nil, destination.returnUrl == nil, destination.codeChallenge == nil, destination.codeChallengeMethod == nil else {
+        guard destination.linkClientId == nil, destination.returnUrl == nil, destination.codeChallenge == nil, destination.codeChallengeMethod == nil,
+              destination.crossDevice == nil else {
             throw APIError.validation("Link-service members are not allowed in business mode.", details: ["destination": "invalid"])
         }
         guard let url = destination.url else { throw APIError.validation("destination.url is required.", details: ["destination.url": "required"]) }
@@ -143,7 +146,8 @@ struct AuthDestinationCheck {
         guard request.purpose == .signIn || request.purpose == .stepUp else {
             throw APIError.validation("The link service serves sign_in and step_up only.", details: ["purpose": "invalid"])
         }
-        return Result(host: host, statement: "", url: nil, link: LinkService(clientId: clientId, returnURL: returnURL, codeChallenge: challenge))
+        return Result(host: host, statement: "", url: nil,
+                      link: LinkService(clientId: clientId, returnURL: returnURL, codeChallenge: challenge, crossDevice: destination.crossDevice ?? false))
     }
 
     static func signatureRequired(_ reason: String) -> APIError {

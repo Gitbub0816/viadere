@@ -6,12 +6,21 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Link service completed: same-device hand-off, cross-device creates, registration-nonce relay (2026-11-15).** A same-device link-service approval
+now finishes: after the authority **accepted** it, the phone opens the authority-signed `return_url` byte for byte with `#vdr_code=<32-byte code>`
+once through the system opener (checked before signing and again before opening; never on deny, report, refusal, timeout or expiry; a failure drops
+the code and shows LS-10). The business can create cross-device deliveries (`destination.cross_device: true`): it shows the `match_code` from the
+view's `cross_device {ach, match_code}`, the phone types it and opens nothing, and the initiating session redeems with `ach` and its PKCE verifier;
+the api and the authority refuse an answer in the other mode's shape. Businesses read a destination-key registration nonce with a live key at
+`POST /v1/business/destination-keys/registration-nonce` (own tenant only, fail-closed per-tenant limit, audited). Everything stays behind
+`AUTH_LINK_SERVICE_ENABLED` / `AUTH_DESTINATION_RECORDS_ENABLED` / `AUTHORITY_TENANT_KEYS_ENABLED` (off). Normative: [`SECURITY.md`](SECURITY.md)
+§2.110; ADR-0021 and ADR-0031 implementation notes; copy LS-09, LS-10. Not verified: the app build (syntax-parsed only), the PostgreSQL run.
+
 **Link-service screen, Lock Screen names, pairing QR, SQLite contention (2026-11-15).** A `link_mode: "viadere"` delivery now opens
 `LinkServiceScreen` (Kit `LinkServiceViewModel`): the relayed `link_open` challenge is verified against the pinned statement keys, the screen
 shows only the signed tenant, client and return host, a number is typed when the challenge asks for one, and the answer is a factor signed with
-the biometric approval key, sent to `link-evidence`. **It never opens a URL**, so a same-device approval registers the code hash but the business
-page never receives `#vdr_code` and cannot redeem: opening the signed return URL (ADR-0021 §5.3) is a decision for the owner and a separate,
-reviewed change (`LinkServiceViewModel.handoff` holds the URL in memory for it). "Show business names on the Lock Screen" exists (off by default:
+the biometric approval key, sent to `link-evidence`. (Superseded the same day: the same-device hand-off of ADR-0021 §5.3 now opens the signed
+return URL after acceptance; see the entry above.) "Show business names on the Lock Screen" exists (off by default:
 notifications say "Viadere", no logo), read by the notification service extension from the app group. The pairing code is also shown as a QR of
 `https://{link domain}/p/{code}`; only a new device's pairing entry reads it (scanner or universal link), an enrolled device refuses it everywhere,
 the server lists `/p/*` in the AASA with a fallback page that reads nothing, and log lines mask the code. SQLite (development and tests) runs on
@@ -52,8 +61,8 @@ possession, attested DNS/well-known evidence, 13-month limit; reduce-only revoca
 `AuthDeliveryFlags.destinationVerification` and pinned keys, and checks the opened URL bytes against `url_sha256`. The link service
 (`link_mode: "viadere"`, `AUTH_LINK_SERVICE_ENABLED`, refused in production) creates deliveries with a business-bound authority challenge,
 relays the device's evidence and completes the delivery on redemption. Normative: [`SECURITY.md`](SECURITY.md) §2.110; owner steps:
-[`ops/AUTHORITY-OWNER-CHECKLIST.md`](ops/AUTHORITY-OWNER-CHECKLIST.md) section E2. Not built: cross-device link-service creates, a business-facing
-relay for the registration nonce, and the same-device hand-off (the app's link-service screen exists since, but opens nothing). Not verified: the PostgreSQL run, live DNS evidence fetching.
+[`ops/AUTHORITY-OWNER-CHECKLIST.md`](ops/AUTHORITY-OWNER-CHECKLIST.md) section E2. Cross-device creates, the business-facing nonce relay and the
+same-device hand-off were built later the same day (entry above). Not verified: the PostgreSQL run, live DNS evidence fetching.
 
 **Console conversations, benefits and RCS rich cards (2026-11-15).** A business without an integration can now read and answer customer messages in
 the console (`Dashboard/ConsoleConversations.swift`: list, thread, reply through `ConversationService.businessSend`, assign, close, reopen; reads

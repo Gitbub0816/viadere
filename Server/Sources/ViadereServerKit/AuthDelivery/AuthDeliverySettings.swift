@@ -41,6 +41,9 @@ public struct AuthDeliverySettings: Sendable {
     /// Per device.
     public var openRate: RateRule = .perMinute(30, burst: 10)
     public var denyRate: RateRule = .perMinute(60, burst: 30)
+    /// Per tenant: reads of a destination-key registration nonce (`POST /v1/business/destination-keys/registration-nonce`). Namespace `authdl-keynonce`,
+    /// so it fails closed when the shared rate-limit store is down (`DatabaseRateLimitStore.defaultFailClosed`).
+    public var registrationNonceRate: RateRule = .perHour(30, burst: 5)
     /// "This wasn't me" reports for one (business, customer) inside `reportWindow` that make further deliveries silent (never refused: a count a stranger can
     /// raise by spamming must not be able to lock the customer out of their own sign-in).
     public var reportThreshold = 3

@@ -24,7 +24,8 @@
         "link_client_id": { "type": "string" },
         "return_url": { "type": "string" },
         "code_challenge": { "type": "string" },
-        "code_challenge_method": { "const": "S256" }
+        "code_challenge_method": { "const": "S256" },
+        "cross_device": { "type": "boolean" }
       }
     },
     "otp": {
