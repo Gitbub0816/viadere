@@ -225,7 +225,7 @@ struct ScannerHandOffTests {
             (try world.code(scope: .sameDevice), nil, .notAccepted),                                         // would run without a prompt
             (try world.code(issuedAt: SafeActionWorld.now.addingTimeInterval(-600)), nil, .expired),         // expired
             (try world.code(lifetime: 3600), nil, .expired),                                                 // too long-lived
-            (try world.code(key: Curve25519.Signing.PrivateKey()), nil, .signature),                         // forged
+            (try world.code(key: P256.Signing.PrivateKey()), nil, .signature),                         // forged
         ]
         for (code, keys, reason) in cases {
             let model = await model(world, keys: keys)

@@ -25,9 +25,10 @@ VIADERE_LINK_DESCRIPTOR_KEYS =
 // Release and Staging archives refuse empty or malformed values (Scripts/check-release-pins.sh). Placeholders until the owner sets them.
 VIADERE_BRAND_MANIFEST_KEYS =
 VIADERE_LOOP_PUBLICATION_KEYS =
-// CKey Safe Actions (SECURITY.md §2.104): the Ed25519 public key(s) of the Safe Action issuer for this build's link domain, each entry
-// `keyId:publicKey` (keyId = the server's CKEY_SAFE_ACTION_KEY_ID, publicKey = 64 hex digits), comma separated (the second during a
-// rotation). Print it with `ViadereServer ckey-safe-action-key`. Pinned in the build: the app never fetches the issuer's key file. Empty =
+// CKey Safe Actions (SECURITY.md §2.104): the public key(s) of the Safe Action issuer for this build's link domain (the authority's Key
+// Vault key ckey-safe-action-signing), each entry `keyId:alg:publicKey` exactly as https://{link domain}/.well-known/ckey-safe-actions.json
+// lists it: alg ES256 with SEC 1 hex (66 digits compressed or 130 uncompressed), or Ed25519 with 64 hex digits; comma separated (the second
+// during a rotation). Take it from the attested key inventory and compare it with the key file. Pinned in the build: the app never fetches the issuer's key file. Empty =
 // every scanned Safe Action is refused (the Viadere code then only works as a plain link or QR); a malformed value stops Release and
 // Staging archives (Scripts/check-release-pins.sh). Placeholder until the owner sets it.
 VIADERE_CKEY_SAFE_ACTION_KEYS =

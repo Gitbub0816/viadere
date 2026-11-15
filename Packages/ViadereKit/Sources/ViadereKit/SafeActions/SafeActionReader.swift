@@ -83,7 +83,7 @@ public enum SafeActionOutcome: Sendable, Equatable {
 /// 1. the text parses as an envelope (`CKeySafeAction.parse`);
 /// 2. `app` is this app; `action` is registered, for this issuer, with the registered scope, a challenge id as `request_id`, no params;
 /// 3. a **pinned** key exists for (`issuer`, `key_id`): no key is ever fetched;
-/// 4. the signature verifies (canonical scalar), the lifetime is at most 120 s, and now is within it (120 s tolerance for a code issued
+/// 4. the signature verifies under the pinned key's algorithm (ES256: 1 ≤ r, s < n and low-S; Ed25519: canonical scalar), the lifetime is at most 120 s, and now is within it (120 s tolerance for a code issued
 ///    "in the future", none after expiry);
 /// 5. this phone has not accepted the `request_id` before (remembered until expiry + 120 s, across restarts);
 /// 6. the issuer's own host answers `request_info` over HTTPS with this `request_id` and `status: "pending"`.
@@ -128,7 +128,7 @@ public struct SafeActionReader: Sendable {
               AuthorityChallengeID.isValid(claimed.requestId), claimed.params.isEmpty else { return .rejected(.notAccepted) }
         guard let key = keys.first(where: { $0.issuer == claimed.issuer && $0.keyId == claimed.keyId }) else { return .rejected(.unknownKey) }
         let action: CKeySafeAction
-        switch CKeySafeAction.verify(text: text, publicKey: key.publicKey, now: clock(), maxLifetime: ViadereSignInSafeAction.lifetimeSeconds) {
+        switch CKeySafeAction.verify(text: text, key: key.publicKey, now: clock(), maxLifetime: ViadereSignInSafeAction.lifetimeSeconds) {
         case .ok(let verified): action = verified
         case .invalid: return .rejected(.malformed)
         case .integrity: return .rejected(.signature)

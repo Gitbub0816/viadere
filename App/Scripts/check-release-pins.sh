@@ -16,8 +16,9 @@
 # SHA-256 of its SPKI. An empty or malformed value would silently make every Brand Kit neutral and every Loop unshowable. The App Clip
 # renders neither and is not checked for them.
 #
-# VIADERE_CKEY_SAFE_ACTION_KEYS (app target only, SECURITY.md §2.104): `keyId:publicKey` entries, comma separated, keyId 1 to 32 of
-# A-Z a-z 0-9 . _ - and publicKey 64 hex digits (Ed25519). Empty is a warning in both configurations: the app then refuses every scanned
+# VIADERE_CKEY_SAFE_ACTION_KEYS (app target only, SECURITY.md §2.104): `keyId:alg:publicKey` entries, comma separated, keyId 1 to 32 of
+# A-Z a-z 0-9 . _ - and either ES256 with SEC 1 hex (02/03 + 64 hex digits, or 04 + 128) or Ed25519 with 64 hex digits. The app also
+# refuses a point off the curve, which this script cannot check. Empty is a warning in both configurations: the app then refuses every scanned
 # Safe Action and the sign-in code works only as a plain link or QR, and "Sign in with Viadere" is staging-only (ADR-0024), so a Release
 # archive must not need a key no production server can use. A malformed value is an error in both (the app would drop the whole list).
 set -eu
@@ -79,7 +80,7 @@ check_safe_action_keys() { # value
   fi
   case "$value" in
     *REPLACE_ME*|*'$('*)
-      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS is a placeholder. Set it to keyId:publicKey (ViadereServer ckey-safe-action-key) or leave it empty." >&2
+      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS is a placeholder. Set it to keyId:alg:publicKey (from /.well-known/ckey-safe-actions.json) or leave it empty." >&2
       return 1 ;;
   esac
   status=0
@@ -87,8 +88,8 @@ check_safe_action_keys() { # value
   old_ifs=$IFS; IFS=','
   for entry in $value; do
     entry=$(printf '%s' "$entry" | tr -d ' ')
-    if ! printf '%s' "$entry" | grep -Eq '^[A-Za-z0-9._-]{1,32}:[0-9A-Fa-f]{64}$'; then
-      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS has an entry that is not keyId:publicKey (key id of 1 to 32 letters, digits, '.', '_' or '-'; 64 hex digits)." >&2
+    if ! printf '%s' "$entry" | grep -Eq '^[A-Za-z0-9._-]{1,32}:(ES256:(0[23][0-9A-Fa-f]{64}|04[0-9A-Fa-f]{128})|Ed25519:[0-9A-Fa-f]{64})$'; then
+      echo "error: VIADERE_CKEY_SAFE_ACTION_KEYS has an entry that is not keyId:alg:publicKey (key id of 1 to 32 letters, digits, '.', '_' or '-'; ES256 with 66 or 130 SEC 1 hex digits, or Ed25519 with 64)." >&2
       status=1; continue
     fi
     id="${entry%%:*}"

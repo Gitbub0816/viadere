@@ -9,7 +9,8 @@ struct SafeActionWorld {
     static let now = Date(timeIntervalSince1970: 1_794_000_000)
     static let ach = "ach_AAECAwQFBgcICQoLDA0ODw"
 
-    let issuerKey = Curve25519.Signing.PrivateKey()
+    /// ES256, like Viadere's issuer (the authority's Key Vault key).
+    let issuerKey = P256.Signing.PrivateKey()
     let issuer: String
     let keyId = "2026-11"
     let replay: any SafeActionReplayStore
@@ -48,14 +49,14 @@ struct SafeActionWorld {
         return try! JSONSerialization.data(withJSONObject: object)
     }
 
-    var pin: PinnedSafeActionKey { PinnedSafeActionKey(issuer: issuer, keyId: keyId, publicKey: issuerKey.publicKey.rawRepresentation) }
+    var pin: PinnedSafeActionKey { PinnedSafeActionKey(issuer: issuer, keyId: keyId, publicKey: .es256(issuerKey.publicKey)) }
 
     func reader(appId: String = "com.viadere.app", keys: [PinnedSafeActionKey]? = nil, clock: @escaping @Sendable () -> Date = { SafeActionWorld.now }) -> SafeActionReader {
         SafeActionReader(appId: appId, issuer: issuer, keys: keys ?? [pin], replay: replay, transport: transport, clock: clock)
     }
 
     func code(scope: CKeySafeAction.Scope = .crossDevice, issuer: String? = nil, app: String = "com.viadere.app", action: String = "signin.request", keyId: String? = nil,
-              requestId: String = ach, issuedAt: Date = now, lifetime: UInt64 = 120, params: Data = Data(), key: Curve25519.Signing.PrivateKey? = nil) throws -> String {
+              requestId: String = ach, issuedAt: Date = now, lifetime: UInt64 = 120, params: Data = Data(), key: P256.Signing.PrivateKey? = nil) throws -> String {
         let issued = UInt64(issuedAt.timeIntervalSince1970)
         return try CKeySafeAction(scope: scope, issuer: issuer ?? self.issuer, app: app, action: action, keyId: keyId ?? self.keyId, requestId: requestId,
                                   issuedAt: issued, expiresAt: issued + lifetime, params: params).signed(with: key ?? issuerKey)
@@ -108,7 +109,24 @@ struct SafeActionReaderTests {
     @Test func aForgedOrAlteredCodeFailsTheSignature() async throws {
         let world = World()
         // Signed by someone else under the pinned key id.
-        #expect(await world.reader().read(try world.code(key: Curve25519.Signing.PrivateKey())) == .rejected(.signature))
+        #expect(await world.reader().read(try world.code(key: P256.Signing.PrivateKey())) == .rejected(.signature))
+        // The high-S twin of the genuine signature (valid ECDSA, refused by CKey readers), and the right envelope under an Ed25519 pin.
+        let original = try world.code()
+        var raw = [UInt8](try #require(Base64URL.decode(String(original.dropFirst(CKeySafeAction.prefix.count)))))
+        let order: [UInt8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                              0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51]
+        let s = Array(raw.suffix(32))
+        var borrow = 0
+        for i in stride(from: 31, through: 0, by: -1) {
+            var d = Int(order[i]) - Int(s[i]) - borrow
+            if d < 0 { d += 256; borrow = 1 } else { borrow = 0 }
+            raw[raw.count - 32 + i] = UInt8(d)
+        }
+        let highS = CKeySafeAction.prefix + Base64URL.encode(Data(raw))
+        #expect(highS != original)
+        #expect(await world.reader().read(highS) == .rejected(.signature))
+        let edPin = PinnedSafeActionKey(issuer: world.issuer, keyId: world.keyId, publicKey: .ed25519(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation))
+        #expect(await world.reader(keys: [edPin]).read(try World().code()) == .rejected(.signature))
         // A genuine code with its request id swapped for another challenge after signing.
         let genuine = try world.code()
         var bytes = Array(Data(base64Encoded: String(genuine.dropFirst(14)).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/"))!)
@@ -269,14 +287,25 @@ struct SafeActionReaderTests {
     // MARK: Pins
 
     @Test func pinsComeFromTheBuildAllOrNothingAndAlwaysForTheBuildsOwnLinkDomain() throws {
-        let key = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
-        let hex = key.map { String(format: "%02x", $0) }.joined()
-        let other = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.map { String(format: "%02X", $0) }.joined()
+        func hexOf(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
+        let p256 = P256.Signing.PrivateKey().publicKey
+        let compressed = hexOf(p256.compressedRepresentation), uncompressed = hexOf(p256.x963Representation).uppercased()
+        let ed = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        let edHex = hexOf(ed)
+        let key = CKeySafeAction.PublicKey.es256(p256)
+        let hex = "ES256:" + compressed
         #expect(SafeActionKeyPins.parse("2026-11:\(hex)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "2026-11", publicKey: key)])
+        #expect(SafeActionKeyPins.parse("2026-11:ES256:\(uncompressed)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "2026-11", publicKey: key)])
+        #expect(SafeActionKeyPins.parse("ed:Ed25519:\(edHex)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "ed", publicKey: .ed25519(ed))])
+        let other = "Ed25519:" + edHex.uppercased()
         #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").map(\.keyId) == ["2026-11", "2027-11"])
         #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").allSatisfy { $0.issuer == "viadere.cksites.dev" })
-        for bad in [nil, "", "   ", "$(VIADERE_CKEY_SAFE_ACTION_KEYS)", hex, "2026-11:", ":\(hex)", "2026-11:\(hex.dropLast())", "2026-11:\(hex)00", "2026-11:\(hex.dropLast())g",
-                    "2026 11:\(hex)", "2026/11:\(hex)", String(repeating: "k", count: 33) + ":\(hex)", "a:\(hex),a:\(other)", "a:\(hex),", "a:\(hex),b:nothex",
+        var offCurve = p256.x963Representation
+        offCurve[64] ^= 1
+        for bad in [nil, "", "   ", "$(VIADERE_CKEY_SAFE_ACTION_KEYS)", hex, compressed, "2026-11:", ":\(hex)", "2026-11:\(compressed)", "2026-11:\(edHex)",
+                    "2026-11:\(hex.dropLast())", "2026-11:\(hex)00", "2026-11:\(hex.dropLast())g", "2026-11:ES256:\(hexOf(offCurve))",
+                    "2026-11:es256:\(compressed)", "2026-11:ES384:\(compressed)", "2026-11:Ed25519:\(compressed)", "2026-11:ES256:\(edHex)",
+                    "2026 11:\(hex)", "2026/11:\(hex)", String(repeating: "k", count: 33) + ":\(hex)", "a:\(hex),a:\(other)", "a:\(hex),", "a:\(hex),b:ES256:nothex",
                     "viadere.com:2026-11:\(hex)", "REPLACE_ME"] as [String?] {
             #expect(SafeActionKeyPins.parse(bad, issuer: "viadere.com").isEmpty, "\(bad ?? "nil")")
         }
