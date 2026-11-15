@@ -192,9 +192,15 @@ struct ConsumerExports {
         let decisions = try await DecisionRecord.query(on: db).filter(\.$consumerId == consumerId).sort(\.$decidedAt, .descending).limit(2000).all()
         out["decisions"] = decisions.map { ["interactionId": $0.interactionId.uuidString.lowercased(), "decision": $0.decision, "assurance": $0.assurance, "channel": $0.channel, "at": iso($0.decidedAt)] }
         let messages = try await ConversationMessageRecord.query(on: db).filter(\.$consumerId == consumerId).sort(\.$createdAt, .descending).limit(5000).all()
+        let images = try await MessageAttachmentService.references(messageIds: messages.compactMap(\.id), on: db)
         out["messages"] = messages.map { message -> [String: Any] in
             let text = (try? ctx.cipher.openString(message.bodyCiphertext, context: "conversation_messages.body", rowId: message.id!)) ?? ""
-            return ["business": names[message.businessId] ?? "", "direction": message.direction, "channel": message.channel, "text": text, "at": iso(message.createdAt)]
+            var entry: [String: Any] = ["business": names[message.businessId] ?? "", "direction": message.direction, "channel": message.channel, "text": text, "at": iso(message.createdAt)]
+            // Images are listed (type, size, digest); the pictures themselves stay viewable in the conversation in the app (SECURITY.md §2.113).
+            if let list = images[message.id!], !list.isEmpty {
+                entry["images"] = list.map { ["id": $0.id.description, "type": $0.mediaType, "bytes": $0.byteSize, "width": $0.width, "height": $0.height, "sha256": $0.sha256] as [String: Any] }
+            }
+            return entry
         }
         let loyalty = try await LoyaltyAccountRecord.query(on: db).filter(\.$consumerId == consumerId).all()
         out["loyalty"] = loyalty.map { ["businessId": $0.businessId.uuidString.lowercased(), "points": $0.pointsBalance] }

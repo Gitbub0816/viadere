@@ -48,7 +48,7 @@ enum RetentionClass: String, CaseIterable, Sendable {
                        summary: "Payload text and replies of finished interactions are erased; the row, ids and status stay for reporting.", tables: "interactions")
         case .conversationContent:
             Definition(defaultDays: 730, minDays: 30, maxDays: 3650, tenantAdjustable: true, holdable: true,
-                       summary: "Message bodies in conversations are replaced by a placeholder.", tables: "conversation_messages")
+                       summary: "Message bodies in conversations are replaced by a placeholder; their images are deleted.", tables: "conversation_messages, message_attachments")
         case .signedDecisions:
             Definition(defaultDays: 730, minDays: 365, maxDays: 2555, tenantAdjustable: false, holdable: true,
                        summary: "Device-signed decisions kept as dispute evidence, then deleted.", tables: "decisions")
@@ -364,6 +364,9 @@ struct RetentionPurger {
                     row.contentErased = true
                     try await row.update(on: db)
                 }
+                // Images follow their message (SECURITY.md §2.113): marked here, the objects are removed by the attachment sweep.
+                let ids = rows.compactMap(\.id)
+                if !ids.isEmpty { try await MessageAttachmentService.markDeleting(MessageAttachmentRecord.query(on: db).filter(\.$messageId ~~ ids), now: ctx.now) }
                 return rows.count
             }
             removed += try await scrub(ConversationMessageRecord.query(on: db).filter(\.$createdAt < platformCutoff))

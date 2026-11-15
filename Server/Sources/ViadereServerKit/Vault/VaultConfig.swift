@@ -43,6 +43,9 @@ extension ServerConfig {
     public func maxBodyBytes(forPath path: String) -> Int {
         // Brand image uploads (WP-2.2): the 2 MB file plus multipart framing; the pipeline re-checks the file's own size.
         if path == ConsoleBrandStudio.uploadPath { return max(maxBodyBytes, ConsoleBrandStudio.uploadBodyLimit) }
+        // Message attachments (SECURITY.md §2.113): the raw image on the API, or the image plus multipart framing in the console.
+        if MessageAttachmentRoutes.isUploadPath(path) { return max(maxBodyBytes, MessageAttachmentRoutes.uploadLimit) }
+        if ConsoleConversations.isUploadPath(path) { return max(maxBodyBytes, ConsoleConversations.uploadBodyLimit) }
         return vaultSync.enabled && (path == "/v1/vault" || path.hasPrefix("/v1/vault/")) ? max(maxBodyBytes, vaultSync.maxRequestBytes) : maxBodyBytes
     }
 }

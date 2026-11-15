@@ -202,6 +202,8 @@ public struct ServerConfig: Sendable {
     public var databaseEntra: EntraDatabaseSettings?
     /// Brand Kits (WP-2.1..2.8): asset host, manifest signing key, selection key, asset store, limits.
     public var brandKits = BrandKitSettings()
+    /// Message attachments (SECURITY.md §2.113): the private store and upload limits.
+    public var attachments = AttachmentSettings()
 
     /// Whether a real database is configured (a password URL or Entra token authentication); `false` = in-memory SQLite (tests).
     public var hasDatabase: Bool { databaseURL != nil || databaseEntra != nil }
@@ -393,6 +395,7 @@ public struct ServerConfig: Sendable {
         try config.applyVerifyEnvironment(env, production: production)
         try config.applyOperationsEnvironment(env, production: production)
         try config.applyBrandKitEnvironment(env, production: production)
+        try config.applyAttachmentEnvironment(env, production: production)
         return config
     }
 

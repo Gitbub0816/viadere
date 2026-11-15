@@ -110,6 +110,8 @@ struct BackgroundJobs {
         if ctx.config.authDelivery.enabled { _ = try await AuthDeliveryService(db: db, ctx: ctx).sweep() }
         try await IdentityMaintenance(db: db, ctx: ctx).run()
         await guarded("loop-sweep") { try await LoopMaintenance(db: db, ctx: ctx).sweep() }
+        // Message attachments (SECURITY.md §2.113): expired uploads and rows marked by retention or deletion lose their objects.
+        await guarded("attachment-sweep") { _ = try await MessageAttachmentService(db: db, ctx: ctx, runtime: app.attachments).sweep() }
         // Complaint / opt-out thresholds are evaluated at most once a minute per instance.
         if await gate("abuse-sweep", gated) {
             try await AbuseService(db: db, ctx: ctx).sweep()

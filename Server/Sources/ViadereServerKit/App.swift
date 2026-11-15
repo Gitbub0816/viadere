@@ -135,6 +135,9 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     app.brandKits = BrandKitRuntime(store: try BrandKitRegistration.store(config: config, override: overrides.brandAssetStore, tokens: tokens, http: outbound,
                                                                           now: { clock.now() }),
                                     maxConcurrent: config.brandKits.maxConcurrentIngestions)
+    app.attachments = AttachmentRuntime(store: try AttachmentRuntime.store(config: config, override: overrides.attachmentStore, tokens: tokens, http: outbound,
+                                                                         now: { clock.now() }),
+                                        maxConcurrent: config.attachments.maxConcurrentIngestions)
 
     // MARK: Database
     // `ViadereServer migrate` connects as the schema owner (DATABASE_MIGRATION_URL, or the migrator's Entra identity); every other process uses
@@ -241,6 +244,8 @@ public struct Overrides: Sendable {
     public var outboundHTTP: (any OutboundHTTP)?
     /// Brand asset storage. `nil` = Azure Blob when configured, a development directory, or memory outside staging and production.
     public var brandAssetStore: (any ObjectStore)?
+    /// Message attachment storage. `nil` = Azure Blob when configured, a development directory, or memory outside staging and production.
+    public var attachmentStore: (any ObjectStore)?
     /// Authority-published tenant destination keys (ADR-0031). `nil` = none known (business-mode magic links fail closed until Stage 6).
     public var tenantDestinationKeys: (any TenantDestinationKeyDirectory)?
     /// The private authority (ADR-0019 §4). `nil` = HTTPS to `AUTHORITY_URL` with a managed-identity token when OIDC is on; tests run the authority in process.
