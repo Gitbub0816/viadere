@@ -230,7 +230,8 @@ public final class AppModel {
                                               verificationStatus: entry.business.verificationStatus, category: entry.category ?? .other)
             },
             consent: { LoopConsentGate.decision(status: consent, business: $0) },
-            brand: services.brandKits, clock: services.clock)
+            brand: services.brandKits, clock: services.clock,
+            signApproval: { [signer = services.loopApprovals] interaction, name in try await signer.sign(interaction, businessName: name) })
     }
 
     public func completeOnboarding() async {
