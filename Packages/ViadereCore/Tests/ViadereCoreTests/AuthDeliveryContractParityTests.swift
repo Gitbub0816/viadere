@@ -108,8 +108,20 @@ struct AuthDeliveryContractParityTests {
         // Every transition that emits an event has a schema name, and the webhook types are all v2-only (`auth.` family).
         for status in AuthDeliveryStatus.allCases { if let name = AuthDeliveryEventName.forTransition(into: status) { #expect(WebhookEventType(rawValue: name.rawValue).isAuthEvent) } }
         #expect(WebhookEventType.authEvents.allSatisfy { $0.isAuthEvent })
+        // `fallback_used` (ADR-0020 section 7) is an event without a transition: no status emits it, and it is v2-only and opaque like the others.
+        #expect(!AuthDeliveryStatus.allCases.contains { AuthDeliveryEventName.forTransition(into: $0) == .fallbackUsed })
+        #expect(WebhookEventType.authDeliveryFallbackUsed.rawValue == "auth.delivery.fallback_used")
+        #expect(WebhookEventType.authEvents.contains(.authDeliveryFallbackUsed) && WebhookEventType.opaqueEvents.contains(.authDeliveryFallbackUsed))
         // No opaque envelope member can carry a secret: the envelope has no free-form member at all.
         #expect(Set(encoded.keys).isSubset(of: ["id", "type", "version", "tenant_id", "request_id", "occurred_at", "result_ref"]))
+    }
+
+    /// The test-event route offers exactly the event names, `fallback_used` included.
+    @Test func theTestEventRouteListsEveryEventName() throws {
+        let lines = try Self.text("contracts/openapi/auth-delivery-v1.yaml").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let start = try #require(lines.firstIndex(of: "    AuthWebhookTestRequest:"))
+        let names = lines[start...].drop { !$0.hasSuffix("enum:") }.dropFirst().prefix { $0.hasPrefix("            - ") }.map { String($0.dropFirst(14)) }
+        #expect(names == AuthDeliveryEventName.allCases.map(\.rawValue))
     }
 
     /// The business API document links to the auth-delivery contract, and the existing parity test keeps covering every other business route.

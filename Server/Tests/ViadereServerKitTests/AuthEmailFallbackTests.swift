@@ -204,6 +204,108 @@ final class AuthEmailFallbackTests: AuthDeliveryTestBase {
         }
     }
 
+    // MARK: The `auth.delivery.fallback_used` webhook (ADR-0020 section 7, THREAT_MODEL ST-DLV-05)
+
+    /// A v2 endpoint of the scene's business that subscribes to `fallback_used` and `sent`.
+    func fallbackHook(_ h: TestHarness, _ s: Scene) async throws -> URL {
+        let url = URL(string: "https://hooks.example.com/fallback")!
+        let r = try await h.businessPost(s.b, "/v1/business/webhooks", CreateWebhookRequest(url: url, events: [.authDeliveryFallbackUsed, .authDeliverySent],
+                                                                                           envelopeVersion: WebhookEnvelopeV2.version, signatureVersion: .v2))
+        XCTAssertEqual(r.status, .created, r.text)
+        return url
+    }
+
+    func fallbackRows(_ h: TestHarness) async throws -> [WebhookDeliveryRecord] {
+        try await WebhookDeliveryRecord.query(on: h.db).filter(\.$eventType == AuthDeliveryEventName.fallbackUsed.rawValue).all()
+    }
+
+    /// Every spelling of a secret a webhook body could smuggle it in.
+    func encodings(_ secret: String) -> [String] {
+        let data = Data(secret.utf8)
+        let base64 = data.base64EncodedString()
+        let base64url = base64.replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        let hex = data.map { String(format: "%02x", $0) }.joined()
+        let percent = secret.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? secret
+        let unicode = secret.unicodeScalars.map { $0 == "@" || $0 == "." ? String(format: "\\u%04x", $0.value) : String($0) }.joined()
+        return [secret, secret.uppercased(), base64, base64url, hex, hex.uppercased(), percent, unicode]
+    }
+
+    func testFallbackUsedIsEmittedExactlyOnceWhenTheEmailIsSentAndCarriesOnlyIds() async throws {
+        try await fallbackHarness { h in
+            let s = try await scene(h)
+            try await allow(h, s)
+            let url = try await fallbackHook(h, s)
+            let view = try await created(h, s, extra: emailExtra())
+            try await h.runJobs()
+            XCTAssertEqual(h.emails.messages(to: address).count, 1)
+            // A redelivered dispatch message, a second worker and a direct second claim send no second email and no second event.
+            _ = try await AuthDeliveryDispatcher(db: h.db, ctx: h.ctx).dispatch(id: view.id.uuid)
+            let row = try await AuthDeliveryRecord.find(view.id.uuid, on: h.db)
+            try await AuthEmailFallback.dispatch(try XCTUnwrap(row), db: h.db, ctx: h.ctx).isFalse()
+            try await h.runJobs()
+            try await h.runJobs()
+            XCTAssertEqual(h.emails.messages(to: address).count, 1)
+            let rows = try await fallbackRows(h)
+            XCTAssertEqual(rows.count, 1)
+            let received = h.webhooks.received.filter { $0.url == url && $0.headers[ViadereHeader.eventType] == "auth.delivery.fallback_used" }
+            XCTAssertEqual(received.count, 1)
+            let delivery = try XCTUnwrap(received.first)
+            XCTAssertFalse(try XCTUnwrap(delivery.headers[ViadereHeader.signature]).contains("v1="), "v2 only")
+            // The opaque envelope: ids, type, version, tenant and time. The request id is the delivery id.
+            let envelope = try ViadereJSON.decode(WebhookEnvelopeV2.self, from: delivery.body)
+            XCTAssertEqual(envelope.type, "auth.delivery.fallback_used")
+            XCTAssertEqual(envelope.requestId, view.id.description)
+            XCTAssertNil(envelope.resultRef)
+            let members = try XCTUnwrap(JSONSerialization.jsonObject(with: delivery.body) as? [String: Any])
+            XCTAssertEqual(Set(members.keys), ["id", "type", "version", "tenant_id", "request_id", "occurred_at"])
+            // No address, domain or code in any encoding: in the body as sent, in the sealed stored body, or in the headers.
+            let stored = try h.ctx.cipher.open(rows[0].body, context: "webhook_deliveries.body", rowId: try XCTUnwrap(rows[0].id))
+            let texts = [String(decoding: delivery.body, as: UTF8.self), String(decoding: stored, as: UTF8.self),
+                         delivery.headers.map { "\($0.key): \($0.value)" }.joined(separator: "\n")]
+            for secret in ["482913", address, "pat@", "inbox.example.org", "example.org"] {
+                for spelling in encodings(secret) {
+                    for text in texts { XCTAssertFalse(text.contains(spelling), "\(secret) as \(spelling)") }
+                }
+            }
+            // The `sent` event follows for the same delivery (the provider's acceptance moved it to `sent`).
+            XCTAssertEqual(h.webhooks.received.filter { $0.url == url && $0.headers[ViadereHeader.eventType] == "auth.delivery.sent" }.count, 1)
+        }
+    }
+
+    func testNoFallbackUsedWhenTheEmailIsSuppressedOrFails() async throws {
+        try await fallbackHarness { h in
+            let s = try await scene(h)
+            try await allow(h, s)
+            _ = try await fallbackHook(h, s)
+            // Over the per-customer budget (3 per 10 minutes): three emails, three events; the fourth is suppressed and emits nothing.
+            for _ in 0..<4 { _ = try await created(h, s, extra: emailExtra()) }
+            try await h.runJobs()
+            XCTAssertEqual(h.emails.messages(to: address).count, 3)
+            try await eq(try await fallbackRows(h).count, 3)
+            // The provider refuses: no email, no event.
+            h.clock.advance(by: 3600)
+            h.emails.setFailing(true)
+            _ = try await created(h, s, extra: emailExtra())
+            try await h.runJobs()
+            h.emails.setFailing(false)
+            try await eq(try await AuditEventRecord.query(on: h.db).filter(\.$action == AuthEmailFallback.auditFailed).count(), 1)
+            try await eq(try await fallbackRows(h).count, 3)
+            // The tenant turned the policy off while the email was queued: suppressed at send time, no event.
+            h.clock.advance(by: 3600)
+            _ = try await created(h, s, extra: emailExtra())
+            try await allow(h, s, false)
+            try await h.runJobs()
+            try await eq(try await AuditEventRecord.query(on: h.db).filter(\.$action == AuthEmailFallback.auditSuppressed).count(), 2)
+            try await eq(try await fallbackRows(h).count, 3)
+            XCTAssertEqual(h.emails.messages(to: address).count, 3)
+            // A delivery that did not ask for email never emits it.
+            try await allow(h, s)
+            _ = try await created(h, s)
+            try await h.runJobs()
+            try await eq(try await fallbackRows(h).count, 3)
+        }
+    }
+
     /// The development sender logs bodies so a developer can read a sign-up code; never one marked sensitive (the fallback code).
     func testTheDevelopmentSenderNeverLogsAFallbackCode() async throws {
         let message = AuthEmailFallback.message(to: address, business: "Northwind", code: "482913", expiresAt: Date(timeIntervalSince1970: 1_800_000_300))

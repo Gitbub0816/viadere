@@ -191,13 +191,15 @@ const v2 = new WebhookVerifier({
   keys: { whk_1a2b3c4d_v1: secretNow, whk_1a2b3c4d_v0: secretBefore },
   replayStore: sharedStore,
 });
-const { envelope } = await v2.verifyEnvelope({ headers: req.headers, body: rawBody });        // auth.delivery.*
+const { envelope } = await v2.verifyEnvelope({ headers: req.headers, body: rawBody });        // auth.delivery.* (incl. fallback_used)
 const other = await v2.verifyOpaqueEnvelope({ headers: req.headers, body: rawBody });         // approve.*, link.*, verification.completed
 ```
 
 Both verifiers check a well-formed header, `|now - t| <= 300 s`, then the MAC in constant time (v2 also the tenant and the `Content-Digest`), decode
 strictly, and require the unsigned convenience headers to agree with the signed body. A rejection is `WebhookVerificationError` (`status` 400; 200 for a
 duplicate). The opaque envelope carries ids and a `result_ref` only: fetch the result and verify **that**.
+`auth.delivery.fallback_used` means the code of a delivery that asked for the email fallback left by email (`assurance: email`); it is sent once,
+never for a suppressed or failed email, and does not change the delivery's state.
 
 **The replay store is on by default** (review R23-06): without `replayStore` a verifier uses an in-memory store with a 72 h retention measured from first
 receipt. That is per process. For production pass a shared store implementing `WebhookReplayStore` (an atomic insert on a unique key):

@@ -128,6 +128,11 @@ public enum AuthDeliveryEventName: String, Codable, Sendable, CaseIterable, Hash
     case denied = "auth.delivery.denied"
     case cancelled = "auth.delivery.cancelled"
     case expired = "auth.delivery.expired"
+    /// The code left by the business-requested email fallback (ADR-0020 section 7, SECURITY §2.101 "Email fallback"): emitted once, when the email
+    /// provider accepted the one email, never when it was suppressed or failed. It is not a state transition (`forTransition` never returns it); like
+    /// every `auth.delivery.*` event it is opaque (ids only) and its meaning is `assurance: email`. Added in contract v1.x: treat an unknown type as
+    /// "not one of mine to act on".
+    case fallbackUsed = "auth.delivery.fallback_used"
 
     /// The event a transition into `status` emits (`validated` and `queued` are internal steps of the create transaction).
     public static func forTransition(into status: AuthDeliveryStatus) -> AuthDeliveryEventName? {
@@ -156,6 +161,7 @@ public extension WebhookEventType {
     static let authDeliveryDenied = WebhookEventType(rawValue: AuthDeliveryEventName.denied.rawValue)
     static let authDeliveryCancelled = WebhookEventType(rawValue: AuthDeliveryEventName.cancelled.rawValue)
     static let authDeliveryExpired = WebhookEventType(rawValue: AuthDeliveryEventName.expired.rawValue)
+    static let authDeliveryFallbackUsed = WebhookEventType(rawValue: AuthDeliveryEventName.fallbackUsed.rawValue)
 
     /// Every `auth.*` event type. A subscription may name these only with signature `v2` and the opaque envelope.
     static let authEvents: [WebhookEventType] = AuthDeliveryEventName.allCases.map { WebhookEventType(rawValue: $0.rawValue) }

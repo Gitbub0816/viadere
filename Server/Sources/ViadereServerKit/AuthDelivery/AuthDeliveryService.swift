@@ -333,6 +333,15 @@ struct AuthDeliveryService {
                                                            onlySubscription: row.callbackWebhookId, opaque: OpaqueWebhookEvent(requestId: row.wireId.description, resultRef: nil))
     }
 
+    /// `auth.delivery.fallback_used` (ADR-0020 section 7, ST-DLV-05): the code left by the email the business asked for. Not a transition, so no event
+    /// row; the same opaque v2 envelope as every `auth.delivery.*` event. The payload names the delivery and `assurance: email` only: never the
+    /// address, its domain or the code.
+    func emitFallbackUsed(_ row: AuthDeliveryRecord) async throws {
+        try await WebhookService(db: db, ctx: ctx).enqueue(.authDeliveryFallbackUsed, businessId: BusinessID(row.businessId),
+                                                           payload: AuthDeliveryEventPayload(deliveryId: row.wireId, status: row.statusValue, assurance: "email"),
+                                                           onlySubscription: row.callbackWebhookId, opaque: OpaqueWebhookEvent(requestId: row.wireId.description, resultRef: nil))
+    }
+
     /// One transition: allowed by the table, then a compare-and-swap on `version` (a lost race changes nothing and returns `false`). The P-class secret is
     /// deleted in the same transaction when the delivery is opened or ends. One event row and one webhook event per transition.
     @discardableResult

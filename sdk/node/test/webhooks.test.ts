@@ -89,6 +89,15 @@ describe("WebhookVerifier", () => {
     assert.equal(v.keyId, "whk_1a2b3c4d_v1");
   });
 
+  it("accepts auth.delivery.fallback_used (contract v1.x, additive) and still refuses an unknown auth type", async () => {
+    const verifier = new WebhookVerifier({ endpoint: ENDPOINT, tenantId: TENANT, keys: KEYS, now: () => T * 1000, replayStore: "disabled" });
+    const parsed = JSON.parse(positive[0]!.body) as Record<string, unknown>;
+    const v = await verifier.verifyEnvelope(delivery({ body: JSON.stringify({ ...parsed, type: "auth.delivery.fallback_used" }) }));
+    assert.equal(v.envelope.type, "auth.delivery.fallback_used");
+    assert.deepEqual(Object.keys(v.envelope).sort(), ["id", "occurred_at", "request_id", "tenant_id", "type", "version"]);
+    assert.equal(await outcome(() => verifier.verifyEnvelope(delivery({ body: JSON.stringify({ ...parsed, type: "auth.delivery.fallback_unknown" }) }))), "malformed_body");
+  });
+
   it("has the replay store ON by default (R23-06): the same event twice is a duplicate", async () => {
     const verifier = new WebhookVerifier({ endpoint: ENDPOINT, tenantId: TENANT, keys: KEYS, now: () => T * 1000 });
     await verifier.verifyEnvelope(delivery());

@@ -30,6 +30,17 @@ struct WebhookSignatureV2SDKTests {
         #expect(envelope.type == "auth.delivery.opened")
     }
 
+    /// `auth.delivery.fallback_used` (ADR-0020 section 7, additive in contract v1.x): the same opaque envelope, a known event name, not a transition.
+    @Test func theFallbackUsedEventVerifiesAndIsAKnownAuthEvent() throws {
+        let body = Data(String(decoding: Self.body, as: UTF8.self).replacingOccurrences(of: "auth.delivery.opened", with: "auth.delivery.fallback_used").utf8)
+        let envelope = try Self.verifier().verifyEnvelope(headers: Self.headers(body: body), body: body)
+        #expect(envelope.type == "auth.delivery.fallback_used")
+        #expect(envelope.resultRef == nil)
+        #expect(AuthDeliveryEventName(rawValue: envelope.type) == .fallbackUsed)
+        #expect(WebhookEventType.authDeliveryFallbackUsed.isAuthEvent && WebhookEventType.authEvents.contains(.authDeliveryFallbackUsed))
+        #expect(!AuthDeliveryStatus.allCases.contains { AuthDeliveryEventName.forTransition(into: $0) == .fallbackUsed })
+    }
+
     @Test func theRegisteredEndpointTenantBodyAndWindowAreBound() {
         #expect(throws: WebhookVerifierV2.Failure.noMatchingSignature) { try Self.verifier(endpoint: URL(string: "https://hooks.example.com/other")!).verify(headers: Self.headers(), body: Self.body) }
         #expect(throws: WebhookVerifierV2.Failure.tenantMismatch) { try Self.verifier(tenant: "ten_mine").verify(headers: Self.headers(), body: Self.body) }

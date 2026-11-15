@@ -168,6 +168,13 @@ tenant, customer and address (`authdl-email-*`, fail closed) suppress the email,
 webhook event `auth.delivery.fallback_used` is **not** emitted yet (it needs the contract schemas and the SDK event lists to change together); the
 `sent` event carries reason `fallback_used:email` and the audit event `auth_delivery.fallback_used` carries `assurance: email`.
 
+**Update (2026-11-15, additive in contract v1.x).** `auth.delivery.fallback_used` is now emitted, closing the open item above and ST-DLV-05: once
+per delivery, by the dispatch that claimed the address and saw the provider accept the email (never for a suppressed or failed email). It is not a
+state transition (no event row; `AuthDeliveryEventName.forTransition` never returns it). Like every `auth.delivery.*` event it goes only to
+v2-signed opaque-envelope subscriptions, so the body is ids only; `assurance: email` is the meaning of the type (and the v1 payload form carries
+`assurance` only, never the address or the code). Added to the event schema, the contract's test-event enum, Core and the Swift, TypeScript and
+Kotlin SDK event lists.
+
 ## Consequences
 
 - Businesses must register a request-signing key before sending live auth deliveries; the Swift, TypeScript and Kotlin backend SDKs implement RFC 9421 signing (ADR-0030).

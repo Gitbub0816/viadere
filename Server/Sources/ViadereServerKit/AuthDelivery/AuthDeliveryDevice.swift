@@ -182,9 +182,11 @@ struct AuthDeliveryDispatcher {
         let channels = row.channels.split(separator: ",").compactMap { AuthDeliveryChannel(rawValue: String($0)) }
         // Email fallback (ADR-0020 section 7): sent at most once, only when the create kept an address (allowed, within budget, not silent). The
         // provider's acceptance moves the delivery to `sent` like an accepted push, with the reason naming the weaker channel.
-        // A later accepted push finds the delivery already `sent` and changes nothing.
+        // A later accepted push finds the delivery already `sent` and changes nothing. `auth.delivery.fallback_used` is emitted here, once: only the
+        // dispatch that won the address claim and saw the provider accept the email gets `true` (never a suppressed or failed email).
         if channels.contains(.email), !row.silent, try await AuthEmailFallback.dispatch(row, db: db, ctx: ctx) {
             try await service.transition(row, to: .sent, by: .worker, reason: AuthEmailFallback.eventReason)
+            try await service.emitFallbackUsed(row)
         }
         // Silent (over a per-subject budget): created and in the inbox, but no alert push.
         if row.silent || !channels.contains(.push) { return nil }
