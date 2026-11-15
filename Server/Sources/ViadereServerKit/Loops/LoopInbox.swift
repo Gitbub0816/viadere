@@ -15,6 +15,16 @@ enum LoopQueue {
         guard let event = try await LoopActionEventRecord.find(envelope.ref, on: tx) else { return .done }
         guard event.businessId == envelope.tenant else { return .deadLetter(reason: "tenant_mismatch") }
         guard event.delivers else { return .done }
+        // Connected (WP-4.1): the opaque event goes to the Loop's bound endpoint instead of the hosted inbox. When it cannot be confirmed
+        // (no or ineligible binding, paused endpoint) the customer sees `unknown`, never `accepted`.
+        if let marker = try await LoopConnectedEventRecord.query(on: tx).filter(\.$eventId == event.id!).first() {
+            guard let reason = try await LoopConnectedService(db: tx, ctx: ctx).deliver(event, marker: marker) else { return .done }
+            let id = event.id!, business = event.businessId
+            return .afterCommit { db, ctx in
+                try await LoopRuntimeService(db: db, ctx: ctx).recordOutcome(eventId: id, businessId: business, outcome: .unknown, source: .system, actor: nil, reason: reason)
+                return nil
+            }
+        }
         if try await InboxItemRecord.query(on: tx).filter(\.$eventId == event.id!).first() != nil { return .done }
         guard let instance = try await LoopInstanceRecord.find(event.instanceId, on: tx), let revision = try await LoopRevisionRecord.find(instance.revisionId, on: tx) else { return .done }
         let queue = LoopDefinition.parse(Data(revision.definitionJSON.utf8)).definition?.step(event.stepId)?.actions
@@ -325,6 +335,7 @@ struct LoopMaintenance {
 /// (no UPDATE) but may be deleted with their tenant.
 enum LoopTenantData {
     static func delete(businessId: UUID, on db: any Database) async throws {
+        try await deletePhase4(businessId: businessId, on: db)
         let items = try await InboxItemRecord.query(on: db).filter(\.$businessId == businessId).all().compactMap(\.id)
         if !items.isEmpty {
             try await InboxNoteRecord.query(on: db).filter(\.$itemId ~~ items).delete()
@@ -346,5 +357,13 @@ enum LoopTenantData {
         try await LoopDefinitionRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopSwitchRecord.query(on: db).filter(\.$businessId == businessId).delete()
         try await LoopStudioDraftRecord.query(on: db).filter(\.$businessId == businessId).delete()
+    }
+
+    /// Phase 4 rows (`LoopsPhase4.v1`), deleted before the events and instances they reference.
+    static func deletePhase4(businessId: UUID, on db: any Database) async throws {
+        try await LoopOutcomeCallbackRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopApprovalRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopConnectedEventRecord.query(on: db).filter(\.$businessId == businessId).delete()
+        try await LoopEndpointBindingRecord.query(on: db).filter(\.$businessId == businessId).delete()
     }
 }

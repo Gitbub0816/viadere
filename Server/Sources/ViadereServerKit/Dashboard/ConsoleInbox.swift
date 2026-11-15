@@ -10,6 +10,7 @@ private struct InboxDecisionForm: Content {
 
 private struct InboxNoteForm: Content { var note: String }
 private struct InboxAssignForm: Content { var assignee: String? }
+private struct LoopEndpointForm: Content { var webhook: String? }
 private struct InboxHoursForm: Content {
     var queue: String
     var hours: String?
@@ -31,6 +32,8 @@ enum ConsoleInbox {
         "submitted": "Submitted for Viadere review. Every Loop and every revision is reviewed before customers can see it.",
         "failed": "The automated checks found problems. Fix them and submit a new revision.",
         "withdrawn": "Revision withdrawn.",
+        "bound": "Endpoint saved. Connected requests of this Loop go to it as opaque events.",
+        "unbound": "Endpoint removed. Connected requests of this Loop now show customers that you couldn't be reached.",
     ]
 
     static func register(_ pages: any RoutesBuilder) {
@@ -71,6 +74,24 @@ enum ConsoleInbox {
             return DashboardResponses.redirect("\(inboxPath)?im=hours")
         }
         pages.get("dashboard", "loops") { req in try await loops(req) }
+        // Connected mode (WP-4.1): bind a published Loop to one of the business's own verified opaque endpoints. Needs both `submitLoops`
+        // and `manageWebhooks`, and a fresh passkey (it decides where customers' answers go).
+        pages.post("dashboard", "loops", ":id", "endpoint") { req -> Response in
+            let (p, businessId) = try req.businessDashboard
+            guard p.can(.submitLoops), p.can(.manageWebhooks), let userId = p.user.id else { throw APIError.forbidden }
+            guard p.hasFreshReauth(ctx: req.ctx) else { throw ReauthRequired(next: loopsPath) }
+            let definitionId = try req.uuid("id")
+            let form = try req.content.decode(LoopEndpointForm.self)
+            let service = LoopConnectedService(db: req.db, ctx: req.ctx)
+            if let raw = form.webhook, !raw.isEmpty, raw != "none" {
+                guard let subscription = UUID(uuidString: raw) else { throw APIError.validation("Choose one of your endpoints.") }
+                try await service.bind(businessId: businessId, definitionId: definitionId, subscriptionId: subscription, by: userId)
+                return DashboardResponses.redirect("\(loopsPath)?im=bound")
+            }
+            guard try await LoopDefinitionRecord.query(on: req.db).filter(\.$id == definitionId).filter(\.$businessId == businessId).first() != nil else { throw APIError.notFound }
+            try await service.unbind(businessId: businessId, definitionId: definitionId, by: userId)
+            return DashboardResponses.redirect("\(loopsPath)?im=unbound")
+        }
         pages.post("dashboard", "loops", "revisions", ":id", "withdraw") { req -> Response in
             let (p, businessId) = try req.businessDashboard
             guard p.can(.submitLoops), let userId = p.user.id else { throw APIError.forbidden }
@@ -165,9 +186,14 @@ enum ConsoleInbox {
                     ConsoleUI.form("\(inboxPath)/\(id)/note", csrf: csrf, ConsoleUI.textarea("note", label: "Note", id: "nt", help: "Only your team sees notes.", required: true, attrs: ["maxlength": "1000"])
                                    + ConsoleUI.formActions(ConsoleUI.button("Add note", .secondary))))
         }
-        let summary = ConsoleUI.card(detail.definition?.title ?? "Request", actions: stateBadge(detail.item.state), ConsoleUI.keyValues([
-            ("Customer sees", DashboardUI.esc(outcome)), ("Received", DashboardFormat.date(detail.item.createdAt)), ("Read by", String(detail.readers)),
-        ]) + ConsoleUI.callout(.neutral, "<p class=\"sm\">The customer is identified only by this request. Don't ask for health details, passwords or card numbers.</p>")
+        // A binding estimate approval (WP-4.4, §2.115): what the customer approved with Face ID or Touch ID on their device. It charges nothing.
+        var facts: [(String, String)] = [("Customer sees", DashboardUI.esc(outcome)), ("Received", DashboardFormat.date(detail.item.createdAt)), ("Read by", String(detail.readers))]
+        if let approval = try await LoopApprovalRecord.query(on: req.db).filter(\.$eventId == detail.event.id!).filter(\.$businessId == businessId).first(),
+           let terms = approval.estimateTerms, let approvedAt = approval.consumedAt {
+            facts.append(("Approved estimate", DashboardUI.esc("\(terms.amount.formatted), \(terms.reference). Approved on the customer's device; nothing was charged.")))
+            facts.append(("Approved at", DashboardFormat.date(approvedAt)))
+        }
+        let summary = ConsoleUI.card(detail.definition?.title ?? "Request", actions: stateBadge(detail.item.state), ConsoleUI.keyValues(facts) + ConsoleUI.callout(.neutral, "<p class=\"sm\">The customer is identified only by this request. Don't ask for health details, passwords or card numbers.</p>")
             + "<h3>What the customer entered</h3>" + ConsoleUI.table([ConsoleUI.Column("Step"), ConsoleUI.Column("Field"), ConsoleUI.Column("Answer")], answers, caption: "What the customer entered", empty: "No answers.")
             + "<h3>History</h3>" + (notes.isEmpty ? "<p class=\"mu\">No notes yet.</p>" : ConsoleUI.timeline(notes, label: "Request history")))
         let body = actions.isEmpty ? summary : "<div class=\"split\"><div>\(summary)</div><div>\(actions)</div></div>"
@@ -220,7 +246,30 @@ enum ConsoleInbox {
             <pre>\(DashboardUI.esc(url.absoluteString))</pre><p class="mu sm">\(installs) customers have this Loop installed\(publication.rolloutPercent < 100 ? ". Viadere is still rolling it out, so not every customer can add it yet" : "").</p></div></div>
             """)
         }
-        let linksCard = linkCards.isEmpty ? "" : ConsoleUI.card("Install links", description: "Share a link or a code so customers can add a published Loop in the Viadere app, whether or not they're connected to you. Customers who add a Loop without connecting send you only their answers to it; you can't message them.", linkCards.joined())
+        // Connected endpoints (WP-4.1, Phase 4 only).
+        var endpointRows: [[ConsoleUI.Cell]] = []
+        if req.ctx.config.loops.connectedEnabled {
+            let subscriptions = try await WebhookSubscriptionRecord.query(on: req.db).filter(\.$businessId == businessId).filter(\.$active == true).all()
+            let eligible = subscriptions.filter { LoopConnectedService.ineligibility($0, businessId: businessId, ctx: req.ctx) == nil }
+            let canBind = p.can(.submitLoops) && p.can(.manageWebhooks)
+            var seen = Set<UUID>()
+            for publication in published where seen.insert(publication.definitionId).inserted {
+                let bound = try await LoopConnectedService(db: req.db, ctx: req.ctx).binding(definitionId: publication.definitionId)
+                let current = bound.flatMap { b in subscriptions.first { $0.id == b.subscriptionId } }
+                var action = ""
+                if canBind {
+                    let options = [ConsoleUI.Option("none", "No endpoint (customers see that you couldn't be reached)")]
+                        + eligible.map { ConsoleUI.Option($0.id!.uuidString.lowercased(), $0.url, selected: $0.id == bound?.subscriptionId) }
+                    action = ConsoleUI.form("\(loopsPath)/\(publication.definitionId.uuidString.lowercased())/endpoint", csrf: DashboardUI.csrf(p),
+                        ConsoleUI.select("webhook", label: "Endpoint for \(definitions[publication.definitionId] ?? "this Loop")", id: "ep-\(publication.definitionId.uuidString.lowercased())", options: options)
+                        + ConsoleUI.formActions(ConsoleUI.button("Save endpoint", .secondary)))
+                }
+                endpointRows.append([.text(definitions[publication.definitionId] ?? "Loop"), .text(current?.url ?? "None"), ConsoleUI.Cell(html: action)])
+            }
+        }
+        let endpointsCard = endpointRows.isEmpty ? "" : ConsoleUI.card("Connected endpoints", description: "Buttons routed to your own system send an opaque loop.action.submitted event (ids only) to the Loop's endpoint. Fetch the request with an API key that has loops:read and answer with loops:write. Only endpoints that use the opaque envelope, subscribe to loop.action.submitted and proved ownership are listed. Changing an endpoint needs a fresh passkey.",
+            ConsoleUI.table([ConsoleUI.Column("Loop"), ConsoleUI.Column("Endpoint"), ConsoleUI.Column("", actions: true)], endpointRows, caption: "Connected endpoints"))
+        let linksCard = endpointsCard + (linkCards.isEmpty ? "" : ConsoleUI.card("Install links", description: "Share a link or a code so customers can add a published Loop in the Viadere app, whether or not they're connected to you. Customers who add a Loop without connecting send you only their answers to it; you can't message them.", linkCards.joined()))
         let body = linksCard + ConsoleUI.callout(.accent, title: "How review works", """
         <p class="sm">Viadere reviews every Loop and every revision before customers can see it: automated checks, then a Viadere reviewer (two for high-risk actions), then a signed publication. \
         You can submit; only Viadere publishes. A published revision keeps serving until a new one passes review. Loops can't collect health information, passwords, card or bank details, or government ids, and can't link anywhere.</p>

@@ -67,6 +67,7 @@ EXEMPT = {
     "PLAY_INTEGRITY_VERIFICATION_KEY": "only with PLAY_INTEGRITY_ENABLED: public key, plain configuration in app_env then",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "unset = export off (SECURITY.md 2.114); an https OTLP/HTTP collector in app_env when one exists",
     "OTEL_SERVICE_NAME": "optional; defaults to viadere-server",
+    "LOOPS_CONNECTED_ENABLED": "default false (SECURITY.md 2.115): Loops Phase 4, set in app_env when connected Loops and binding estimate approvals go live",
     "AUTH_EMAIL_FALLBACK_ENABLED": "default false; refused in staging/production until the email-fallback gate (ledger L-8) is recorded",
 }
 # Names the server reads that are not in .env.example.

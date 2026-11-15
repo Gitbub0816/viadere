@@ -32,8 +32,12 @@ enum BusinessAPIKeys {
         /// Auth deliveries (ADR-0020): create, cancel and complete / read status. Elevated (not a baseline scope); the `auth.challenge` capability is checked as well.
         static let authDeliveriesWrite = "auth_deliveries:write"
         static let authDeliveriesRead = "auth_deliveries:read"
+        /// Connected Loops (WP-4.1): read connected action events and instances of this business. Elevated (not a baseline scope).
+        static let loopsRead = "loops:read"
+        /// Connected Loops: answer connected action events (outcome callbacks). Elevated.
+        static let loopsWrite = "loops:write"
         static let all: [String] = [interactionsWrite, interactionsRead, messagesWrite, statusesWrite, webhooksManage, rewardsWrite, approvalsManage, keyDirectoryManage,
-                                    linksManage, walletWrite, profilesRead, authDeliveriesWrite, authDeliveriesRead]
+                                    linksManage, walletWrite, profilesRead, authDeliveriesWrite, authDeliveriesRead, loopsRead, loopsWrite]
     }
 
     struct Issued {

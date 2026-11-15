@@ -25,6 +25,17 @@ public struct LoopSettings: Sendable {
     public var directoryRate: RateRule = .perMinute(60, burst: 30)
     /// Loops one account may have installed at once.
     public var maxInstalledPerAccount = 100
+    /// `LOOPS_CONNECTED_ENABLED` (WP-4.1, WP-4.4; SECURITY.md §2.115), default **off**: Phase 4 of the validator and the runtime, i.e.
+    /// `connected` routing, connected-mode events and callbacks, and the binding `approve_estimate`. Off, the server is exactly Phase 3:
+    /// submissions, publications and actions that need Phase 4 are refused (fail closed), and the business routes answer `404`.
+    public var connectedEnabled = false
+    /// Approval challenges (`approve_estimate`) a customer may ask for.
+    public var approvalRate: RateRule = .perMinute(10, burst: 5)
+    /// Outcome callbacks per business.
+    public var callbackRate: RateRule = .perMinute(120, burst: 60)
+
+    /// The phase the validator, Studio and the runtime enforce.
+    public var platformPhase: LoopPlatformPhase { connectedEnabled ? .connected : .hosted }
 
     public init() {}
 }
@@ -63,6 +74,11 @@ extension ServerConfig {
             throw ServerConfigError.invalid("AZURE_KEY_VAULT_LOOP_PUBLICATION_KEY must name its own key")
         }
         try requireDistinctLoopKey()
+        switch env["LOOPS_CONNECTED_ENABLED"]?.lowercased() {
+        case "true": loops.connectedEnabled = true
+        case "false", nil, "": loops.connectedEnabled = false
+        default: throw ServerConfigError.invalid("LOOPS_CONNECTED_ENABLED (true or false)")
+        }
     }
 
     /// One key, one role: the publication key differs from the key-directory log key and the link-descriptor key.

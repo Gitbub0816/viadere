@@ -92,7 +92,11 @@ extension WebhookService {
         record.pausedBy = paused ? actor.id : nil
         record.pauseReason = paused ? String(reason.prefix(200)) : nil
         try await record.update(on: db)
-        if paused { ctx.metrics.count(.webhookPaused) }
+        if paused {
+            ctx.metrics.count(.webhookPaused)
+            // Connected Loop events still queued to this endpoint can't be confirmed now: the customer sees `unknown` (WP-4.1).
+            try await LoopConnectedService(db: db, ctx: ctx).endpointPaused(subscriptionId: id.uuid)
+        }
         _ = try await AuditService(db: db, ctx: ctx).record(paused ? "webhook.paused" : "webhook.resumed", actor: actor, businessId: businessId, subjectType: "webhook",
             subjectId: id.description, metadata: paused ? ["reason": String(reason.prefix(200))] : [:])
     }

@@ -42,7 +42,8 @@ struct LoopPublicationService {
         }
         let publisher = LoopPublisherIdentity(publisherType: .business, businessId: BusinessID(businessId), verificationStatus: business.status, category: category)
         // A `brand_kit` appearance may name only one of this business's own approved kits (never another tenant's).
-        let context = LoopValidationContext(submittingBusinessId: BusinessID(businessId), publisher: publisher, phase: .hosted,
+        // The phase the server runs: Phase 4 (connected routing, `approve_estimate`) only with `LOOPS_CONNECTED_ENABLED`.
+        let context = LoopValidationContext(submittingBusinessId: BusinessID(businessId), publisher: publisher, phase: ctx.config.loops.platformPhase,
                                             brandKitKeys: try await Self.approvedBrandKitKeys(businessId: businessId, on: db))
         let report = LoopPolicyValidator.validate(data, context: context)
         guard let hash = report.definitionHash, let parsed = LoopDefinition.parse(data).definition, let canonical = try? parsed.canonicalJSON() else {
@@ -188,7 +189,8 @@ struct LoopPublicationService {
                                               category: BusinessCategory(rawValue: business.category))
         let kits = try await Self.approvedBrandKitKeys(businessId: revision.businessId, on: db)
         let report = LoopPolicyValidator.validate(Data(revision.definitionJSON.utf8),
-                                                  context: LoopValidationContext(submittingBusinessId: BusinessID(revision.businessId), publisher: publisher, brandKitKeys: kits))
+                                                  context: LoopValidationContext(submittingBusinessId: BusinessID(revision.businessId), publisher: publisher,
+                                                                                 phase: ctx.config.loops.platformPhase, brandKitKeys: kits))
         let reviews = try await LoopReviewRecord.query(on: db).filter(\.$revisionId == revision.id!).filter(\.$stage != ReviewStage.automated.rawValue).all()
             .compactMap { record -> LoopReview? in
                 guard let reviewer = record.reviewerId, let decision = LoopReview.Decision(rawValue: record.decision) else { return nil }
