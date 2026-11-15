@@ -91,6 +91,7 @@ enum AuthDeliveryRoutes {
         }
         AuthLinkRedemption.register(routes)
         AuthTenantKeyRelay.register(routes)
+        AuthDestinationKeyNonceRelay.register(routes)
 
         // MARK: Devices
         routes.api(APIRoutes.authDeliveries) { req in

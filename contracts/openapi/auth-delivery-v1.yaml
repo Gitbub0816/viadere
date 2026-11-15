@@ -392,6 +392,48 @@ paths:
         "400": { description: "`invalid_grant`: unknown, expired, used or foreign code, or wrong verifier." }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: The authority is unavailable (fail closed). }
+  /v1/business/destination-keys/registration-nonce:
+    post:
+      tags: [Business]
+      operationId: readDestinationKeyRegistrationNonce
+      summary: Read the registration nonce for one of your destination keys (ADR-0031 §1.2, SECURITY §2.110)
+      description: |
+        Scope `auth_deliveries:write`, **live keys only** (a test key is `403`), behind `AUTH_DELIVERY_ENABLED` and `AUTH_DESTINATION_RECORDS_ENABLED`
+        (and the authority's `AUTHORITY_TENANT_KEYS_ENABLED`); off: `404`. The tenant is your API key's business, never a request member. Returns the
+        nonce the reviewed authority admin job issued for this key and host set, with exactly the values the registration proof
+        (`viadere-destination-key-registration+jws`) signs. Reading consumes nothing; the job's registration consumes the nonce once, after which this
+        answers `404`. `404` (one body) for no pending nonce, another tenant's key, a consumed or an expired nonce. Rate-limited per tenant (`429`,
+        fail closed) and audited. `503` when the authority is unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kid]
+              properties:
+                kid: { type: string, minLength: 43, maxLength: 43, description: "RFC 7638 thumbprint of the key being registered" }
+      responses:
+        "200":
+          description: What the proof of possession signs.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [tenant_id, aud, kid, hosts, nonce, expires_at]
+                properties:
+                  tenant_id: { type: string }
+                  aud: { type: string, description: "`urn:viadere:authority:<env>`" }
+                  kid: { type: string }
+                  hosts: { type: array, items: { type: string } }
+                  nonce: { type: string, minLength: 43, maxLength: 43 }
+                  expires_at: { type: integer, description: Unix seconds }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { description: The authority is unavailable (fail closed). }
   /v1/approve/requests/{approvalId}/deny:
     post:
       tags: [Device]
@@ -486,6 +528,7 @@ components:
             return_url: { type: string }
             code_challenge: { type: string }
             code_challenge_method: { type: string, enum: [S256] }
+            cross_device: { type: boolean, description: "`viadere` only (ADR-0021 §6): the person signs in on another device. The view then carries `cross_device {ach, match_code}`; the phone types the number and opens nothing. Absent or false: same device." }
         otp:
           type: object
           additionalProperties: false
@@ -530,6 +573,13 @@ components:
         correlation_id: { type: string }
         client_transaction_ref: { type: string }
         reason: { type: string }
+        cross_device:
+          type: object
+          description: "Cross-device link-service deliveries only (ADR-0021 §6). Show `match_code` on the initiating screen (WEB-02) while it is present, poll until `opened`, then redeem with `{link_client_id, ach, code_verifier}`."
+          required: [ach]
+          properties:
+            ach: { type: string, pattern: "^ach_" }
+            match_code: { type: string, pattern: "^[0-9]{2}$", description: "Present while the delivery is open; never sent to the phone." }
         events:
           type: array
           items:
