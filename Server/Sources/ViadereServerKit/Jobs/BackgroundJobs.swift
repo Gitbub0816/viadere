@@ -157,6 +157,8 @@ struct BackgroundJobs {
         if await gate("assurance-run", gated) {
             await guarded("assurance") { _ = try await OnboardingAssurance(db: db, ctx: ctx).run() }
             await guarded("pending-changes") { try await PendingChanges(db: db, ctx: ctx).expireDue() }
+            await guarded("analytics-rollup") { _ = try await AnalyticsRollup(db: db, ctx: ctx).run() }
+            await guarded("console-recoveries") { try await ConsoleRecovery(db: db, ctx: ctx).expireDue() }
         }
     }
 

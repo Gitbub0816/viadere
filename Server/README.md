@@ -458,8 +458,11 @@ it sends text-only standalone cards and carousels, no media), numbered-reply SMS
 DNS-pinned webhook connections (the destination is re-resolved and checked immediately before sending but is not pinned to the connection).
 WP6: `SERVER_PEPPER` rotation orphans the single-valued lookup hashes (docs/ops/KEY-ROTATION.md section 3); the Cloudflare to origin certificate leg (G-11) is open; the Terraform for the audit bucket and the mTLS hostname is not validated in CI yet; the consumer export has no web fallback (the app is required, by design).
 Dashboard: operator enrollments are still shown once as links (everything else the dashboard sends goes through the email provider), no payment processor (metering and an invoice preview
-only), no business-profile editing after verification, no operator-assisted recovery for a business user who loses every passkey (consumers have recovery codes),
-and analytics scan per-tenant rows (fine for pilot volumes; add rollups before large scale). Console conversations (§2.108) reload to show new
+only). Profile changes after verification (§2.111) compare a new name with verified businesses in memory (pilot volumes) and the identity-proof checklist of
+operator-assisted console recovery is a recorded checklist whose evidence rules are an owner/legal decision. Analytics read the daily rollup
+(`Jobs/AnalyticsRollup.swift`, hourly, closed UTC days, last 3 days recomputed, missing days backfilled up to 90 days back and read raw meanwhile) plus today's
+live rows; latencies, pending webhooks, abuse signals and campaign credits are still read live. A brand-kit change reaches Wallet passes already
+installed only at their next update push. Console conversations (§2.108) reload to show new
 messages (no live updates), list the 200 most recent threads and show the last 200 messages of a thread; they never show a customer's shared profile.
 Console benefits (§2.109) do not issue rewards, adjust points or issue, update or rotate passes (API only); a test-mode organization sees no passes.
 

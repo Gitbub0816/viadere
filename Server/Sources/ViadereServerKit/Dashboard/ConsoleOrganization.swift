@@ -14,6 +14,11 @@ private struct GoLiveForm: Content {
     var useCase: String
     var volume: String
 }
+private struct ProfileChangeForm: Content {
+    var displayName: String?
+    var handle: String?
+    var website: String?
+}
 
 /// Organization section: profile, onboarding (spec §8.1) and domains. Onboarding is shown as the state machine's checklist; every step links to
 /// where it is done.
@@ -54,6 +59,20 @@ enum ConsoleOrganization {
             try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).requestGoLive(useCase: form.useCase, volume: form.volume)
             return DashboardResponses.redirect("/dashboard/organization?m=golive")
         }
+        // G20 (§2.111): identity-bearing profile changes wait for two Viadere operators; the request itself needs a fresh passkey.
+        pages.post("dashboard", "organization", "profile") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            guard p.can(.manageOrganization) else { throw APIError.forbidden }
+            try await DashboardActions(db: req.db, ctx: req.ctx, principal: p).requireReauth(next: "/dashboard/organization#profile-edit")
+            let form = try req.content.decode(ProfileChangeForm.self)
+            try await BusinessProfileChanges(db: req.db, ctx: req.ctx).request(principal: p, displayName: form.displayName, handle: form.handle, website: form.website)
+            return DashboardResponses.redirect("/dashboard/organization?m=profile-requested")
+        }
+        pages.post("dashboard", "organization", "profile", ":id", "cancel") { req -> Response in
+            let (p, _) = try req.businessDashboard
+            try await BusinessProfileChanges(db: req.db, ctx: req.ctx).cancel(id: try req.uuid("id"), principal: p)
+            return DashboardResponses.redirect("/dashboard/organization?m=profile-cancelled")
+        }
     }
 
     static func notice(for outcome: DomainControl.Outcome) -> String {
@@ -89,6 +108,7 @@ enum ConsoleOrganization {
                 ("Verified", DashboardFormat.optional(business.verifiedAt)),
             ])
             profileBody += "<p class=\"mu sm\">Your permanent code is never reassigned. Your public display name and your legal entity are kept separate: the legal entity is reviewed by Viadere and is not shown to customers.</p>"
+            profileBody += try await profileChangeSection(req, p: p, business: business, currentHandle: summary?.handle?.value, canManage: canManage, csrf: csrf)
         } else if let application {
             switch application.state {
             case "pending":
@@ -173,6 +193,42 @@ enum ConsoleOrganization {
         }
         let body = profile + (forms.isEmpty ? "" : ConsoleUI.sectionTitle("Your next step") + forms) + onboarding
         return DashboardUI.businessPage(p, title: "Organization", active: "/dashboard/organization", subtitle: "Your profile and the path to production.", flash: DashboardFormat.flash(req), body: body)
+    }
+
+    /// The pending change (only this organization's, only to its own members) and the edit form. Customers never see a pending value.
+    private static func profileChangeSection(_ req: Request, p: DashboardPrincipal, business: BusinessRecord, currentHandle: String?, canManage: Bool,
+                                             csrf: String) async throws -> String {
+        guard let businessId = business.id else { return "" }
+        let service = BusinessProfileChanges(db: req.db, ctx: req.ctx)
+        var out = ""
+        if let open = try await service.open(businessId: businessId) {
+            var rows: [(String, String)] = []
+            if let v = open.displayName { rows.append(("Display name", "\(DashboardUI.esc(open.previousDisplayName)) &rarr; <strong>\(DashboardUI.esc(v))</strong>")) }
+            if let v = open.handle { rows.append(("Handle", "\(DashboardUI.esc(open.previousHandle.map { "@" + $0 } ?? "none")) &rarr; <strong>@\(DashboardUI.esc(v))</strong>")) }
+            if let v = open.website { rows.append(("Website", "\(DashboardUI.esc(open.previousWebsite ?? "none")) &rarr; <strong>\(DashboardUI.esc(v))</strong>")) }
+            rows.append(("Requested", DashboardFormat.date(open.requestedAt)))
+            rows.append(("Review", open.status == "first_approved" ? "One of two Viadere reviewers approved it." : "Waiting for Viadere's review."))
+            let cancel = canManage ? ConsoleUI.formActions(ConsoleUI.form("/dashboard/organization/profile/\(open.id!.uuidString.lowercased())/cancel", csrf: csrf,
+                ConsoleUI.button("Cancel this change", .secondary, small: true))) : ""
+            out += ConsoleUI.callout(.accent, title: "Profile change under review",
+                "<p class=\"sm\">Customers keep seeing your current profile until two Viadere reviewers approve the change.</p>" + ConsoleUI.keyValues(rows) + cancel)
+        } else if let last = try await service.latest(businessId: businessId), ["rejected", "refused"].contains(last.status) {
+            out += ConsoleUI.callout(.danger, title: "Last profile change not approved",
+                "<p class=\"sm\">\(DashboardUI.esc(last.decisionNote ?? "Viadere did not approve the change.")) Decided \(DashboardFormat.optional(last.decidedAt)).</p>")
+        }
+        guard canManage else { return out }
+        let form = ConsoleUI.form("/dashboard/organization/profile", csrf: csrf,
+            "<div class=\"cols\">"
+            + ConsoleUI.input("displayName", label: "Display name", id: "pc-name", value: business.displayName, help: "What customers see. No look-alikes of Viadere or of other organizations.",
+                              attrs: ["maxlength": "80", "autocomplete": "organization"])
+            + ConsoleUI.input("handle", label: "Handle", id: "pc-handle", value: currentHandle.map { "@" + $0 } ?? "", help: "Your old handle is retired for good: it is never reused.",
+                              attrs: ["maxlength": "31", "autocapitalize": "none", "spellcheck": "false"])
+            + "</div>"
+            + ConsoleUI.input("website", label: "Website", id: "pc-web", type: "url", value: business.websiteURL ?? "", placeholder: "https://",
+                              help: "Must be on a domain you verified under Domains.", optional: true, attrs: ["maxlength": "200"])
+            + "<p class=\"mu sm\">Your logo comes from your approved Brand Kit (Brand Studio), which Viadere reviews separately.</p>"
+            + ConsoleUI.formActions(ConsoleUI.button("Send for review", passkey: true) + ConsoleUI.passkeyNote()))
+        return out + ConsoleUI.more("Change your public name, handle or website", "<div id=\"profile-edit\">\(form)</div>")
     }
 
     private static func legalEntityDetail(row: BusinessOnboardingRecord, state: OnboardingState) -> String {

@@ -6,6 +6,17 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Profile changes, console recovery, analytics rollups and branded passes (2026-11-15).** A verified business can ask to change its public name,
+handle or website from Organization; the change waits in `business_profile_changes` (customers never see it) until two different operators approve
+it under `/operator/profile-changes`, with the impersonation checks of verification re-run at each approval (Viadere look-alikes, names confusable
+with other verified businesses' names or any handle they ever held, retired handles never reused, website on a verified domain). A console user
+who lost every passkey is re-enrolled by an Owner or Organization Admin from Team (preferred) or, only when no other admin has a passkey, through
+`/operator/recoveries`: two operators, a recorded identity-proof checklist whose evidence rules are an **owner/legal decision**, a 72-hour waiting
+period with notice to every member and security contact, then a one-hour link to the member's own address; old passkeys are deleted when the new one
+is enrolled. Analytics read a daily rollup plus today's live rows; the consumer export gains `historyByBusiness`. Signed Wallet passes carry the
+business's approved Brand Kit colors (contrast-checked, else Viadere's) and icon, logo and strip images. Normative: [`SECURITY.md`](SECURITY.md)
+§2.111, [`WALLET.md`](WALLET.md). Not verified: the PostgreSQL run; screenshots of the new pages were checked in light and dark at 1280 px.
+
 **Console conversations, benefits and RCS rich cards (2026-11-15).** A business without an integration can now read and answer customer messages in
 the console (`Dashboard/ConsoleConversations.swift`: list, thread, reply through `ConversationService.businessSend`, assign, close, reopen; reads
 audited, bodies decrypted only for the owning tenant, customers shown as `subject_ref`), and run its loyalty program, revoke rewards, void Wallet

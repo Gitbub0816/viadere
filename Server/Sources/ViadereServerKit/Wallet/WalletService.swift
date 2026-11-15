@@ -14,6 +14,8 @@ import ViadereCore
 struct WalletService {
     let db: any Database
     let ctx: ServerContext
+    /// The Brand Kit asset store, for brand images on the pass (`PassBranding`). Without it a pass still gets the kit's colors.
+    var brandRuntime: BrandKitRuntime? = nil
 
     static let serialPrefix = "VP-"
     static let maxLogMessages = 20
@@ -241,9 +243,12 @@ struct WalletService {
     /// The signed `.pkpass` bytes for a pass, built fresh from current data.
     func pkpass(for pass: WalletPassRecord) async throws -> Data {
         let signer = try requireSigner()
-        let json = try await descriptor(for: pass, signer: signer).json()
+        var descriptor = try await descriptor(for: pass, signer: signer)
+        let style = await PassBranding(db: db, ctx: ctx, runtime: brandRuntime).style(businessId: pass.businessId, kind: pass.kindValue)
+        descriptor.colors = style.colors
+        let json = try descriptor.json()
         do {
-            return try PKPassBuilder.build(passJSON: json, signer: signer, at: ctx.now)
+            return try PKPassBuilder.build(passJSON: json, signer: signer, at: ctx.now, images: style.images)
         } catch {
             throw APIError.internalError
         }

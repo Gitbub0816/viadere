@@ -531,7 +531,7 @@ Token buckets keyed by `name|key` (the namespace is the part before the first `|
 * **Purge race:** removing unverified users first *claims* them (`UPDATE … SET status = 'purging' WHERE status = 'unverified' RETURNING id`) and deletes children only for the claimed ids, in one transaction; an owner who verified in the meantime is skipped, and keeps their passkey.
 * **Unverified accounts** cannot sign in, create an organization or accept an invitation (`DashboardActions.acceptInvite` also refuses them). After 24 h the job loop deletes them (with passkeys and codes). A later sign-up or an accepted invitation for the same address first deletes the unverified record, so the address is never held hostage.
 * **Invitations:** the link (single-use token, `inviteTTL` 7 days) is emailed to the invited address and never shown to the inviter. A new person requests a code (`POST /dashboard/invite/{token}/code`, limited per invitation, per address and per IP) and sends it with `invite/begin`; accounts that already exist (verified) sign in and accept. If the email cannot be sent the invitation is withdrawn.
-* **Staging demo console owner (no email step):** `ViadereServer staging-demo --console-owner <email>` (refused unless `ENVIRONMENT=staging`; run in the api container, output to the caller's terminal only) creates an **active** business user with an `owner` membership of the fictional Atlas Demo only, skipping the code step because staging has no mail delivery. It refuses an address that belongs to an operator, an unverified or disabled account, or a member of any other organization (no takeover of another tenant's account). It prints a one-time link `/dashboard/enroll/{token}`: table `console_enrollments (user_id, business_id, token_hash, state open|used|revoked, expires_at, used_at)`, token 32 CSPRNG bytes, only `SecureToken.hash` stored, **1 hour** fixed, a newer link revokes the older ones. `POST /dashboard/auth/enroll/begin|finish` (IP-limited `dashboard-auth`, page `web`; a foreign `Origin` is `403`) runs a passkey registration ceremony of kind `console-enroll`; `finish` re-checks the link (open, unexpired, active business user, live membership in the link's organization), flips `open → used` by compare-and-swap in the same transaction that stores the passkey (single use), audits `dashboard.console_enrolled` and opens a business session bound to that organization. No HTTP route creates a link (the only writer is `StagingDemo.issueConsoleEnrollment`); tenant deletion revokes open links. Tests: `StagingDemoConsoleTests`.
+* **Staging demo console owner (no email step):** `ViadereServer staging-demo --console-owner <email>` (refused unless `ENVIRONMENT=staging`; run in the api container, output to the caller's terminal only) creates an **active** business user with an `owner` membership of the fictional Atlas Demo only, skipping the code step because staging has no mail delivery. It refuses an address that belongs to an operator, an unverified or disabled account, or a member of any other organization (no takeover of another tenant's account). It prints a one-time link `/dashboard/enroll/{token}`: table `console_enrollments (user_id, business_id, token_hash, state open|used|revoked, expires_at, used_at)`, token 32 CSPRNG bytes, only `SecureToken.hash` stored, **1 hour** fixed, a newer link revokes the older ones. `POST /dashboard/auth/enroll/begin|finish` (IP-limited `dashboard-auth`, page `web`; a foreign `Origin` is `403`) runs a passkey registration ceremony of kind `console-enroll`; `finish` re-checks the link (open, unexpired, active business user, live membership in the link's organization), flips `open → used` by compare-and-swap in the same transaction that stores the passkey (single use), audits `dashboard.console_enrolled` and opens a business session bound to that organization. No HTTP route creates a link for this purpose (the only writer here is `StagingDemo.issueConsoleEnrollment`; the passkey recovery of §2.111 issues links only to the member's own address); tenant deletion revokes open links. Tests: `StagingDemoConsoleTests`.
 * **Email delivery:** `EmailSender` (`HTTPEmailSender`: `POST EMAIL_API_URL`, JSON `{from,to,subject,text}`, key in `EMAIL_API_AUTH_HEADER` (default `Authorization: Bearer`)). The development `LoggingEmailSender` prints the message; in staging and production it logs only the kind and the recipient's domain, never a code or link. Sign-up delivery failures are logged and not surfaced (the user resends).
 
 ### 2.25 Configuration
@@ -1465,3 +1465,80 @@ the business's reference; a real customer cannot be answered without production 
 existing validation applies); revoke, void and consume need a fresh passkey and are audited to the person; a test-mode organization cannot change
 the program or redeem, revoke or void live value; consume is single use from the console and the API; business text is escaped.
 
+### 2.111 Business profile changes and console passkey recovery (G20, G25; `Server/.../Platform/BusinessProfileChanges.swift`, `Dashboard/OperatorProfileChanges.swift`, `Dashboard/ConsoleRecovery.swift`, `Dashboard/OperatorRecovery.swift`; migrations `BusinessProfileChanges.v1`, `ConsoleRecovery.v1`)
+
+**Profile changes after verification (normative).**
+
+1. **Scope.** Every customer-visible column of `businesses` is identity-bearing: `display_name`, the active handle and `website_url`. They change
+   only through a *profile change*; there is no field that applies immediately (the data model has no low-risk profile field such as a support
+   contact or a description). The logo customers see is the approved Brand Kit's (§2.93, its own operator review and image pipeline) and is not
+   edited here.
+2. **Request.** `POST /dashboard/organization/profile` needs `manageOrganization` (Owner, Organization Admin), a **verified** organization and the
+   console step-up (`requireReauth`: fresh passkey assertion and the privileged-inactivity limit). Unchanged or empty fields are dropped; nothing
+   left is `422`. At most one open change per organization (`409`); cancelling (`/profile/{id}/cancel`, same permission, tenant-scoped, `404` for
+   another tenant's id) is protective and needs no step-up. Stored in `business_profile_changes` (proposed values, the values customers saw,
+   reviewers, decision); **customers never read this table**: directory, handle lookup, search, profiles and passes keep reading `businesses` and
+   the active handle until the change is applied.
+3. **Checks (`BusinessIdentityPolicy`, run at request and again at every approval).** Name: 2 to 80 characters; `DisplayTextSanitizer` with
+   `identity: true` (no Viadere look-alike anywhere, no invisible, bidirectional or control characters); not confusable with any other **verified**
+   business's display name or with any handle it ever held (active or retired). Confusable = equal skeleton, or one edit apart when both have at
+   least 6 characters, or one containing the other when the shorter has at least 8 (skeleton: width/case/accent folding, Cyrillic and Greek
+   homoglyphs, legal suffixes such as Inc/LLC/Ltd dropped, letters and digits only, then `BusinessHandle.confusableSkeleton`). Handle:
+   `BusinessHandle.validateForRegistration` and `BusinessRegistry.checkHandleAvailable` against **every** row of `business_handles`, retired ones
+   included, by value and by skeleton (so a retired handle is never issued again, not even to its former owner). Website: `https`, no
+   credentials, host equal to or under one of the organization's **verified** domains (§ domain control).
+4. **Two operators.** Approval is two steps by two **different** operators, each with a fresh passkey (`/operator/profile-changes/{id}/approve`):
+   the first records `first_reviewer`; the same operator's second approval is `403` and audited
+   (`business.profile_change_second_review_refused`); the second applies the change in one transaction (compare-and-swap `first_approved ->
+   applied`; the old active handle becomes `retired`, the new one is inserted, `search_text` is rebuilt; the unique indexes on handle and
+   skeleton are the backstop against a racing claim). A change whose checks fail at either approval is closed as `refused` (`422`), so a name
+   that became confusable with a business verified in the meantime never goes live. Declining needs a reason of 8 to 300 characters, shown to
+   the organization. A suspended or revoked organization's change cannot be applied (`409`).
+5. **Audit and notice.** `business.profile_change_requested | _cancelled | _first_approval | _second_review_refused | _applied | _rejected |
+   _refused`; Owners and Organization Admins (and, for the request, the security contacts) are emailed at request and decision.
+
+**Passkey recovery for a business console user (normative).**
+
+6. **Admin path (preferred).** `POST /dashboard/team/members/{membership}/recover` by an Owner or Organization Admin (`manageTeam`) with the
+   console step-up, for another member whose role they may manage (`RoleGrantPolicy`; an Organization Admin cannot recover an Owner, Organization
+   Admin or Security Admin), with a reason of 8 to 300 characters. **Nobody recovers themselves** (`403`, `console.recovery_refused`). A member who
+   also belongs to another organization is refused (a recovery restores the whole account and must never reach another tenant's console). The
+   release (item 9) happens at once; Owners, Organization Admins, Security Admins and the security contacts subscribed to role changes are
+   emailed. Not under two-person approval: the link goes only to the member's own verified address, so the admin never holds a credential.
+7. **Operator path (only when no other administrator can).** Allowed only while the organization has **no other** Owner or Organization Admin
+   who is active and has at least one passkey (re-checked at request, approval and release; otherwise `403`). `POST /operator/recoveries` by one
+   operator with a reason and **every** item of the identity-proof checklist ticked; `POST /operator/recoveries/{id}/approve` by a **different**
+   operator (the requester's own approval is `403`, `console.recovery_approval_refused`) who ticks every item again. Requests and approved
+   recoveries that are never released expire after 14 days.
+8. **Waiting period.** Approval sets `release_at = approved_at + 72 hours` and emails every member of the organization (all roles), its security
+   contacts and the member. `POST /operator/recoveries/{id}/release` before `release_at` is `409` (`console.recovery_release_refused`) for every
+   operator; there is no override. Until the link is used the recovery can be cancelled by any operator (fresh passkey, reason), by the member
+   (proof they still have access) or by an administrator who may manage them (`/dashboard/team/recoveries/{id}/cancel`, tenant-scoped).
+9. **Release and completion.** Release revokes every session of the member, sets `dashboard_users.status = recovering` (sign-in with any old
+   passkey is refused and the session middleware rejects the account), revokes the member's open enrollment links and emails a **one-hour,
+   single-use** `console_enrollments` link (token hash only, `recovery_id` set) to the member's own address; no console page ever shows it. The
+   enrollment page and ceremony (§ staging demo console owner: origin check, rate limits, compare-and-swap `open -> used`) accept a `recovering`
+   account only for a link of a recovery that is still `released`. Finishing it, in the same transaction, flips the recovery `released ->
+   completed`, **deletes every earlier passkey** of the member, revokes every session, sets the account `active` and stores the new passkey; then
+   the member is signed in. The member can therefore do nothing between release and enrollment. A released recovery whose link expired unused can
+   be released again (operator path) or restarted by the admin (admin path).
+10. **Audit.** `console.recovery_started | _requested | _approved | _approval_refused | _release_refused | _released | _cancelled | _completed |
+    _refused`, each with the path and the member; `dashboard.console_enrolled` as for any console link.
+11. **Owner and legal decisions (recorded, not invented).** The checklist (`ConsoleRecovery.checklist`) records that both operators confirmed:
+    contact through the address on file; confirmation through an organization contact the requester does not control; the requester's authority
+    and a current legal entity record; that no other administrator can do it; a review of recent audit events. **What evidence each item
+    requires (documents, channels, call-backs) is for the product owner and counsel to set**; until they do, operators record references in the
+    reason and never upload documents. The 72-hour waiting period and the 14-day expiry are owner decisions and change only deliberately.
+
+**Residual risks.** The name check compares against verified businesses only (a pending application with a similar name is the reviewer's
+call) and scans them in memory (pilot volumes); a member who controls neither a passkey nor their mailbox cannot be recovered by either path;
+two colluding operators can still recover an account after the waiting period, which is why every member and security contact is told first.
+
+**Tests.** `ProfileChangeTests` (pending change invisible to directory, handle lookup and search until two different operators approve; another
+tenant cannot see or cancel it; a read-only member and a pending organization cannot submit; step-up required; Viadere look-alikes, bidi
+characters and names confusable with another verified business refused at request and at approval; handle collisions, confusable handles,
+reserved words and retired handles refused for everyone; one operator cannot approve twice; website only on a verified domain);
+`ConsoleRecoveryTests` (self-recovery refused; no `manageTeam`, Organization Admin over an Owner and other tenants refused; old session and old
+passkey dead after release; single-use link; old passkeys deleted at completion; operator path: checklist complete for both operators, the
+requester cannot approve, nothing released before approval or before the waiting period ends, other members and the member notified, refused
+while another admin has a passkey, the member cancels; every step audited).
