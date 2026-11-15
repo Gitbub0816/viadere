@@ -208,3 +208,18 @@ Rules the screens follow:
 * **Flow endings** use `ViadereOutcome` with the flow's existing copy: Connect, redemption (expired, refused, failed), the verification
   result and failure, phone linking, data export.
 * **Numbers that change** (points balance, authenticator code) use `contentTransition(.numericText())` through `.viadereAnimation`.
+
+## 10. Auth deliveries, Lock Screen details and the Home Screen widget (2026-11-15)
+
+* **Deliveries in Alerts.** Sign-in links, one-time codes and security notices are not in the Alerts read model, so "Needs you" shows
+  them from their own inbox (`AuthDeliveryInboxViewModel`, `GET /v1/auth-deliveries`) at the top: pending only, newest first, expired
+  rows gone by the device clock, disabled while offline. A row, like a push, opens the delivery sheet, which reads the display object
+  only and shows the link screen (still fail-closed: nothing is opened), the code sheet, or the N-06 line for a notice.
+* **Code sheet** (C-OTP-01/02/04, C-TOTP-01): who and "Expires at …" first; "Show code" is the one-time `open`; the code is large,
+  monospaced and read digit by digit, hidden while the screen is recorded, cleared on expiry, close and backgrounding, and "Copy code"
+  is local-only with an expiry never later than the code's. Footer: This wasn't me · Copy code, equal. No live countdown (UX_COPY §0
+  rule 10); the expiry is checked every second and the sheet turns to C-OTP-02.
+* **Live Activity details** (You → Notifications, searchable): two choice cards, "Only that a decision is needed" by default; the
+  detailed choice needs Face ID or the passcode.
+* **Home Screen widget** (small, medium): the count of waiting requests and, medium only, benefits available; neutral when signed out
+  or a day stale. A tap opens the app. The app writes only numbers (`HomeWidgetWriter`, `WidgetSnapshot`).
