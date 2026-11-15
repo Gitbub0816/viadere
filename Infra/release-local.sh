@@ -38,7 +38,8 @@ publish() { # $1 = image name, $2 = Dockerfile
   local image="$REGISTRY/$OWNER_REPO/$1" shatag ref digest
   shatag="$image:sha-${SHA:0:12}"
   echo "== $1: build (linux/amd64)"
-  docker buildx build --platform linux/amd64 --load -f "$2" \
+  # --provenance/--sbom false: one plain image manifest like CI's `docker build` (no index), which deploy-staging.sh requires.
+  docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load -f "$2" \
     --label org.opencontainers.image.source="https://github.com/Gitbub0816/viadere" \
     --label org.opencontainers.image.revision="$SHA" \
     -t "$shatag" . || fail "$1 build"
@@ -50,8 +51,12 @@ publish() { # $1 = image name, $2 = Dockerfile
   digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$shatag" | cut -d@ -f2)"
   case "$digest" in sha256:*) ;; *) fail "$1 digest" ;; esac
   ref="$image@$digest"
+  case "$(docker buildx imagetools inspect --raw "$ref" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("mediaType",""))')" in
+    application/vnd.oci.image.manifest.v1+json|application/vnd.docker.distribution.manifest.v2+json) ;;
+    *) fail "$1 was pushed as an index, not a single image (Docker Desktop: Settings > General, turn off the containerd image store, then retry)" ;;
+  esac
   echo "== $1: SBOM and keyless signature (a browser window opens for the Sigstore sign-in)"
-  syft "registry:$ref" -o "spdx-json=sbom-$1.spdx.json" || fail "$1 SBOM"
+  syft "registry:$ref" --platform linux/amd64 -o "spdx-json=sbom-$1.spdx.json" || fail "$1 SBOM"
   cosign sign --yes "$ref" || fail "$1 sign"
   cosign attest --yes --type spdxjson --predicate "sbom-$1.spdx.json" "$ref" || fail "$1 SBOM attestation"
   rm -f "sbom-$1.spdx.json"
