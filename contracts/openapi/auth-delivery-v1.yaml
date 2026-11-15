@@ -259,6 +259,72 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuthDeliveryView" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/auth-deliveries/{deliveryId}/link-evidence:
+    post:
+      tags: [Device]
+      operationId: submitAuthLinkEvidence
+      summary: Answer a link-service delivery's authority challenge (ADR-0021 §5.3)
+      description: |
+        Device-signed bearer. Behind `AUTH_DELIVERY_ENABLED` and `AUTH_LINK_SERVICE_ENABLED` (both off: `404`). Body `{factor}`: the
+        `viadere-factor+jws` answering exactly the `link_open` challenge stored on this delivery (`authority_challenge` in the display). The api relays
+        it to the authority with the device's account; the authority verifies it and records the link code hash. No grant exists until the business
+        redeems (`POST /v1/business/auth-links/redeem`). Any refusal is `401 evidence_invalid`.
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - $ref: "#/components/parameters/DeliveryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [factor]
+              properties:
+                factor: { type: string, maxLength: 4096 }
+      responses:
+        "200":
+          description: The authority's decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [decision]
+                properties:
+                  decision: { type: string, enum: [approve, deny, report] }
+        "401": { description: "evidence_invalid" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/auth-tenants/{tenantId}/destination-keys:
+    get:
+      tags: [Device]
+      operationId: getTenantDestinationKeys
+      summary: Authority-signed tenant record and revocation list for a business-mode link (ADR-0031 §2)
+      description: |
+        Device-signed bearer. Behind `AUTH_DELIVERY_ENABLED` and `AUTH_DESTINATION_RECORDS_ENABLED` (both off: `404`). The api relays the authority's
+        `viadere-tenant-keys+jws` and the latest `viadere-device-keys-revocation+jws` **unchanged** and signs neither; the device verifies both against
+        its pinned authority keys (SECURITY §2.110). `503` when the authority does not answer: the device shows S-LINK-11 and the link waits.
+      security:
+        - deviceSignedBearer: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+      responses:
+        "200":
+          description: The relayed statements.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [record]
+                properties:
+                  record: { type: string, maxLength: 4096, description: "compact viadere-tenant-keys+jws" }
+                  revocation_list: { type: string, maxLength: 4096, description: "compact viadere-device-keys-revocation+jws" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/business/auth-approvals:
     post:
       tags: [Business]
@@ -495,6 +561,8 @@ components:
         request_id: { type: string }
         destination_host: { type: string }
         destination_statement: { type: string }
+        link_mode: { type: string, enum: [business, viadere] }
+        authority_challenge: { type: string }
         code_kind: { type: string, enum: [otp, totp] }
         variables: { type: object, additionalProperties: { type: string } }
         silent: { type: boolean }

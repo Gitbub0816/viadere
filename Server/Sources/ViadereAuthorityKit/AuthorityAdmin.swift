@@ -24,7 +24,8 @@ public enum AuthorityAdmin {
     }
 
     public static let commands = ["client-register", "link-client-register", "keylog-import", "key-version-pin", "key-inventory-record", "key-inventory-check",
-                                  "seal-key-create", "seal-key-exposed"]
+                                  "seal-key-create", "seal-key-exposed", "tenant-key-nonce", "tenant-key-register", "revoke-tenant-key", "remove-tenant-host",
+                                  "device-key-revoke"]
 
     public static func run(command: String, changeFile: Data, commit: String, db: any Database, config: AuthorityConfig, now: Date = Date(),
                            executionId: String? = ProcessInfo.processInfo.environment["CONTAINER_APP_JOB_EXECUTION_NAME"]) async throws {
@@ -39,6 +40,12 @@ public enum AuthorityAdmin {
         case "key-inventory-check": try await checkInventory(change, db: db)
         case "seal-key-create": try await createSealKey(change, commit: commit, db: db, config: config, executionId: executionId, now: now)
         case "seal-key-exposed": try await sealKeyExposed(change, db: db, now: now)
+        // Tenant destination keys (ADR-0031 §1): nonce first, then the registration that consumes it; reduction works without the api.
+        case "tenant-key-nonce": try await issueRegistrationNonce(change, commit: commit, db: db, now: now)
+        case "tenant-key-register": try await registerTenantKey(change, commit: commit, db: db, config: config, now: now)
+        case "revoke-tenant-key": try await revokeTenantKey(change, db: db, now: now)
+        case "remove-tenant-host": try await removeTenantHost(change, db: db, now: now)
+        case "device-key-revoke": try await revokeDeviceKey(change, commit: commit, db: db, config: config, now: now)
         default: throw Failure.unknownCommand(command)
         }
         await AuthorityAudit.record(db, "authority.admin.\(command)", outcome: "success", caller: "admin", detail: "commit:\(commit)", at: now)

@@ -14,6 +14,8 @@ import Observation
 public enum DestinationCheck: Sendable, Equatable {
     /// The signature, the tenant record and the host all checked out: this host is the business's.
     case verified(host: String)
+    /// As `verified`, with the business name from the authority-signed tenant record (ADR-0031 §4): the screen shows this name, never the api's.
+    case verifiedBy(host: String, business: String)
     /// The host is not one the business verified (S-LINK-08).
     case wrongDestination
     /// The signature failed or is missing (S-LINK-09). Sends `destination_unverified`; never counts toward a pause.
@@ -30,6 +32,14 @@ public enum DestinationCheck: Sendable, Equatable {
 /// Verifies the business-signed destination of a link (ADR-0031: `viadere-destination+jws` against the authority-signed tenant record).
 public protocol DestinationVerifying: Sendable {
     func verify(_ display: AuthLinkDisplay) async -> DestinationCheck
+    /// After Continue: `url` is the exact string `open` returned. True only when its bytes hash to the verified statement's `url_sha256`, its host
+    /// is the statement's `host` and the shared validator passes (ADR-0031 §4). Called at most once per verified display.
+    func verifyOpened(_ url: String, for display: AuthLinkDisplay) async -> Bool
+}
+
+extension DestinationVerifying {
+    /// Fail closed: a verifier that cannot check the URL bytes never lets one open.
+    public func verifyOpened(_ url: String, for display: AuthLinkDisplay) async -> Bool { false }
 }
 
 /// What ships until Stage 6 delivers the authority tenant record: nothing is verifiable, so every business link fails closed with
@@ -190,7 +200,20 @@ public final class LinkConfirmationViewModel {
             destinationVerified = true
             verifiedHost = host.lowercased()
             phase = .reviewing
+        case .verifiedBy(let host, let business) where host == fetched.host:
+            // The authority record's verified name replaces the api's display name (ADR-0031 §4).
+            var shown = fetched
+            shown.business = business
+            shown.businessVerified = true
+            display = shown
+            destinationVerified = true
+            verifiedHost = host
+            phase = .reviewing
         case .verified: phase = .notOpened(.wrongDestination)
+        case .verifiedBy:
+            // The api's display host is not the signed host: integrity, reported like every other mismatch.
+            phase = .notOpened(.signatureFailed)
+            await reportDestinationFailure()
         case .wrongDestination: phase = .notOpened(.wrongDestination)
         case .signatureFailed:
             phase = .notOpened(.signatureFailed)
@@ -211,8 +234,8 @@ public final class LinkConfirmationViewModel {
             return
         }
         phase = .opening
-        let url: URL
-        do { url = try await api.openLink(deliveryId: deliveryId) } catch let error as AuthDeliveryError {
+        let raw: String
+        do { raw = try await api.openLinkRaw(deliveryId: deliveryId) } catch let error as AuthDeliveryError {
             switch error {
             case .expired: phase = .expired
             case .alreadyUsed: phase = .alreadyUsed
@@ -221,9 +244,9 @@ public final class LinkConfirmationViewModel {
             }
             return
         } catch { phase = .gone; return }
-        // The URL the service returned must still be the verified host, over https, with no userinfo or non-default port: re-checked here,
-        // on the device, right before it is opened (ADR-0031 §4: the device checks the URL bytes against the signed digest).
-        guard Self.isAcceptable(url, host: host) else {
+        // The exact bytes the service returned must hash to the signed `url_sha256` and name the signed host; the URL handed to the system must be
+        // those same bytes; and it must still be https on the verified host with no userinfo or port (ADR-0031 §4).
+        guard await verifier.verifyOpened(raw, for: display), let url = URL(string: raw), url.absoluteString == raw, Self.isAcceptable(url, host: host) else {
             phase = .notOpened(.signatureFailed)
             await reportDestinationFailure()
             return

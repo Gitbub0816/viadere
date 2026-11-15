@@ -258,6 +258,18 @@ struct StatementBuilder {
         guard head.environment == environment else { throw AuthorityKeyError.keyUnavailable("statement") }
         return try await KMSJWS.es256(kms: kms, key: keys.statement, typ: AuthorityKeyLogHead.type, payload: head.payload)
     }
+
+    /// `viadere-tenant-keys+jws` (ADR-0031 §2) from the authority's own `authority_tenant_keys` rows (`AuthorityTenantRecords.compute`).
+    func sign(tenantRecord: AuthorityTenantRecord) async throws -> String {
+        guard tenantRecord.environment == environment else { throw AuthorityKeyError.keyUnavailable("statement") }
+        return try await KMSJWS.es256(kms: kms, key: keys.statement, typ: AuthorityTenantRecord.type, payload: tenantRecord.payload)
+    }
+
+    /// `viadere-device-keys-revocation+jws` (ADR-0033 §3.3) from the reviewed `authority_device_key_revocations` rows.
+    func sign(revocationList: AuthorityRevocationList) async throws -> String {
+        guard revocationList.environment == environment else { throw AuthorityKeyError.keyUnavailable("statement") }
+        return try await KMSJWS.es256(kms: kms, key: keys.statement, typ: AuthorityRevocationList.type, payload: revocationList.payload)
+    }
 }
 
 /// Wraps the authority's KMS: every `sign`, `signRS256` and `unwrap` first writes an `authority_sign_records` row (key reference and operation, never

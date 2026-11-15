@@ -121,7 +121,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
     if let transport = overrides.authorityTransport {
         guard !config.isStrict else { throw ServerConfigError.invalid("an authority transport override in staging or production") }
         app.authorityTransport = transport
-    } else if config.oidc.enabled || config.authDelivery.linkServiceEnabled, let url = config.oidc.authorityURL, let audience = config.oidc.authorityAudience,
+    } else if config.oidc.enabled || config.authDelivery.linkServiceEnabled || config.authDelivery.destinationRecordsEnabled, let url = config.oidc.authorityURL, let audience = config.oidc.authorityAudience,
               let identity = AzureManagedIdentity.fromEnvironment(ProcessInfo.processInfo.environment) {
         app.authorityTransport = HTTPAuthorityTransport(baseURL: url, audience: audience, tokens: identity, http: StandaloneOutboundHTTP(guard: .fromEnvironment()))
     }
@@ -131,7 +131,7 @@ public func configure(_ app: Application, config initialConfig: ServerConfig, ov
                             dashboardPasskeys: dashboardPasskeys, passSigner: passSigner, passPush: passPush,
                             integrity: try overrides.integrity ?? AppAttestVerifier.apple(config: config, clock: clock), email: email,
                             domains: domains, outbound: outbound, kms: kms, auditObjectStore: auditStore, accessTokens: tokens,
-                            queueTransport: queueTransport, tenantDestinationKeys: overrides.tenantDestinationKeys)
+                            queueTransport: queueTransport, tenantDestinationKeys: overrides.tenantDestinationKeys ?? authorityTenantKeys(config: config, app: app, clock: clock))
     app.brandKits = BrandKitRuntime(store: try BrandKitRegistration.store(config: config, override: overrides.brandAssetStore, tokens: tokens, http: outbound,
                                                                           now: { clock.now() }),
                                     maxConcurrent: config.brandKits.maxConcurrentIngestions)

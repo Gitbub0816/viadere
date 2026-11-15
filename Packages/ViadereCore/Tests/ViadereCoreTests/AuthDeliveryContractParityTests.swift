@@ -81,9 +81,11 @@ struct AuthDeliveryContractParityTests {
 
     @Test func displaySchemaMatchesTheEncodedDisplayObject() throws {
         let schema = try Self.schema("auth-delivery-display-v1.schema.json")
-        let display = AuthDeliveryDisplay(id: AuthDeliveryID(), method: .magicLink, purpose: .signIn, template: "auth.sign_in_link.v1", status: .queued, businessId: BusinessID(),
+        var display = AuthDeliveryDisplay(id: AuthDeliveryID(), method: .magicLink, purpose: .signIn, template: "auth.sign_in_link.v1", status: .queued, businessId: BusinessID(),
                                           businessName: "Northwind", expiresAt: Date(), createdAt: Date(), requestId: "r", destinationHost: "login.example.com",
                                           destinationStatement: "a.b.c", codeKind: .otp, variables: ["reference": "x"], silent: false)
+        display.linkMode = .viadere
+        display.authorityChallenge = "d.e.f"
         let encoded = try #require(JSONSerialization.jsonObject(with: try ViadereJSON.encode(display)) as? [String: Any])
         #expect(Set(encoded.keys) == Set((schema["properties"] as? [String: Any] ?? [:]).keys))
         #expect(Set(schema["required"] as? [String] ?? []).isSubset(of: Set(encoded.keys)))

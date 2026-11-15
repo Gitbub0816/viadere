@@ -62,4 +62,29 @@ extension APIRoutes {
     /// Scope `auth_deliveries:write`. `400 bad_request` (`invalid_grant`) for an unknown, expired, used or foreign code or a wrong verifier.
     public static let businessAuthLinkRedeem = Endpoint<AuthLinkRedeemRequest, AuthLinkRedeemResponse>(
         "business.authLinks.redeem", .POST, "/v1/business/auth-links/redeem", auth: .businessAPIKey)
+    /// Device-signed. `404` while `AUTH_DELIVERY_ENABLED` or `AUTH_LINK_SERVICE_ENABLED` is off; `401 evidence_invalid` for any refused factor.
+    public static let authDeliveryLinkEvidence = Endpoint<AuthLinkEvidenceRequest, AuthLinkEvidenceResponse>(
+        "authDeliveries.linkEvidence", .POST, "/v1/auth-deliveries/{deliveryId}/link-evidence", auth: .deviceSignedBearer)
+}
+
+/// `POST /v1/auth-deliveries/{id}/link-evidence` (ADR-0021 §5.3, link service): the device's `viadere-factor+jws` answering the delivery's own `link_open`
+/// challenge. The api relays it to the authority with the device's account, and only for the challenge it stored on this delivery; the authority
+/// verifies it and records the link code hash. Nothing here is a grant: the grant is signed only when the business redeems.
+public struct AuthLinkEvidenceRequest: Codable, Sendable, Hashable {
+    public var factor: String
+    public init(factor: String) { self.factor = factor }
+
+    enum CodingKeys: String, CodingKey { case factor }
+
+    public init(from decoder: any Decoder) throws {
+        try requireOnly(decoder, ["factor"])
+        factor = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .factor)
+        guard factor.utf8.count <= AuthorityJWS.maxBytes else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "factor")) }
+    }
+}
+
+/// The authority's verdict: `approve` (the device now opens the signed `return_url` with `#vdr_code=`) or `deny`.
+public struct AuthLinkEvidenceResponse: Codable, Sendable, Hashable {
+    public var decision: FactorDecision
+    public init(decision: FactorDecision) { self.decision = decision }
 }

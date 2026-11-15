@@ -19,6 +19,8 @@
     "request_id": { "type": "string" },
     "destination_host": { "type": "string" },
     "destination_statement": { "type": "string", "description": "Compact viadere-destination+jws the device verifies before Continue is enabled (ADR-0031 section 4)." },
+    "link_mode": { "enum": ["business", "viadere"], "description": "magic_link only: viadere for a link-service delivery (ADR-0021 section 5)." },
+    "authority_challenge": { "type": "string", "description": "Link service only: the compact viadere-challenge+jws (link_open) the device verifies against its pinned keys (ADR-0033 section 2)." },
     "code_kind": { "enum": ["otp", "totp"] },
     "variables": { "type": "object", "additionalProperties": { "type": "string" } },
     "silent": { "type": "boolean" }

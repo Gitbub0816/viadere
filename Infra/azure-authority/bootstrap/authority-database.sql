@@ -39,3 +39,13 @@ GRANT UPDATE (state) ON authority_seal_keys TO viadere_authority_admin;
 GRANT SELECT ON authority_recovery_codes TO viadere_authority_admin;
 GRANT UPDATE (state) ON authority_recovery_codes TO viadere_authority_admin;
 GRANT INSERT ON authority_audit_events TO viadere_authority_admin;
+
+-- 5. (Run after `ViadereAuthority migrate` created Authority.v3.) Tenant destination keys (ADR-0031 section 1): only the admin job adds or renews a
+--    key, and only after its proof of possession over a nonce the job issued; the serving authority reads them, signs records and applies the
+--    reduce-only revocations. Pinned-key revocations (ADR-0033 section 3.4) are recorded by the admin job and are append-only (trigger).
+GRANT INSERT, SELECT ON authority_registration_nonces TO viadere_authority_admin;
+GRANT UPDATE (expires_at, consumed_at) ON authority_registration_nonces TO viadere_authority_admin;
+GRANT INSERT, SELECT ON authority_tenant_keys TO viadere_authority_admin;
+GRANT UPDATE (public_key, allowed_hosts, display_name, status, not_after, registered_at, change_commit, revoked_at, revoke_reason) ON authority_tenant_keys TO viadere_authority_admin;
+GRANT INSERT, SELECT, UPDATE ON authority_tenant_records TO viadere_authority_admin;
+GRANT INSERT, SELECT ON authority_device_key_revocations TO viadere_authority_admin;

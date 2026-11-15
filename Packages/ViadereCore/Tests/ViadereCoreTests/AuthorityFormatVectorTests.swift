@@ -48,6 +48,9 @@ private func vectorCode(_ error: any Error) -> String {
         case .recoveryMismatch: "recovery_mismatch"
         }
     case let e as AuthDestinationStatementError: e.rawValue
+    case let e as AuthorityTenantRecordError: e.rawValue
+    case let e as AuthorityRevocationListError: e.rawValue
+    case let e as DestinationKeyRegistrationError: e.rawValue
     case let e as RecoverySealError:
         switch e {
         case .malformed: "malformed"
@@ -218,19 +221,66 @@ struct DeviceStatementVectorTests {
         }
     }
 
+    var sealKids: [String] { v.at("seal_kids").items.map(\.text) }
+
+    @Test func tenantRecords() throws {
+        let cases = v.at("tenant_records").items
+        #expect(cases.count >= 35)
+        for c in cases {
+            let name = c.at("name").text
+            let outcome: String
+            do {
+                let record = try AuthorityStatementVerifier.verifyTenantRecord(c.at("jws").text, pinnedKeys: pinned, revokedKids: Set(c.at("revoked_kids").items.map(\.text)),
+                                                                               environment: .staging, tenantId: c.at("tenant_id").text,
+                                                                               minimumSeq: c.at("minimum_seq").number, now: date(c.at("now").number))
+                #expect(try canonicalText(.object(record.payload)) == c.at("payload_canonical").text, "\(name)")
+                let kid = try AuthorityJWS.parse(c.at("jws").text, expectedType: AuthorityTenantRecord.type, allowedAlgorithms: ["ES256"]).kid
+                #expect(try AuthorityJWS.signingInput(alg: "ES256", kid: kid, typ: AuthorityTenantRecord.type, payload: record.payload) == signingInput(of: c.at("jws").text), "\(name)")
+                outcome = "accept"
+            } catch { outcome = vectorCode(error) }
+            #expect(outcome == c.at("expect").text, "\(name)")
+        }
+    }
+
+    @Test func revocationLists() throws {
+        let cases = v.at("revocation_lists").items
+        #expect(cases.count >= 20)
+        #expect(sealKids.count == 2)
+        for c in cases {
+            let name = c.at("name").text
+            let outcome: String
+            do {
+                let list = try AuthorityStatementVerifier.verifyRevocationList(c.at("jws").text, statementKeys: pinned, sealKids: sealKids,
+                                                                               alreadyRevoked: Set(c.at("already_revoked").items.map(\.text)),
+                                                                               environment: .staging, now: date(c.at("now").number))
+                let expected = c.at("revoked").items.map { "\($0.at("key_family").text)/\($0.at("kid").text)" }
+                #expect(list.revoked.map { "\($0.family.rawValue)/\($0.kid)" } == expected, "\(name)")
+                outcome = "accept"
+            } catch { outcome = vectorCode(error) }
+            #expect(outcome == c.at("expect").text, "\(name)")
+        }
+    }
+
     @Test("Each of the four statement types is refused by every verifier of another type")
     func crossType() {
         let cases = v.at("cross_typ").items
-        #expect(cases.count == 4 * 2 + 6)
+        #expect(cases.count == 4 * 4 + 12)
         for c in cases {
             let compact = c.at("jws").text
             let outcome: String
             do {
-                if c.at("verifier").text == AuthorityChallengeStatement.type {
+                switch c.at("verifier").text {
+                case AuthorityChallengeStatement.type:
                     _ = try AuthorityStatementVerifier.verifyChallenge(compact, pinnedKeys: pinned, environment: .staging, now: date(1_800_000_000))
-                } else {
+                case AuthorityKeyLogHead.type:
                     _ = try AuthorityStatementVerifier.verifyHead(compact, pinnedKeys: pinned, environment: .staging,
                                                                   ownKids: [], minimumSeq: 0, now: date(1_800_000_000))
+                case AuthorityTenantRecord.type:
+                    _ = try AuthorityStatementVerifier.verifyTenantRecord(compact, pinnedKeys: pinned, environment: .staging, tenantId: "tnt_example",
+                                                                          minimumSeq: 0, now: date(1_800_000_000))
+                default:
+                    _ = try AuthorityStatementVerifier.verifyRevocationList(compact, statementKeys: pinned, sealKids: sealKids, environment: .staging,
+                                                                            now: date(1_800_000_000))
                 }
                 outcome = "accept"
             } catch { outcome = vectorCode(error) }
@@ -290,6 +340,40 @@ struct AuthDestinationVectorTests {
             do { try s.verifyOpened(url: c.at("opened_url").text, allowedHosts: hosts); opened = "accept" } catch { opened = error.rawValue }
             #expect(opened == c.at("opened_expect").text, "\(name)")
         }
+    }
+
+    /// ADR-0031 §1.2: the registration proof of possession, including the revision 3.1 cases (reused nonce, expired and future-dated PoP, `hosts[]`
+    /// mismatch, wrong `iss`/`aud`). A nonce is consumed only when every other check passed.
+    @Test func registrationProofsOfPossession() async throws {
+        let r = v.at("registration")
+        let key = try signingKey(r.at("public_key"))
+        #expect(JWKThumbprint.p256(key) == r.at("kid").text)
+        let cases = r.at("cases").items
+        #expect(cases.count >= 25)
+        for c in cases {
+            let name = c.at("name").text
+            var consumeCalls = 0
+            let outcome: String
+            do {
+                _ = try await DestinationKeyRegistration.verify(c.at("jws").text, publicKey: key, tenantId: c.at("change_tenant").text, environment: .staging,
+                                                                hosts: Set(c.at("change_hosts").items.map(\.text)), expectedNonce: r.at("issued_nonce").text,
+                                                                now: date(c.at("now").number), consumeNonce: { consumeCalls += 1; return !c.at("nonce_consumed").flag })
+                outcome = "accept"
+            } catch { outcome = vectorCode(error) }
+            #expect(outcome == c.at("expect").text, "\(name)")
+            // Only a proof that passed every other check may reach the nonce compare-and-swap.
+            #expect(consumeCalls == (["accept", "nonce_reused"].contains(c.at("expect").text) ? 1 : 0), "\(name)")
+        }
+    }
+
+    @Test func theSDKRegistrationProofVerifies() async throws {
+        let key = SoftwareP256SigningKey()
+        let nonce = Base64URL.encode(SecureToken.randomBytes(32))
+        let now = date(1_800_000_000)
+        let compact = try await DestinationKeyRegistration.sign(tenantId: "ten_abc", hosts: ["login.example.com"], nonce: nonce, environment: .staging, key: key, issuedAt: now)
+        let verified = try await DestinationKeyRegistration.verify(compact, publicKey: try key.publicKey.signingKey(), tenantId: "ten_abc", environment: .staging,
+                                                                   hosts: ["login.example.com"], expectedNonce: nonce, now: now, consumeNonce: { true })
+        #expect(verified.kid == JWKThumbprint.p256(try key.publicKey.signingKey()))
     }
 
     /// ADR-0031 §3 allows only `sign_in`, `step_up` and `verify_contact`; Core accepts any `AuthDeliveryPurpose`. Recorded as a finding, not fixed here.

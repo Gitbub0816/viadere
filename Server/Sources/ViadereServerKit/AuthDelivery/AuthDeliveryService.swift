@@ -14,6 +14,8 @@ struct AuthSecretPayload: Codable, Sendable {
 struct AuthDeliveryService {
     let db: any Database
     let ctx: ServerContext
+    /// The authority, for link-service creates only (the route passes `req.application.authorityTransport`).
+    var authority: (any AuthorityTransport)? = nil
 
     var settings: AuthDeliverySettings { ctx.config.authDelivery }
 
@@ -78,6 +80,9 @@ struct AuthDeliveryService {
         var channels: [AuthDeliveryChannel]
         var destination: AuthDestinationCheck.Result?
         var callback: UUID?
+        /// Link service: the delivery id chosen before the authority challenge (which names it), and that challenge.
+        var deliveryId: UUID? = nil
+        var linkChallenge: AuthorityChallengeCreateResponse? = nil
     }
 
     func create(principal: BusinessPrincipal, body: Data, key: String) async throws -> (value: AuthDeliveryView, created: Bool) {
@@ -169,8 +174,30 @@ struct AuthDeliveryService {
         let daily = await ctx.limiter.allow("authdl-subject-day", key: scope, rule: settings.subjectDailyRate)
         var silent = !(burst && daily)
         if try await reportedDenials(businessId: businessId.uuid, consumerId: relationship.consumerId) >= settings.reportThreshold { silent = true }
-        return Plan(relationshipId: relationship.id!, consumerId: relationship.consumerId, sandbox: consumer.isSandbox, silent: silent, lifetime: lifetime, channels: channels,
-                    destination: destination, callback: callback)
+        var plan = Plan(relationshipId: relationship.id!, consumerId: relationship.consumerId, sandbox: consumer.isSandbox, silent: silent, lifetime: lifetime,
+                        channels: channels, destination: destination, callback: callback)
+        // 4. Link service (ADR-0021 §5.2): the authority challenge, only for a customer the delivery will reach. References only; the authority checks
+        //    the client, its exact return URL and its business, and builds the display itself.
+        if let link = destination?.link {
+            guard let transport = authority else {
+                throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
+            }
+            let deliveryId = UUID()
+            let challenge = AuthorityChallengeCreateRequest(purpose: .linkOpen, link: .init(
+                linkClientId: link.clientId, returnURL: link.returnURL, deliveryId: AuthDeliveryID(deliveryId).description, codeChallenge: link.codeChallenge,
+                purpose: request.purpose.rawValue, crossDevice: false, businessId: businessId.uuid))
+            let created: (status: Int, response: AuthorityChallengeCreateResponse?)
+            do { created = try await AuthorityClient(transport: transport).createChallenge(challenge) } catch {
+                throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
+            }
+            guard let response = created.response else {
+                // One answer for every refusal: an unknown, suspended or foreign link client, or a return URL it did not register.
+                throw APIError.validation("The link client or return_url is not registered for your business.", details: ["destination.link_client_id": "not_registered"])
+            }
+            plan.deliveryId = deliveryId
+            plan.linkChallenge = response
+        }
+        return plan
     }
 
     /// "This wasn't me" reports for one (business, customer) inside the window. A `destination_unverified` denial is an integrity signal about the business's
@@ -185,7 +212,7 @@ struct AuthDeliveryService {
     func insert(principal: BusinessPrincipal, request: AuthDeliveryCreateRequest, plan: Plan, hash: String) async throws -> AuthDeliveryRecord {
         let now = ctx.now
         let row = AuthDeliveryRecord()
-        row.id = UUID()
+        row.id = plan.deliveryId ?? UUID()
         row.businessId = principal.businessId.uuid
         row.requestId = request.requestId
         row.requestHash = hash
@@ -214,6 +241,11 @@ struct AuthDeliveryService {
         if let destination = plan.destination {
             row.destinationHost = destination.host
             row.destinationStatement = destination.statement.isEmpty ? nil : destination.statement
+            if let link = destination.link, let challenge = plan.linkChallenge {
+                row.linkClientId = link.clientId
+                row.linkChallengeId = challenge.challengeId
+                row.linkStatement = challenge.statement
+            }
         }
         row.codeKind = request.otp?.codeKind.rawValue
         try await row.create(on: db)

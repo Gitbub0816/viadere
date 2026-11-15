@@ -187,7 +187,7 @@ final class AuthorityHarness: @unchecked Sendable {
     func createLinkChallenge(crossDevice: Bool) async throws -> AuthorityChallengeCreateResponse {
         let body = AuthorityChallengeCreateRequest(purpose: .linkOpen, link: .init(linkClientId: Self.linkClientId, returnURL: Self.returnURL,
                                                                                    deliveryId: AuthDeliveryID().description, codeChallenge: Self.challenge(for: Self.codeVerifier),
-                                                                                   purpose: "sign_in", crossDevice: crossDevice))
+                                                                                   purpose: "sign_in", crossDevice: crossDevice, businessId: Self.businessId))
         let result = try await call(.POST, AuthorityRoute.challenges, json: try ViadereJSON.encode(body))
         XCTAssertEqual(result.status, .created, String(decoding: result.body, as: UTF8.self))
         return try ViadereJSON.decode(AuthorityChallengeCreateResponse.self, from: result.body)

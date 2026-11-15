@@ -95,8 +95,12 @@ public struct AuthorityChallengeCreateRequest: Codable, Sendable, Hashable {
         public var codeChallenge: String
         public var purpose: String
         public var crossDevice: Bool
+        /// The business that creates the delivery (the api names it from the authenticated API key). The authority refuses a `link_open` challenge
+        /// unless it equals the link client's registered business: one tenant can never present another tenant's link client.
+        public var businessId: UUID?
 
-        public init(linkClientId: String, returnURL: String, deliveryId: String, codeChallenge: String, purpose: String, crossDevice: Bool) {
+        public init(linkClientId: String, returnURL: String, deliveryId: String, codeChallenge: String, purpose: String, crossDevice: Bool, businessId: UUID? = nil) {
+            self.businessId = businessId
             self.linkClientId = linkClientId
             self.returnURL = returnURL
             self.deliveryId = deliveryId
@@ -107,11 +111,11 @@ public struct AuthorityChallengeCreateRequest: Codable, Sendable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case linkClientId = "link_client_id", returnURL = "return_url", deliveryId = "delivery_id", codeChallenge = "code_challenge", purpose
-            case crossDevice = "cross_device"
+            case crossDevice = "cross_device", businessId = "business_id"
         }
 
         public init(from decoder: any Decoder) throws {
-            try authorityRequireOnly(decoder, ["link_client_id", "return_url", "delivery_id", "code_challenge", "purpose", "cross_device"])
+            try authorityRequireOnly(decoder, ["link_client_id", "return_url", "delivery_id", "code_challenge", "purpose", "cross_device", "business_id"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             linkClientId = try c.decode(String.self, forKey: .linkClientId)
             returnURL = try c.decode(String.self, forKey: .returnURL)
@@ -119,6 +123,7 @@ public struct AuthorityChallengeCreateRequest: Codable, Sendable, Hashable {
             codeChallenge = try c.decode(String.self, forKey: .codeChallenge)
             purpose = try c.decode(String.self, forKey: .purpose)
             crossDevice = try c.decode(Bool.self, forKey: .crossDevice)
+            businessId = try c.decodeIfPresent(UUID.self, forKey: .businessId)
         }
     }
 

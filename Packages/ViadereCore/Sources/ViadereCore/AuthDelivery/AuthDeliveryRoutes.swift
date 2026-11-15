@@ -31,6 +31,40 @@ public struct AuthWebhookTestResponse: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey { case eventId = "event_id" }
 }
 
+/// `GET /v1/auth-tenants/{tenantId}/destination-keys` (ADR-0031 §2): the authority-signed tenant record and the latest pinned-key revocation list,
+/// relayed **unchanged** by the api, which signs neither. The device verifies both itself (`AuthorityStatementVerifier.verifyTenantRecord`,
+/// `verifyRevocationList`); nothing in this object is trusted before that.
+public struct AuthTenantDestinationKeys: Codable, Sendable, Hashable {
+    /// The compact `viadere-tenant-keys+jws`.
+    public var record: String
+    /// The compact `viadere-device-keys-revocation+jws`, when the authority has one.
+    public var revocationList: String?
+
+    public init(record: String, revocationList: String? = nil) {
+        self.record = record
+        self.revocationList = revocationList
+    }
+
+    enum CodingKeys: String, CodingKey { case record, revocationList = "revocation_list" }
+
+    public init(from decoder: any Decoder) throws {
+        try requireOnly(decoder, ["record", "revocation_list"])
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        record = try c.decode(String.self, forKey: .record)
+        revocationList = try c.decodeIfPresent(String.self, forKey: .revocationList)
+        guard record.utf8.count <= AuthorityJWS.maxBytes, (revocationList?.utf8.count ?? 0) <= AuthorityJWS.maxBytes else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "statement too long"))
+        }
+    }
+}
+
+extension APIRoutes {
+    /// Device: the tenant record and revocation list for a business-mode link (ADR-0031 §2). `404` while `AUTH_DELIVERY_ENABLED` or
+    /// `AUTH_DESTINATION_RECORDS_ENABLED` is off; `503` when no authority answers (the device then shows S-LINK-11 and the link waits).
+    public static let authTenantDestinationKeys = Endpoint<EmptyBody, AuthTenantDestinationKeys>(
+        "authTenants.destinationKeys", .GET, "/v1/auth-tenants/{tenantId}/destination-keys", auth: .deviceSignedBearer)
+}
+
 extension APIRoutes {
     // MARK: Auth delivery (ADR-0020; behind `AUTH_DELIVERY_ENABLED`, off by default in staging and production)
     /// Creates a `magic_link`, `otp` or `notice` delivery. Scope `auth_deliveries:write`; `Idempotency-Key` required; the tenant is the API key's business.
@@ -67,7 +101,7 @@ extension APIRoutes {
         businessAuthDeliveryCreate.descriptor, businessAuthDeliveryGet.descriptor, businessAuthDeliveryCancel.descriptor, businessAuthDeliveryComplete.descriptor,
         businessWebhookUpdate.descriptor, businessAuthWebhookTest.descriptor,
         authDeliveries.descriptor, authDeliveryGet.descriptor, authDeliveryOpen.descriptor, authDeliveryDeny.descriptor,
-    ] + authApprovalEndpoints + [businessAuthLinkRedeem.descriptor]
+    ] + authApprovalEndpoints + [businessAuthLinkRedeem.descriptor, authTenantDestinationKeys.descriptor, authDeliveryLinkEvidence.descriptor]
 }
 
 /// What a push for an auth delivery may contain (ADR-0020 section 6.2, ST-PRIV-02): a generic alert, a category, an opaque thread id and the delivery id.

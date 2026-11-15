@@ -57,9 +57,11 @@ struct LiveAuthDeliveryAPITests {
         #expect(!display.businessVerified, "the name is the api's, not the authority record's")
         #expect(pathAndQuery(try #require(transport.requests.first).url) == "/v1/auth-deliveries/\(AuthDeliveryID(id).description)")
         #expect(transport.requests.allSatisfy { $0.method == .GET }, "looking never opens")
-        // The item has no place for a URL, a code, the statement or the variables.
+        // The item has no place for a URL, a code or the variables. The destination statement is a digest of the URL, not a bearer value (class T,
+        // ADR-0031 §3); it rides along, with the request id, only so the link screen can verify it (ADR-0031 §4).
         let labels = Set(Mirror(reflecting: try await api.item(deliveryId: id)).children.compactMap(\.label))
-        #expect(labels == ["deliveryId", "kind", "businessId", "business", "host", "purpose", "createdAt", "expiresAt", "state", "silent"])
+        #expect(labels == ["deliveryId", "kind", "businessId", "business", "host", "purpose", "createdAt", "expiresAt", "state", "silent", "requestId",
+                           "destinationStatement", "linkService"])
 
         await #expect(throws: AuthDeliveryError.failed) { _ = try await api.item(deliveryId: UUID()) }
     }

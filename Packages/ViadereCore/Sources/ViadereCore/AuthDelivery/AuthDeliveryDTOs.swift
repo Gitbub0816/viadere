@@ -4,7 +4,7 @@ import Foundation
 // and `audience` included, fails decoding (the server answers `422 validation_failed`). The tenant is the authenticated API key's business,
 // never a field of the payload (spec Appendix A).
 
-private struct StrictKey: CodingKey {
+struct StrictKey: CodingKey {
     var stringValue: String
     var intValue: Int? { nil }
     init?(stringValue: String) { self.stringValue = stringValue }
@@ -12,7 +12,7 @@ private struct StrictKey: CodingKey {
 }
 
 /// Refuses a JSON object with any member outside `allowed`.
-private func requireOnly(_ decoder: any Decoder, _ allowed: Set<String>) throws {
+func requireOnly(_ decoder: any Decoder, _ allowed: Set<String>) throws {
     let keys = try decoder.container(keyedBy: StrictKey.self).allKeys.map(\.stringValue)
     guard Set(keys).isSubset(of: allowed) else {
         throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown member"))
@@ -290,10 +290,17 @@ public struct AuthDeliveryDisplay: Codable, Sendable, Hashable {
     public var variables: [String: String]?
     /// Delivered silently (no alert push) because a per-subject budget was exhausted: the inbox still shows it (ADR-0020 section 8).
     public var silent: Bool
+    /// `magic_link` only: `viadere` for a link-service delivery (ADR-0021 §5), absent for a business link.
+    public var linkMode: AuthLinkMode?
+    /// Link service only: the authority's compact `viadere-challenge+jws` (purpose `link_open`), relayed unchanged; the device verifies it against its
+    /// pinned keys and renders exactly its display (ADR-0033 §2). Never a bearer value.
+    public var authorityChallenge: String?
 
     public init(id: AuthDeliveryID, method: AuthDeliveryMethod, purpose: AuthDeliveryPurpose, template: String, status: AuthDeliveryStatus,
                 businessId: BusinessID, businessName: String, expiresAt: Date, createdAt: Date, requestId: String, destinationHost: String? = nil,
                 destinationStatement: String? = nil, codeKind: AuthCodeKind? = nil, variables: [String: String]? = nil, silent: Bool = false) {
+        self.linkMode = nil
+        self.authorityChallenge = nil
         self.id = id
         self.method = method
         self.purpose = purpose
@@ -314,7 +321,7 @@ public struct AuthDeliveryDisplay: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, method, purpose, template, status, businessId = "business_id", businessName = "business_name", expiresAt = "expires_at"
         case createdAt = "created_at", requestId = "request_id", destinationHost = "destination_host", destinationStatement = "destination_statement"
-        case codeKind = "code_kind", variables, silent
+        case codeKind = "code_kind", variables, silent, linkMode = "link_mode", authorityChallenge = "authority_challenge"
     }
 }
 

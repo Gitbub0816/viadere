@@ -59,7 +59,7 @@ final class AuthLinkRedemptionTests: XCTestCase {
         let deviceKey: SoftwareP256SigningKey
     }
 
-    func makeAuthority(businessId: UUID, accountId: UUID) async throws -> Authority {
+    static func makeAuthority(businessId: UUID, accountId: UUID) async throws -> Authority {
         let kms = LocalKMS()
         for name in ["grant-signing", "device-statement-signing"] { kms.createSigningKey(name) }
         let statementKey = try await kms.publicKey(keyRef: "device-statement-signing"), grantKey = try await kms.publicKey(keyRef: "grant-signing")
@@ -94,9 +94,10 @@ final class AuthLinkRedemptionTests: XCTestCase {
     }
 
     /// The device path (relayed by the api in production): challenge with the authority-built display, then a same-device factor with a code hash.
-    func approveSameDevice(_ authority: Authority, code: String) async throws -> String {
+    func approveSameDevice(_ authority: Authority, code: String, businessId: UUID) async throws -> String {
         let request = AuthorityChallengeCreateRequest(purpose: .linkOpen, link: .init(linkClientId: Self.linkClient, returnURL: Self.returnURL,
-            deliveryId: AuthDeliveryID().description, codeChallenge: Base64URL.encode(Data(SHA256.hash(data: Data(Self.verifier.utf8)))), purpose: "sign_in", crossDevice: false))
+            deliveryId: AuthDeliveryID().description, codeChallenge: Base64URL.encode(Data(SHA256.hash(data: Data(Self.verifier.utf8)))), purpose: "sign_in", crossDevice: false,
+            businessId: businessId))
         let created = try await InProcessAuthorityTransport(app: authority.app).send(method: .POST, path: AuthorityRoute.challenges, contentType: "application/json",
                                                                                     body: try ViadereJSON.encode(request))
         XCTAssertEqual(created.status, 201)
@@ -128,11 +129,11 @@ final class AuthLinkRedemptionTests: XCTestCase {
         try await withHarness({ $0.authDelivery.linkServiceEnabled = true }) { h in
             let shop = try await h.makeBusiness(name: "Shop", handle: "acmelink")
             let other = try await h.makeBusiness(name: "Other", handle: "globexlink")
-            let authority = try await self.makeAuthority(businessId: shop.id.uuid, accountId: UUID())
+            let authority = try await Self.makeAuthority(businessId: shop.id.uuid, accountId: UUID())
             box.value = authority
             h.app.authorityTransport = InProcessAuthorityTransport(app: authority.app)
             let code = Base64URL.encode(SecureToken.randomBytes(32))
-            _ = try await self.approveSameDevice(authority, code: code)
+            _ = try await self.approveSameDevice(authority, code: code, businessId: shop.id.uuid)
             let body = try ViadereJSON.encode(AuthLinkRedeemRequest(linkClientId: Self.linkClient, code: code, codeVerifier: Self.verifier))
             // Another tenant's API key: the authority compares the authenticated business with its client record.
             await XCTAssertEqualAsync(try await h.business(other, .POST, "/v1/business/auth-links/redeem", body: body).status, .badRequest)

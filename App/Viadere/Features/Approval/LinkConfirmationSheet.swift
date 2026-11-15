@@ -17,10 +17,11 @@ struct LinkConfirmationScreen: View {
 
     init(deliveryId: UUID) {
         let services = AppEnvironment.services
-        // Business-signed destinations are verified against an authority-signed tenant record (ADR-0031), which arrives in Stage 6: until
-        // then `FailClosedDestinationVerifier` is the only verifier and nothing is ever opened.
+        // Business-signed destinations are verified against an authority-signed tenant record (ADR-0031). `services.destinationVerifier` is
+        // `FailClosedDestinationVerifier` unless `authDeliveryFlags.destinationVerification` is on and the build pins authority keys
+        // (`DestinationVerifiers.make`); the flag ships off, so nothing is ever opened until the owner enables it.
         _model = State(initialValue: LinkConfirmationViewModel(
-            deliveryId: deliveryId, api: services.authDelivery, verifier: FailClosedDestinationVerifier(), opener: UIApplicationURLOpener()))
+            deliveryId: deliveryId, api: services.authDelivery, verifier: services.destinationVerifier, opener: UIApplicationURLOpener()))
     }
 
     var body: some View {
