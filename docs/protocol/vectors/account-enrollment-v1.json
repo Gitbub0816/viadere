@@ -1,0 +1,43 @@
+{
+  "accountId" : "6f1c2a4e-9b3d-4c5e-8f70-112233445566",
+  "appAttestClientData" : "VIADERE-APPATTEST-ENROLL-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\nQ2hhbGxlbmdlLWZvci1hY2NvdW50LWVucm9sbG1lbnQtdmVjdG9y\n5f0ae9036f7e00756197776430682f298e8844039615a27b404abcdfef159cce",
+  "appAttestClientDataHashHex" : "e0df60c8e1ae9847de946185cebc783b07016a7bbacfbc21f42a78ecebe0d2b9",
+  "challenge" : "Q2hhbGxlbmdlLWZvci1hY2NvdW50LWVucm9sbG1lbnQtdmVjdG9y",
+  "description" : "Device-first account creation (SECURITY.md 2.5a): key proofs (VIADERE-ENROLL-V1) and the App Attest client data (VIADERE-APPATTEST-ENROLL-V1) over the reserved account id, and the user-verified proof that adds a recovery credential (VIADERE-CONFIRM-V1, subject recoveryCredential, subjectId = the server ceremony id). Signatures are ECDSA P-256 / SHA-256, raw r||s, base64url, low-S; verify them, do not compare them (ECDSA is randomized).",
+  "keyListDigest" : "5f0ae9036f7e00756197776430682f298e8844039615a27b404abcdfef159cce",
+  "keys" : [
+    {
+      "algorithm" : "ES256",
+      "proof" : "2W22gfC8EAXE7Vlh5A30B9mcAYr5L0rhV4eY0pP1WOkBLbsd0XKJTiTY7w9dKnkkMkQOoz91qQX5zEVeiycVRA",
+      "proofMessage" : "VIADERE-ENROLL-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\nQ2hhbGxlbmdlLWZvci1hY2NvdW50LWVucm9sbG1lbnQtdmVjdG9y\nrequest\nBHBc4wGaNAMaZNonIulz8jnyUnT6_juzZ_7jsyj5XfstPIZhODMGU6LNPKx1K-AlpGO6ocW74f-YmUsacCthbbg",
+      "publicKey" : "BHBc4wGaNAMaZNonIulz8jnyUnT6_juzZ_7jsyj5XfstPIZhODMGU6LNPKx1K-AlpGO6ocW74f-YmUsacCthbbg",
+      "purpose" : "request"
+    },
+    {
+      "algorithm" : "ES256",
+      "proof" : "LkZ9P-38uXiLq5pIb8NrxHRgOq44tgOk_mTnuEFxXYsUQmOEuP9JNdsJHejMTufLKJmSqQAkgnMSYZZBA6UfDA",
+      "proofMessage" : "VIADERE-ENROLL-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\nQ2hhbGxlbmdlLWZvci1hY2NvdW50LWVucm9sbG1lbnQtdmVjdG9y\napprovalUserPresence\nBI6Ku196A6GQGsZclPM3HWZq_iISc4nlYPMm0Eg1huv_2s8XRqr0rh6rQnTlRQgbVxC69Z1BS0idYCSH8aIC1PM",
+      "publicKey" : "BI6Ku196A6GQGsZclPM3HWZq_iISc4nlYPMm0Eg1huv_2s8XRqr0rh6rQnTlRQgbVxC69Z1BS0idYCSH8aIC1PM",
+      "purpose" : "approvalUserPresence"
+    },
+    {
+      "algorithm" : "ES256",
+      "proof" : "HYdPMG3qJ7AW33CAU8H1uiBoaDqM1RjzTAswR7op3BFdsTXu1sCIhMb_X3k4zpCuUncSC0zAVpwT4yieP9xsMQ",
+      "proofMessage" : "VIADERE-ENROLL-V1\n6f1c2a4e-9b3d-4c5e-8f70-112233445566\nQ2hhbGxlbmdlLWZvci1hY2NvdW50LWVucm9sbG1lbnQtdmVjdG9y\napprovalBiometric\nBPuy1rjd4JXnFkl8tHqOQpVMPGQVwsl1aitenq2vTRMaZ5WdF-BH1YXdLoWFsBI60VQ1h0Cc2zdef2g6NYNddCY",
+      "publicKey" : "BPuy1rjd4JXnFkl8tHqOQpVMPGQVwsl1aitenq2vTRMaZ5WdF-BH1YXdLoWFsBI60VQ1h0Cc2zdef2g6NYNddCY",
+      "purpose" : "approvalBiometric"
+    }
+  ],
+  "name" : "account-enrollment-v1",
+  "recoveryCredentialProof" : {
+    "assurance" : "devicePasscode",
+    "deviceId" : "a1b2c3d4-e5f6-4789-8abc-def012345678",
+    "publicKey" : "BI6Ku196A6GQGsZclPM3HWZq_iISc4nlYPMm0Eg1huv_2s8XRqr0rh6rQnTlRQgbVxC69Z1BS0idYCSH8aIC1PM",
+    "signature" : "7HSAvAVwmg4wYTV9K3rFgM77B4b9ADrqjD-B-vY_ZOAy6e64f73ow-BZJfIoNRdtAP0idLE1h4IymVHRysl91w",
+    "signedAt" : "2027-01-15T08:00:00.123Z",
+    "signingInput" : "VIADERE-CONFIRM-V1\nrecoveryCredential\n0b4f8c1a-2d3e-4f50-9a6b-7c8d9e0f1a2b\na1b2c3d4-e5f6-4789-8abc-def012345678\n2027-01-15T08:00:00.123Z\ndevicePasscode",
+    "subject" : "recoveryCredential",
+    "subjectId" : "0b4f8c1a-2d3e-4f50-9a6b-7c8d9e0f1a2b"
+  },
+  "version" : 1
+}

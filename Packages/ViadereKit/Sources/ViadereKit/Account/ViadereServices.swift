@@ -1,0 +1,254 @@
+import Foundation
+import ViadereCore
+
+/// The object graph, built once at launch and shared by the app, extensions and previews.
+public struct ViadereServices: Sendable {
+    public var configuration: ViadereConfiguration
+    public var api: any ViadereAPI
+    public var sessions: SessionManager
+    public var keys: any DeviceKeyStore
+    public var records: any DeviceRecordStore
+    public var preferences: any PreferencesStore
+    public var secrets: any SecretStore
+    public var passkeys: any PasskeyService
+    public var notificationPermission: any NotificationPermissionService
+    public var appLock: any AppLockAuthenticator
+    /// Wipes notifications, Live Activities, watch context and dynamic categories on sign-out (app supplies it).
+    public var residue: any LocalResidueCleaner
+    /// Fires when the server stops trusting this device; `AppModel` wipes local state in response.
+    public let revocation: DeviceRevocationNotifier
+    /// True in the App Clip: it enrolls a request-key-only device and never holds approval keys.
+    public var isAppClip: Bool
+    /// App Attest for enrollment (`DeviceCheckAppAttest` on device; unsupported on the Simulator and in extensions).
+    public var appAttest: any AppAttestProviding
+    public var clock: @Sendable () -> Date
+    /// The Approve v2 API (`nil` in extensions, the App Clip and tests that do not use it).
+    public var approveAPI: (any ApproveAPI)?
+    /// The Organization API (alerts, benefits, businesses; `nil` in extensions and the App Clip).
+    public var organizationAPI: (any OrganizationAPI)?
+    /// Hosted Loops (consent, instances, keys; `nil` in the App Clip and extensions that do not render Loops).
+    public var loopsAPI: (any LoopsAPI)?
+    /// Brand Kits (`nil` in the App Clip). Synchronous reads; no security flow awaits it.
+    public var brandKits: BrandKitStore?
+    /// Auth delivery (the inbox, the display object, one-time codes, reduce-only answers): `LiveAuthDeliveryAPI` in the app and its
+    /// extensions; the App Clip and bare test graphs keep `UnavailableAuthDeliveryAPI`, where every call fails closed.
+    public var authDelivery: any AuthDeliveryAPI = UnavailableAuthDeliveryAPI()
+    /// Posts the local "Deny not sent yet" notice (N-09). The app supplies the UserNotifications implementation.
+    public var localSecurityNotices: any LocalSecurityNoticePosting = NoLocalSecurityNotices()
+    /// "Sign in with Viadere" on the device (ADR-0024): challenge statements, factor answers and the consent list. Fails closed when absent.
+    public var oidc: any OIDCDeviceAPI = UnavailableOIDCDeviceAPI()
+    /// The link service's device calls (`link_mode: "viadere"`, SECURITY.md §2.110): fetch the delivery's authority challenge, send the signed answer.
+    public var linkService: any LinkServiceDeviceAPI = UnavailableLinkServiceDeviceAPI()
+    /// Reads CKey Safe Actions from the scanner (SECURITY.md §2.104). `nil` in the App Clip and extensions: every Safe Action is refused.
+    public var safeActionReader: SafeActionReader?
+    /// Switches for pieces that wait on the authority (Stage 6). `.shipping` is all off.
+    public var authDeliveryFlags: AuthDeliveryFlags = .shipping
+    /// The business-link destination check (ADR-0031 §4). `FailClosedDestinationVerifier` unless `authDeliveryFlags.destinationVerification` is on and the
+    /// build pins authority statement keys (`DestinationVerifiers.make`); every business link then fails closed and nothing is opened.
+    public var destinationVerifier: any DestinationVerifying = FailClosedDestinationVerifier()
+    /// The Home Screen widget's snapshot writer (numbers only). The app sets it; extensions, the App Clip and tests leave it `nil`.
+    public var homeWidget: HomeWidgetWriter?
+    /// Device pairing (§2.107): adding a device from a trusted one. Fails closed when absent (extensions, the App Clip).
+    public var devicePairingAPI: any DevicePairingAPI = UnavailableDevicePairingAPI()
+    /// Message images (SECURITY.md §2.113). `nil` in the App Clip and extensions: the composer then offers no photo picker.
+    public var attachmentsAPI: (any MessageAttachmentsAPI)?
+
+    public var account: AccountService {
+        AccountService(api: api, sessions: sessions, passkeys: passkeys, keys: keys, records: records,
+                       preferences: preferences, secrets: secrets, residue: residue, isAppClip: isAppClip, appAttest: appAttest,
+                       clock: clock)
+    }
+
+    public var approvals: ApprovalService { ApprovalService(api: api, keys: keys, records: records, clock: clock) }
+
+    /// Binding `approve_estimate` approvals of Loops (WP-4.4): the device-bound biometric key over the challenge's context digest.
+    public var loopApprovals: LoopApprovalSigner { LoopApprovalSigner(keys: keys, records: records, clock: clock) }
+
+    public var confirmations: ConfirmationService { ConfirmationService(api: api, keys: keys, records: records, clock: clock) }
+
+    public var notificationHandler: NotificationActionHandler {
+        NotificationActionHandler(api: api, approvals: approvals, clock: clock, authDelivery: authDelivery, notices: localSecurityNotices)
+    }
+
+    public var notificationEnricher: NotificationEnricher { NotificationEnricher(api: api, preferences: preferences, clock: clock) }
+
+    public init(configuration: ViadereConfiguration, api: any ViadereAPI, sessions: SessionManager, keys: any DeviceKeyStore,
+                records: any DeviceRecordStore, preferences: any PreferencesStore, secrets: any SecretStore,
+                passkeys: any PasskeyService, notificationPermission: any NotificationPermissionService,
+                appLock: any AppLockAuthenticator, residue: any LocalResidueCleaner = NoLocalResidueCleaner(),
+                revocation: DeviceRevocationNotifier = DeviceRevocationNotifier(), isAppClip: Bool = false,
+                appAttest: any AppAttestProviding = UnavailableAppAttest(),
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.configuration = configuration
+        self.api = api
+        self.sessions = sessions
+        self.keys = keys
+        self.records = records
+        self.preferences = preferences
+        self.secrets = secrets
+        self.passkeys = passkeys
+        self.notificationPermission = notificationPermission
+        self.appLock = appLock
+        self.residue = residue
+        self.revocation = revocation
+        self.isAppClip = isAppClip
+        self.appAttest = appAttest
+        self.clock = clock
+    }
+
+    // MARK: Live
+
+    #if canImport(Security) && canImport(LocalAuthentication) && !os(watchOS)
+    /// The production graph: Keychain-backed storage, Secure Enclave keys (software fallback only in DEBUG on the
+    /// simulator), pinned URLSession transport, device-signed API client with single-flight refresh.
+    /// - Parameters:
+    ///   - passkeys: supply `ApplePasskeyService()` from the iOS app; extensions don't need one.
+    public static func live(configuration: ViadereConfiguration, passkeys: any PasskeyService = UnavailablePasskeyService(),
+                            notificationPermission: any NotificationPermissionService = MockNotificationPermissionService(result: false),
+                            appLock: any AppLockAuthenticator = MockAppLockAuthenticator(succeeds: false),
+                            residue: any LocalResidueCleaner = NoLocalResidueCleaner(), isAppClip: Bool = false,
+                            appAttest: any AppAttestProviding = Self.systemAppAttest()) -> ViadereServices {
+        let secrets = KeychainSecretStore(service: configuration.keychainService, accessGroup: configuration.keychainAccessGroup)
+        let keys = makeKeyStore(configuration: configuration, secrets: secrets)
+        let records = SecretDeviceRecordStore(secrets: secrets)
+        // The refresh token is only readable while the phone is unlocked; the access token (for the notification
+        // extension's fetch) stays readable after first unlock.
+        let refreshSecrets = KeychainSecretStore(service: configuration.keychainService, accessGroup: configuration.keychainAccessGroup,
+                                                 accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
+        let tokens = SecretTokenStore(secrets: secrets, refreshSecrets: refreshSecrets)
+        let transport = URLSessionTransport(configuration: configuration)
+        let signer = DeviceRequestSigner(records: records, keys: keys)
+        let executor = RequestExecutor(baseURL: configuration.apiBaseURL, transport: transport, signer: signer)
+        // The app and its extensions rotate the same session; serialize that across processes (single-use refresh tokens).
+        let groupID = configuration.appGroupID
+        let lock = makeRefreshLock(appGroupID: groupID)
+        let sessions = SessionManager(store: tokens, refresher: APITokenRefresher(executor: executor), lock: lock)
+        let revocation = DeviceRevocationNotifier()
+        let client = APIClient(executor: executor, sessions: sessions, onDeviceRejected: { revocation.notify() })
+        var services = ViadereServices(configuration: configuration, api: LiveViadereAPI(client: client), sessions: sessions, keys: keys,
+                               records: records, preferences: UserDefaultsPreferences(suiteName: groupID.isEmpty ? nil : groupID),
+                               secrets: secrets, passkeys: passkeys, notificationPermission: notificationPermission, appLock: appLock,
+                               residue: residue, revocation: revocation, isAppClip: isAppClip, appAttest: appAttest)
+        if !isAppClip {
+            services.approveAPI = LiveApproveAPI(client: client)
+            services.authDelivery = LiveAuthDeliveryAPI(client: client, flags: .forConfiguration(configuration))
+            services.oidc = LiveOIDCDeviceAPI(client: client)
+            services.linkService = LiveLinkServiceDeviceAPI(client: client)
+            // Request information comes from the issuer's own host over the app's transport, with no session and no device signature.
+            services.safeActionReader = SafeActionReader(configuration: configuration,
+                                                         replay: PreferencesSafeActionReplayStore(preferences: services.preferences), transport: transport)
+            services.devicePairingAPI = LiveDevicePairingAPI(client: client)
+            services.attachmentsAPI = LiveMessageAttachmentsAPI(client: client)
+            services.authDeliveryFlags = .forConfiguration(configuration)
+            services.destinationVerifier = DestinationVerifiers.make(flags: services.authDeliveryFlags, fetcher: LiveTenantDestinationKeys(client: client),
+                                                                     secrets: secrets, environment: configuration.authorityEnvironment,
+                                                                     pinnedKeys: AuthorityStatementKeyPins.effective(configuration: configuration),
+                                                                     sealKids: AuthorityPinnedKeys.sealKids(configuration.authorityEnvironment))
+            services.organizationAPI = LiveOrganizationAPI(client: client)
+            services.loopsAPI = LiveLoopsAPI(client: client)
+            services.brandKits = BrandKitStore(api: LiveBrandKitAPI(client: client), assets: TransportBrandAssetFetcher(transport: transport),
+                                               cache: makeBrandKitCache(appGroupID: groupID), keys: configuration.brandManifestKeys,
+                                               apiHost: configuration.apiBaseURL.host)
+        }
+        return services
+    }
+
+    /// The Brand Kit cache in the app group (shared with the notification service extension), or memory when there is no container.
+    static func makeBrandKitCache(appGroupID: String) -> any BrandKitCache {
+        guard !appGroupID.isEmpty, let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
+            return InMemoryBrandKitCache()
+        }
+        return FileBrandKitCache(directory: container.appendingPathComponent("BrandKits", isDirectory: true))
+    }
+
+    /// `DCAppAttestService` where DeviceCheck exists, "unsupported" elsewhere.
+    public static func systemAppAttest() -> any AppAttestProviding {
+        #if canImport(DeviceCheck)
+        return DeviceCheckAppAttest()
+        #else
+        return UnavailableAppAttest()
+        #endif
+    }
+
+    /// The cross-process refresh lock. With no app group (the App Clip, which has no extension sharing its session)
+    /// a single-process lock is enough. With an app group configured but its container missing, refreshes **fail
+    /// closed** (retryable error) instead of running unprotected; only DEBUG builds, which may be unsigned, fall back.
+    static func makeRefreshLock(appGroupID: String) -> any CrossProcessLock {
+        guard !appGroupID.isEmpty else { return NoCrossProcessLock() }
+        if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) {
+            return FileCrossProcessLock(url: container.appendingPathComponent("session-refresh.lock"))
+        }
+        #if DEBUG
+        return NoCrossProcessLock()
+        #else
+        return UnavailableCrossProcessLock()
+        #endif
+    }
+
+    static func makeKeyStore(configuration: ViadereConfiguration, secrets: any SecretStore) -> any DeviceKeyStore {
+        #if targetEnvironment(simulator)
+        #if DEBUG
+        return SoftwareDeviceKeyStore(secrets: secrets)
+        #else
+        return UnavailableKeyStore()
+        #endif
+        #else
+        return SecureEnclaveKeyStore(accessGroup: configuration.keychainAccessGroup,
+                                    approvalAccessGroup: configuration.approvalKeychainAccessGroup)
+        #endif
+    }
+    #endif
+
+    // MARK: Mock
+
+    #if DEBUG
+    /// An in-memory world for previews, tests and demos. Uses software keys, so it is compiled out of release builds.
+    public static func mock(api: MockViadereAPI = MockViadereAPI(), signedIn: Bool = true,
+                            unsupportedKeys: Set<DeviceKeyPurpose> = [],
+                            appAttest: any AppAttestProviding = MockAppAttest(),
+                            clock: @escaping @Sendable () -> Date = { Date() }) async -> ViadereServices {
+        let secrets = InMemorySecretStore()
+        let keys = SoftwareDeviceKeyStore(secrets: InMemorySecretStore(), unsupported: unsupportedKeys)
+        let records = SecretDeviceRecordStore(secrets: secrets)
+        let tokens = SecretTokenStore(secrets: secrets)
+        let sessions = SessionManager(store: tokens, refresher: FailingRefresher(), clock: clock)
+        var configuration = ViadereConfiguration.local
+        configuration.brandManifestKeys = [MockBrandKitAPI.pinnedKey]
+        configuration.loopPublicationKeys = [MockLoopsAPI.pinnedKey]
+        var services = ViadereServices(configuration: configuration, api: api, sessions: sessions, keys: keys, records: records,
+                                       preferences: InMemoryPreferences(), secrets: secrets, passkeys: MockPasskeyService(),
+                                       notificationPermission: MockNotificationPermissionService(), appLock: MockAppLockAuthenticator(),
+                                       appAttest: appAttest, clock: clock)
+        services.organizationAPI = api
+        services.loopsAPI = MockLoopsAPI(clock: clock)
+        let brand = MockBrandKitAPI()
+        services.brandKits = BrandKitStore(api: brand, assets: brand, cache: InMemoryBrandKitCache(), keys: configuration.brandManifestKeys, clock: clock)
+        if signedIn {
+            let consumerId = api.consumerId
+            try? await sessions.set(TokenSet(consumerId: consumerId, accessToken: "mock", accessExpiresAt: clock().addingTimeInterval(3_600)))
+            _ = try? await services.account.enrollThisDevice(name: "Preview iPhone")
+            services.preferences.setBool(true, for: .onboardingComplete)
+        }
+        return services
+    }
+    #endif
+}
+
+/// Used when the process (e.g. an extension) can't present passkey UI.
+public struct UnavailablePasskeyService: PasskeyService {
+    public init() {}
+    public func register(options: PasskeyRegistrationOptions) async throws -> PasskeyRegistrationCredential { throw PasskeyError.unsupported }
+    public func assert(options: PasskeyAssertionOptions) async throws -> PasskeyAssertionCredential { throw PasskeyError.unsupported }
+}
+
+/// Release builds on the simulator (never shipped): no keys at all, so nothing can be signed.
+public struct UnavailableKeyStore: DeviceKeyStore {
+    public init() {}
+    public func existingKey(for purpose: DeviceKeyPurpose) async throws -> (any ManagedSigningKey)? { throw KeyStoreError.unavailable }
+    public func createKey(for purpose: DeviceKeyPurpose) async throws -> any ManagedSigningKey { throw KeyStoreError.unavailable }
+    public func deleteKey(for purpose: DeviceKeyPurpose) async throws {}
+}
+
+struct FailingRefresher: TokenRefresher {
+    func refresh(current: TokenSet?) async throws -> TokenSet { throw APIError.sessionExpired }
+}

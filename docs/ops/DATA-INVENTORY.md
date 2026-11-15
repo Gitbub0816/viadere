@@ -1,0 +1,295 @@
+# Data inventory and retention (LEG-PR-002, LEG-PR-006; spec §13)
+
+**Status:** draft v1, 2026-10-27, derived from the Server migrations (`Server/Sources/ViadereServerKit/Migrations`) and purge jobs. Owner: Privacy
+lead. **Counsel review pending** for every lawful-basis, retention-period and cross-border cell marked `[counsel]`. Retention periods must be
+established through this inventory and applicable law (spec §13), not hardcoded: the "current purge" column states what the code does today.
+
+Classes follow the spec §13 table: **PUB** Public, **OPS** Operational, **SEC** Security metadata, **IDA** Identity assertions,
+**RIE** Raw identity evidence, **PKP** Passkey private keys, **SMP** Sensitive message payloads. **P** = personal data of an identifiable
+person (or a pseudonym derivable by Viadere); **E** = encrypted at rest at field level (AES-256-GCM, row-bound, `DATA_ENCRYPTION_KEY`); **H** = peppered hash only
+(`SERVER_PEPPER`). Custody is "Viadere" unless stated. All rows sit in Azure Database for PostgreSQL Flexible Server 18 in an Azure US region (`centralus` in staging; ADR-0011) with provider-level encryption at rest on top of the field encryption shown. **Updated 2026-11-02 (ADR-0029, owner decisions 11 and 13):** Fly.io, Neon and Google Cloud KMS are retired from CI, IaC and code; whether live resources still exist is checked read-only by the owner before deletion (ADR-0029 §5). Residency: all Viadere data at rest stays in Azure US regions; transit and processors are listed in §3 with their regions.
+
+Not stored by Viadere today (by design, confirm on each change): raw ID images, birthdates, selfies (RIE: issuer/device/Didit, ADR-05), passkey private
+keys (PKP: device / E2EE vault), plaintext phone numbers, plaintext message bodies, API keys and tokens (hashes only).
+
+## 1. Table inventory
+
+| Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `consumers` | optional display name (none for device-first accounts), passkey user handle (only once a passkey exists), status, policy version, how it was created | OPS | P | none beyond DB | Until account deletion (`DELETE /v1/account`, docs/SECURITY.md §2.20) | display name is user-chosen and never required (§2.5a) |
+| `account_enroll_ceremonies` | reserved account id, challenge hash, state, times | SEC | none | hash only | Purged a day after expiry (`IdentityMaintenance`) | |
+| `passkey_credentials` | WebAuthn public keys, sign count | SEC | P | public keys | Deleted with the account | public keys only; private keys on device |
+| `passkey_ceremonies` | challenges, state | SEC | | | Purged 1 h after expiry (job loop) | |
+| `devices` | name, platform, kind, notice window, expiry, replacement state, trust tier and why, integrity format, key algorithm | SEC | P | none | Revoked/expired devices are revoked by `DeviceLifecycle.revokeExpired`; rows kept (cool-down proof, `docs/SECURITY.md` §2.5); names blanked on account deletion | rows of deleted accounts: confirm deletion scope `[counsel]` |
+| `device_keys` | device public keys per purpose, attested flag | SEC | P | public keys | With device / account | |
+| `app_attest_keys` | App Attest key id, public key, counter | SEC | P | public key | With device / account | |
+| `device_enroll_challenges` | hashed challenges | SEC | | H | expires with challenge (no explicit purge) | gap: add purge |
+| `token_families`, `access_tokens`, `refresh_tokens` | session families, token **hashes**, sealed refresh successor | SEC | P | H; successor sealed | Successor nulled after the grace window (retention job); rows not purged | gap: purge expired/revoked token rows |
+| `recovery_profiles`, `recovery_codes`, `account_recoveries` | peppered hashes of recovery id/codes, pending passkey, state | SEC | P | H | Swept by `RecoveryService.sweep`; deleted with account | recovery codes are bearer secrets (residual risk) |
+| `phone_links` | phone **ciphertext**, keyed hash, masked form, last4, state, `source` (`mo` = linked by a text sent from the phone, ADR-0027), `usableFrom`; the `otp_hash` column is cleared and no longer written | OPS | P | E + H | Erased on account deletion; revoked by `UNLINK`; revoked rows keep nothing readable beyond the masked form | last4 and masked number are readable; a number linked by text is `phone_control_mo`, never a factor |
+| `phone_link_mo_challenges` (ADR-0026 class P) | keyed hash of the nonce, keyed hash and ciphertext of the claimed number, account and device, expiry | OPS | P | E + H | **Whole row deleted at use**, and swept at expiry + 2 minutes (class `auth_secrets`, never held); deleted with the account and when the link is removed; an unverified begin keeps nothing but an audit event | the nonce itself is never stored |
+| `link_tokens` | token hash, phone ciphertext/hash, purpose | OPS | P | E + H | **Retired (ADR-0027):** emptied at deploy by `AuthRetention.v1`; the class keeps its 7-day rule (`LINK_TOKEN_RETENTION_DAYS`) until the table is dropped | no route redeems a token any more |
+| `sms_contexts` | SMS conversation state ciphertext | SMP | P | E | Reset on account deletion; opt-out kept as suppression only | state can hold business names and menu context |
+| `sms_consent_events` | phone hash, opt-out keyword, time | OPS | P | H | **Kept** (suppression/consent evidence) | retention `[counsel]` (TCPA/CTIA evidence period) |
+| `sms_outbound` | phone ciphertext, **body ciphertext**, status | SMP | P | E | Finished rows deleted after `OUTBOUND_RETENTION_DAYS` (30) | |
+| `channel_endpoints` | RCS/SMS capability per phone hash | OPS | P | H | no purge | gap: purge for deleted accounts |
+| `channel_outbound` | phone ciphertext, channel, status, provider id | OPS | P | E + H | Finished rows deleted after `OUTBOUND_RETENTION_DAYS` | |
+| `rcs_postbacks` | postback token hash, phone hash, target | OPS | P | H | no purge after consume/expiry | gap |
+| `processed_provider_messages` | provider message ids (dedup) | OPS | | | no purge | gap: bound growth |
+| `conversation_sessions` | business/consumer pair, channel, state | OPS | P | none | Until account deletion | |
+| `conversation_messages` | message **body ciphertext**, direction, timestamps | SMP | P | E | Erased on account deletion; no age-based purge | retention period for messages `[counsel]`; E2EE (ADR-07) will move bodies off the server |
+| `businesses`, `business_handles`, `business_codes`, `retired_business_codes` | directory listing, legal name, website, brand | PUB | (P if sole trader) | none | Kept (handles/codes are never reassigned) | |
+| `business_applications` | requested handle, legal name, description, reviewer note | OPS | P | none | no purge | operator decision notes: retention `[counsel]` |
+| `business_controls` | throttle, ceiling, suspension reason | SEC | | | Kept | |
+| `business_api_keys` | key **hash**, prefix, last4, scopes, revoked | SEC | | H | Kept after revocation (audit) | |
+| `business_idempotency` | idempotency key, request hash, **sealed** result | OPS | | E | `BusinessIdempotency.purge` (job loop) | |
+| `relationships` | consumer-business link, status | OPS | P | none | Until account deletion | |
+| `consent_grants` | per-purpose consent with version, source, channels | SEC | P | none | Until account deletion | consent receipts are evidence: retention `[counsel]` |
+| `interactions` | request payload JSON (kind, purpose, display text), status, outcome JSON | SMP | P | payload erased on deletion | Payload/outcome erased on account deletion; no age-based purge | payload can contain business text; classify per kind `[counsel]` |
+| `interaction_challenges` | challenge nonce hash | SEC | | H | no purge | gap |
+| `decisions` | **signed decision** (device-signed canonical JSON), signature, assurance | SEC | P | integrity | **Append-only.** Kept pseudonymous for disputes; free-text `reply` payload erased on deletion (§2.20) | dispute-retention period `[counsel]` |
+| `audit_events` | actor, actor pseudonym (`actor_ref`, HMAC of the account id), policy version, action, outcome, ids, redacted metadata, hash chain | SEC | P (ids) | HMAC chain (`AUDIT_CHAIN_KEY`) | **Append-only, no purge** | retention/erasure policy `[counsel]`; chain head exported to write-once storage Verify detail (attempts, reasons, methods, consent) is in the platform-only trail (no `business_id`); the business-facing views and export are a projection (`BusinessAuditProjection`): consumer actors shown as the business's `subject_ref` |
+| `replay_nonces` | replay-guard nonces | SEC | | | Purged at expiry (job loop) | |
+| `rate_limit_buckets` | limiter keys (IP /64, hashes), tokens | OPS | P (IP) | | Purged when refilled/expired (job loop) | keys hold client IPs |
+| `security_notices` | in-app security notices | SEC | P | none | Until account deletion | |
+| `apns_tokens` | APNs device tokens | OPS | P | none | Dropped when APNs reports invalid; with account | tokens are personal data |
+| `push_tokens` | Push tokens of providers other than APNs (FCM registration tokens, Android) | OPS | P | none | Invalidated when the provider reports the token invalid; deleted on device revocation, on re-registration with another provider and with the account (SECURITY.md §2.114) | tokens are personal data |
+| `live_activity_tokens`, `live_activity_starts` | Live Activity push tokens, activity keys | OPS | P | none | Dropped when APNs invalidates | |
+| `webhook_subscriptions` | business URL, **secret ciphertext** (+ previous) | SEC | | E | Until deleted by the business | |
+| `webhook_deliveries` | event body (**ciphertext**), status, attempts | SMP | P | E | Succeeded/dead rows deleted after `WEBHOOK_RETENTION_DAYS` (30); bodies mentioning a deleted consumer scrubbed | |
+| `webhook_delivery_attempts` | per-attempt status/duration/error | OPS | | | Deleted with their delivery | |
+| `loyalty_programs`, `loyalty_accounts`, `loyalty_ledger` | program rules, points balance, **member reference ciphertext**, ledger | OPS | P | member ref E | Until account deletion; ledger kept for accounting `[counsel]` | |
+| `rewards`, `reward_claims`, `reward_redemptions` | offers, claims, redemption code **hash**, slot | OPS | P | H | Until account deletion; codes valid ~2 min | |
+| `wallet_passes`, `wallet_registrations` | pass serial, auth token hash, scan-code generation, check-in time, issuer (customer/business), business ticket overrides (venue, seat, start), device library id, push token | OPS | P | H | Until voided/deleted | pass content carries no phone/name; the business never sees registrations |
+| `wallet_push_outbox`, `wallet_logs` | pass-update queue, device logs | OPS | | | Purged after 7 days (job loop) | |
+| `delegation_grants`, `delegation_invitations` | household grants, **label ciphertext**, code hash | SEC | P | E + H | Until revoked/expired and account deletion | labels erased on deletion |
+| `dashboard_users` | email **ciphertext** + hash, display name | OPS | P | E + H | Unverified sign-ups purged after 24 h; verified kept while a member | removal of a business user: retention `[counsel]` |
+| `dashboard_passkeys` | WebAuthn public keys | SEC | P | public keys | With user | |
+| `dashboard_sessions` | session token hash, realm, timestamps | SEC | P | H | Deleted 24 h after expiry | |
+| `dashboard_ceremonies`, `dashboard_email_codes` | challenges, email-code hashes, sealed payload | SEC | P | H / sealed | Ceremonies purged 1 h after expiry; codes after 24 h | |
+| `org_memberships`, `org_invites`, `operator_enrollments`, `console_enrollments` | roles, invite email **ciphertext**, token hash (console enrollments: staging demo owner and passkey recovery links, §2.111) | SEC | P | E + H | Kept (membership history); enrollment tokens expire | |
+| `console_recoveries` | member and membership ids, path, state, reason, checklist keys, operator/admin ids, timestamps (no token, no email) | SEC | P | E + H | Kept (recovery history); open ones cancelled at tenant deletion | §2.111 |
+| `business_profile_changes` | proposed and previous public name, handle, website; reviewer ids, decision note | PUB/SEC | P | E | Deleted with the tenant | §2.111 |
+| `business_daily_stats`, `analytics_rollup_days` | per-business per-day counts (fixed metric names), day markers; no customer data | AGG | A | E | 400 days, purged by the rollup job; tenant rows deleted with the tenant | G21 |
+| `abuse_signals`, `usage_events` | per-business complaint/opt-out counters, metering | OPS | | | Abuse buckets older than 90 days purged; usage kept (billing) | usage retention `[counsel]` |
+| `disclosure_receipts` (WP2, used by Verify) | customer's consent to **one** disclosure: business, subject_ref, capability, purpose, field names, request id, times | IDA | P | none (no evidence) | **Kept** as consent evidence; `consumed_at`/`revoked_at` set once | retention `[counsel]`; contains no attribute values |
+| `verification_requests` (WP3) | a business's request for one customer: ids, `subject_ref`, capability, parameters (e.g. `{"years":21}`), purpose, status, label, **names** of disclosed fields, idempotency and request hashes | IDA | P | H (idempotency); **no evidence, no values** | Closed requests deleted after 400 days (`VerifyService.runMaintenance`); with the account otherwise | 400 days is a placeholder `[counsel]` |
+| `verification_attempts` (WP3) | one try: method, status, **single-use Wallet nonce** (erased when consumed), Didit session id, internal failure reason, purge status | SEC | P | nonce deleted on use; session id is an opaque provider id | Deleted with the request (400 days); a row whose provider purge is pending is kept until the purge succeeds; the purge retries with exponential backoff (`purge_next_at`, 30 s to 24 h) and has no attempt cap; an overdue purge (> 1 h) raises `viadere_verify_provider_purge_overdue` | `vendor_data` at Didit is this row's id, not a person |
+| `verification_results` (WP3) | outcome, **payload ciphertext** (the capability's output fields: for `age.minimum` only the boolean and validity fields), provenance JSON (method, verifier, issuer id, assurance dimensions, expiry, revocation state, policy version; **no personal data**) | IDA | P | payload E (row-bound); provenance plain | **Payload erased at the business's one retrieval or after 15 min**, whichever is first; provenance deleted with the request | identity names/addresses are payload until retrieved `[counsel]` |
+| `verification_provider_events` (WP3) | Didit webhook `event_id` (deduplication) | OPS | | | Deleted after 7 days | |
+
+## 2. Data outside the Server database
+
+| Data | Where | Class | Custody and treatment |
+|---|---|---|---|
+| Secrets: `DATA_ENCRYPTION_KEY`, `SERVER_PEPPER`, `AUDIT_CHAIN_KEY`, `CONNECT_LINK_SIGNING_KEY` | Azure Key Vault `kv-vdr-<env>` (US region; `kms1:` wrapped by `kek-data`, ADR-0012), offline escrow | SEC | Never in the database or git. Loss makes encrypted columns / hashes unrecoverable. (Was: Fly secrets, retired) |
+| Authority keys and secrets (ADR-0028, ADR-0032) | Azure Key Vault `kv-vdr-auth-<env>` (US region) | SEC | Authority identity only; non-exportable keys; HMAC secrets `ACCOUNT_REF_KEY`, `OIDC_PAIRWISE_KEY`, `RECOVERY_VERIFIER_KEY`, `SUBJECT_REF_KEY` copy |
+| Audit chain heads | write-once storage (to be provisioned: object-lock bucket) | SEC | Output of `audit-head`; integrity anchor |
+| Raw identity evidence (ID image, selfie, birthdate) | Didit (processor), Apple Wallet / issuer, device | RIE | Not collected centrally (ADR-05); Viadere keeps the minimized result; Didit sessions are purged after reading, with unbounded retry and an alert `[counsel: DPA, residency]`; Didit's own data-retention window is configured to the shortest the account allows (backstop if our purge cannot run) |
+| Passkey private keys, approval keys | Secure Enclave / iCloud Keychain / E2EE vault | PKP | Never server plaintext (ADR-06/08) |
+| Logs | Azure App Insights / Log Analytics (`centralus`, 30 days), Key Vault `AuditEvent` diagnostics, Cloudflare logs and analytics (global edge; retention per plan) | OPS/SEC | Auth, phone-link and OIDC routes log an allow-list of fields only (ADR-0026 §3); `LogRedaction` remains a second layer; Cloudflare Logpush for `id.` and link hosts excludes query strings `[counsel]`. (Was: Fly logs and GCP audit logs, retired) |
+| Backups | Azure Flexible Server PITR (7 days lean / 35 days standard; geo-redundant pairs must be US regions, ADR-0026 §3) | all | Erased data persists in backups until they age out: stated in the privacy notice; restores re-run sweeps and tombstones before serving `[counsel]`. (Was: Neon PITR, retired) |
+| Email (verification codes, invitations) | transactional email provider | OPS | Address and code in transit; provider is a sub-processor |
+| Didit session data (WP3): ID images, selfie, liveness video, document fields, face embedding and scores | Didit (processor, EU by default), only for the duration of one verification | RIE | Captured on the device and sent **directly to Didit**; Viadere never receives images or biometrics. After reading the decision in memory and deriving the one claim, the server deletes the session with `privacy_erasure` and deletes the vendor user (`POST /v3/users/delete/`), and records the deletion; failures are retried. Configure the shortest retention in the Didit console as a backstop and keep biometric-template retention **off**. No biometric template is retained at Didit. `[counsel: BIPA / GDPR Art. 9, DPA, residency]` |
+| Apple Wallet presentment (WP3): the encrypted DeviceResponse | transient, in server memory | RIE | Decrypted with the merchant key (KMS-wrapped, ADR-03), verified, reduced to the requested elements, **never persisted or logged**. Apple and the issuing authority do not learn where the ID was shared (Apple's design). IACA trust anchors are public certificates on disk |
+| SMS/RCS content | MailerSend or Twilio / RCS provider | SMP | Provider retains per its terms: sub-processor `[counsel]` |
+
+## 3. Sub-processors (to publish; LEG-PR-006)
+
+Current list (owner decision 13: stored in the US, processors listed honestly with their regions; S1-A10-3):
+
+| Processor | Purpose | Data | Region (as known; **verify** marks unconfirmed) |
+|---|---|---|---|
+| Microsoft Azure | hosting, database, Key Vault, Service Bus, blob, logs | all data at rest | US regions only (`centralus` staging); enforced by Azure Policy and `RESIDENCY-US` |
+| Microsoft Entra ID | workload identities and tokens | no customer data | global service |
+| Cloudflare | edge, TLS, tunnel, WAF, static site and `id.` JWKS | all traffic in transit; edge logs | global edge (processing outside the US in transit); log storage per plan, **verify** |
+| Apple | APNs, Wallet, App Attest | push tokens, opaque ids | Apple global infrastructure |
+| Google | FCM (Android, later) | push tokens, opaque ids | Google global infrastructure |
+| MailerSend | transactional email; email fallback for auth **codes** (gated; never links) and SMS (US/CA) | email address, message content (the one-time code), activity | **verify** (ledger L-8, owner); email fallback stays off until verified US storage or content storage off (ADR-0020 §7). The server refuses `AUTH_EMAIL_FALLBACK_ENABLED` in staging and production until this row records the verified location and retention settings. Fallback emails are sent with `track_clicks`, `track_opens`, `track_content` off |
+| SMS provider (MailerSend, Twilio alternative) | SMS gateway on-ramp, phone-link inbound texts | phone numbers, message text | **verify** |
+| Didit | identity verification (not authentication) | RIE, transient | EU by default; outside the authentication-delivery residency claim |
+| RCS provider | TBD | | TBD |
+
+Retired (no longer sub-processors once ADR-0029 is applied): Fly.io (hosting), Neon (database), Google Cloud (KMS, audit bucket). Each processor needs a DPA, a transfer mechanism and a breach-notification clause `[counsel]`; the public sub-processor list must match this table (Site, WP7).
+
+## 4. Lawful basis, purpose and rights (placeholders for counsel)
+
+| Processing purpose | Data | Lawful basis `[counsel]` | Rights / notes |
+|---|---|---|---|
+| Account and authentication | consumers, passkeys, devices, tokens | `[contract / legitimate interest]` | access, deletion (`DELETE /v1/account`) |
+| Delivering business interactions and SMS/RCS | phone link, outbound, messages, interactions | `[contract; consent for marketing channels]` | opt-out (STOP keywords), consent receipts |
+| Security, fraud and abuse prevention | audit, decisions, rate limits, abuse signals | `[legitimate interest]` | retention balanced against erasure |
+| Business onboarding and verification | applications, dashboard users | `[contract / legitimate interest]` | |
+| Billing and metering | usage_events, ledger | `[contract / legal obligation]` | |
+| Identity assertions (Verify) | assertion metadata, minimized results | `[consent / explicit consent for biometrics]` | jurisdiction-specific (BIPA, GDPR Art. 9) |
+
+## 5. Gaps found while building this inventory
+
+1. No age-based purge for: `interactions`, `conversation_messages`, `decisions`, `consent_grants`, `audit_events`, `business_applications`, `channel_endpoints`, `rcs_postbacks`, `processed_provider_messages`, `interaction_challenges`, `device_enroll_challenges`, expired `access_tokens`/`refresh_tokens`. Retention must be set per data class (spec §13) and implemented as configurable class-based jobs (WP8 part 2 / Server owner).
+2. `RetentionService` covers only outbound rows, link tokens, webhook deliveries and device expiry. A `RETENTION_*` setting exists for three of these only.
+3. Export of data for a subject-access request exists only as `export-dispute` (per interaction); there is no subject-access export (LEG-PR gap).
+4. Backups retain erased data until the Azure PITR window expires (7 / 35 days); the privacy notice must say so.
+
+## 6. Addendum (2026-10-28, WP6): tables added by WP1, WP2, WP5 and WP6, and the retention that now exists
+
+Sections 1 to 5 are unchanged (they were written before these tables existed). Same legend. Retention periods marked **[class]** are the per-data-class values of
+`RetentionClass` (section 7): platform default, hard bounds, operator-adjustable inside the bounds, legal hold where noted.
+
+### 6.1 Approve v2, key directory and E2EE (WP1)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `kd_log_entries`, `kd_tree_heads` | the business key directory: signed root/key/revoke statements (public keys only), Merkle leaf hashes, signed tree heads | PUB | | integrity (database triggers refuse UPDATE and DELETE; the log is signed by `KEY_DIRECTORY_LOG_KEY`) | **Kept** (a transparency log that forgets is not one) | public keys and key ids only; no customer data |
+| `approve_enrollments` | business, relationship, consumer, `subject_ref`, capability, code **hash**, the device's signed statement, the business confirmation | SEC | P | code H | Rows of cancelled/expired enrollments: with the relationship or account; statements are public keys and signatures | the 8-character code is a short-lived bearer secret (bounded by 10-minute life, rate limits) |
+| `approve_keys` | pairwise approval public key and HPKE public key per relationship, `kid`s, assurance, status | SEC | P | public keys | Revoked with the relationship, the device or the account; rows kept for verification of old results | no private key ever leaves the device |
+| `approve_requests` | request metadata, `subject_ref`, protection mode, hash, **sealed** details (server-visible mode only), decision, `amr`, the compact JWS result | SEC | P | `details_sealed` E; end-to-end requests hold only an opaque envelope | Deleted **30 days after the terminal state** with their deliveries (class `auth_delivery_metadata`, ADR-0026; one-time catch-up by `AuthRetention.v1`). A row with a signed result (owner ruling O-3) is kept as high-value evidence with only ids, decision, key, `result_ref` and the JWS, and leaves on the `signed_decisions` schedule (730 days default); routine sign-in results stay high-value for now (decision 16, OQ-1) | the 30 and 730 day periods need privacy/legal approval before production (spec 11.1); the JWS is the business's dispute evidence |
+| `approve_deliveries` | which device was offered which request | OPS | P | none | With the request | |
+| `approve_freezes` | customer-set freeze of approvals (reason code, times) | SEC | P | none | Deleted with the account | |
+
+### 6.2 Capability policy (WP2)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `business_entitlements` | tier and capability grants/revocations with actor, justification and review reference | SEC | | none | **Kept** (who allowed what, when) | no customer data |
+| `capability_switches` | operator kill switches per capability (global or business), reason | SEC | | none | Kept | |
+| `policy_rules` | jurisdiction rules per capability, reason | SEC | | none | Kept | |
+| `relationships.subject_ref` (column) | pairwise pseudonym of a customer for one business | IDA | P | H (`SUBJECT_REF_KEY`) | With the relationship | re-derived after a key change |
+
+### 6.3 Credential vault (WP5, behind `VAULT_SYNC_ENABLED`)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `vault_vaults`, `vault_members`, `vault_manifests`, `vault_blobs`, `vault_joins`, `vault_recovery_releases` | **end-to-end encrypted** blobs and manifests of a person's credentials, member device keys, join tokens | PKP/SMP | P | the server holds ciphertext only (keys never leave the devices) | Deleted with the vault or the account; expired joins removed by the vault job | anti-rollback counters are plaintext integers; `vault_recovery_releases` holds account/device ids and times of recovery-envelope release requests (72 h hold, 24 h window); `vault_members.former_device_id` remembers the account device of a removed member |
+
+### 6.4 Business platform (WP6)
+
+| Table | Data | Class | P | Protection | Retention | Notes |
+|---|---|---|---|---|---|---|
+| `business_onboarding` | one row per business: stage facts (domain verified, legal-entity review, sensitive-category review, sandbox milestones, go-live request and decision), legal registry **number and name, jurisdiction and references to evidence** (a URL or record id; **no documents are stored**) | OPS | (P if sole trader) | none | Kept while the business exists; free text of decided applications is erased per **[applications]** | the references are what an operator checked, not the evidence |
+| `business_domains` | domain, verification token, method, result, next check | OPS | | none | Deleted with the organization | the token is public (it is published in DNS) |
+| `contract_acceptances` | which document slug and version, who accepted, when, **hash** of IP (versioned pepper) and of the user agent | SEC | P (user id) | H | **Kept** (contract evidence) `[counsel]` | the raw address and agent are never stored |
+| `business_mtls_certs` | tenant-bound client certificate fingerprints / CA key ids, label, subject, expiry | SEC | | none | Deleted with the organization | public certificate data |
+| `business_request_signing_keys` | RFC 9421 request-signing public keys (SECURITY §2.112): `vsk_` key id, P-256 public key and its fingerprint, the bound API key, label, who added it, last use, revocation | SEC | | none | Deleted with the organization | public key data; the private key never reaches Viadere |
+| `business_security_settings` | console IP allow-list, privileged-inactivity timeout, two-person flag, mTLS requirement, alert subscriptions, **security contacts (sealed)**, `allow_email_fallback` (tenant policy, migration `AuthEmailFallback.v1`) | SEC | P (contacts) | contacts E | Deleted with the organization | |
+| `business_api_keys` (columns added) | non-secret key id `kid`, IP allow-list, expiry, last-used time and **hash** of the caller's address, certificate binding, rotation links, revoker and reason | SEC | | H | Kept after revocation | last-used address is a versioned-pepper hash |
+| `dashboard_sessions` (columns added) | **hash** and masked form of the address, hash and label of the user agent, country | SEC | P | H | Deleted 24 h after expiry | shown to the user in Security > Sessions |
+| `dashboard_known_contexts` | hash of the sign-in context (network, agent) per user, for suspicious-login alerts | SEC | P | H | Deleted after **400 days** unseen **[support_records]** | |
+| `pending_changes` | two-person approval requests: kind, **sealed** payload (no secret), requester, approver, status | SEC | P | payload E | Decided requests deleted per **[support_records]** (730 days) | |
+| `platform_flags` | operator switches: flag, scope, value, reason, who | SEC | | none | Kept while set; the audit trail keeps the history | the audit-export mark is stored here too |
+| `operator_notices` | operator announcements: audience, scope, text, delivery progress | OPS | | none | Finished notices deleted per **[support_records]** | no personal data in the text by policy |
+| `support_tickets` | tickets and appeals: subject, **sealed body**, status, operator note | OPS | P | body E | Closed tickets deleted per **[support_records]** | |
+| `data_requests` | tenant export / deletion requests, status, decisions; the export artifact is **sealed** and erased after 24 hours | OPS | | artifact E | Decided requests per **[support_records]**; artifact 24 h | export contains no secret and no customer-level data |
+| `consumer_exports` | consumer data export jobs: device, status, **ciphertext chunks sealed to the requesting device's key** | OPS | P | E2EE (the server cannot read it) | Bundle erased at expiry (7 days); row deleted a week later | |
+| `account_freezes` | operator freeze of a consumer account: reason (internal), operator, times | SEC | P | none | Released freezes deleted per **[support_records]** | the person is shown a generic notice, not the reason |
+| `retention_settings`, `legal_holds` | per-class retention days (platform and tenant), legal holds (scope, reason, who) | SEC | | none | Kept; holds kept after release | |
+| `audit_checkpoints` | the sequence number and hash of the last purged audit event | SEC | | | Kept | lets the remaining chain verify |
+| `interactions.content_erased`, `conversation_messages.content_erased` (columns) | marks rows whose content the retention job replaced | OPS | | | | |
+
+## 7. Retention by data class (WP6): what the code purges now
+
+Implemented in `Operations/Retention.swift` (`RetentionClass`, `RetentionPurger`), run by the job loop at most once a minute per instance, idempotent and batched. An operator moves a
+**platform** value inside the bounds (`/operator/retention`, reason required, audited `retention.platform_set`); a business may **shorten** (never lengthen) the classes
+marked tenant-adjustable for its own data (Compliance > Retention, audited `retention.tenant_set`). A **legal hold** (`/operator/holds`: global, one business or one consumer, reason
+required) suspends every holdable class for its scope until released. The deployment's `WEBHOOK_RETENTION_DAYS`, `OUTBOUND_RETENTION_DAYS` and `LINK_TOKEN_RETENTION_DAYS` remain the defaults of their classes.
+
+**Classification of authentication stores (ADR-0026, owner decisions 7, 10, 16).** P = pending secret (minutes), T = security transaction metadata (30 days after the terminal state), E-high = high-value audit evidence (longer, access-restricted), E-routine = routine security evidence (30 days).
+
+| Store | Class | Period | Sweep |
+|---|---|---|---|
+| `phone_link_mo_challenges` | P | deleted at use; expiry + 2 minutes | minute job (`PhoneLinkService.purgeChallenges`), daily backstop class `auth_secrets` |
+| `approve_requests`, `approve_deliveries`, `approve_freeze_events` | T | 30 days after the terminal state (a business may shorten) | `auth_delivery_metadata` |
+| signed result on `approve_requests` (`result_jws`, `result_ref`, `decided_kid`, `decision`) | E-high (O-3; OQ-1: routine sign-in results too) | `signed_decisions` class: 730 days (365-2555), holdable | `signed_decisions` |
+| `decisions` | E-high | 730 days, unchanged | `signed_decisions` |
+| `audit_events` | E-high | 2555 days, export before purge, unchanged | `audit_events` |
+| `link_tokens` | T | emptied; 7 days until dropped | `link_tokens` |
+| `webhook_deliveries`, finished `sms_outbound` / `channel_outbound` | T | 30 days, unchanged | `webhook_deliveries`, `outbound_messages` |
+| `outbox_messages` (published), `processed_messages`, queue dead letters | T | 7, 15 and 30 days (all within 30), unchanged | `QueuePump.purge` |
+| authority and auth-delivery tables of the delivery API | P / T / E-routine / E-high per ADR-0026 section 2 | attach to `auth_secrets`, `auth_delivery_metadata`, `auth_evidence_routine` as they are built | `auth_evidence_routine` is reserved (30 days) |
+
+| Class | What is purged | Default (min-max) days | Tenant may shorten | Holdable |
+|---|---|---|---|---|
+| `interaction_content` | payload text, reply and signed decision of **finished** interactions are erased; the row, ids and status stay | 400 (30-1095) | yes | yes |
+| `conversation_content` | message bodies replaced by `[expired]` | 730 (30-3650) | yes | yes |
+| `signed_decisions` | device-signed decisions deleted, and Approve v2 signed results (`approve_requests` rows kept as evidence after their 30-day metadata period) | 730 (365-2555) | no | yes |
+| `consent_history` | **superseded** consent versions deleted; the current consent of a relationship never | 1095 (365-3650) | no | yes |
+| `audit_events` | events older than the period **and** already covered by an exported head; a checkpoint keeps the chain verifiable; nothing is purged without an export target | 2555 (730-3650) | no | yes |
+| `business_applications` | free-text description and reviewer note of decided applications | 730 (90-3650) | no | yes |
+| `usage_records` | metering rows | 2555 (365-3650) | no | yes |
+| `webhook_deliveries` | deliveries with their attempts, including never-sent (paused) ones | 30 (1-365) | yes | yes |
+| `outbound_messages` | finished SMS and channel sends | 30 (1-365) | no | yes |
+| `link_tokens` | used or expired link tokens (retired: the table is emptied at deploy) | 7 (1-90) | no | no |
+| `auth_secrets` | pending secrets (`phone_link_mo_challenges`): the daily backstop of the minute sweep (expiry + 2 minutes) | 1 (1-1) | no | no |
+| `auth_delivery_metadata` | approval requests and deliveries 30 days after the terminal state (a signed result keeps its evidence fields and leaves with `signed_decisions`), freeze-event references | 30 (7-90) | yes | yes |
+| `auth_evidence_routine` | routine security evidence (reserved for low-risk issuance records and fatigue, pause and report bookkeeping) | 30 (7-90) | no | yes |
+| `security_tokens` | expired session tokens, enrollment and interaction challenges | 30 (7-180) | no | no |
+| `channel_capability` | RCS capability cache, consumed postbacks, provider message de-duplication markers | 180 (14-730) | no | no |
+| `security_notices` | in-app notices (dismissed ones after 90 days) | 365 (30-1095) | no | no |
+| `support_records` | closed tickets and appeals, finished notices, decided approvals and data requests, released freezes, expired export bundles, old dashboard contexts | 730 (90-3650) | no | yes |
+
+**Append-only tables and the retention gate.** `audit_events`, `decisions` and `consent_grants` refuse UPDATE and DELETE at the database. The retention job deletes through
+`RetentionDeleteGate.perform`, a transaction that opens a narrow exception for DELETE on those three tables only (a transaction-local setting in PostgreSQL, a one-row gate that the
+same transaction closes in SQLite); UPDATE stays refused. A process that can run arbitrary SQL as the runtime role can open the gate too: what protects the audit log from that is the
+write-once export of signed heads, not the trigger (SECURITY.md section 2.77).
+
+**Status of the section 5 gaps.** Gap 1 (no age-based purge) closed for every table listed there, with these exceptions that stay by design: `sms_consent_events` (suppression evidence),
+`businesses`/handles/codes (never reassigned), `passkey_credentials`, `devices` and `relationships` (until account deletion), `kd_*` (public log). Gap 2 closed (17 classes). Gap 3 closed:
+`POST /v1/account/exports` is the subject-access export (section 6.4, `consumer_exports`; SECURITY.md section 2.78). Gap 4 (backups) is unchanged.
+
+## 8. Addendum (2026-10-30, feature expansion v4 Phase 1: Organization)
+
+Migrations `Organization.v1` and `Surfaces.v1`. No Loops or Brand Kit table exists in this release.
+
+| Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `business_preferences` | per (customer, business): favorite, mute level and end, `blocked_at` | OPS | P | none | Deleted with the account (`PreferenceService.wipe`); a block outlives the connection it ended, by design | never shown to the business |
+| `notification_settings` | per customer: default notification level, optional quiet window (start and end minute, IANA time zone) (`NotificationSettings.v1`) | OPS | P | none | Deleted with the account (`PreferenceService.wipe`) | never shown to the business |
+| `conversation_state` | per (customer, conversation): archived time, muted | OPS | P | none | Deleted with the account | never shown to the business |
+| `alert_seen` | per viewer: alert id (`{source}:{id}`) and when it was marked seen | OPS | P | none | Deleted with the account | gap: no age-based purge yet (bounded by the alerts the account opened); add a 400-day class with the next retention change |
+| `loop_definitions`, `loop_revisions`, `loop_reviews`, `loop_publications`, `loop_rollout_allowlist`, `loop_switches`, `loop_reports` | business-authored Loop definitions (display text only), review decisions (reviewer reasons field-encrypted), signed manifests, rollout, switches; reports name the reporting account | OPS | P (reports) | reviewer notes `FieldCipher` (`loop_reviews.notes`) | Deleted with the tenant (`LoopTenantData`, `TenantRights`); revisions are immutable by trigger | no customer input |
+| `loop_studio_drafts` | Loop Studio drafts (WP-3.7): Loop key, origin template, canonical draft definition (business-authored display text only), version, author ids, timestamps | OPS | | none (no customer input; same class as `loop_revisions`) | Kept until the business deletes the draft; exported (`loopDrafts`) and deleted with the tenant (`LoopTenantData`, `TenantRights`) | no customer input |
+| `loop_instances`, `loop_action_events`, `loop_action_outcomes` | per customer and business: the instance (with the Brand Kit key pinned at creation, `brand_kit_pin`), each action (step, action, idempotency key, request digest, device id) and outcomes; inputs the customer entered | CUS | P | inputs `FieldCipher` (`loop_action_events.inputs`); events and outcomes append-only (trigger) | Deleted with the tenant (`LoopTenantData`); gap: no age-based purge and no deletion with the customer account yet (add with the next retention change) | inputs can hold short free text; no field type for health, secrets, card, bank or government ids |
+| `loop_consents` | per customer: global and per-business Loop consent with text version and digest, comprehension time, grant and revocation times | CON | P | none | Kept as consent evidence while the account exists | |
+| `inbox_queues`, `inbox_items`, `inbox_reads`, `inbox_notes` | hosted inbox per business: items (instance and event ids, state, assignee), read receipts per staff member, staff notes | CUS | P | notes `FieldCipher` (`inbox_notes.body`) | Closed items deleted after 180 days with notes and receipts (`LoopInbox.purgeClosed`, maintenance job); everything deleted with the tenant | staff email alerts carry no customer content |
+| `operator_permissions` | operator id, permission (`loop_reviewer`), grant and revocation times | SEC | | none | Kept (audit evidence) | granted only by the `grant-operator-permission` command |
+| `business_surfaces` | a business's module layout versions (module ids and order only), who published | OPS | | none | Deleted with the tenant (`TenantRights`) | no customer data |
+
+The Alerts and Benefits lists are read models over existing tables; they store nothing beyond the rows above.
+
+## 9. Addendum (2026-10-31, customer profiles; `docs/PROFILES.md`, SECURITY.md §2.97)
+
+Migration `Profiles.v1`.
+
+| Table | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `consumer_profiles` | the custom public name | PII | P | field cipher (row-bound) | Deleted with the account (`ProfileService.wipe`) | the public name is shared with every connected business by design |
+| `profile_values` | profile values (contact, personal, birth date, travel, memberships, vehicle, home, work) | PII | P | field cipher (row-bound, `profile_values.value#{rowId}`) | Deleted with the account | no operator or support view; closed catalog |
+| `profile_grants` | per (customer, business, field key): granted and revoked times, reason | OPS | P | none (keys only) | Kept without values after the account is deleted (grant history) | gap: no age-based purge yet; propose 400 days after revocation |
+| `profile_receipts` | customer-visible disclosure receipts: business name, action, keys, purpose, request id | OPS | P | none (no values) | Kept like consent history | gap as above |
+| `profile_requests` | a business's request: keys, purpose (business text), status, approved keys | OPS | P | none | Deleted with the account | gap: no age-based purge of answered requests yet |
+| `profile_verified_facts` | booleans established with an ID, method, assurance, policy version, time | PII (derived) | P | none | Deleted with the account or when the customer removes them | never a document number, image, name or birth date |
+| `profile_verification_attempts` | nonce (until used), provider session id, purge state | OPS | P | none | Abandoned attempts fail after their lifetime; rows without a pending purge are deleted after 30 days and with the account | provider sessions are purged with the Verify backoff |
+| `profile_category_requests` | a business's request to be allowed a profile category, justification, operator decision | OPS | | none | Deleted with the tenant | no customer data |
+
+## 10. Addendum (2026-10-31, feature expansion v4 Phase 2: Brand Kits)
+
+Migration `BrandKits.v1`. Business-supplied appearance data only; no customer data except the pin column.
+
+| Table / store | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `brand_assets` | per image: business, SHA-256, slot, size, review state and note, uploader and reviewer ids | OPS | | none | Deleted with the tenant (`TenantRights`) | rejected uploads are not stored (audit event only) |
+| `brand_kits` | per kit: identifier, name, tokens, frame, image ids, approved snapshot, versions, review state and note | OPS | | none | Deleted with the tenant | |
+| `brand_kit_schedules` | per business: schedule JSON (time zone, windows, rotation weights) | OPS | | none | Deleted with the tenant | |
+| `brand_manifests` | every signed manifest version (canonical JSON, JWS, hash, kid, lifetime) or a withdrawal | OPS | | integrity by signature | Deleted with the tenant | gap: no age-based purge of superseded versions yet |
+| `interactions.brand_kit_pin` | the kit id pinned to an interaction | OPS | | none | With the interaction row | |
+| Blob container `brand-assets` | re-encoded PNGs (`brand/{business}/{sha256}.png`), no metadata | OPS | | private container, Entra only, create-only writes | **gap**: blobs are not deleted with the tenant or after a takedown (no delete path in the store); never served without an approved row | add a purge job |
+
+## 11. Addendum (2026-11-15, message attachments; SECURITY.md §2.113)
+
+Migration `MessageAttachments.v1`.
+
+| Table / store | Data | Class | P | Protection | Retention (current purge job) | Notes / gaps |
+|---|---|---|---|---|---|---|
+| `message_attachments` | per image: business, customer, conversation, message and position, side, uploader reference (device, key or console user id), stored type, size, dimensions, SHA-256 of the stored image, object name, state and times | SMP | P | none (no content; the image is in the store) | Pending: expired after 1 hour and removed by the attachment sweep. Attached: marked with its message by `conversation_content` retention; marked by account deletion (the person's conversations, both sides) and tenant deletion; the sweep deletes the object, then the row | the digest is of the re-encoded image, not of what the person uploaded |
+| Blob container (attachment store, `AZURE_ATTACHMENT_BLOB_CONTAINER`) | re-encoded images (no metadata), each sealed with the field cipher bound to tenant and row | SMP | P | private container, Entra only, create-only writes, AES-256-GCM per object | Deleted by the sweep when the row is marked; gone at once (no blob soft delete, no versions) | `Infra/azure` `azurerm_storage_account.attachments` (`stvdratt…`, container `message-attachments`): an account of its own, because soft delete and versioning are account-wide and the brand account keeps 30 days of both. Decision (2026-11-15): blob soft delete **off**, versioning, change feed and point-in-time restore off, no immutability policy, so a deleted image cannot be recovered by anyone; container soft delete 7 days only protects against deleting the whole container and never keeps a blob the sweep deleted. Enforced by `policy_check.py` `ST-ATTACH-RETENTION` (both profiles). Accepted cost: an image deleted by mistake (a wrong retention setting, an operator error) is not recoverable either |
+| Webhook deliveries (`message.received`) | attachment ids and metadata only | SMP | P | sealed body (existing) | existing webhook retention | never bytes, never a URL |
+| Account export | per message: image id, type, size, dimensions, digest | SMP | P | export encryption (existing) | existing | the pictures themselves are not in the export |

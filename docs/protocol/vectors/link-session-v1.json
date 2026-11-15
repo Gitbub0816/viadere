@@ -1,0 +1,55 @@
+{
+  "appAttestClientData" : "VIADERE-APPATTEST-LINK-V1\n5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\nb5e027b632f997cd06898409781cdccea253a511e9973cb071b9928934ae2aac",
+  "approvalStatement" : {
+    "kid" : "cN3Hn_QaA5EySmCw88ZOdOxPvcGZsSMrCAkQCfrypcs",
+    "payload" : "eyJhbGciOiJFUzI1NiIsImFzc3VyYW5jZSI6ImJpb21ldHJpYyIsImJ1c2luZXNzX2lkIjoiYjBiMWIyYjMtYzRjNS00ZDZkLThlN2UtZjhmOWZhZmJmY2ZkIiwiY3JlYXRlZF9hdCI6MTgwMDAwMDAxMCwiZW5yb2xsbWVudF9pZCI6IjVhMGU5YzJiLTNmNDEtNGQ2YS05YjdjLTBkMWUyZjNhNGI1YyIsImhwa2Vfa2lkIjoiNXpyd2dMMUtEcmIxUnNlNFh4b1kxZDBxQTNfNGFNOFNCSkpCS1lHZ2hGdyIsImhwa2VfcHVibGljX2tleSI6IkJDSldzQmJnRFRvZnZKMmt2V3lXU0RBUW9KMFVGY1BkOGlxSlI2dTBmNW1rblFwLWxJbGFtVXFtSUZGTWtVb2dpaVVEemdkLVZMQ2xoNnNPS3RLdkVYNCIsImtpZCI6ImNOM0huX1FhQTVFeVNtQ3c4OFpPZE94UHZjR1pzU01yQ0FrUUNmcnlwY3MiLCJwdWJsaWNfa2V5IjoiQkdoQXh0eWY1eDdZTnBEaWdKb0FNYkk4SzVDWFdNTE9UcnNNNHBhLWJZeExtUzV6dDhpRnA2d2w1VHhTSzFRaHZ0clJVcGhCV1lCMmJBWWZJbTcwRUw4Iiwic3ViamVjdF9yZWYiOiJzdWJfajQ2ZTFJaTZSd2hjQUM2S0tvUm0xM1d6bkNoemdrdnZoWUZPRkZCZzNFcyIsInR5cGUiOiJhcHByb3ZhbC1lbnJvbGxtZW50IiwidiI6MX0",
+    "publicKey" : "BGhAxtyf5x7YNpDigJoAMbI8K5CXWMLOTrsM4pa-bYxLmS5zt8iFp6wl5TxSK1QhvtrRUphBWYB2bAYfIm70EL8",
+    "signature" : "FCtYmb7ubGs_FbnkYDxqyd3IwEWsLJmuRhDAu7XoZxVPdqFC2pk8wuLLkXfXfcV8wQl80_sHrtyCWE0XoKad7A",
+    "signingInput" : "VIADERE-APPROVAL-ENROLL-V1\n{\"alg\":\"ES256\",\"assurance\":\"biometric\",\"business_id\":\"b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd\",\"created_at\":1800000010,\"enrollment_id\":\"5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\",\"hpke_kid\":\"5zrwgL1KDrb1Rse4XxoY1d0qA3_4aM8SBJJBKYGghFw\",\"hpke_public_key\":\"BCJWsBbgDTofvJ2kvWyWSDAQoJ0UFcPd8iqJR6u0f5mknQp-lIlamUqmIFFMkUogiiUDzgd-VLClh6sOKtKvEX4\",\"kid\":\"cN3Hn_QaA5EySmCw88ZOdOxPvcGZsSMrCAkQCfrypcs\",\"public_key\":\"BGhAxtyf5x7YNpDigJoAMbI8K5CXWMLOTrsM4pa-bYxLmS5zt8iFp6wl5TxSK1QhvtrRUphBWYB2bAYfIm70EL8\",\"subject_ref\":\"sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es\",\"type\":\"approval-enrollment\",\"v\":1}"
+  },
+  "approvalStatementDigest" : "116040df8339a59ca7d7f12fec31ff93b261c23c09df459505b764be4ef505db",
+  "bindingTag" : "mzaITKsA_7NK1BqEw6Q8xz-lxZEqM5ZGZGsrNbrtNwE",
+  "businessId" : "b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd",
+  "checkCode" : "B6J2X2DJ",
+  "code" : "K7QFM2XA",
+  "confirmation" : {
+    "kid" : "0McQ_zAaKOS-dMC3NjCv75sQCsgJ1Ij5obfR8AZv7wg",
+    "payload" : "eyJidXNpbmVzc19pZCI6ImIwYjFiMmIzLWM0YzUtNGQ2ZC04ZTdlLWY4ZjlmYWZiZmNmZCIsImNvbmZpcm1fa2lkIjoiME1jUV96QWFLT1MtZE1DM05qQ3Y3NXNRQ3NnSjFJajVvYmZSOEFadjd3ZyIsImNvbmZpcm1lZF9hdCI6MTgwMDAwMDA0MCwia2lkIjoidWE0ZEhCUW5pMmVjMGRoT1FmX1AwTXJ3N1dJOFhxSi1zcXlocWhDTWhyRSIsInNlc3Npb25faWQiOiI1YTBlOWMyYi0zZjQxLTRkNmEtOWI3Yy0wZDFlMmYzYTRiNWMiLCJzdGF0ZW1lbnRfZGlnZXN0IjoiYjVlMDI3YjYzMmY5OTdjZDA2ODk4NDA5NzgxY2RjY2VhMjUzYTUxMWU5OTczY2IwNzFiOTkyODkzNGFlMmFhYyIsInN1YmplY3RfcmVmIjoic3ViX2o0NmUxSWk2UndoY0FDNktLb1JtMTNXem5DaHpna3Z2aFlGT0ZGQmczRXMiLCJ0eXBlIjoibGluay1jb25maXJtYXRpb24iLCJ2IjoxLCJ2ZXJpZmljYXRpb24iOiJzYXNfdHlwZWQifQ",
+    "publicKey" : "BPgvKXZdVAJh4QLH8UohJTk4sIaQ5H3ZbBKwkSOnGbkPRIm8kyI8ITdGfuUC3GeqMtlibEfaxtF4j761tQaXqtY",
+    "signature" : "Muvl7phqH6iV9OLmdAWftJJUiqQC6gYQBSVxnphFLLgsKnjYV3fAtZ_fkdnmc2qsqUIkSq2eWTzct4z5WSQyQQ",
+    "signingInput" : "VIADERE-LINK-CONFIRM-V1\n{\"business_id\":\"b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd\",\"confirm_kid\":\"0McQ_zAaKOS-dMC3NjCv75sQCsgJ1Ij5obfR8AZv7wg\",\"confirmed_at\":1800000040,\"kid\":\"ua4dHBQni2ec0dhOQf_P0Mrw7WI8XqJ-sqyhqhCMhrE\",\"session_id\":\"5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\",\"statement_digest\":\"b5e027b632f997cd06898409781cdccea253a511e9973cb071b9928934ae2aac\",\"subject_ref\":\"sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es\",\"type\":\"link-confirmation\",\"v\":1,\"verification\":\"sas_typed\"}"
+  },
+  "description" : "Business link sessions (SECURITY.md 2.59): Viadere's descriptor (VIADERE-LINK-DESCRIPTOR-V1, key link-descriptor), the device's approval-key statement (VIADERE-APPROVAL-ENROLL-V1, enrollment id = session id) and link statement (VIADERE-LINK-V1, signed by the connection key it contains), the binding tag, check code and SAS keyed by the business-held secret es, the account pseudonym, the business's confirmation (VIADERE-LINK-CONFIRM-V1), Viadere's result (VIADERE-LINK-RESULT-V1) and the App Attest client data of the completion. Payloads are canonical JSON (2.2), base64url; signatures ECDSA P-256 / SHA-256 raw r||s, low-S: verify them, do not compare them.",
+  "descriptor" : {
+    "kid" : "uxiUuWtJqb0nlLS0aw8L1edAOWqqLUA9ZJ-lMKES6q4",
+    "payload" : "eyJidXNpbmVzc19kb21haW4iOiJub3J0aHdpbmQuZXhhbXBsZSIsImJ1c2luZXNzX2lkIjoiYjBiMWIyYjMtYzRjNS00ZDZkLThlN2UtZjhmOWZhZmJmY2ZkIiwiYnVzaW5lc3NfbmFtZSI6Ik5vcnRod2luZCBCYW5rIiwiY2FwYWJpbGl0aWVzIjpbIm1lc3NhZ2Uuc2VuZCIsInRyYW5zYWN0aW9uLmFwcHJvdmUiXSwiZGlzcGxheV9oaW50IjoiQWNjb3VudCBlbmRpbmcgNDgyMSIsImV4cGlyZXNfYXQiOjE4MDAwMDAzMDAsImlzc3VlZF9hdCI6MTgwMDAwMDAwMCwicm9vdF9raWQiOiI3UXdyMU1mU1R0dC1kQkxpbVhtMmNidXlwNFVMbFRRTWxWU2lkZHlTbEl3Iiwic2Vzc2lvbl9pZCI6IjVhMGU5YzJiLTNmNDEtNGQ2YS05YjdjLTBkMWUyZjNhNGI1YyIsInNpZ25lcl9raWQiOiJ1eGlVdVd0SnFiMG5sTFMwYXc4TDFlZEFPV3FxTFVBOVpKLWxNS0VTNnE0Iiwic3ViamVjdF9yZWYiOiJzdWJfajQ2ZTFJaTZSd2hjQUM2S0tvUm0xM1d6bkNoemdrdnZoWUZPRkZCZzNFcyIsInR5cGUiOiJsaW5rLXNlc3Npb24tZGVzY3JpcHRvciIsInYiOjF9",
+    "publicKey" : "BCOBb6J4lo4Pa19xYuSwhwgIfgWVss3ZOxRbTC3ONYB4jTjmXMTVneRamlW8ORAanULv5mM_1Brt57mZYG1PK9w",
+    "signature" : "FHQcu7ViHCXoJP5HCoSImtC6bvLjdaVIwv3Tt7JzBMx8zCgpRYPzpFPY6tu_G2ZyzveiHGasp2BnDGg_Yxy55A",
+    "signingInput" : "VIADERE-LINK-DESCRIPTOR-V1\n{\"business_domain\":\"northwind.example\",\"business_id\":\"b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd\",\"business_name\":\"Northwind Bank\",\"capabilities\":[\"message.send\",\"transaction.approve\"],\"display_hint\":\"Account ending 4821\",\"expires_at\":1800000300,\"issued_at\":1800000000,\"root_kid\":\"7Qwr1MfSTtt-dBLimXm2cbuyp4ULlTQMlVSiddySlIw\",\"session_id\":\"5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\",\"signer_kid\":\"uxiUuWtJqb0nlLS0aw8L1edAOWqqLUA9ZJ-lMKES6q4\",\"subject_ref\":\"sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es\",\"type\":\"link-session-descriptor\",\"v\":1}"
+  },
+  "descriptorDigest" : "5c2344b98ecdbd7374b33612294373882460fc8f144ac51d3652032400ef6ee8",
+  "link" : "https://viadere.cksites.dev/k/K7QFM2XA#es=0UTAWGsqFQx3eBXcvMZ5sSddbALB6u9fxKNSSQzUe7U",
+  "linkDomain" : "viadere.cksites.dev",
+  "name" : "link-session-v1",
+  "pseudonym" : "CTDE-2YE7",
+  "result" : {
+    "kid" : "uxiUuWtJqb0nlLS0aw8L1edAOWqqLUA9ZJ-lMKES6q4",
+    "payload" : "eyJhcHByb3ZhbF9zdGF0ZW1lbnRfZGlnZXN0IjoiMTE2MDQwZGY4MzM5YTU5Y2E3ZDdmMTJmZWMzMWZmOTNiMjYxYzIzYzA5ZGY0NTk1MDViNzY0YmU0ZWY1MDVkYiIsImJ1c2luZXNzX2lkIjoiYjBiMWIyYjMtYzRjNS00ZDZkLThlN2UtZjhmOWZhZmJmY2ZkIiwiY29tcGxldGVkX2F0IjoxODAwMDAwMDExLCJzZXNzaW9uX2lkIjoiNWEwZTljMmItM2Y0MS00ZDZhLTliN2MtMGQxZTJmM2E0YjVjIiwic2lnbmVyX2tpZCI6InV4aVV1V3RKcWIwbmxMUzBhdzhMMWVkQU9XcXFMVUE5WkotbE1LRVM2cTQiLCJzdGF0ZW1lbnRfZGlnZXN0IjoiYjVlMDI3YjYzMmY5OTdjZDA2ODk4NDA5NzgxY2RjY2VhMjUzYTUxMWU5OTczY2IwNzFiOTkyODkzNGFlMmFhYyIsInN1YmplY3RfcmVmIjoic3ViX2o0NmUxSWk2UndoY0FDNktLb1JtMTNXem5DaHpna3Z2aFlGT0ZGQmczRXMiLCJ0eXBlIjoibGluay1yZXN1bHQiLCJ2IjoxfQ",
+    "publicKey" : "BCOBb6J4lo4Pa19xYuSwhwgIfgWVss3ZOxRbTC3ONYB4jTjmXMTVneRamlW8ORAanULv5mM_1Brt57mZYG1PK9w",
+    "signature" : "Z5QwbIPgqPL1rdQP53EYpScKBd8iTR2iBbW2l9UgGzlJNX9upH_vVVU8VELLJvvtZ5L_DUjIfFdrcKLfCpgzFg",
+    "signingInput" : "VIADERE-LINK-RESULT-V1\n{\"approval_statement_digest\":\"116040df8339a59ca7d7f12fec31ff93b261c23c09df459505b764be4ef505db\",\"business_id\":\"b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd\",\"completed_at\":1800000011,\"session_id\":\"5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\",\"signer_kid\":\"uxiUuWtJqb0nlLS0aw8L1edAOWqqLUA9ZJ-lMKES6q4\",\"statement_digest\":\"b5e027b632f997cd06898409781cdccea253a511e9973cb071b9928934ae2aac\",\"subject_ref\":\"sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es\",\"type\":\"link-result\",\"v\":1}"
+  },
+  "sas" : "171630",
+  "secret" : "0UTAWGsqFQx3eBXcvMZ5sSddbALB6u9fxKNSSQzUe7U",
+  "sessionId" : "5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c",
+  "statement" : {
+    "kid" : "ua4dHBQni2ec0dhOQf_P0Mrw7WI8XqJ-sqyhqhCMhrE",
+    "payload" : "eyJhbGciOiJFUzI1NiIsImFwcHJvdmFsX3N0YXRlbWVudF9kaWdlc3QiOiIxMTYwNDBkZjgzMzlhNTljYTdkN2YxMmZlYzMxZmY5M2IyNjFjMjNjMDlkZjQ1OTUwNWI3NjRiZTRlZjUwNWRiIiwiYnVzaW5lc3NfaWQiOiJiMGIxYjJiMy1jNGM1LTRkNmQtOGU3ZS1mOGY5ZmFmYmZjZmQiLCJjYXBhYmlsaXRpZXMiOlsibWVzc2FnZS5zZW5kIiwidHJhbnNhY3Rpb24uYXBwcm92ZSJdLCJjcmVhdGVkX2F0IjoxODAwMDAwMDEwLCJkZXNjcmlwdG9yX2RpZ2VzdCI6IjVjMjM0NGI5OGVjZGJkNzM3NGIzMzYxMjI5NDM3Mzg4MjQ2MGZjOGYxNDRhYzUxZDM2NTIwMzI0MDBlZjZlZTgiLCJraWQiOiJ1YTRkSEJRbmkyZWMwZGhPUWZfUDBNcnc3V0k4WHFKLXNxeWhxaENNaHJFIiwicHVibGljX2tleSI6IkJQRUNMSkJ3VUJjNWpiU0dQVmVCWHc3ejVmUVJlYnNFS1BMbEV3XzAwY05mTDdMNGFGX05WaTduV2FVcGdZa29PN0xBQmFZRFdGTDlkX09Ma2FrVXV5byIsInNlc3Npb25faWQiOiI1YTBlOWMyYi0zZjQxLTRkNmEtOWI3Yy0wZDFlMmYzYTRiNWMiLCJzdWJqZWN0X3JlZiI6InN1Yl9qNDZlMUlpNlJ3aGNBQzZLS29SbTEzV3puQ2h6Z2t2dmhZRk9GRkJnM0VzIiwidHlwZSI6Imxpbmstc3RhdGVtZW50IiwidiI6MX0",
+    "publicKey" : "BPECLJBwUBc5jbSGPVeBXw7z5fQRebsEKPLlEw_00cNfL7L4aF_NVi7nWaUpgYkoO7LABaYDWFL9d_OLkakUuyo",
+    "signature" : "QSEJowFopRbienbO8Yao8YbTI_6qQ09E8kVOBxBhEjVWjN3hk13QIReMc98TEL6dnxif08d391qkEV4CxR27sA",
+    "signingInput" : "VIADERE-LINK-V1\n{\"alg\":\"ES256\",\"approval_statement_digest\":\"116040df8339a59ca7d7f12fec31ff93b261c23c09df459505b764be4ef505db\",\"business_id\":\"b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd\",\"capabilities\":[\"message.send\",\"transaction.approve\"],\"created_at\":1800000010,\"descriptor_digest\":\"5c2344b98ecdbd7374b33612294373882460fc8f144ac51d3652032400ef6ee8\",\"kid\":\"ua4dHBQni2ec0dhOQf_P0Mrw7WI8XqJ-sqyhqhCMhrE\",\"public_key\":\"BPECLJBwUBc5jbSGPVeBXw7z5fQRebsEKPLlEw_00cNfL7L4aF_NVi7nWaUpgYkoO7LABaYDWFL9d_OLkakUuyo\",\"session_id\":\"5a0e9c2b-3f41-4d6a-9b7c-0d1e2f3a4b5c\",\"subject_ref\":\"sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es\",\"type\":\"link-statement\",\"v\":1}"
+  },
+  "statementDigest" : "b5e027b632f997cd06898409781cdccea253a511e9973cb071b9928934ae2aac",
+  "subjectRef" : "sub_j46e1Ii6RwhcAC6KKoRm13WznChzgkvvhYFOFFBg3Es",
+  "version" : 1
+}

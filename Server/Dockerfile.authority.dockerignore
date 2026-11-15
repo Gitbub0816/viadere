@@ -1,0 +1,12 @@
+**/.build
+**/.swiftpm
+**/DerivedData
+.git
+App
+Design
+docs
+Site
+sdk
+Infra
+**/.env
+**/*.p8

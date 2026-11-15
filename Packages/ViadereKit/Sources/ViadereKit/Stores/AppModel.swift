@@ -1,0 +1,623 @@
+import Foundation
+import ViadereCore
+#if canImport(Observation) && !os(Linux)
+import Observation
+#endif
+
+/// The stable primary bar (spec C1; docs/APP-IA.md): Alerts, Messages, Benefits, Businesses and You. Alerts comes first because it is where the
+/// app opens; Activity is the History segment of Alerts; You holds the account, security, notifications, privacy and appearance (it replaced
+/// the Settings sheet behind the context bar, which owners could not find). Add business lives in Businesses and next to the selector. The
+/// bar never grows with the number of businesses.
+public enum AppTab: String, CaseIterable, Sendable, Hashable {
+    case alerts, messages, benefits, businesses, you
+
+    public var destination: OrganizationDestination {
+        switch self {
+        case .messages: .messages
+        case .alerts: .alerts
+        case .benefits: .benefits
+        case .businesses: .businesses
+        case .you: .settings
+        }
+    }
+
+    /// Whether the business selector filters this tab (You is global; per-business settings live on the business page).
+    public var isFilteredByContext: Bool { destination.isFilteredByContext }
+}
+
+/// A request to start the connect flow with a code that arrived by link, QR, NFC or App Clip.
+public struct PendingConnect: Equatable, Sendable {
+    public var code: BusinessCode
+    public var link: ConnectLink?
+    public var source: ConnectSource
+}
+
+/// Root state: which top-level phase the app is in, where the user is, and what to present.
+@MainActor
+#if canImport(Observation) && !os(Linux)
+@Observable
+#endif
+public final class AppModel {
+    public enum Phase: Equatable, Sendable { case launching, onboarding(OnboardingStep), needsReenrollment, ready }
+
+    public private(set) var phase: Phase = .launching
+    public var selectedTab: AppTab = .alerts
+    /// Settings live in the You tab. Kept for callers that used to present the Settings sheet: setting it selects You.
+    public var settingsPresented: Bool {
+        get { selectedTab == .you }
+        set { if newValue { selectedTab = .you } }
+    }
+    /// Add business (+): from the Businesses directory or next to the selector; also opened by connect codes, QR and link sessions.
+    public var addBusinessPresented = false
+    /// The camera scanner (Alerts and Businesses headers, Add business). It reads Viadere codes and QR codes; see `scanned(_:symbology:)`.
+    public var scannerPresented = false
+    /// A handle or code read by the scanner, for Add business to look up.
+    public var scannedLookup: String?
+    /// A pairing code from an opened `/p/{code}` link, for the new device's pairing entry in onboarding (`openDevicePairing`). Never set on an
+    /// enrolled device; onboarding takes it once and clears it.
+    public var pendingDevicePairingCode: String?
+    /// What the scanner accepted, until the shell delivers it.
+    public private(set) var scannedDecision: ScannedCodeDecision?
+    /// The approval sheet. While it is up the business context is frozen (C9.7): nothing switches it underneath a decision.
+    public var presentedApproval: ApprovalViewModel? {
+        didSet { if presentedApproval == nil, oldValue != nil { organization.endSensitiveFlow() } }
+    }
+    public var pendingConnect: PendingConnect?
+    /// An Approve enrollment link (`/a/{CODE}?rk=`) waiting for the Approvals screen to pick it up.
+    public var pendingApproveEnrollment: PendingApproveEnrollment?
+    /// A business link session opened from a QR or link (`/k/…`); the Connect tab presents it.
+    public var pendingLinkSession: PendingLinkSession?
+    /// A verification session opened from a business's "Verify with Viadere" button, QR or typed code (`/v/…`); the root presents its review.
+    public var pendingVerificationSession: PendingVerificationSession?
+    /// A sign-in link delivery (a tapped `viadere.auth.link` push or its "Open" action): the root presents the confirm screen
+    /// (`LinkConfirmationViewModel`). Nothing is opened or consumed until the person taps Continue.
+    public var pendingAuthDelivery: PendingAuthDelivery?
+    /// "Sign in with Viadere" (`/o/{ach}` QR or a `viadere.oidc` push): the root presents the confirm screen (`OIDCSignInViewModel`).
+    public var pendingOIDCSignIn: PendingOIDCSignIn?
+    /// Set by the app: opens an Approve v2 request (`nil` key: the list of requests). Kept out of the Kit because the controller lives in the app.
+    public var openApproveRequest: (@MainActor (String?) async -> Void)?
+    public var conversationToOpen: SessionID?
+    public var businessToOpen: BusinessHandle?
+    /// A Loop install link (`/lp/{loopId}`) waiting for the shell to present its install sheet (`LoopDetailView`).
+    public var loopToInstall: LoopDefinitionID?
+    public var toast: String?
+    /// Set to open Settings → Trusted devices (the security notice banner's "Review"); Settings clears it once it has navigated.
+    public var reviewDevicesRequested = false
+    public private(set) var isLocked = false
+    /// Bumped every time the app locks. The UI keys its content on this so every presented sheet, alert and
+    /// pushed screen is torn down with the lock, and nothing underneath can stay visible or interactive.
+    public private(set) var lockEpoch = 0
+    /// True when the keychain could not be read at launch (locked, early boot): keys are re-checked on the next
+    /// foreground instead of forcing a re-enrollment.
+    public private(set) var keysNeedRecheck = false
+
+    public let services: ViadereServices
+    /// The explanation shown before the passkey sheet when setting this iPhone up again.
+    public let passkeyGate = PasskeyExplanationGate()
+    public let home: HomeViewModel
+    public let activity: ActivityViewModel
+    public let rewards: RewardsViewModel
+    public let wallet: WalletPassCoordinator
+    public let messages: MessagesViewModel
+    public let securityNotices: SecurityNoticesViewModel
+    /// Organization (WP-1.2): the business context and the Alerts, Benefits and Businesses destinations.
+    public let organization: OrganizationContextStore
+    public let alerts: AlertsViewModel
+    public let benefits: BenefitsViewModel
+    public let businesses: BusinessesViewModel
+    /// The account-wide default level and quiet hours (You → Notifications).
+    public let notificationSettings: NotificationSettingsViewModel
+    /// Loop consent (global and per business; WP-3.5). Entry points are hidden unless it allows them.
+    public let loopConsent: LoopConsentViewModel
+    /// The Loop publication keys the renderer verifies with (build pins, narrowed by the server's list).
+    public let loopKeys: LoopKeyRing
+    /// Installed Loops (Your Loops, Settings) and the verified records of install-only businesses for the renderer.
+    public let loopLibrary: LoopLibraryViewModel
+    private var queuedLink: DeepLink?
+    /// Links and notification opens that arrived while the app was locked, replayed in order after unlock.
+    private var lockedQueue: [DeepLink] = []
+    /// How many opens are waiting for an unlock (tests and the lock screen).
+    public var queuedWhileLockedCount: Int { lockedQueue.count }
+    static let maxQueuedWhileLocked = 5
+    private var backgroundedAt: Date?
+    private var isColdLaunch = true
+
+    /// - Parameter walletLibrary: `PassKitWalletLibrary()` in the app; the default reports Wallet as unavailable.
+    public init(services: ViadereServices, walletLibrary: any WalletLibrary = UnavailableWalletLibrary()) {
+        self.services = services
+        home = HomeViewModel(services: services)
+        activity = ActivityViewModel(services: services)
+        rewards = RewardsViewModel(services: services)
+        wallet = WalletPassCoordinator(services: services, library: walletLibrary)
+        messages = MessagesViewModel(services: services)
+        securityNotices = SecurityNoticesViewModel(services: services)
+        organization = OrganizationContextStore(preferences: services.preferences)
+        alerts = AlertsViewModel(api: services.organizationAPI, clock: services.clock)
+        benefits = BenefitsViewModel(api: services.organizationAPI)
+        businesses = BusinessesViewModel(api: services.organizationAPI)
+        notificationSettings = NotificationSettingsViewModel(api: services.organizationAPI)
+        loopConsent = LoopConsentViewModel(api: services.loopsAPI)
+        loopKeys = LoopKeyRing(pinned: services.configuration.loopPublicationKeys, api: services.loopsAPI)
+        let consentModel = loopConsent
+        loopLibrary = LoopLibraryViewModel(api: services.loopsAPI, consent: { consentModel.status })
+        businesses.onChange = { [weak self] directory in
+            guard let self else { return }
+            self.organization.update(directory: directory)
+            for entry in directory where !entry.isActive {
+                self.alerts.forget(business: entry.business.id)
+                self.services.brandKits?.forget(entry.business.id)
+            }
+        }
+        // The API client reports "the server no longer trusts this device" through this notifier.
+        services.revocation.setHandler { [weak self] in
+            Task { @MainActor in await self?.deviceWasRevoked() }
+        }
+    }
+
+    // MARK: Launch
+
+    public func bootstrap() async {
+        let hasSession = await services.sessions.isSignedIn
+        let record = try? await services.records.load()
+        let complete = services.preferences.bool(.onboardingComplete)
+        guard hasSession, complete else {
+            phase = .onboarding(OnboardingFlow.resume(hasSession: hasSession, hasDevice: record != nil,
+                                                      primingShown: services.preferences.bool(.notificationPrimingShown),
+                                                      protectionShown: services.preferences.bool(.protectionPromptShown), complete: complete,
+                                                      recoveryPending: RecoveryHoldStore(secrets: services.secrets).load() != nil))
+            return
+        }
+        switch await services.account.health() {
+        case .healthy:
+            phase = .ready
+        case .needsReenrollment, .notEnrolled:
+            phase = .needsReenrollment
+        case .unavailable:
+            // The keychain can't answer yet (-25308 and friends): not an invalidation. Stay usable, re-check later.
+            phase = .ready
+            keysNeedRecheck = true
+        }
+        if AppLockPolicy(enabled: services.preferences.bool(.appLockEnabled)).shouldLock(backgroundedAt: nil, now: services.clock(), isColdLaunch: isColdLaunch) {
+            lock()
+        }
+        isColdLaunch = false
+        if phase == .ready {
+            await home.load()
+            await activity.load()
+            await securityNotices.load()
+            await refreshOrganization()
+            if let link = queuedLink { queuedLink = nil; await handle(link) }
+        }
+    }
+
+    /// Businesses first (the selector's options), then the lists. The server is the source of truth; a missed push is healed here.
+    public func refreshOrganization() async {
+        await businesses.load()
+        refreshBrandKits()
+        await alerts.refresh()
+        await alerts.ensureLoaded(organization.effective)
+        await benefits.load()
+        // Keep the Home Screen widget's waiting count current even when Alerts is not on screen (numbers only).
+        services.homeWidget?.publish(alerts: alerts, benefits: benefits)
+        await notificationSettings.load()
+        if services.loopsAPI != nil {
+            await loopConsent.load()
+            await loopKeys.refresh()
+            await loopLibrary.load()
+        }
+    }
+
+    /// Fetches Brand Kits of the active businesses in the background. Nothing waits for it: every surface renders neutral at once and
+    /// adopts a verified kit when it arrives (spec B4.4).
+    public func refreshBrandKits() {
+        guard let store = services.brandKits else { return }
+        let ids = businesses.active.filter { $0.business.isVerified }.map(\.business.id)
+        Task.detached(priority: .utility) { await store.refresh(ids) }
+    }
+
+    /// What a Loop screen needs, as a snapshot of the device's verified directory and consent (WP-3.6).
+    public func loopRenderContext() -> LoopRenderContext {
+        let directory = Dictionary(businesses.directory.map { ($0.business.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let consent = loopConsent.status
+        let keys = loopKeys
+        // Businesses the customer only installed a Loop of (no connection): the server's directory record from Your Loops.
+        let installed = loopLibrary.publisherRecords
+        return LoopRenderContext(
+            keys: { keys.keys },
+            publisher: { id in
+                guard let entry = directory[id], entry.isActive else { return installed[id] }
+                return VerifiedBusinessRecord(id: entry.business.id, displayName: entry.business.displayName,
+                                              verificationStatus: entry.business.verificationStatus, category: entry.category ?? .other)
+            },
+            consent: { LoopConsentGate.decision(status: consent, business: $0) },
+            brand: services.brandKits, clock: services.clock,
+            signApproval: { [signer = services.loopApprovals] interaction, name in try await signer.sign(interaction, businessName: name) })
+    }
+
+    public func completeOnboarding() async {
+        phase = .ready
+        await home.load()
+        await activity.load()
+        await securityNotices.load()
+        await refreshOrganization()
+        if let link = queuedLink { queuedLink = nil; await handle(link) }
+    }
+
+    // MARK: App lock & scene phases
+
+    public func reviewDevices() { reviewDevicesRequested = true; selectedTab = .you }
+
+    /// Opens the connect review for a business the customer is no longer connected to (its permanent code; the review shows it again).
+    public func reconnect(_ business: BusinessSummary) {
+        selectedTab = .businesses
+        pendingConnect = PendingConnect(code: business.code, link: nil, source: .code)
+        addBusinessPresented = true
+    }
+
+    public func sceneDidEnterBackground() { backgroundedAt = services.clock() }
+
+    public func sceneWillEnterForeground() async {
+        let policy = AppLockPolicy(enabled: services.preferences.bool(.appLockEnabled))
+        if phase == .ready, policy.shouldLock(backgroundedAt: backgroundedAt, now: services.clock(), isColdLaunch: false) { lock() }
+        backgroundedAt = nil
+        if keysNeedRecheck {
+            switch await services.account.health() {
+            case .healthy: keysNeedRecheck = false
+            case .needsReenrollment, .notEnrolled: keysNeedRecheck = false; phase = .needsReenrollment
+            case .unavailable: break
+            }
+        }
+        if phase == .ready, !isLocked { await home.load(); await activity.load(); await securityNotices.load(); await refreshOrganization() }
+    }
+
+    /// Locks the app: dismisses every presented sheet and discards pending presentations, so nothing stays on
+    /// screen behind or above the lock. Links and notification opens that arrive meanwhile are queued.
+    public func lock() {
+        guard !isLocked else { return }
+        isLocked = true
+        lockEpoch += 1
+        Task { await securityNotices.setCovered(true) }
+        presentedApproval = nil
+        pendingConnect = nil
+        pendingApproveEnrollment = nil
+        pendingLinkSession = nil
+        pendingVerificationSession = nil
+        pendingAuthDelivery = nil
+        pendingOIDCSignIn = nil
+        pendingDevicePairingCode = nil
+        conversationToOpen = nil
+        businessToOpen = nil
+        addBusinessPresented = false
+        toast = nil
+    }
+
+    public func unlock() async {
+        let ok = await services.appLock.authenticate(reason: "Unlock Viadere")
+        if ok { await unlocked() }
+    }
+
+    /// Opens the app after a successful authentication and replays what arrived while it was locked.
+    func unlocked() async {
+        isLocked = false
+        await securityNotices.setCovered(false)
+        let replay = lockedQueue
+        lockedQueue.removeAll()
+        for link in replay { await handle(link) }
+    }
+
+    private func enqueueWhileLocked(_ link: DeepLink) {
+        lockedQueue.append(link)
+        if lockedQueue.count > Self.maxQueuedWhileLocked { lockedQueue.removeFirst(lockedQueue.count - Self.maxQueuedWhileLocked) }
+    }
+
+    // MARK: Deep links & notifications
+
+    public func open(url: URL) async {
+        guard let link = DeepLinkRouter.route(url) else { return }
+        await handle(link)
+    }
+
+    /// A code read by the in-app scanner. `ScannedCodePolicy` is the only judge of what a scan may open; an accepted link takes the same
+    /// path as a tapped one, so it lands on a review screen and approves nothing. Returns the reason when the code was refused.
+    ///
+    /// An accepted code closes the scanner and waits in `scannedDecision`; the shell calls `deliverScanned()` once the scanner is off
+    /// screen, so the review sheet is never presented over a closing camera.
+    @discardableResult
+    public func scanned(_ payload: String, symbology: ScannedSymbology) -> ScanRejection? {
+        switch ScannedCodePolicy.evaluate(payload, symbology: symbology) {
+        case .rejected(let reason):
+            return reason
+        case let accepted:
+            scannedDecision = accepted
+            scannerPresented = false
+            return nil
+        }
+    }
+
+    /// Opens what the scanner accepted (at most once).
+    public func deliverScanned() async {
+        guard let decision = scannedDecision else { return }
+        scannedDecision = nil
+        switch decision {
+        case .open(let link):
+            await handle(link)
+        case .lookup(let text):
+            selectedTab = .businesses
+            scannedLookup = text
+            addBusinessPresented = true
+        case .safeAction(let text):
+            await deliverSafeAction(text)
+        case .rejected:
+            break
+        }
+    }
+
+    /// A scanned CKey Safe Action. It is verified first (`SafeActionReader`: pinned key, signature, app, action, time, single use, the
+    /// issuer's request information); a verified one opens the sign-in review carrying who is asking, and approves nothing. Anything else
+    /// shows the fixed refusal and opens nothing. A Safe Action is single use, so it is never queued: locked or not ready means refused.
+    private func deliverSafeAction(_ text: String) async {
+        guard !isLocked, phase == .ready, let reader = services.safeActionReader else {
+            toast = SafeActionRejection.notReady.message
+            return
+        }
+        switch await reader.read(text) {
+        case .needsConfirmation(let request):
+            // The app may have locked while the issuer was asked.
+            guard !isLocked, phase == .ready else { toast = SafeActionRejection.notReady.message; return }
+            pendingOIDCSignIn = PendingOIDCSignIn(challengeId: request.requestId, safeAction: request)
+        case .rejected(let reason):
+            toast = reason.message
+        case .notASafeAction:
+            toast = SafeActionRejection.malformed.message
+        }
+    }
+
+    public func handle(_ link: DeepLink) async {
+        // Nothing is routed, fetched or presented while locked: it waits for the unlock.
+        guard !isLocked else { enqueueWhileLocked(link); return }
+        // A pairing code's link is never queued for later: it is for this moment's onboarding or for nothing.
+        if case .devicePairing(let code) = link { await openDevicePairing(code); return }
+        guard phase == .ready else { queuedLink = link; return }
+        switch link {
+        case .connect(let code, let link):
+            selectedTab = .businesses
+            addBusinessPresented = true
+            pendingConnect = PendingConnect(code: code, link: link, source: link == nil ? .code : .qr)
+        case .business(let handle):
+            // Opens that business's page (or the connect review when not connected). It never selects a business context: only the
+            // customer's own choice in the selector does.
+            businessToOpen = handle
+            selectedTab = .businesses
+        case .retiredLink:
+            // An old text link: nothing is read or redeemed. The person is told and sees what is waiting in the app.
+            selectedTab = .alerts
+            toast = "This link is no longer used. Open Viadere to see your requests."
+            await home.load()
+        case .authDelivery(let id):
+            pendingAuthDelivery = PendingAuthDelivery(id: id)
+        case .approveRequest(let key):
+            await openApproveRequest?(key)
+        case .interaction(let id):
+            await openInteraction(id)
+        case .conversation(let id):
+            conversationToOpen = id
+            selectedTab = .messages
+        case .settings:
+            selectedTab = .you
+        case .approveEnrollment(let code, let rootKid, let secret):
+            pendingApproveEnrollment = PendingApproveEnrollment(code: code, rootKid: rootKid, secret: secret)
+            selectedTab = .you
+        case .linkSession(let code, let secret):
+            pendingLinkSession = PendingLinkSession(code: code, secret: secret)
+            selectedTab = .businesses
+            addBusinessPresented = true
+        case .loopInstall(let id):
+            // Opening an install link only shows the Loop's install sheet; nothing is installed without the customer's choice.
+            loopToInstall = id
+        case .verificationSession(let code):
+            pendingVerificationSession = PendingVerificationSession(code: code)
+        case .oidcSignIn(let challengeId):
+            pendingOIDCSignIn = PendingOIDCSignIn(challengeId: challengeId)
+        case .devicePairing:
+            // Handled above (`openDevicePairing`).
+            break
+        }
+    }
+
+    /// `/p/{code}` opened from the system camera or a tap (SECURITY.md §2.107). Only a device that is not enrolled (no session, no device record)
+    /// and is in onboarding takes it, and only as a code for its pairing entry, which still needs Continue. An enrolled device says so and keeps
+    /// nothing.
+    func openDevicePairing(_ code: String) async {
+        let signedIn = await services.sessions.isSignedIn
+        let record = try? await services.records.load()
+        guard !signedIn, record == nil else {
+            pendingDevicePairingCode = nil
+            toast = ScanRejection.pairingOnEnrolledDevice.message
+            return
+        }
+        switch phase {
+        case .onboarding, .launching: pendingDevicePairingCode = code
+        case .ready, .needsReenrollment: toast = ScanRejection.pairingOnEnrolledDevice.message
+        }
+    }
+
+    /// Presents the secure approval sheet for an interaction.
+    public func openInteraction(_ id: InteractionID) async {
+        guard !isLocked else { enqueueWhileLocked(.interaction(id)); return }
+        guard phase == .ready || phase == .needsReenrollment else { queuedLink = .interaction(id); return }
+        guard let envelope = try? await services.api.interaction(id) else {
+            toast = "We couldn't load that request."
+            return
+        }
+        let record = try? await services.records.load()
+        let model = ApprovalViewModel(envelope: envelope, device: record, services: services)
+        model.onFinished = { [weak self] outcome in
+            guard let self else { return }
+            self.home.didDecide(outcome.interactionId)
+            self.alerts.markHandled(alertId: AlertIdentifier.make(.interaction, outcome.interactionId.uuid))
+            Task {
+                await self.home.load()
+                await self.activity.load()
+                await self.alerts.refresh()
+            }
+        }
+        model.onKeyInvalidated = { [weak self] in self?.phase = .needsReenrollment }
+        // C9.7: a request from business B opened while browsing A shows B ("Showing B", with "Back to all") without rewriting the saved
+        // context, and the context is frozen until the sheet closes. The sheet itself always names its own issuing business.
+        organization.open(itemFrom: envelope.business.id)
+        organization.beginSensitiveFlow()
+        presentedApproval = model
+    }
+
+    /// Applies the result of an action performed from a notification.
+    public func apply(_ outcome: NotificationOutcome) async {
+        if isLocked {
+            // Opens wait for the unlock; refreshes and toasts would only touch hidden state, so they wait too.
+            switch outcome {
+            case .requiresApp(let id), .open(let id?): enqueueWhileLocked(.interaction(id))
+            case .openAuthDelivery(let id): enqueueWhileLocked(.authDelivery(id))
+            case .openOIDCSignIn(let ach): enqueueWhileLocked(.oidcSignIn(challengeId: ach))
+            case .openApproveRequest(let key): enqueueWhileLocked(.approveRequest(key))
+            case .openRequests: enqueueWhileLocked(.approveRequest(nil))
+            default: break
+            }
+            return
+        }
+        switch outcome {
+        case .requiresApp(let id): await openInteraction(id)
+        case .open(let id?): await openInteraction(id)
+        case .open(nil):
+            // A security push ("Review") carries no subject: the notices are fetched when the app opens.
+            selectedTab = .alerts
+            await securityNotices.load()
+        case .submitted: await home.load()
+        case .reduced: await home.load()
+        // F-14/F-15: a tapped approval or link push opens that request (or the confirm screen), not the Alerts list.
+        case .openAuthDelivery(let id): pendingAuthDelivery = PendingAuthDelivery(id: id)
+        case .openOIDCSignIn(let ach): pendingOIDCSignIn = PendingOIDCSignIn(challengeId: ach)
+        case .openApproveRequest(let key): await openApproveRequest?(key)
+        case .openRequests: await openApproveRequest?(nil)
+        case .stale: toast = "That was already handled."; await home.load()
+        case .expired: toast = "That request expired."; await home.load()
+        case .failed(_, let message): toast = message
+        case .ignored: break
+        }
+    }
+
+    // MARK: Account
+
+    public func signOut() async {
+        await services.account.signOut()
+        reset()
+    }
+
+    /// The server no longer trusts this device: erase everything and start over.
+    public func deviceWasRevoked() async {
+        guard !wiping else { return }
+        wiping = true
+        defer { wiping = false }
+        await services.account.wipeLocalState()
+        reset()
+        toast = "This device was removed from your account."
+        // Re-arm so a later enrollment can report a revocation again.
+        services.revocation.setHandler { [weak self] in
+            Task { @MainActor in await self?.deviceWasRevoked() }
+        }
+    }
+
+    public func deleteAccount() async throws {
+        try await services.account.deleteAccount()
+        reset()
+    }
+
+    public func reenroll(deviceName: String) async throws {
+        _ = try await services.account.reenrollThisDevice(name: deviceName, explain: passkeyGate.explainer)
+        phase = .ready
+        await home.load()
+    }
+
+    private var wiping = false
+
+    private func reset() {
+        presentedApproval = nil
+        pendingConnect = nil
+        pendingApproveEnrollment = nil
+        pendingLinkSession = nil
+        pendingVerificationSession = nil
+        pendingOIDCSignIn = nil
+        pendingDevicePairingCode = nil
+        conversationToOpen = nil
+        businessToOpen = nil
+        lockedQueue.removeAll()
+        queuedLink = nil
+        keysNeedRecheck = false
+        selectedTab = .alerts
+        addBusinessPresented = false
+        organization.reset()
+        alerts.reset()
+        benefits.reset()
+        services.homeWidget?.clear()
+        businesses.reset()
+        notificationSettings.reset()
+        loopConsent.clear()
+        loopLibrary.clear()
+        loopToInstall = nil
+        services.brandKits?.removeAll()
+        isLocked = false
+        phase = .onboarding(.welcome)
+    }
+}
+
+/// An enrollment code (and the business root key id it carried) opened from a link or QR.
+/// A link session to present: the code, and the business's secret from the link's fragment (`nil` when the person types the code; then the business's
+/// check code is typed too).
+public struct PendingLinkSession: Sendable, Equatable {
+    public var code: String
+    public var secret: LinkSessionSecret?
+    public var checkCode: String?
+    public init(code: String, secret: LinkSessionSecret? = nil, checkCode: String? = nil) {
+        self.code = code
+        self.secret = secret
+        self.checkCode = checkCode
+    }
+}
+
+/// A link delivery to confirm before anything is opened.
+public struct PendingAuthDelivery: Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public init(id: UUID) { self.id = id }
+}
+
+/// An OIDC sign-in to confirm: the authority challenge id from the QR universal link, the push, or a verified CKey Safe Action.
+public struct PendingOIDCSignIn: Sendable, Equatable, Identifiable {
+    public var challengeId: String
+    /// Set only when the review was opened by a verified Safe Action: the verified issuer and what it says about who is asking.
+    public var safeAction: VerifiedSafeActionRequest?
+    public var id: String { challengeId }
+    public init(challengeId: String, safeAction: VerifiedSafeActionRequest? = nil) {
+        self.challengeId = challengeId
+        self.safeAction = safeAction
+    }
+}
+
+/// A verification session to review: its code (from the link, the QR, or typed by the person).
+public struct PendingVerificationSession: Sendable, Equatable, Identifiable {
+    public var code: String
+    public var id: String { code }
+    public init(code: String) { self.code = code }
+}
+
+public struct PendingApproveEnrollment: Sendable, Equatable {
+    public var code: String
+    public var rootKid: String?
+    /// The enrollment secret from the link's fragment, or `nil` when the person typed the code (then `checkCode` is required).
+    public var secret: ApprovalEnrollmentSecret?
+    /// The business's second code of the typed path.
+    public var checkCode: String?
+    public init(code: String, rootKid: String?, secret: ApprovalEnrollmentSecret? = nil, checkCode: String? = nil) {
+        self.code = code
+        self.rootKid = rootKid
+        self.secret = secret
+        self.checkCode = checkCode
+    }
+}

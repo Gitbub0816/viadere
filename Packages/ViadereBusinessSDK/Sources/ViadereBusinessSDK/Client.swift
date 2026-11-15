@@ -1,0 +1,404 @@
+import Foundation
+import ViadereCore
+
+/// Retry behaviour for transient failures (network errors, `429`, `5xx`). Only requests that are safe to repeat are
+/// retried: every `GET`, and every `POST` that carries an idempotency key or is naturally idempotent (cancel).
+public struct RetryPolicy: Sendable, Equatable {
+    public var maxAttempts: Int
+    public var baseDelay: TimeInterval
+    public var maxDelay: TimeInterval
+
+    public init(maxAttempts: Int = 3, baseDelay: TimeInterval = 0.5, maxDelay: TimeInterval = 30) {
+        self.maxAttempts = max(1, maxAttempts)
+        self.baseDelay = baseDelay
+        self.maxDelay = maxDelay
+    }
+
+    public static let none = RetryPolicy(maxAttempts: 1)
+    public static let standard = RetryPolicy()
+
+    /// `Retry-After` wins (capped); otherwise exponential backoff with full jitter.
+    func delay(attempt: Int, retryAfter: TimeInterval?) -> TimeInterval {
+        if let retryAfter { return min(max(0, retryAfter), maxDelay) }
+        let exponential = min(maxDelay, baseDelay * pow(2, Double(attempt - 1)))
+        return Double.random(in: 0...exponential)
+    }
+}
+
+/// Result of issuing an interaction.
+public struct IssuedInteraction: Sendable, Equatable {
+    public var interaction: Interaction
+    /// `false` when the server recognized the idempotency key and returned the original interaction.
+    public var wasCreated: Bool
+}
+
+/// A typed client for the Viadere business API (`/v1/business/*`) for **server-side** Swift.
+///
+/// * Authenticates with your API key (`Authorization: Bearer vdk_…`). Keep it on your server: never ship it in an app.
+/// * Sets `Idempotency-Key` from the request's `idempotencyKey` so retries are safe.
+/// * Retries `429`, `5xx` and network failures with backoff, honouring `Retry-After`.
+/// * Never logs or prints the key (`description` is redacted).
+/// * With `requestSigner`, signs every request with an RFC 9421 HTTP Message Signature (SECURITY §2.112): what a live key needs on the
+///   authentication routes when it is not bound to mutual TLS. Each attempt, retries included, gets a fresh nonce and `created`.
+public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    public static let userAgent = "ViadereBusinessSDK/1.0 (Swift)"
+
+    private let apiKey: String
+    public let baseURL: URL
+    private let transport: any BusinessTransport
+    public let retry: RetryPolicy
+    private let sleep: @Sendable (TimeInterval) async -> Void
+    /// The universal-link host the links you show must use (`viadere.com`; your staging integration passes the staging host). The SDK builds
+    /// Approve and link-session links on it and refuses a relay ticket that names any other host.
+    public let linkDomain: LinkDomain
+    /// The RFC 9421 request-signing key (registered under Security > Request signing), or `nil` for unsigned requests.
+    private let requestSigner: HTTPRequestSigner?
+
+    /// - Parameters:
+    ///   - apiKey: `vdk_live_…` or `vdk_test_…`.
+    ///   - baseURL: defaults to `https://viadere.com`. Must be https (plain http only for loopback development).
+    ///   - requestSigner: opt-in RFC 9421 signing (`HTTPRequestSigningKey`: a `SoftwareHTTPRequestSigningKey`, or your own type that asks a KMS or
+    ///     HSM to sign). The key id is the `vsk_…` the console showed when you registered the public key.
+    public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.defaultDomain)")!, transport: any BusinessTransport = URLSessionTransport(),
+                retry: RetryPolicy = .standard, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
+                linkDomain: LinkDomain = .production, requestSigner: (any HTTPRequestSigningKey)? = nil, now: @escaping @Sendable () -> Date = { Date() }) throws {
+        guard (apiKey.hasPrefix("vdk_live_") || apiKey.hasPrefix("vdk_test_")), apiKey.count >= 20, apiKey.count <= 80,
+              apiKey.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) else { throw ViadereSDKError.invalidAPIKey }
+        let loopback = ["localhost", "127.0.0.1", "::1"].contains(baseURL.host ?? "")
+        guard baseURL.scheme == "https" || (baseURL.scheme == "http" && loopback), baseURL.host != nil, baseURL.user == nil else {
+            throw ViadereSDKError.insecureBaseURL
+        }
+        self.apiKey = apiKey
+        self.baseURL = baseURL
+        self.transport = transport
+        self.retry = retry
+        self.sleep = sleep
+        self.linkDomain = linkDomain
+        if let requestSigner {
+            guard HTTPSignatureProfile.isValidKeyId(requestSigner.keyId) else { throw ViadereSDKError.invalidSigningKey }
+            self.requestSigner = HTTPRequestSigner(key: requestSigner)
+        } else {
+            self.requestSigner = nil
+        }
+        self.now = now
+    }
+
+    private let now: @Sendable () -> Date
+
+    /// Whether requests are signed (RFC 9421).
+    public var signsRequests: Bool { requestSigner != nil }
+
+    /// Whether this client uses a live key (real customers) or a test key.
+    public var isLive: Bool { apiKey.hasPrefix("vdk_live_") }
+
+    public var description: String { "ViadereBusinessClient(\(isLive ? "live" : "test") key •••\(apiKey.suffix(4)), \(baseURL.absoluteString))" }
+    public var debugDescription: String { description }
+
+    // MARK: Capabilities
+
+    /// What this key can do right now (`GET /v1/business/capabilities`): your tiers, the capabilities Viadere granted your business
+    /// (the ceiling), the capabilities this key carries, their intersection (`effective`) and the capability catalog. A capability that
+    /// was revoked or switched off disappears from `effective` on the next call; a request that needs it fails with
+    /// `403 insufficient_scope`, `403 not_entitled` or `403 capability_disabled` (see `ViadereAPIError.isCapabilityDenied`).
+    public func capabilities() async throws -> BusinessCapabilitiesResponse {
+        try decode(BusinessCapabilitiesResponse.self, try await perform(APIRoutes.businessCapabilities.descriptor))
+    }
+
+    // MARK: Interactions
+
+    /// Issues an interaction (`POST /v1/business/interactions`, scope `interactions:write`). Idempotent on `request.idempotencyKey`.
+    ///
+    /// The interaction's kind decides the capability the key needs: `authenticate` needs `auth.challenge`, `authorize` needs
+    /// `transaction.approve`, every other kind `message.send`. A messaging-only key that issues an approval fails with
+    /// `403 insufficient_scope`.
+    public func issueInteraction(_ request: IssueInteractionRequest) async throws -> IssuedInteraction {
+        let response = try await perform(APIRoutes.businessIssueInteraction.descriptor, body: request, idempotencyKey: request.idempotencyKey)
+        return IssuedInteraction(interaction: try decode(Interaction.self, response), wasCreated: response.status == 201)
+    }
+
+    /// The outcome of an interaction (`GET /v1/business/interactions/{id}`, scope `interactions:read`).
+    public func interactionOutcome(id: InteractionID) async throws -> InteractionOutcome {
+        try decode(InteractionOutcome.self, try await perform(APIRoutes.businessInteractionOutcome.descriptor, parameters: ["interactionId": id.description]))
+    }
+
+    /// Cancels a pending interaction (scope `interactions:write`). Cancelling an already-final interaction returns its outcome.
+    public func cancelInteraction(id: InteractionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "cancel")) async throws -> InteractionOutcome {
+        try decode(InteractionOutcome.self, try await perform(APIRoutes.businessCancelInteraction.descriptor, parameters: ["interactionId": id.description],
+                                                              body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
+    }
+
+    // MARK: Authentication delivery (ADR-0020; staging pilot, off by default)
+
+    /// Creates a magic-link, one-time-code or notice delivery (scope `auth_deliveries:write`). Viadere only delivers it: it never verifies your code, and
+    /// "opened" is not a sign-in. `Idempotency-Key` is required; the tenant is your key, never a field.
+    public func createAuthDelivery(_ request: AuthDeliveryCreateRequest, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryCreate.descriptor, body: request, idempotencyKey: idempotencyKey))
+    }
+
+    public func authDelivery(id: AuthDeliveryID) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryGet.descriptor, parameters: ["deliveryId": id.description]))
+    }
+
+    public func cancelAuthDelivery(id: AuthDeliveryID, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl-cancel")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryCancel.descriptor, parameters: ["deliveryId": id.description],
+                                                            body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
+    }
+
+    /// Reports **your own** verification outcome after the customer opened the delivery.
+    public func completeAuthDelivery(id: AuthDeliveryID, outcome: AuthDeliveryOutcome, idempotencyKey: String = IdempotencyKey.generate(prefix: "authdl-done")) async throws -> AuthDeliveryView {
+        try decode(AuthDeliveryView.self, try await perform(APIRoutes.businessAuthDeliveryComplete.descriptor, parameters: ["deliveryId": id.description],
+                                                            body: AuthDeliveryCompleteRequest(outcome: outcome), idempotencyKey: idempotencyKey))
+    }
+
+    /// Moves a webhook endpoint to signature v2 (no way back; the older event types are dual-signed for 30 days).
+    public func moveWebhookToSignatureV2(id: WebhookSubscriptionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "webhook-v2")) async throws -> WebhookSubscription {
+        try decode(WebhookSubscription.self, try await perform(APIRoutes.businessWebhookUpdate.descriptor, parameters: ["webhookId": id.description],
+                                                               body: UpdateWebhookRequest(signatureVersion: .v2), idempotencyKey: idempotencyKey))
+    }
+
+    /// Test keys only: a signed sample `auth.delivery.*` event to one of your v2 endpoints.
+    public func sendAuthWebhookTest(webhookId: WebhookSubscriptionID, type: String) async throws -> AuthWebhookTestResponse {
+        try decode(AuthWebhookTestResponse.self, try await perform(APIRoutes.businessAuthWebhookTest.descriptor, body: AuthWebhookTestRequest(webhookId: webhookId, type: type)))
+    }
+
+    // MARK: Sandbox (test keys only)
+
+    /// Creates a sandbox consumer connected to your business (`POST /v1/business/sandbox/relationships`). **Test keys can
+    /// only issue interactions and messages to sandbox relationships**; a live key can never target one, and a test key can
+    /// never reach a real person. Requires a `vdk_test_…` key.
+    public func createSandboxRelationship() async throws -> SandboxRelationship {
+        try decode(SandboxRelationship.self, try await perform(APIRoutes.businessSandboxRelationship.descriptor))
+    }
+
+    // MARK: Messages and statuses
+
+    /// Sends a message into the customer's conversation with you (scope `messages:write`).
+    ///
+    /// Images: upload each with `uploadAttachment(sessionId:data:contentType:)` and name the ids in `request.attachmentIds` (1 to 4, no
+    /// duplicates) with the **same** `sessionId`; `body` may then be empty. Ids without a `sessionId`, too many or repeated ids are refused locally
+    /// (`ViadereSDKError.invalidAttachmentIds`) and nothing is sent.
+    public func sendMessage(_ request: BusinessSendMessageRequest) async throws -> ConversationMessage {
+        if let ids = request.attachmentIds {
+            guard !ids.isEmpty, MessageAttachmentPolicy.validate(ids), request.sessionId != nil else { throw ViadereSDKError.invalidAttachmentIds }
+        }
+        return try decode(ConversationMessage.self, try await perform(APIRoutes.businessSendMessage.descriptor, body: request, idempotencyKey: request.idempotencyKey))
+    }
+
+    /// Updates an ongoing-event status; a newer update with the same `activityKey` replaces the earlier one (scope `statuses:write`).
+    public func updateStatus(_ request: BusinessStatusUpdateRequest) async throws -> Interaction {
+        try decode(Interaction.self, try await perform(APIRoutes.businessUpdateStatus.descriptor, body: request, idempotencyKey: request.idempotencyKey))
+    }
+
+    // MARK: Loyalty and rewards (scope `rewards:write`)
+
+    /// Creates a reward (`POST /v1/business/rewards`). Without `relationshipId` it joins your program and every connected
+    /// customer sees it, each with their own server-computed eligibility; with one, only that customer does.
+    /// Idempotent on `request.idempotencyKey`. The returned flag is `false` when the key was already used.
+    public func createReward(_ request: IssueRewardRequest) async throws -> (reward: Reward, wasCreated: Bool) {
+        let response = try await perform(APIRoutes.businessIssueReward.descriptor, body: request, idempotencyKey: request.idempotencyKey)
+        return (try decode(Reward.self, response), response.status == 201)
+    }
+
+    /// Your rewards, newest first.
+    public func listRewards() async throws -> [Reward] {
+        try decode([Reward].self, try await perform(APIRoutes.businessRewardsList.descriptor))
+    }
+
+    /// Withdraws a reward. Outstanding redemption codes stop validating and held points return to customers. Safe to repeat.
+    public func revokeReward(id: RewardID) async throws -> Reward {
+        try decode(Reward.self, try await perform(APIRoutes.businessRewardRevoke.descriptor, parameters: ["rewardId": id.description], naturallyIdempotent: true))
+    }
+
+    /// Your loyalty program (`404` until you create one).
+    public func loyaltyProgram() async throws -> BusinessLoyaltyProgram {
+        try decode(BusinessLoyaltyProgram.self, try await perform(APIRoutes.businessLoyaltyProgramGet.descriptor))
+    }
+
+    /// Creates or replaces your loyalty program. Changing `termsVersion` makes customers accept the new terms to join.
+    public func saveLoyaltyProgram(_ program: UpsertLoyaltyProgramRequest) async throws -> BusinessLoyaltyProgram {
+        try decode(BusinessLoyaltyProgram.self, try await perform(APIRoutes.businessLoyaltyProgramPut.descriptor, body: program, naturallyIdempotent: true))
+    }
+
+    /// Adds or removes points for an enrolled customer. Idempotent on `request.idempotencyKey`: a replay returns the current
+    /// balance with `applied == false` and changes nothing.
+    public func adjustPoints(_ request: AdjustLoyaltyPointsRequest) async throws -> LoyaltyPointsResult {
+        try decode(LoyaltyPointsResult.self, try await perform(APIRoutes.businessAdjustPoints.descriptor, body: request, idempotencyKey: request.idempotencyKey))
+    }
+
+    /// Validates the code a customer shows at the till and consumes it in one atomic step.
+    ///
+    /// Exactly one call can ever succeed for a code. A code that was already used answers `409` (with `redeemedAt` in the error
+    /// details), an expired or withdrawn one `410`, and an unknown one `404`. This call is **not** retried automatically:
+    /// if the response is lost, a repeat reports "already used", so check with the customer instead of consuming twice.
+    public func consumeRedemption(code: String, locationCode: String? = nil) async throws -> RedemptionReceipt {
+        try decode(RedemptionReceipt.self, try await perform(APIRoutes.businessConsumeRedemption.descriptor,
+                                                              body: ConsumeRedemptionRequest(code: code, locationCode: locationCode)))
+    }
+
+    // MARK: Wallet passes (scope `wallet:write`, live keys)
+
+    /// Issues (or returns the existing) Wallet pass for a connected customer. The customer adds it to Apple Wallet from the Viadere
+    /// app; you never receive the pass file. Naturally idempotent (one pass per customer and subject). `wasCreated` is `false` for an
+    /// existing pass. Test-mode keys are refused.
+    public func issueWalletPass(_ request: BusinessIssueWalletPassRequest) async throws -> (pass: BusinessWalletPass, wasCreated: Bool) {
+        let response = try await perform(APIRoutes.businessWalletPassIssue.descriptor, body: request, naturallyIdempotent: true)
+        return (try decode(BusinessWalletPass.self, response), response.status == 201)
+    }
+
+    /// Your passes, newest first.
+    public func listWalletPasses(limit: Int = 50) async throws -> [BusinessWalletPass] {
+        try decode([BusinessWalletPass].self, try await perform(APIRoutes.businessWalletPassesList.descriptor, query: [("limit", String(min(max(limit, 1), 200)))]))
+    }
+
+    /// A schedule or venue change on a ticket or reservation pass, or a fresh code (`rotateScanCode`). Pushed to the customer's devices.
+    /// Limited to a few updates per pass per day: passes are not a notification channel. Not retried automatically.
+    public func updateWalletPass(id: WalletPassID, _ update: UpdateWalletPassRequest) async throws -> BusinessWalletPass {
+        try decode(BusinessWalletPass.self, try await perform(APIRoutes.businessWalletPassUpdate.descriptor, parameters: ["passId": id.description], body: update))
+    }
+
+    /// Voids a pass (final). Safe to repeat.
+    public func voidWalletPass(id: WalletPassID) async throws -> BusinessWalletPass {
+        try decode(BusinessWalletPass.self, try await perform(APIRoutes.businessWalletPassVoid.descriptor, parameters: ["passId": id.description],
+                                                              naturallyIdempotent: true))
+    }
+
+    /// Validates a scanned pass QR: redeems a coupon, checks in a ticket or reservation, or identifies a loyalty member. Like
+    /// `consumeRedemption`, this is **not** retried automatically (a lost response followed by a repeat would report "already used").
+    /// Obviously malformed input is refused locally without a request.
+    public func scanWalletPass(code: String, locationCode: String? = nil) async throws -> WalletScanResult {
+        guard WalletScanCode.isWellFormed(code) else {
+            throw ViadereAPIError(status: 404, code: .notFound, message: "This pass isn't valid here.", requestId: nil, details: nil, retryAfter: nil)
+        }
+        return try decode(WalletScanResult.self, try await perform(APIRoutes.businessWalletScan.descriptor,
+                                                                   body: WalletScanRequest(code: code.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                                                           locationCode: locationCode)))
+    }
+
+    // MARK: Webhooks (scope `webhooks:manage`)
+
+    public func listWebhooks() async throws -> [WebhookSubscription] {
+        try decode([WebhookSubscription].self, try await perform(APIRoutes.businessWebhooksList.descriptor))
+    }
+
+    /// Creates a subscription. The returned `secret` is shown **once**: store it in your secrets manager.
+    /// The server requires an `Idempotency-Key`: a retry with the same key (and request) returns the same subscription and secret.
+    public func createWebhook(url: URL, events: [WebhookEventType], idempotencyKey: String = IdempotencyKey.generate(prefix: "webhook")) async throws -> WebhookSecretResponse {
+        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookCreate.descriptor, body: CreateWebhookRequest(url: url, events: events),
+                                                                 idempotencyKey: idempotencyKey))
+    }
+
+    public func deleteWebhook(id: WebhookSubscriptionID) async throws {
+        _ = try await perform(APIRoutes.businessWebhookDelete.descriptor, parameters: ["webhookId": id.description])
+    }
+
+    /// Rotates the signing secret. The previous secret keeps signing for 24 hours so you can switch over without dropping events
+    /// (verify with both: `WebhookVerifier(secrets: [new, old])`).
+    public func rotateWebhookSecret(id: WebhookSubscriptionID, idempotencyKey: String = IdempotencyKey.generate(prefix: "rotate")) async throws -> WebhookSecretResponse {
+        try decode(WebhookSecretResponse.self, try await perform(APIRoutes.businessWebhookRotate.descriptor, parameters: ["webhookId": id.description],
+                                                                 body: Optional<EmptyBody>.none, idempotencyKey: idempotencyKey))
+    }
+
+    /// Proves ownership of the endpoint: the server sends a signed, single-use challenge the endpoint must echo.
+    public func verifyWebhook(id: WebhookSubscriptionID) async throws -> WebhookVerificationResult {
+        try decode(WebhookVerificationResult.self, try await perform(APIRoutes.businessWebhookVerify.descriptor, parameters: ["webhookId": id.description],
+                                                                    body: Optional<EmptyBody>.none, naturallyIdempotent: true))
+    }
+
+    /// Sends one signed `webhook.test` event to the endpoint.
+    public func testWebhook(id: WebhookSubscriptionID) async throws {
+        _ = try await perform(APIRoutes.businessWebhookTest.descriptor, parameters: ["webhookId": id.description], body: Optional<EmptyBody>.none)
+    }
+
+    public func pauseWebhook(id: WebhookSubscriptionID, reason: String? = nil) async throws {
+        _ = try await perform(APIRoutes.businessWebhookPause.descriptor, parameters: ["webhookId": id.description], body: PauseWebhookRequest(reason: reason),
+                              naturallyIdempotent: true)
+    }
+
+    public func resumeWebhook(id: WebhookSubscriptionID) async throws {
+        _ = try await perform(APIRoutes.businessWebhookResume.descriptor, parameters: ["webhookId": id.description], body: Optional<EmptyBody>.none, naturallyIdempotent: true)
+    }
+
+    // MARK: Plumbing
+
+    func perform<Body: Encodable>(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: Body?, idempotencyKey: String? = nil,
+                                  naturallyIdempotent: Bool = false, accept: String = "application/json") async throws -> BusinessHTTPResponse {
+        var payload: Data?
+        if let body {
+            do { payload = try ViadereJSON.encode(body) } catch { throw ViadereSDKError.encodingFailed }
+        }
+        return try await performRaw(endpoint, parameters: parameters, query: query, body: payload.map { ($0, "application/json") }, idempotencyKey: idempotencyKey,
+                                    naturallyIdempotent: naturallyIdempotent, accept: accept)
+    }
+
+    func perform(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], naturallyIdempotent: Bool = false,
+                 accept: String = "application/json") async throws -> BusinessHTTPResponse {
+        try await perform(endpoint, parameters: parameters, query: query, body: Optional<EmptyBody>.none, naturallyIdempotent: naturallyIdempotent, accept: accept)
+    }
+
+    /// The one request path: a JSON body (above) or raw bytes with their own type (an image upload). The same rules apply to both: the key in
+    /// `Authorization`, retries only when the request is safe to repeat (`GET`, an idempotency key, or naturally idempotent), and, with a
+    /// request signer, an RFC 9421 signature whose `content-digest` covers exactly these bytes and whose `content-type` is this type.
+    func performRaw(_ endpoint: AnyEndpoint, parameters: [String: String] = [:], query: [(String, String)] = [], body: (data: Data, contentType: String)?,
+                    idempotencyKey: String? = nil, naturallyIdempotent: Bool = false, accept: String = "application/json") async throws -> BusinessHTTPResponse {
+        let path: String
+        do { path = try endpoint.path(parameters, query: query) } catch { throw ViadereSDKError.invalidPath }
+        guard let url = URL(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else { throw ViadereSDKError.invalidPath }
+        var headers = ["Authorization": "Bearer \(apiKey)", "Accept": accept, "User-Agent": Self.userAgent]
+        if let body { headers["Content-Type"] = body.contentType }
+        if let idempotencyKey {
+            guard IdempotencyKey.isValid(idempotencyKey) else { throw ViadereAPIError(status: 400, code: .badRequest, message: "Invalid idempotency key.", requestId: nil, details: nil, retryAfter: nil) }
+            headers[ViadereHeader.idempotencyKey] = idempotencyKey
+        }
+        let safeToRetry = endpoint.method == .GET || idempotencyKey != nil || naturallyIdempotent
+        let request = BusinessHTTPRequest(method: endpoint.method.rawValue, url: url, headers: headers, body: body?.data)
+        return try await send(request, retryable: safeToRetry)
+    }
+
+    private func send(_ request: BusinessHTTPRequest, retryable: Bool) async throws -> BusinessHTTPResponse {
+        var attempt = 0
+        while true {
+            attempt += 1
+            let outcome: Result<BusinessHTTPResponse, any Error>
+            do { outcome = .success(try await transport.send(try await signed(request))) } catch { outcome = .failure(error) }
+            switch outcome {
+            case .success(let response):
+                if (200..<300).contains(response.status) { return response }
+                let error = Self.apiError(response)
+                if retryable, error.isRetryable, attempt < retry.maxAttempts {
+                    await sleep(retry.delay(attempt: attempt, retryAfter: error.retryAfter))
+                    continue
+                }
+                throw error
+            case .failure(let error):
+                if retryable, attempt < retry.maxAttempts {
+                    await sleep(retry.delay(attempt: attempt, retryAfter: nil))
+                    continue
+                }
+                if let sdk = error as? ViadereSDKError { throw sdk }
+                throw ViadereSDKError.transport(String(describing: type(of: error)))
+            }
+        }
+    }
+
+    /// Signs this attempt (a fresh nonce and `created` every time); a signing failure is never sent unsigned.
+    private func signed(_ request: BusinessHTTPRequest) async throws -> BusinessHTTPRequest {
+        guard let requestSigner else { return request }
+        return try await ViadereRequestSigning.sign(request, with: requestSigner, now: now())
+    }
+
+    static func apiError(_ response: BusinessHTTPResponse) -> ViadereAPIError {
+        let retryAfter = response.header("Retry-After").flatMap(TimeInterval.init)
+        if let body = try? ViadereJSON.decode(APIErrorResponse.self, from: response.body) {
+            return ViadereAPIError(status: response.status, code: body.error.code, message: body.error.message, requestId: body.error.requestId,
+                                   details: body.error.details, retryAfter: retryAfter)
+        }
+        return ViadereAPIError(status: response.status, code: nil, message: "Unexpected response from the Viadere API.",
+                               requestId: response.header("X-Request-Id"), details: nil, retryAfter: retryAfter)
+    }
+
+    func decode<T: Decodable>(_ type: T.Type, _ response: BusinessHTTPResponse) throws -> T {
+        do { return try ViadereJSON.decode(type, from: response.body) } catch {
+            throw ViadereSDKError.decodingFailed(String(describing: T.self))
+        }
+    }
+}

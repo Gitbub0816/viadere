@@ -1,0 +1,288 @@
+import Foundation
+import ViadereCore
+#if canImport(Observation) && !os(Linux)
+import Observation
+#endif
+
+@MainActor
+#if canImport(Observation) && !os(Linux)
+@Observable
+#endif
+public final class MessagesViewModel {
+    public private(set) var conversations: [ConversationSummary] = []
+    public private(set) var isLoading = false
+    public private(set) var errorMessage: String?
+    private let services: ViadereServices
+
+    public init(services: ViadereServices, initial: [ConversationSummary] = []) {
+        self.services = services
+        self.conversations = initial
+    }
+
+    public var unreadTotal: Int { conversations.reduce(0) { $0 + $1.unreadCount } }
+
+    public func load() async {
+        isLoading = conversations.isEmpty
+        defer { isLoading = false }
+        do {
+            // Archived threads come too (they are only hidden from the main list), so they can be found and restored.
+            let threads: [ConversationSummary]
+            if let organization = services.organizationAPI {
+                threads = try await organization.conversations(business: nil, includeArchived: true)
+            } else {
+                threads = try await services.api.conversations()
+            }
+            conversations = threads
+                .sorted { ($0.lastMessageAt ?? .distantPast) > ($1.lastMessageAt ?? .distantPast) }
+            errorMessage = nil
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't load messages."
+        }
+    }
+
+    // MARK: Organization (spec C4; WP-1.2)
+
+    /// On-device search over the cached thread list (business name, handle, last preview). Message bodies are encrypted at rest on the
+    /// server, so there is no server-side search; nothing here crosses into another tenant's data.
+    public var searchQuery = ""
+
+    /// Threads for the business context and the search, newest first. One business's history is never merged with another's.
+    public func visible(context: OrganizationContext) -> [ConversationSummary] {
+        let needle = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return conversations.filter { thread in
+            if let business = context.businessFilter, thread.business.id != business { return false }
+            if thread.archived == true { return false }
+            guard !needle.isEmpty else { return true }
+            if BusinessDirectoryRules.matches(thread.business, query: needle) { return true }
+            return thread.lastMessagePreview?.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    /// The All view groups threads by business (spec C2 "unified thread list grouped by business"), groups ordered by their newest thread.
+    public func groups(context: OrganizationContext) -> [ConversationGroup] {
+        var order: [BusinessID] = []
+        var byBusiness: [BusinessID: (BusinessSummary, [ConversationSummary])] = [:]
+        for thread in visible(context: context) {
+            if byBusiness[thread.business.id] == nil {
+                order.append(thread.business.id)
+                byBusiness[thread.business.id] = (thread.business, [])
+            }
+            byBusiness[thread.business.id]?.1.append(thread)
+        }
+        return order.compactMap { byBusiness[$0].map { ConversationGroup(business: $0.0, threads: $0.1) } }
+    }
+
+    /// Archived threads for the business context, newest first (Messages → Archived). Restoring one puts it back in the list.
+    public func archived(context: OrganizationContext) -> [ConversationSummary] {
+        conversations.filter { thread in
+            thread.archived == true && (context.businessFilter == nil || thread.business.id == context.businessFilter)
+        }
+    }
+
+    public func unread(context: OrganizationContext) -> Int {
+        conversations.filter { context.businessFilter == nil || $0.business.id == context.businessFilter }.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    /// Archives (or restores) a thread for this account only; the business is never told. True when the server kept the change
+    /// (the screen confirms only then).
+    @discardableResult
+    public func setArchived(_ id: SessionID, _ archived: Bool) async -> Bool {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return false }
+        let previous = conversations[index].archived
+        conversations[index].archived = archived
+        do {
+            _ = try await api.updateConversation(id, ConversationStateUpdate(archived: archived))
+            return true
+        } catch {
+            if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].archived = previous }
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+            return false
+        }
+    }
+
+    @discardableResult
+    public func setMuted(_ id: SessionID, _ muted: Bool) async -> Bool {
+        guard let api = services.organizationAPI, let index = conversations.firstIndex(where: { $0.id == id }) else { return false }
+        let previous = conversations[index].muted
+        conversations[index].muted = muted
+        do {
+            _ = try await api.updateConversation(id, ConversationStateUpdate(muted: muted))
+            return true
+        } catch {
+            if let i = conversations.firstIndex(where: { $0.id == id }) { conversations[i].muted = previous }
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't save that change."
+            return false
+        }
+    }
+
+    public func start(with business: BusinessID) async -> ConversationSummary? {
+        do {
+            let conversation = try await services.api.startConversation(with: business)
+            if !conversations.contains(where: { $0.id == conversation.id }) { conversations.insert(conversation, at: 0) }
+            return conversation
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't start a conversation."
+            return nil
+        }
+    }
+}
+
+/// One business's threads in the All view.
+public struct ConversationGroup: Identifiable, Sendable, Hashable {
+    public var business: BusinessSummary
+    public var threads: [ConversationSummary]
+    public var id: BusinessID { business.id }
+}
+
+/// A message plus the structured `choose` request it carries, if still open.
+public struct MessageRow: Identifiable, Equatable, Sendable {
+    public var message: ConversationMessage
+    public var choice: InteractionEnvelope?
+    public var id: MessageID { message.id }
+    public var isFromConsumer: Bool { message.direction == .consumerToBusiness }
+
+    /// Structured options shown as chips, only while the choice is pending and unexpired.
+    public func openOptions(now: Date) -> [ChoiceOption] {
+        guard let choice, choice.status == .pending, !choice.interaction.isExpired(at: now),
+              case .choose(let payload) = choice.interaction.payload else { return [] }
+        return payload.options
+    }
+}
+
+@MainActor
+#if canImport(Observation) && !os(Linux)
+@Observable
+#endif
+public final class ConversationViewModel {
+    public private(set) var rows: [MessageRow] = []
+    public var draft = ""
+    public private(set) var isSending = false
+    public private(set) var errorMessage: String?
+    public let conversation: ConversationSummary
+    private let services: ViadereServices
+    public static let maxLength = 1600
+
+    public init(conversation: ConversationSummary, services: ViadereServices) {
+        self.conversation = conversation
+        self.services = services
+    }
+
+    public var canSend: Bool {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count <= Self.maxLength, !isSending, !images.contains(where: \.isUploading) else { return false }
+        return !text.isEmpty || images.contains { $0.attachment != nil }
+    }
+
+    // MARK: Images (SECURITY.md §2.113)
+
+    /// Images picked for the next message, in order.
+    public private(set) var images: [ComposerImage] = []
+    /// Decoded-and-verified bytes of attachments shown in the thread, by id (memory only).
+    public private(set) var loadedImages: [AttachmentID: Data] = [:]
+    public private(set) var imageErrors: Set<AttachmentID> = []
+
+    /// Whether the composer may offer the photo picker (an attachments API exists and fewer than the maximum are picked).
+    public var canAddImage: Bool { services.attachmentsAPI != nil && images.count < MessageAttachmentPolicy.maxPerMessage && !isSending }
+
+    /// Checks then uploads one picked image (already re-encoded by the app). Refusals are explained without a round trip.
+    public func addImage(_ data: Data, mediaType: String) async {
+        guard let api = services.attachmentsAPI else { errorMessage = ComposerImageRules.unavailable; return }
+        guard images.count < MessageAttachmentPolicy.maxPerMessage else { errorMessage = ComposerImageRules.tooMany; return }
+        let type: String
+        switch ComposerImageRules.check(data, declared: mediaType) {
+        case .failure(let rejection):
+            errorMessage = MessageAttachmentPolicy.message(rejection)
+            return
+        case .success(let detected): type = detected
+        }
+        let item = ComposerImage(id: UUID(), data: data, mediaType: type, status: .uploading)
+        images.append(item)
+        errorMessage = nil
+        await upload(item.id, api: api)
+    }
+
+    /// Retries a failed upload.
+    public func retryImage(_ id: UUID) async {
+        guard let api = services.attachmentsAPI, let index = images.firstIndex(where: { $0.id == id }), images[index].failure != nil else { return }
+        images[index].status = .uploading
+        await upload(id, api: api)
+    }
+
+    public func removeImage(_ id: UUID) { images.removeAll { $0.id == id } }
+
+    private func upload(_ id: UUID, api: any MessageAttachmentsAPI) async {
+        guard let item = images.first(where: { $0.id == id }) else { return }
+        let status: ComposerImage.Status
+        do {
+            status = .ready(try await api.upload(item.data, mediaType: item.mediaType, to: conversation.id))
+        } catch {
+            status = .failed((error as? APIError)?.userMessage ?? ComposerImageRules.uploadFailed)
+        }
+        if let index = images.firstIndex(where: { $0.id == id }) { images[index].status = status }
+    }
+
+    /// Fetches one attachment of this conversation for display. Bytes that do not match the reference (size, SHA-256) are never shown.
+    public func loadImage(_ attachment: MessageAttachment) async {
+        guard loadedImages[attachment.id] == nil, attachment.sessionId == conversation.id, let api = services.attachmentsAPI else { return }
+        do {
+            let data = try await api.download(attachment.id, in: conversation.id)
+            guard attachment.matches(data) else { imageErrors.insert(attachment.id); return }
+            loadedImages[attachment.id] = data
+            imageErrors.remove(attachment.id)
+        } catch {
+            imageErrors.insert(attachment.id)
+        }
+    }
+
+    public var remainingCharacters: Int { Self.maxLength - draft.count }
+
+    public func load() async {
+        do {
+            let page = try await services.api.messages(in: conversation.id)
+            var built: [MessageRow] = []
+            for message in page.items.sorted(by: { $0.createdAt < $1.createdAt }) {
+                var envelope: InteractionEnvelope?
+                if let interactionId = message.interactionId { envelope = try? await services.api.interaction(interactionId) }
+                built.append(MessageRow(message: message, choice: envelope))
+            }
+            rows = built
+            errorMessage = nil
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't load this conversation."
+        }
+    }
+
+    public func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSend else { return }
+        isSending = true
+        defer { isSending = false }
+        // Only uploaded images go; a failed one stays in the composer for the person to remove or retry.
+        let ids = images.compactMap { $0.attachment?.id }
+        do {
+            let message = try await services.api.sendMessage(in: conversation.id,
+                                                             SendMessageRequest(body: text, clientMessageId: UUID().uuidString.lowercased(),
+                                                                                attachmentIds: ids.isEmpty ? nil : ids))
+            rows.append(MessageRow(message: message, choice: nil))
+            images.removeAll { $0.attachment != nil }
+            draft = ""
+            errorMessage = nil
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? "Couldn't send that."
+        }
+    }
+
+    /// Tapping a chip answers the structured `choose` interaction with a device-signed `select` decision.
+    public func choose(_ option: ChoiceOption, in row: MessageRow) async {
+        guard let envelope = row.choice else { return }
+        do {
+            let outcome = try await services.approvals.submit(envelope, decision: .select, selectedOptionIds: [option.id], channel: .inApp)
+            if let index = rows.firstIndex(where: { $0.id == row.id }) { rows[index].choice?.status = outcome.status }
+            errorMessage = nil
+        } catch let error as ApprovalError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = "Couldn't send that choice."
+        }
+    }
+}

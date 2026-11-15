@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 321.71 146" width="321.71" height="146" role="img" aria-label="Viadere">
+<title>Viadere</title>
+<defs><radialGradient id="vd-d" cx="0.36" cy="0.32" r="0.72">
+<stop offset="0" stop-color="#FFFDF8"/>
+<stop offset="1" stop-color="#D3CCC0"/>
+</radialGradient>
+<linearGradient id="vd-l0" x1="88.74" y1="102.99" x2="113.12" y2="69.37" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#4B4843"/>
+<stop offset="0.5" stop-color="#8C867C"/>
+<stop offset="1" stop-color="#C9C2B6"/>
+</linearGradient>
+<linearGradient id="vd-l1" x1="189.31" y1="97.44" x2="213.49" y2="64.4" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#5E584F"/>
+<stop offset="0.5" stop-color="#A39A8B"/>
+<stop offset="1" stop-color="#D3C8B4"/>
+</linearGradient>
+<linearGradient id="vd-f0" x1="0" y1="46" x2="0" y2="146" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#D9D4CB"/>
+<stop offset="1" stop-color="#9A948A"/>
+</linearGradient>
+<linearGradient id="vd-f1" x1="0" y1="46" x2="0" y2="146" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#F5F1EA"/>
+<stop offset="0.55" stop-color="#DCD6CC"/>
+<stop offset="1" stop-color="#A49D92"/>
+</linearGradient>
+<linearGradient id="vd-f2" x1="0" y1="46" x2="0" y2="146" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#ECE3D3"/>
+<stop offset="0.5" stop-color="#D7C9B0"/>
+<stop offset="1" stop-color="#AD9978"/>
+</linearGradient></defs>
+<path d="M0 46C31.34 46 52.61 53.08 58.62 61.38L88.74 102.99L115.22 66.49C130.87 44.9 156.4 45.68 170.7 68.18L189.31 97.44L215.59 61.52C231.34 40 256.71 40.99 270.74 63.66L321.71 146C290.37 146 271.7 141.91 268.73 137.12L240.79 91.98L213.57 129.17C198.67 149.53 174.45 148.74 160.91 127.45L141.09 96.28L116.14 130.69C101.32 151.11 76.1 151.1 61.31 130.67L0 46Z" fill="#8D877D"/>
+<path d="M88.74 102.99C101.18 120.16 102.65 139.14 118.23 127.81L141.09 96.28C129.64 78.27 128.81 57.95 113.12 69.37L88.74 102.99Z" fill="url(#vd-l0)"/>
+<path d="M189.31 97.44C200.84 115.58 199.82 137.73 215.67 126.3L240.79 91.98C229.56 73.83 229.23 53.05 213.49 64.4L189.31 97.44Z" fill="url(#vd-l1)"/>
+<path d="M0 46C31.34 46 52.61 53.08 58.62 61.38L88.74 102.99C101.18 120.16 102.65 139.14 118.23 127.81L116.14 130.69C101.32 151.11 76.1 151.1 61.31 130.67L0 46Z" fill="url(#vd-f0)"/>
+<path d="M113.12 69.37L115.22 66.49C130.87 44.9 156.4 45.68 170.7 68.18L189.31 97.44C200.84 115.58 199.82 137.73 215.67 126.3L213.57 129.17C198.67 149.53 174.45 148.74 160.91 127.45L141.09 96.28C129.64 78.27 128.81 57.95 113.12 69.37Z" fill="url(#vd-f1)"/>
+<path d="M213.49 64.4L215.59 61.52C231.34 40 256.71 40.99 270.74 63.66L321.71 146C290.37 146 271.7 141.91 268.73 137.12L240.79 91.98C229.56 73.83 229.23 53.05 213.49 64.4Z" fill="url(#vd-f2)"/>
+<circle cx="155.21" cy="20.5" r="20.5" fill="url(#vd-d)"/>
+</svg>

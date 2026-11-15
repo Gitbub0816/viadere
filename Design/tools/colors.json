@@ -1,0 +1,10 @@
+{
+  "Background": {
+    "light": "#F5F2EC",
+    "dark": "#121211"
+  },
+  "Accent": {
+    "light": "#7A6440",
+    "dark": "#CDB993"
+  }
+}

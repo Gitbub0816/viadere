@@ -1,0 +1,170 @@
+# Deploy the authority image (ADR-0019, ADR-0028 section 6.3-6.4). SEPARATE from azure.yml: its own identity (id-gh-deploy-auth-<env>, rights
+# on rg-viadere-<env>-auth only) and its own GitHub environment `authority-staging` (required reviewers, "Prevent self-review", deployment
+# branch main only). Started by hand with a digest; release.yml never starts it. No third-party JavaScript action; cosign is checksum-pinned.
+#
+# Refused: an unsigned image, a signature from another workflow identity, or provenance that does not tie the digest to a commit on main.
+# Not prevented (residual R-11): a correctly signed image built from a malicious commit that was merged to main; branch protection and
+# CODEOWNERS on Server/Sources/ViadereAuthority* are the control. The reviewer sees the commit before approving (job summary of `verify`).
+name: Authority deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Authority image digest from the release run (sha256:...)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authority-deploy
+  cancel-in-progress: false
+
+env:
+  AZ_MIN_VERSION: 2.91.0
+
+jobs:
+  verify:
+    name: Verify the image and show the commit (no Azure credential)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      commit: ${{ steps.prov.outputs.commit }}
+    env:
+      DIGEST: ${{ inputs.digest }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check the input
+        run: |
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "digest must be sha256:<64 hex>" >&2; exit 1; }
+          [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "authority deploys run from main only" >&2; exit 1; }
+      - run: .github/scripts/install-tools.sh cosign
+      - name: Verify the signature and the workflow identity
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/viadere-authority"
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/(tags/v.*|heads/main)$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${image}@${DIGEST}" > /dev/null
+      - name: Verify the SLSA provenance and that its commit is on main
+        id: prov
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/viadere-authority"
+          gh attestation verify "oci://${image}@${DIGEST}" --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" --format json > "$RUNNER_TEMP/att.json"
+          commit="$(python3 -I - "$RUNNER_TEMP/att.json" <<'PY'
+          import json, re, sys
+          data = json.load(open(sys.argv[1]))
+          text = json.dumps(data)
+          m = re.findall(r'"sourceRepositoryDigest"\s*:\s*"([0-9a-f]{40})"', text)
+          if len(set(m)) != 1:
+              sys.exit("provenance does not name exactly one source commit")
+          print(m[0])
+          PY
+          )"
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "${commit}" origin/main || { echo "commit ${commit} is not on main: refused" >&2; exit 1; }
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Authority deploy for review"
+            echo "Image digest: \`${DIGEST}\`"
+            echo "Built from commit: \`${commit}\` (on main)"
+            echo
+            echo "Changed files under the authority paths since the previous deploy marker:"
+            git diff --stat "${commit}~20" "${commit}" -- 'Server/Sources/ViadereAuthority*' 'Server/Dockerfile.authority' 'Packages/ViadereCore' | tail -30
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to the authority (staging)
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Required reviewers and deployment branch main only are configured on this environment (docs/ops/AUTHORITY-OWNER-CHECKLIST.md).
+    environment:
+      name: authority-staging
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      DIGEST: ${{ inputs.digest }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_AUTH_RESOURCE_GROUP: ${{ vars.AZURE_AUTH_RESOURCE_GROUP }}
+      AZURE_AUTH_ACR_NAME: ${{ vars.AZURE_AUTH_ACR_NAME }}
+      APP: ca-viadere-authority
+      MIGRATE_JOB: job-viadere-authority-migrate
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check configuration
+        run: |
+          if [ -z "${AZURE_CLIENT_ID}" ] || [ -z "${AZURE_AUTH_RESOURCE_GROUP}" ] || [ -z "${AZURE_AUTH_ACR_NAME}" ]; then
+            echo "environment variables missing (AUTHORITY-OWNER-CHECKLIST.md)" >&2
+            exit 1
+          fi
+      - name: Azure CLI login (workload identity federation, no secret)
+        run: |
+          az config set extension.use_dynamic_install=no core.only_show_errors=true > /dev/null
+          python3 -I - "$(az version --query '"azure-cli"' -o tsv)" "${AZ_MIN_VERSION}" <<'PY'
+          import sys
+          have, need = (tuple(int(p) for p in v.split(".")[:3]) for v in sys.argv[1:3])
+          sys.exit(0 if have >= need else f"Azure CLI {sys.argv[1]} is older than {sys.argv[2]}")
+          PY
+          token="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          echo "::add-mask::${token}"
+          az login --service-principal --username "${AZURE_CLIENT_ID}" --tenant "${AZURE_TENANT_ID}" --federated-token "${token}" --output none
+          az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+      - name: Import the verified image by digest into the authority registry
+        id: ref
+        run: |
+          src="ghcr.io/${GITHUB_REPOSITORY,,}/viadere-authority@${DIGEST}"
+          az acr import --name "${AZURE_AUTH_ACR_NAME}" --source "${src}" --image "viadere-authority:sha-${DIGEST:7:12}" \
+            --username "${GITHUB_ACTOR}" --password "${GH_TOKEN}" --force
+          echo "image=${AZURE_AUTH_ACR_NAME}.azurecr.io/viadere-authority@${DIGEST}" >> "$GITHUB_OUTPUT"
+      - name: Run the authority migrations and wait
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+        run: |
+          az containerapp job update --name "${MIGRATE_JOB}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --image "${REF}" --output none
+          execution="$(az containerapp job start --name "${MIGRATE_JOB}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --query name -o tsv)"
+          for _ in $(seq 1 90); do
+            status="$(az containerapp job execution show --name "${MIGRATE_JOB}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" \
+              --job-execution-name "${execution}" --query properties.status -o tsv)"
+            case "${status}" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "authority migrations ${status}: the authority is NOT updated" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "authority migrations did not finish in 15 minutes" >&2
+          exit 1
+      - name: Update the authority to the same digest and wait for the revision
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+        run: |
+          suffix="r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          az containerapp update --name "${APP}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --image "${REF}" --revision-suffix "${suffix}" --output none
+          revision="${APP}--${suffix}"
+          for _ in $(seq 1 60); do
+            ready="$(az containerapp show --name "${APP}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --query properties.latestReadyRevisionName -o tsv)"
+            [ "${ready}" = "${revision}" ] && { echo "revision ${revision} is ready"; exit 0; }
+            state="$(az containerapp revision show --name "${APP}" --resource-group "${AZURE_AUTH_RESOURCE_GROUP}" --revision "${revision}" --query properties.runningState -o tsv 2>/dev/null || true)"
+            case "${state}" in Failed|Degraded) echo "revision ${revision} ${state}; traffic stays on the previous revision" >&2; exit 1 ;; esac
+            sleep 10
+          done
+          echo "revision ${revision} not ready in 10 minutes; traffic stays on the previous revision" >&2
+          exit 1
+      - name: Log out
+        if: always()
+        run: az logout || true

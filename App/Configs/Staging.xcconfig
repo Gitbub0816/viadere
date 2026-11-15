@@ -1,0 +1,57 @@
+#include "Shared.xcconfig"
+
+// STAGING: a Release-grade build (optimized, no DEBUG flag, strict ATS, no local-dev exception, pinning fail-closed) pointed at the
+// staging server (Infra/fly/fly.staging.toml). Setup guide: docs/ops/STAGING-SETUP.md.
+// Same bundle ID as production (com.viadere.app): the APNs topic, App Attest app ID and the AASA file stay identical, so staging needs no
+// extra Apple identifiers. Consequence: a staging build REPLACES a production install on the same device.
+
+// Per-developer overrides are read FIRST (Shared.xcconfig includes Local.xcconfig), so they can never reach the security settings below.
+// The only overridable staging values are the three push/attest switches (see "TestFlight" below) through the VIADERE_STAGING_* names.
+
+// Staging runs on cksites.dev until viadere.com is registered. Both hosts are one level below cksites.dev, so the free Cloudflare
+// Universal SSL certificate covers them.
+// ---- server, domains ---------------------------------------------------------------------------------------------
+VIADERE_API_BASE_URL = https:/$()/viadere-api.cksites.dev
+// Passkey relying party and associated domains: the staging web origin (server RP_ID / RP_ORIGIN). This host must reach the Fly origin so
+// /.well-known/apple-app-site-association is served for it (docs/ops/STAGING-SETUP.md, Cloudflare DNS).
+VIADERE_WEB_DOMAIN = viadere.cksites.dev
+VIADERE_RP_DOMAIN = viadere.cksites.dev
+VIADERE_DISPLAY_NAME = Viadere Staging
+
+// ---- ATS: strict, no exceptions (Debug alone defines VIADERE_LOCAL_DEV) -------------------------------------------------
+VIADERE_PLIST_DEFS =
+
+// ---- certificate pins for viadere-api.cksites.dev (SPKI SHA-256, base64) -----------------------------------------------------
+// A Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
+// Compute them with App/Scripts/compute-spki-pins.py (docs/ops/STAGING-SETUP.md). Pin the CA intermediate(s) of the Cloudflare edge chain, not
+// the leaf: Cloudflare renews the edge certificate (and may switch CAs) without notice. Primary and backup must differ.
+// If a pin contains two slashes in a row, write one of them as $() so xcconfig does not read it as a comment.
+// Computed 2026-10-30 from the live Cloudflare edge chain of viadere-api.cksites.dev (App/Scripts/compute-spki-pins.py):
+// leaf CN=cksites.dev <- Google Trust Services WE1 <- GTS Root R4. Cloudflare Universal SSL may also issue from Let's Encrypt, so the
+// ISRG roots are pinned as well (keys published at letsencrypt.org/certs). Re-run the script if Cloudflare changes CA families.
+VIADERE_PIN_PRIMARY = kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=
+VIADERE_PIN_BACKUP = mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=
+VIADERE_PIN_ISRG_X1 = C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=
+VIADERE_PIN_ISRG_X2 = diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=
+VIADERE_API_PINS = $(VIADERE_PIN_PRIMARY),$(VIADERE_PIN_BACKUP),$(VIADERE_PIN_ISRG_X1),$(VIADERE_PIN_ISRG_X2)
+
+// Azure staging Key Vault `brand-manifest` key (kv-vdr-stgcbo3l), printed by `ViadereServer brand-manifest-key` on 2026-10-31.
+VIADERE_BRAND_MANIFEST_KEYS = dUPwpEj4t4LEQNhmJaX2KuXagJnOgaHHOMli_sEaaKM:BPQWQouXRTqnVvN3wD4FSbbBXaSHTVi_a0V2a3pSjQZdyP9OMKEFcjpOz7rRhnIlG0pINwWqq3XJr9jmfKUl_Ms
+// Azure staging Key Vault `loop-publication` key (kv-vdr-stgcbo3l), printed by `ViadereServer loop-publication-key` on 2026-10-31.
+VIADERE_LOOP_PUBLICATION_KEYS = p6LAkYzgN__FDWgdy9ol0Ph10qGLOrbOljoUq7jyePE:BI2lEi_FKZMGbN2POdBa2MIxke-ae1qPw6iD8jcE60OJj2dovdwxzmDgkOChpMnh3PNXrG0dV0qYtKgzBYdyFtw
+
+// ---- push and App Attest ---------------------------------------------------------------------------------------------
+// Defaults match fly.staging.toml (APNS_ENVIRONMENT = sandbox, APP_ATTEST_ENVIRONMENT = development): builds run from Xcode on a device.
+// TestFlight builds are signed for distribution; Apple issues them PRODUCTION push tokens, so for a TestFlight round put these in
+// Local.xcconfig and change the server the same way (docs/ops/STAGING-SETUP.md, "TestFlight"):
+//   VIADERE_STAGING_APNS_ENVIRONMENT = production      (server APNS_ENVIRONMENT = "production")
+//   VIADERE_STAGING_APS_ENVIRONMENT = production
+//   VIADERE_STAGING_APP_ATTEST_ENVIRONMENT = production  (server APP_ATTEST_ENVIRONMENT = "production")
+VIADERE_APNS_ENVIRONMENT = $(VIADERE_STAGING_APNS_ENVIRONMENT:default=sandbox)
+APS_ENVIRONMENT = $(VIADERE_STAGING_APS_ENVIRONMENT:default=development)
+APP_ATTEST_ENVIRONMENT = $(VIADERE_STAGING_APP_ATTEST_ENVIRONMENT:default=development)
+
+// ---- diagnostics -------------------------------------------------------------------------------------------------------------
+// Staging-only diagnostics (e.g. the Loop fallback reason under the generic "can't be shown" notice), read at run time from Info.plist
+// (ViadereStagingDiagnostics). Release never sets it.
+VIADERE_STAGING_DIAGNOSTICS = YES

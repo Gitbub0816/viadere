@@ -1,0 +1,1571 @@
+{
+  "cases" : [
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "html" : "<b>x</b>",
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "unknown_member"
+        ]
+      },
+      "name" : "unknown_member"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "s1",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "cycle",
+          "unreachable_step"
+        ]
+      },
+      "name" : "cycle"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "done"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "unreachable_step"
+        ]
+      },
+      "name" : "unreachable_step"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "transfer_funds",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "unregistered_action"
+        ]
+      },
+      "name" : "unregistered_action"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "payment.capture",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "reserved_action"
+        ]
+      },
+      "name" : "reserved_payment_action"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "verify_age",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "reserved_action"
+        ]
+      },
+      "name" : "reserved_verify_age"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "Approve and pay",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "label_not_allowed"
+        ]
+      },
+      "name" : "label_not_allowed"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "medical"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "no_fields",
+          "prohibited_field_type"
+        ]
+      },
+      "name" : "prohibited_field_health"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "card_number"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "no_fields",
+          "prohibited_field_type"
+        ]
+      },
+      "name" : "prohibited_field_card"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Describe your symptoms"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "health_content"
+        ]
+      },
+      "name" : "health_text"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Built by Viadere"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "attribution_spoofing",
+          "impersonation"
+        ]
+      },
+      "name" : "attribution_spoofing"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "body" : "Details at www.example.com",
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "link_not_allowed"
+        ]
+      },
+      "name" : "link"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "connected",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "routing_mode_not_available"
+        ]
+      },
+      "name" : "connected_in_phase_3"
+    },
+    {
+      "context" : {
+        "category" : "healthcare"
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "category_banned"
+        ]
+      },
+      "name" : "healthcare_category"
+    },
+    {
+      "context" : {
+        "publisher" : null
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "attribution_missing"
+        ]
+      },
+      "name" : "attribution_missing"
+    },
+    {
+      "context" : {
+        "publisher_business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d02"
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "failed",
+        "required_review" : "single",
+        "rules" : [
+          "attribution_mismatch"
+        ]
+      },
+      "name" : "attribution_mismatch"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Massage therapy booking"
+      },
+      "expected" : {
+        "derived_risk_class" : "medium",
+        "gate" : "passed",
+        "required_review" : "two_person",
+        "rules" : [
+          "health_adjacent_content"
+        ]
+      },
+      "name" : "review_flag_two_person"
+    },
+    {
+      "context" : {
+
+      },
+      "definition" : {
+        "appearance" : {
+          "kit" : "spring",
+          "mode" : "brand_kit"
+        },
+        "entry_points" : [
+          "message",
+          "alert"
+        ],
+        "key" : "estimate-review",
+        "limits" : {
+          "expires_in_seconds" : 259200
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "review_estimate",
+                "id" : "ack",
+                "label" : "send_acknowledgement",
+                "next" : "done",
+                "params" : {
+                  "amount" : {
+                    "currency" : "USD",
+                    "value" : "285.28"
+                  },
+                  "reference" : "EST-1042",
+                  "terms" : "Valid for 14 days. Work starts after you approve in person."
+                },
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "estimates"
+                }
+              }
+            ],
+            "body" : "Parts and labor for the front brakes.",
+            "id" : "review",
+            "title" : "Brake repair estimate",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Your repair estimate"
+      },
+      "expected" : {
+        "derived_risk_class" : "high",
+        "gate" : "passed",
+        "required_review" : "two_person",
+        "rules" : [
+          "high_risk_action"
+        ]
+      },
+      "name" : "high_risk_estimate"
+    }
+  ],
+  "description" : "Loop definition schema v1 and LoopPolicyValidator rule codes (SECURITY.md 2.92, plan 4.3). `valid.canonical` is the canonical JSON (SECURITY.md 2.2) and `valid.definition_hash` = \"sha256:\" + hex(SHA-256(canonical)). Each case is validated with context: submitting business = publisher business 0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01, publisher verified, category retail, phase hosted (3), registry v1, unless `context` overrides it. `expected.rules` is the sorted set of rule codes (hard-gate failures and review flags); `gate` is failed when any hard-gate rule is present.",
+  "name" : "loop-definition-v1",
+  "registry_version" : 1,
+  "rule_set_version" : 1,
+  "submitting_business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+  "valid" : {
+    "canonical" : "{\"appearance\":{\"mode\":\"standard\"},\"entry_points\":[\"business_page\",\"message\",\"alert\"],\"key\":\"pickup-scheduling\",\"limits\":{\"expires_in_seconds\":86400},\"schema_version\":1,\"steps\":[{\"actions\":[{\"action\":\"select_option\",\"id\":\"confirm\",\"label\":\"continue\",\"next\":\"s2\"}],\"fields\":[{\"id\":\"slot\",\"label\":\"Pickup time\",\"options\":[{\"id\":\"am\",\"label\":\"Morning\"},{\"id\":\"pm\",\"label\":\"Afternoon\"}],\"required\":true,\"type\":\"single_choice\"}],\"id\":\"s1\",\"type\":\"form\"},{\"actions\":[{\"action\":\"acknowledge\",\"id\":\"submit\",\"label\":\"send_request\",\"next\":\"done\",\"routing\":{\"mode\":\"hosted\",\"queue\":\"pickups\"}}],\"id\":\"s2\",\"type\":\"summary\"},{\"id\":\"done\",\"show_outcome\":true,\"type\":\"result\"}],\"title\":\"Schedule your pickup\"}",
+    "definition" : {
+      "appearance" : {
+        "mode" : "standard"
+      },
+      "entry_points" : [
+        "business_page",
+        "message",
+        "alert"
+      ],
+      "key" : "pickup-scheduling",
+      "limits" : {
+        "expires_in_seconds" : 86400
+      },
+      "schema_version" : 1,
+      "steps" : [
+        {
+          "actions" : [
+            {
+              "action" : "select_option",
+              "id" : "confirm",
+              "label" : "continue",
+              "next" : "s2"
+            }
+          ],
+          "fields" : [
+            {
+              "id" : "slot",
+              "label" : "Pickup time",
+              "options" : [
+                {
+                  "id" : "am",
+                  "label" : "Morning"
+                },
+                {
+                  "id" : "pm",
+                  "label" : "Afternoon"
+                }
+              ],
+              "required" : true,
+              "type" : "single_choice"
+            }
+          ],
+          "id" : "s1",
+          "type" : "form"
+        },
+        {
+          "actions" : [
+            {
+              "action" : "acknowledge",
+              "id" : "submit",
+              "label" : "send_request",
+              "next" : "done",
+              "routing" : {
+                "mode" : "hosted",
+                "queue" : "pickups"
+              }
+            }
+          ],
+          "id" : "s2",
+          "type" : "summary"
+        },
+        {
+          "id" : "done",
+          "show_outcome" : true,
+          "type" : "result"
+        }
+      ],
+      "title" : "Schedule your pickup"
+    },
+    "definition_hash" : "sha256:66d413c5f259750452cdd20bf0379450eac7f094bf7c732ca9f6aa8924fa502c",
+    "expected" : {
+      "derived_risk_class" : "medium",
+      "gate" : "passed",
+      "required_review" : "single",
+      "rules" : [
+
+      ]
+    }
+  },
+  "version" : 1
+}

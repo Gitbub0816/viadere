@@ -1,0 +1,58 @@
+// Shared build settings. Per-developer overrides go in Configs/Local.xcconfig (git-ignored).
+// `$()` after the colon stops xcconfig from treating `//` as a comment.
+
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+// Production API. Pins for this host live in ViadereConfiguration.productionPinning (TODO before release).
+VIADERE_API_BASE_URL = https:/$()/api.viadere.com
+
+// Web domain the app is associated with (entitlements `applinks:` / `webcredentials:` / `appclips:`) and the passkey relying-party ID.
+// Staging.xcconfig points both at staging.viadere.com. The server's RP_ID / RP_ORIGIN must be the same domain.
+VIADERE_WEB_DOMAIN = viadere.com
+VIADERE_RP_DOMAIN = $(VIADERE_WEB_DOMAIN)
+// Universal-link host (WP-C3): every link the app parses must use it (`/c/`, `/a/`, `/k/`, `/l/`, `/h/`). Defaults to the web domain, so the
+// Staging build gets viadere.cksites.dev; the server's LINK_DOMAIN must be the same value. Read from Info.plist `ViadereLinkDomain`.
+VIADERE_LINK_DOMAIN = $(VIADERE_WEB_DOMAIN)
+// Viadere's `link-descriptor` public key(s) (base64url X9.63, comma separated; the second during a rotation). The app accepts a business link
+// session only if one of these signed its descriptor; empty = link sessions fail closed. Print it with `ViadereServer link-descriptor-key`.
+VIADERE_LINK_DESCRIPTOR_KEYS =
+// Brand Kits and hosted Loops (SECURITY.md §2.92, §2.93): Viadere's `brand-manifest` and `loop-publication` public keys, each entry
+// `kid:publicKey` (kid = base64url SHA-256 of the SPKI, publicKey = base64url X9.63; a bare publicKey also works), comma separated (the
+// second during a rotation). Print the brand key with `ViadereServer brand-manifest-key`; the loop key is served by `GET /v1/loops/keys`
+// (compare it with the Key Vault key before pinning). Pinned in the build:
+// a key from the network is never trusted. Empty = every Brand Kit renders neutral and every Loop shows "This request can't be shown";
+// Release and Staging archives refuse empty or malformed values (Scripts/check-release-pins.sh). Placeholders until the owner sets them.
+VIADERE_BRAND_MANIFEST_KEYS =
+VIADERE_LOOP_PUBLICATION_KEYS =
+// CKey Safe Actions (SECURITY.md §2.104): the public key(s) of the Safe Action issuer for this build's link domain (the authority's Key
+// Vault key ckey-safe-action-signing), each entry `keyId:alg:publicKey` exactly as https://{link domain}/.well-known/ckey-safe-actions.json
+// lists it: alg ES256 with SEC 1 hex (66 digits compressed or 130 uncompressed), or Ed25519 with 64 hex digits; comma separated (the second
+// during a rotation). Take it from the attested key inventory and compare it with the key file. Pinned in the build: the app never fetches the issuer's key file. Empty =
+// every scanned Safe Action is refused (the Viadere code then only works as a plain link or QR); a malformed value stops Release and
+// Staging archives (Scripts/check-release-pins.sh). Placeholder until the owner sets it.
+VIADERE_CKEY_SAFE_ACTION_KEYS =
+// Which APNs environment the app registers its push token for (`sandbox` | `production`; read from Info.plist `ViadereAPNsEnvironment`).
+// It must equal the server's APNS_ENVIRONMENT. ViadereConfiguration honours `sandbox` only for a host other than the production API.
+VIADERE_APNS_ENVIRONMENT = production
+// Comma-separated SPKI pins for a non-production API host (Staging only). Production pins are compiled into ViadereConfiguration.productionPinning.
+VIADERE_API_PINS =
+VIADERE_DISPLAY_NAME = Viadere
+
+// Apple Wallet (docs/WALLET.md). The Pass Type ID the server signs passes with (its PASS_TYPE_IDENTIFIER); the app needs it in the
+// pass-type-identifiers entitlement to see whether a pass is already in Wallet. The Beta label on Wallet screens is an owner decision.
+VIADERE_PASS_TYPE_IDENTIFIER = pass.com.viadere.wallet
+VIADERE_WALLET_BETA_LABEL = YES
+// Staging-only diagnostics (YES only in Staging.xcconfig; Release and Debug never show them).
+VIADERE_STAGING_DIAGNOSTICS = NO
+
+// Apple developer team. Set it in Local.xcconfig: DEVELOPMENT_TEAM = ABCDE12345
+DEVELOPMENT_TEAM =
+
+// Approve v2: the public key(s) of Viadere's key-directory transparency log, base64url X9.63 points, comma separated (the first is the
+// signing key; list the next one during a rotation). Empty means the build trusts no log, so Approve v2 stays closed (fails closed).
+// Print it from the server with `ViadereServer key-directory-log-key`; it is a public key, never the private scalar.
+VIADERE_KEY_DIRECTORY_LOG_KEYS =
+
+// Optional per-developer overrides (team id, a staging server).
+#include? "Local.xcconfig"

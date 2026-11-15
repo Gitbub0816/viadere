@@ -1,0 +1,347 @@
+# Authentication delivery — approved customer copy (Stage 1, revision 3)
+
+| | |
+|---|---|
+| Spec | `docs/product/AUTH-DELIVERY-SPEC-v2.md` §7, §7.1, §7.2, §20 (Part II copy is the default where §7 and §20 differ; deliberate deviations are recorded in §11) |
+| Decisions | 1 and 9 (no SMS authentication), 2, 3, 4, 13; ADR-0021, ADR-0022, ADR-0024, ADR-0027, ADR-0031, ADR-0032, ADR-0033 |
+| Voice | Existing app wording and `Design/brand-guide.html`: plain, calm, short sentences; second person; the business named exactly as verified; no exclamation marks, no urgency words ("now", "immediately", "warning", "hacked"), no shield imagery; existing patterns kept: "Not you? …", "This wasn't me", "Approve on your iPhone", "Approvals never happen by text." |
+| Owner | A9 writes, A2 reviews for phishing and fatigue susceptibility, A6/A7 validate native affordances (spec §20). Validation on real devices is a Stage 4 gate (spec §27). |
+| Status | Revision 3 (A2/A3 re-reviews): new S-DEV-03..05 (comparison code), S-REC-04 rewritten without a self-service path, S-REC-05 gated, S-REC-06, S-SEC-03 retired, S-SEC-04/-05, S-LINK-11/-12, S-MFA-14/-15, OIDC-11. **A9 must review these before the Stage 4 merge (condition C-12).** Revision 2 after the A9 and A6/A7 reviews (`docs/reviews/STAGE1_RESPONSE.md`). English source strings; localization rules in §10. Every string must survive 200% text and AX5 sizes without truncating the business name, the host or the Deny button. |
+
+## 0. Rules every string follows
+
+1. **Identify the business** with `{Business}` = the verified display name (never a brand-kit field, never business-supplied text). For authority-backed prompts and business links it comes from the authority-signed record (ADR-0031, ADR-0033), never from api display fields.
+2. **Name the action** ("sign-in", "payment", "sign-in link", "code"). Never "Approve" on a passive link notification; a tap to open a link is not an approval (spec §7).
+3. **No success claim Viadere cannot know.** Viadere never says "You're signed in", never predicts what a business will do, and never shows "Approved" before the relay accepted the signed answer. It says what it did ("Your answer was sent to {Business}", "Opened {host}").
+4. **No time-based trust claims.** Waiting never makes a device trusted (SECURITY §2.5a, §2.26, owner decision WP-B5). No string promises that an action becomes possible "after {date}" unless that is literally the rule (the recovery activation time and the phone-link cool-down are such rules; device trust for payments is not).
+5. **Lock Screen and notification text carry no code, number, amount, payee, URL or personal data.** The business name appears on a locked device **unless** the person hides previews (iOS "Show Previews: When Unlocked" or "Never" replaces title and body with the category placeholder "You have a security item."; Android follows the lock-screen setting with a generic public version) or leaves "Show business names on the Lock Screen" (You → Notifications) **off, which is the default**: which businesses a person deals with is personal data, so off is the privacy-preserving value. Off, every notification is titled "Viadere", names no business (N-02a, N-05a, N-06a, N-03a) and carries no business logo; the business is shown once Viadere is open. A notification extension cannot tell whether the phone is locked, so off applies to every notification, locked or not. Turning names on needs Face ID or the passcode; turning them off never does. Detailed approval notifications ("Who, amount and place") name the business by definition. Interruption level is `active`; nothing is time-sensitive.
+6. **One safe-action vocabulary** (§0.1), **equal prominence** (§0.2), and Deny never needs unlocking-plus-Face-ID: from a notification it works on a locked phone (after first unlock since restart); only Review/Open need unlocking.
+7. **Businesses cannot edit** any string here, the warning hierarchy, or button roles. They supply only bounded variables: `{action}` (≤ 60 chars, e.g. "Sign in on Chrome, Mac") and `{reference}` (≤ 40 chars), validated (ADR-0020 §2).
+8. **Context only when reliably known.** Location or device lines appear only when the business supplied them in a business-signed (E2EE) request; otherwise they are omitted, never guessed.
+9. Server-visible requests keep the existing label: "Viadere passed this on and could read it. It is not signed by {Business}. Only approve if you started this yourself."
+10. **Times are absolute.** "Expires at {time}", "Requested at {time}"; no live countdown (it adds pressure). On expiry: "Ask {Business} for a new request"; Viadere never regenerates a request by itself.
+
+### 0.1 Safe-action vocabulary
+
+| Word | Meaning | Where |
+|---|---|---|
+| **Deny** | Say no to this request | approval screens and approval notifications, watch |
+| **This wasn't me** | Say no **and** report it (signed `report`, `not_me`) | approval screens (footer button), link and code screens, link notifications, device transfer, watch |
+| **Review** | Open the request in the app (needs unlock) | approval notifications |
+| **Open** | Open the sign-in link screen (needs unlock) | link notifications |
+
+Retired on these surfaces: "Decline", "No", "Not me", "No, it isn't me", "I didn't request this", "I don't recognize this", "Report suspicious request". Non-security confirm flows (Loops, choose/confirm interactions) keep their existing words; that is a recorded exception, not a precedent.
+
+Line under approval buttons: "Deny says no. This wasn't me also reports it."
+
+### 0.2 Equal prominence (testable; ADR-0022 §2.5)
+
+Deny and Approve (or This wasn't me and Continue on link screens) are one component: identical height, width, type size, weight and contrast ratio, neutral palette (no red on Deny, no filled Approve). The safe action comes **first** in layout and reading order. Side by side until text would truncate, then stacked with the safe action on top. Approve is disabled (not hidden) until the number is complete. On approval screens "This wasn't me" is a full-width secondary button (≥ 44 pt) inside the pinned footer, not a link. No slide-to-approve.
+
+## 1. Notifications (push)
+
+| Id | Where | Title | Body | Notes |
+|---|---|---|---|---|
+| N-01 | APNs/FCM payload as sent (before the NSE or the Android fetch runs); Android public version | Viadere | You have a new security item. | Generic; payload carries only the delivery id |
+| N-02 | Sign-in link, after fetch | {Business} | {Business} sign-in link is ready. Tap to continue. | spec §20 "Magic link"; actions **Open**, **This wasn't me** |
+| N-02a | Sign-in link, after fetch, business names off (default, §0 rule 5) | Viadere | A sign-in link is ready. Tap to continue. | Same actions |
+| N-03 | Push approval (sign-in), after fetch | {Business} | Sign-in request from {Business}. Only approve if you started this. | Actions **Review**, **Deny**. Rewritten (A6/A7 finding 7c) so the line reads correctly on the wrist, where Approve does not exist |
+| N-04 | Payment step-up | {Business} | Payment request from {Business}. Only approve if you started this. | No amount on the notification |
+| N-05 | One-time code | {Business} | Your {Business} code is ready. Open Viadere to see it. | Code never in the notification |
+| N-05a | One-time code, business names off | Viadere | Your code is ready. Open Viadere to see it. | |
+| N-06 | Notice (account notice from a business) | {Business} | {Business} sent a security notice. | Fixed template; never business text |
+| N-06a | Notice, business names off | Viadere | You have a new security notice. | |
+| N-03a | Interaction approval (sign-in or other approval), business names off | Viadere | Sign-in approval requested · Approval requested (either followed by " by an unverified business" when the business is not verified) | The unverified warning is kept without the name |
+| N-07 | Requests replaced (collapse) | {Business} | {Business} sent a new request. Earlier ones were replaced. | ADR-0022 §5.2; not sent while over budget |
+| N-08 | Fetch failed / offline / before first unlock | Viadere | You have a new security item. Open Viadere to review it. | Never shows a stale business name |
+| N-09 | Local notification: Deny could not be sent | Viadere | Deny not sent yet. Open Viadere. | ADR-0022 §5.6 |
+| — | Previews hidden placeholder (`hiddenPreviewsBodyPlaceholder`, all auth categories) | — | You have a security item. | Replaces "Viadere needs your attention" |
+| INB-01 | Inbox line for a request delivered silently (over budget) | — | You have a pending sign-in from {Business}. | ADR-0020 §8 |
+
+Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), **This wasn't me** (background, signed reduce-only, no unlock). `viadere.approve` → **Review** (foreground, needs unlock), **Deny** (background, signed reduce-only, no unlock). There is no Approve action on any notification.
+
+| Id | Element (You → Notifications, beside "Live Activity details") | Copy |
+|---|---|---|
+| N-SET-01 | Setting title (also the search row) | Show business names on the Lock Screen |
+| | Row detail (search) | Which business a notification is from |
+| | Option, off (default) | Just Viadere · Notifications don't say which business they're from until you open Viadere. |
+| | Option, on | The business name · See who it's from at a glance. Anyone who can see your phone sees it too. |
+| | Explanation | Notifications can name the business they're from, which anyone who can see your phone can read, or just say Viadere until you open the app. |
+| | Face ID / passcode reason (turning on) | Show business names on the Lock Screen |
+
+## 2. Sign-in link screens (ADR-0021, ADR-0031)
+
+| Id | Element | Copy |
+|---|---|---|
+| S-LINK-01 | Title | {Business} sign-in link |
+| | Body | Continue to sign in to {Business}. This opens {host}. |
+| | Host row | {host}, full, registrable domain in strong type, wraps, never truncated; any `xn--` label shown as is with "This address uses unusual characters." |
+| | Detail row | Expires at {time} |
+| | Buttons (equal, safe action first) | This wasn't me · Continue (VoiceOver: "Continue to {host}") |
+| | Footnote | Continue only if you asked {Business} for a sign-in link on this device. |
+| S-LINK-02 | Link service choice (two equal options) | Continue on this phone / I'm signing in on another device |
+| S-LINK-03 | Another device: number entry | Enter the 2-digit number on the {Business} screen where you're signing in. No number there, or someone gave it to you? Tap This wasn't me. |
+| | Field label | Number on {Business} |
+| | Buttons | This wasn't me · Continue (enabled when the entry is complete) |
+| S-LINK-04 | After opening | Opened {host}. Finish signing in there. |
+| S-LINK-05 | After "This wasn't me" | Thanks. We told {Business} you didn't ask for this. You can ignore it. If you keep getting these, report it. |
+| | Optional action | Report to Viadere |
+| S-LINK-06 | Expired | This sign-in link has expired. Ask {Business} for a new link. |
+| S-LINK-07 | Already used | This sign-in link was already used. Ask {Business} for a new link if you still need to sign in. |
+| S-LINK-08 | Destination failed validation on device | We didn't open this link because it doesn't go to a website {Business} has verified. |
+| S-LINK-09 | Destination signature failed (ADR-0031 §4) | We couldn't confirm this link came from {Business}. We didn't open it. |
+| S-LINK-10 | Old `/l/` or `/h/` link (ADR-0027 §4) | This link is no longer used. Open Viadere to see your requests. |
+| S-LINK-11 | Destination could not be checked (tenant record stale or unavailable; ADR-0031 §4, availability class; nothing is sent to the business) | We couldn't check this sign-in link right now, so we didn't open it. Try again in a moment. |
+| | Button | Try again |
+| S-LINK-12 | Device clock outside the allowed window (ADR-0031 §4) | We couldn't check this sign-in link. Check your phone's date and time, then try again. |
+| | Button | Try again |
+
+### 2.1 Viadere link service (`link_mode: "viadere"`, ADR-0021 §5, SECURITY §2.110)
+
+`{Business}` is the authority-signed `tenant_name`; the website is the signed `return_url`'s host; nothing comes from api display fields.
+
+| Id | Element | Copy |
+|---|---|---|
+| LS-01 | Title | Sign in to {Business}? |
+| | Rows | Website: {host} (as S-LINK-01's host row) · Service: {client name} (only when it differs from {Business}) |
+| | Subtitle | Only approve if you asked {Business} to sign you in. |
+| | Buttons (one component, equal, safe actions first) | This wasn't me · Deny · Approve |
+| LS-02 | Number field (only when the challenge asks for one) | Label and helper: S-LINK-03 (Number on {Business} · Enter the 2-digit number on the {Business} screen where you're signing in. No number there, or someone gave it to you? Tap This wasn't me.) |
+| | Wrong number | That number doesn't match the one on {Business}. Check it and try again. |
+| | Third wrong number | This sign-in was stopped after three wrong numbers. Ask {Business} for a new link. |
+| LS-03 | Approved (after the authority accepted) | Approved. Go back to {Business} to finish signing in. |
+| LS-04 | Denied | Denied. Nobody was signed in. |
+| LS-05 | This wasn't me | S-LINK-05 |
+| LS-06 | Expired · already answered · gone | This sign-in link has expired. Ask for a new one where you started signing in. · This sign-in link was already answered. · This request is no longer active. |
+| LS-07 | Statement not verified (E-01) · answer refused | We couldn't confirm this sign-in request came from Viadere. Nothing was approved. · Viadere didn't accept this answer, so nobody was signed in. Ask for a new link where you started signing in. |
+| LS-08 | No biometric approval key · offline | Approving sign-ins needs Face ID or Touch ID on this device. · E-02 offline line, with Try again |
+| LS-09 | Same device: accepted and the system opened the business's page (`#vdr_code=` hand-off) | Opened {host}. Finish signing in there. |
+| LS-10 | Same device: the page could not be opened (the system declined, the request ran out, or the link would not open exactly as signed); the code was discarded | We couldn't open {host}, so you're not signed in. Ask for a new link where you started signing in. |
+
+## 3. Push approval and payment screens (ADR-0022)
+
+| Id | Element | Copy |
+|---|---|---|
+| S-MFA-01 | Title | Approve sign-in to {Business}? |
+| | Subtitle | Only approve if you started this. |
+| | Detail | {action} (when supplied) · Requested at {time} · Expires at {time} |
+| | Field label | Number on {Business} |
+| | Helper under the field | Enter the 2-digit number on the {Business} screen where you're signing in. No number there, or someone gave it to you? Tap Deny. |
+| | Buttons (equal, Deny first) | Deny · Approve |
+| | Footer button (≥ 44 pt) | This wasn't me |
+| | Line under buttons | Deny says no. This wasn't me also reports it. |
+| S-MFA-02 | Wrong number (1st, 2nd; announced to VoiceOver) | That number doesn't match. Check the screen where you're signing in. Don't type a number someone gave you. |
+| S-MFA-03 | Wrong number (3rd, auto-deny) | The number didn't match, so we denied this request. If you're signing in, start again on {Business}. |
+| S-MFA-04 | Face ID / passcode reason string (iOS `localizedReason`, set on the signing context) | Confirm it's you to approve this {Business} request. |
+| S-MFA-05 | Approved (shown only after the relay accepted the signed answer) | Approved. Your answer was sent to {Business}. |
+| S-MFA-06 | Denied | Request denied. We told {Business}. If that was a mistake, start again on {Business}. |
+| S-MFA-07 | Reported ("This wasn't me") | Thanks. We denied this request and told {Business} it wasn't you. Someone may have your {Business} sign-in details. You can change your password there. If you keep getting requests you didn't start, you can pause them. |
+| | Action | Pause requests from {Business} for 1 hour |
+| S-MFA-08 | Fatigue warning (from 3 requests/hour) | There have been {n} sign-in requests for {Business} in the last hour. If you didn't start them, tap This wasn't me. |
+| | Acknowledgement before Approve is enabled (kept from the existing app) | I started this myself |
+| S-MFA-09 | Paused | Requests from {Business} are paused until {time}. |
+| | Action | Resume (requires Face ID) |
+| S-MFA-10 | Same-device hint (under the number field) | Switch to {Business}, read the number, then come back. Don't use a number from a message or call. |
+| S-MFA-11 | Answer could not be sent (offline or error; nothing is queued) | Your answer wasn't sent. Check your connection and try again. {Business} hasn't received anything yet. |
+| S-MFA-12 | Expired before the answer could be sent | This request expired before your answer could be sent. If you still need to sign in, start again on {Business}. |
+| S-MFA-13 | Inbox item: request blocked by a pause | A request from {Business} was blocked while requests are paused until {time}. Resume if you're trying to sign in. |
+| S-MFA-14 | Several open requests from one business (ADR-0022 §5.2; shown above the number field when n > 1) | {n} open sign-in requests from {Business}. Enter the number shown where you're signing in. Only that request is approved. |
+| S-MFA-15 | Typed number matches more than one open request | This number matches more than one request. Nothing was approved. Start again on {Business} to get a new number. |
+| S-PAY-01 | Title | Confirm a payment to {payee}? |
+| | Rows | Amount {amount formatted with currency} · Payee {payee} · Reference {reference} |
+| | Subtitle | Only approve if you started this payment. |
+| | Field label and helper | Number on {Business} · Enter the 3-digit number on the {Business} checkout screen. No number there, or someone gave it to you? Tap Deny. |
+| | Buttons | Deny · Approve; footer: This wasn't me |
+| S-PAY-01b | Approved | Approved. Your answer was sent to {Business}. Check {Business} to see whether the payment went through. |
+| S-PAY-01c | Denied | Payment denied. We told {Business} you didn't approve it. |
+| S-PAY-02 | Device not trusted for payments | This iPhone can't approve payments yet. To allow it, approve it with Face ID on a device you already trust. You can still deny. |
+| S-PAY-02b | Same, no other trusted device | This iPhone can't approve payments yet. {Business} can set it up again. You can still deny. |
+
+## 4. One-time code (OTP and partner TOTP codes)
+
+| Id | Element | Copy |
+|---|---|---|
+| C-OTP-01 | Title | Your {Business} code |
+| | Code display | {code} (large, monospaced, VoiceOver reads digits individually) |
+| | Line 1 | Use it only on {Business}. |
+| | Line 2 | Never share this code. {Business} will never ask you for it by phone, text or email. |
+| | Detail | Expires at {time} |
+| | Buttons | This wasn't me · Copy code (iOS pasteboard item local-only with expiry; Android `EXTRA_IS_SENSITIVE`, **verify**) |
+| C-OTP-02 | Expired | This code has expired. Ask {Business} for a new one. |
+| C-OTP-04 | Button before the code is shown (the tap is the one-time `open`; the sheet opens without the code) | Show code |
+| C-OTP-03 | Email fallback footnote (only in Viadere's email template) | {Business} sent this code by email because you asked for it there. Email is easier to intercept than the Viadere app. |
+| C-OTP-05 | Email fallback template as built (G23; plain text, no link; `AuthEmailFallback.message`) | Subject: C-OTP-01 title "Your {Business} code" (never the code). Body: the title, the code on its own line, C-OTP-01 line 1, line 2, "Expires at {HH:MM} UTC on {YYYY-MM-DD}", then C-OTP-03. **A9 to review** the UTC time format (email has no device time zone) |
+| C-TOTP-01 | Partner TOTP code label | Sign-in code for {Business}. Viadere passed it on; {Business} checks it. |
+
+## 5. Device transfer, recovery, account security and phone linking
+
+| Id | Element | Copy |
+|---|---|---|
+| S-DEV-01 | Cross-device transfer (spec §7) | Confirm that you're moving your Viadere account to this device. |
+| | Detail | From {old device name} to {new device name}. You'll confirm with Face ID. |
+| | Buttons | This wasn't me · Confirm |
+| S-DEV-02 | New device recovery (spec §20) | Verify your existing device or use an approved recovery method. |
+| S-DEV-03 | New device: comparison code (ADR-0033 §4.1; shown only after the device verified the signed challenge lists exactly its own keys) | Enter this number on your other device: {code} |
+| | Detail | Only enter it on a device you own and are holding. Viadere never asks for this number by phone, text or email. |
+| | Code rendering | 6 digits in two groups of 3, monospaced, read digit by digit by VoiceOver/TalkBack |
+| S-DEV-04 | Existing device: approve a new device (the code is never shown here) | Add a new device to your account? |
+| | Row | Name chosen on the new device: {reported name} |
+| | Field label | Number on the new device |
+| | Helper | Type the 6-digit number shown on the new device. No new device in front of you, or someone gave you a number? Tap This wasn't me. |
+| | Buttons (equal, safe action first) | This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
+| | Wrong number | That number doesn't match the new device. Check it and try again. (after 3: "Nothing was added. Start again on the new device.") |
+| S-DEV-05 | New device: the signed challenge does not list exactly this device's keys | We couldn't confirm this request belongs to this device, so nothing was added. Start again. |
+| S-PAIR-01 | Trusted device, Settings → Trusted devices (§2.107) | Add another device |
+| | Body | On the new device, open Viadere, choose I already use Viadere and enter this code. It works once. |
+| | Code and expiry | {XXXX-XXXX-XXXX} · Works until {time}. Don't share it with anyone. |
+| S-PAIR-02 | No D1 device on the account (start or code refused, `no_trusted_device`) | None of your devices can approve a new one. To get back into your account, use account recovery with your recovery codes. |
+| | Action | Use account recovery |
+| S-PAIR-03 | New device, onboarding (button "I already use Viadere") | Enter the code from your other device |
+| | Helper | On a device that already uses Viadere, open Settings, then Trusted devices, then Add another device. |
+| | Wrong, used or expired code | This code didn't work. Check it on your other device, or make a new one there. |
+| | While the code is shown (S-DEV-03 above) | Waiting for your other device… · Cancel |
+| S-PAIR-04 | New device, results | Added: This device was added to your account. · Denied: Your other device didn't add this one. Nothing was added. · Expired: This request expired and nothing was added. Make a new code on your other device. · Three wrong numbers: S-DEV-04 final line |
+| S-PAIR-05 | Trusted device, request (title and field: S-DEV-04; facts above the decision) | Rows: Name chosen on the new device: {name} · {platform} · Requested at {time} · Expires at {time} · Viadere verified this is a genuine Apple device. / Viadere couldn't verify this device. |
+| | Fatigue warning (third request in an hour) | You've had several requests to add a device. Only continue if you're setting one up right now. |
+| | Buttons (equal, safe actions first) | Deny · This wasn't me · Add device (enabled when 6 digits are entered; confirms with Face ID) |
+| | Line under the buttons | Deny says no. This wasn't me also reports it. |
+| S-PAIR-06 | Trusted device, results | Added: The new device was added. Your other devices were told. · Denied: Nothing was added. · Reported: Nothing was added. Your devices were told. · Request changed (`pairing_mismatch`): This request doesn't match the new device, so nothing was added. Start again on the new device. · No Face ID key: Adding a device needs Face ID or Touch ID on this device. |
+| S-PAIR-07 | Push to D1 devices (no name, code or number) | Viadere · Someone wants to add a device to your Viadere account. Open Viadere to review it. |
+| | Alerts row | A device is asking to join your account. |
+| S-PAIR-08 | In-app notice after "This wasn't me" (every device) | Someone tried to add a device to your Viadere account and you said it wasn't you. Nothing was added. Review your devices in Viadere. |
+| S-PAIR-09 | Trusted device, under the code: the same code as a QR (`/p/{code}`, SECURITY §2.107) | Or scan this with the new device. It holds the same code. (VoiceOver: QR code holding the same code) |
+| | New device, pairing entry button | Scan the code |
+| | Scanner refusal in the pairing entry (anything but a pairing code) | That isn't a code for adding this device. Scan the code on your other device's screen. |
+| S-PAIR-10 | Pairing code on a device that already uses Viadere: app scanner / opened link | This code adds a new device to an account. Scan it with the device you're adding. Nothing was opened. |
+| | Pairing entry on an enrolled device (scan, link or Continue) | This device already uses Viadere, so it can't be added with a code. Nothing was opened. |
+| WEB-07 | `/p/{code}` opened in a browser (nothing looked up; the code is not shown) | Title: Open this in the Viadere app · On the new device, open Viadere, choose I already use Viadere and scan the code again, or type it. Nothing was added here. · Only scan a code shown on your own device. |
+| S-REC-01 | Recovery downgrade (spec §7) | Recovering with a code gives this device less access. |
+| | Detail | After a 72-hour wait, your other devices are signed out and this device takes over. It can message and deny requests, but it can't approve payments or other high-risk requests until each business sets it up again. Shared household access ends. Another trusted device of yours can cancel during the wait. |
+| | Detail, no other trusted device | You don't have another trusted device, so nobody can cancel this during the wait. |
+| | Buttons | Cancel · Continue |
+| S-REC-02 | Pending recovery seen in the key-log head | Someone used a recovery code to start recovering your account. It finishes on {date and time} unless you cancel. Not you? Cancel. Cancelling also turns off your remaining recovery codes, so make new ones afterwards. |
+| S-REC-03 | Trade-off statement (Settings → Recovery) | Keep your recovery codes somewhere safe and private. Anyone with your recovery ID and one code can start a recovery. If you lose every device and every code, nobody at Viadere can restore your account. That's what keeps others from taking it. |
+| S-REC-04 | After recovery with old codes (ADR-0032 §3.3; revision 3 wording, no self-service path, S2-A2-7) | Your account was recovered with older recovery codes, so signing in to websites with Viadere is off for this account. Messaging and approvals still work. |
+| | Detail | To turn it back on, recover again with a recovery code you made in Viadere before this recovery. If you don't have one, contact Viadere support. |
+| | Action | Contact support (no "Make new recovery codes" action on this screen) |
+| S-REC-05 | Prompt to make new codes (ADR-0032 §3.5). **Shown only in builds with sealed recovery (ADR-0034) and only after the server enables it; never before (condition C-4)** | Make new recovery codes. They replace your current codes and also protect sign-ins with Viadere. |
+| S-REC-06 | Confirm a new code set (authority-built display: set id, count; ADR-0033 §1) | Make {count} new recovery codes? Your current recovery codes stop working. Confirm with Face ID. |
+| | Buttons (equal, safe action first) | Cancel · Make codes |
+| | After | Write these codes down or store them somewhere safe and private. They are shown once. |
+| | Not allowed (key not yet trusted, or not a Face ID/Touch ID key) | You can make new recovery codes on a device that has been on your account for at least a day and uses Face ID or Touch ID. |
+| S-SEC-01 | Head unavailable for over 1 hour while online (ADR-0032 §3.4) | We couldn't check your account's security. If you didn't start a recovery or add a device, keep Viadere open on a network you trust and try again. |
+| S-SEC-02 | Enrollment not yet confirmed (ADR-0032 §1.4) | Finishing security setup… |
+| S-SEC-03 | *Retired in revision 3*: accounts are no longer created during an authority outage (ADR-0032 §1.5, S2-A2-8 option (a)) | — |
+| S-SEC-04 | Sign-up while the authority is unavailable (ADR-0032 §1.5) | We couldn't finish setting up your account. We'll keep trying. You can keep this screen open or come back later. |
+| S-SEC-05 | Imported account with other devices (ADR-0032 §1.4) | Devices on your account: {device name}, added {date}. Don't recognize one? Remove it. |
+| S-PH-01 | Phone linking intro | Link your number to your Viadere account on this phone by sending one text from it. We never send you codes by text. |
+| | Button | Write text |
+| S-PH-02 | Compose prefill (SMS body) | Link my number to my Viadere app {nonce} |
+| S-PH-03 | Waiting (until expiry) | Waiting for your text from {masked number}… |
+| S-PH-04 | Not received (at expiry) | We didn't receive your text from {masked number}. Make sure you send it from that phone line. |
+| S-PH-05 | Linked (cool-down) | Number linked. Businesses can reach you by text there from {date}. Approvals never happen by text. |
+| S-PH-06 | No compose sheet (iPad, no SIM) | Send this text from the phone with that number: "{prefill}" to {sendTo}. |
+| | Button | Copy text |
+| S-PH-07 | In-app notice to the current owner of a number (ADR-0027 §1.3) | Someone asked to link {masked number} to another Viadere account. If that number is still yours, keep it. |
+| | Buttons | Keep my number · Let it go |
+| S-PH-08 | Number paused by UNLINK (in-app notice; ADR-0027 §1.5 rev 5, R-8/R-9). Leads with the safe step; never invites removal, which frees the number | Someone texted UNLINK from your phone number, so Viadere paused it. If this wasn't you, link it again in Viadere with a text from that phone. If you remove it instead, the number is free for another account to link. |
+| SMS-01 | Gateway "get Viadere" (on-ramp) | Get the Viadere app to connect with businesses: https://{domain}/get |
+| SMS-02 | MT notice after a valid MO | Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages. |
+| SMS-03 | Reply to UNLINK | Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app. |
+| SMS-04 | Secure request on a text-only number | Viadere: {Business} sent you something that needs the Viadere app. Open Viadere to respond. |
+| SMS-05 | Routing refused for an unlinked number (menu or direct address) | Viadere: To message {Business}, link this number in the Viadere app first. Get the app: https://{domain}/get |
+| SMS-06 | Menu items "Account help" and "Manage businesses in app" (replaces the hand-off link) | Viadere: Open the Viadere app for account help and settings. |
+| SMS-07 | Pointer when a request needs an answer (ADR-0027 §4; used where SMS-04 does not apply) | Viadere: Open the Viadere app to respond. |
+| SMS-08 | Unlinked menu, first item (was "Link your account") | Get the Viadere app |
+| SMS-09 | Business message with images in an SMS thread, no text (SECURITY §2.113: SMS and RCS never carry an image or a link to one) | Viadere: {Business} sent you an image. Open the Viadere app to see it. · plural: Viadere: {Business} sent you {count} images. Open the Viadere app to see them. |
+| SMS-10 | Business message with text **and** images in an SMS thread | {the business's text}, a blank line, then SMS-09 |
+| W-LINK-RETIRED | `/l/` and `/h/` page title and body (410) | Title "This link is no longer used"; body "Open Viadere to see your requests." |
+| W-GET | `/get` page | Static page: what Viadere is, the App Store button, "Viadere never sends you a code or a sign-in link by text." |
+
+The spec's §7 "SMS fallback" copy ("Use a text message instead? …") is **not used**: decisions 1 and 9 exclude SMS for authentication. No string in this file offers a text message as a sign-in method.
+
+### 5.1 Message images (SECURITY §2.113)
+
+| Id | Where | Copy |
+|---|---|---|
+| MSG-ATT-01 | Thread list preview of an image-only message | Image · {count} images |
+| MSG-ATT-02 | Composer photo button (accessibility label) | Add a photo |
+| MSG-ATT-03 | Composer thumbnail states (accessibility) | Image, adding · Image, ready to send |
+| MSG-ATT-04 | Composer thumbnail buttons | Remove image · Try again |
+| MSG-ATT-05 | Refusals before or after upload | That image is larger than 2 MB. · Send a photo or a PNG or JPEG image. · The file's type does not match its contents. Send a real PNG or JPEG. · That image is too large (at most 8192 pixels per side and 25 megapixels). · That image could not be read. · Animated images are not supported. · That image is too detailed to send. Try a smaller one. |
+| MSG-ATT-06 | More than four, upload failed, no attachments API | You can send up to 4 images in one message. · Couldn't add that image. Try again. · Images can't be sent from here. |
+| MSG-ATT-07 | Image in a bubble (accessibility label) · could not be shown | Image you sent / Image · Couldn't load this image. |
+| MSG-ATT-08 | Console: card, help, reply form, flash, alt text | "Add an image" · "Viadere removes location, camera and other hidden data from the image and sends it only to this customer in the Viadere app. Customers who reach you by text are told an image is waiting in the app." · "Images to send" / "Untick an image to leave it out. Images not sent within an hour are removed." · "Image added. It is sent with your next reply." · "Image from the customer" / "Image you sent" |
+
+## 6. Errors and outage
+
+| Id | Situation | Copy |
+|---|---|---|
+| E-01 | Service outage / authority unavailable (spec §7) | We couldn't complete verification right now. Try again. |
+| E-02 | Offline | You're offline. Connect to the internet to review this request. |
+| E-03 | Request no longer valid (cancelled or superseded) | This request is no longer active. |
+| E-04 | Delegate device | Only the account holder can respond to security requests. |
+| E-05 | App update needed (old phone-link build) | Update Viadere to link your number. |
+| E-06 | Notifications off (inbox banner) | Notifications are off. Security requests still appear here when you open Viadere. |
+| E-07 | Cold launch, protected data unavailable | Unlock your iPhone to continue. |
+| E-08 | Android, notifications delayed (Help item) | If requests arrive late, turn off battery optimization for Viadere. |
+
+## 7. watchOS (ADR-0022 §8)
+
+| Id | Element | Copy |
+|---|---|---|
+| W-01 | Approval item | {Business} sign-in request |
+| W-02 | Instruction (first line of the long look) | Approve on your iPhone. |
+| W-03 | Buttons | Deny · This wasn't me |
+| W-04 | Link item | {Business} sign-in link is ready. Open it on your iPhone. |
+| W-05 | Phone unreachable | Couldn't reach your iPhone. Open Viadere on your iPhone to deny. |
+
+## 8. Web surfaces
+
+| Id | Surface | Copy |
+|---|---|---|
+| WEB-01 | `@viadere/web` status UI: waiting | Check your phone. We sent a request to the Viadere app. |
+| WEB-02 | Number display (business page) | Enter this number in Viadere: {code} |
+| WEB-03 | Denied | The request was denied in the Viadere app. |
+| WEB-04 | Expired | The request expired. Try again. |
+| WEB-05 | No app / not deliverable / paused | We couldn't reach the Viadere app for this account. Choose another way to sign in. (Never hints at a pause: no enumeration.) |
+| WEB-06 | Wrong browser (link service same-device, initiating session missing) | Open this link on the device where you started signing in. |
+| OIDC-01 | Authorize page heading | Sign in to {Client} with Viadere |
+| OIDC-02 | Passkey button (first, primary) | Use your Viadere passkey |
+| OIDC-03 | App option | Use the Viadere app instead |
+| OIDC-04 | Code instruction (under the Viadere code) | Scan with the Viadere app. Only scan a code on this page. Don't scan one that someone sent or showed you. |
+| OIDC-04a | Link to the QR code · instruction under it · link back | Using your phone's camera instead? Show a QR code · Scan with your phone's camera. Only scan a code on this page. Don't scan one that someone sent or showed you. · Back to the Viadere code |
+| OIDC-04b | Scanner (app): hint · caution · accepted · refused | Point at a Viadere code or QR code · Only scan a code on a page you opened yourself. · Code read · That code isn't from Viadere. Nothing was opened. / This code is no longer used. Nothing was opened. / This code asks the app to act without showing you first. Viadere doesn't accept those. / That code can't be read as a Viadere code. Nothing was opened. |
+| OIDC-05 | Consent | {Client} wants to confirm it's you. It gets an ID that only {Client} can use. It doesn't get your name, email or phone number, and other apps can't match it. You'll return to {redirect host}. |
+| OIDC-06 | Consent buttons | Cancel · Continue |
+| OIDC-07 | Error (bad client or redirect) | This sign-in request isn't valid. Return to the app you came from. If you got here from a message, close this page. |
+| OIDC-08 | Phone screen after QR or `login_hint` push | Title "Sign in to {Client}?"; row "Website {redirect host}"; number field as S-MFA-01; subtitle "Only approve if you opened this page yourself."; buttons Deny · Approve; footer This wasn't me |
+| OIDC-09 | Settings list | Apps you've signed in to with Viadere · {Client}, last used {date} |
+| OIDC-10 | Revoke action | Stop {Client} recognizing me |
+| OIDC-11 | Authorize page over the challenge limit (ADR-0024 §4) | Too many sign-in attempts from here. Wait a minute and try again. |
+| OIDC-12 | Phone screen (OIDC-08) opened by a verified Viadere code (CKey Safe Action, SECURITY.md §2.104), shown above the question | Rows "Requested by" {issuer} (verified code) · "Device" {device} · "Location" {location} (only when the site gives one) · "Requested" {time}; warning "Only continue if this is the device you are using right now. Someone may be showing you a code meant for their own session." |
+| OIDC-13 | Scanner refusal of a code that claims to be a Viadere sign-in (one sentence plus one reason; never repeats the code) | This code claims to be a Viadere sign-in but could not be verified. Nothing was opened. + one of: The code is damaged or incomplete. · It is meant for another app. · It asks for something Viadere doesn't accept from a code. · It isn't signed with a key this app trusts. · Its signature doesn't match. · It has expired. Refresh the sign-in page and scan again. · It was already scanned on this phone. Start the sign-in again on the website. · Viadere couldn't confirm who is asking. Check your connection and start the sign-in again. · That sign-in is no longer waiting. · Open and unlock Viadere, then scan again. |
+
+## 9. Business-facing integration guidance (developer docs, not customer copy)
+
+- Show the number from `match_code` in large type next to "Enter this number in Viadere" (WEB-02).
+- Never tell the customer "Approve the request you received" without the number; never pre-fill or auto-submit; never read the number to a customer by phone or text.
+- On cross-device magic links, refuse or pair (ADR-0021 §6) and show WEB-06.
+- Throttle unauthenticated sign-in triggers per client IP and per account (R-20).
+- `variables` must not contain names, emails or phone numbers.
+
+## 10. Localization rules (S1-A9-12)
+
+- Strings live in a String Catalog with plural variations ("{n} requests", "2 earlier requests were replaced"); no sentence is assembled in code; ids in this file are stable keys.
+- Every variable (`{Business}`, `{host}`, `{Client}`, `{payee}`, `{reference}`) is wrapped in Unicode bidi isolates (FSI … PDI) so names and hosts render correctly in RTL locales.
+- Times, dates, money and masked phone numbers use locale formatters; nothing is formatted by hand.
+- Each English source string ships with a `comment` describing every variable and the screen.
+- Target reading level: grade 8 or lower.
+- First additional locale: Spanish for the US launch (owner question OQ-6; "US-only" residency does not mean English-only).
+
+## 11. Deliberate deviations from spec Part II default copy
+
+| Id | Part II default | This file | Reason |
+|---|---|---|---|
+| S-MFA-06 | "Sign-in request denied. Your account has not been approved for this attempt." | "Request denied. We told {Business}. If that was a mistake, start again on {Business}." | A9 (S1-A9-6): the default reads as if the person's account was rejected and gives no next step. Needs A0 acknowledgement at the gate |
+| N-03 | "Approve sign-in to {Business}? Only approve if you started this." | "Sign-in request from {Business}. Only approve if you started this." | The notification is mirrored to the watch, where Approve does not exist (A6/A7 finding 7c) |

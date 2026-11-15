@@ -1,0 +1,212 @@
+import Fluent
+import Foundation
+import ViadereCore
+
+/// Tells an account that something sensitive happened (a device or phone was added, an App Clip session started): an **in-app notice**
+/// that the app shows on its next open (`GET /v1/security-notices`) plus a push to the account's other devices. The in-app notice
+/// matters for the account whose only other device has no push token, or none at all: nobody is "elsewhere" to tell otherwise.
+struct SecurityNotices {
+    let db: any Database
+    let ctx: ServerContext
+
+    enum Notice {
+        case newDevice, newPhone, appClip, deviceReplaced, devicePendingReplacement, replacementCancelled
+        case recoveryStarted, recoveryCancelled, recoveryAttemptsLocked, recoveryCompleted, delegationEnded
+        case vaultDeviceAdded, vaultDeviceRemoved, vaultDeleted
+        case vaultRecoveryRequested, vaultRecoveryCancelled, vaultRecoveryReleased, vaultRecoveryFetched, vaultRestored
+        case approvalKeyEnrolled, approvalKeyRevoked, approvalsFrozen, approvalsUnfrozen, approvalRequestsPaused, approvalKeyUnconfirmed
+        case recoveryCredentialAdded
+        case businessLinked, businessLinkUnconfirmed
+        case phoneTransferRequested, phoneUnlinked, phoneTransferred
+        case devicePairingReported
+
+        var kind: SecurityNoticeTopic {
+            switch self {
+            case .newDevice: .newDevice
+            case .newPhone: .newPhone
+            case .phoneTransferRequested: .phoneTransferRequested
+            case .phoneUnlinked: .phoneUnlinked
+            case .phoneTransferred: .phoneTransferred
+            case .appClip: .appClip
+            case .deviceReplaced, .replacementCancelled: .deviceReplaced
+            case .devicePendingReplacement: .devicePendingReplacement
+            case .recoveryStarted: .recoveryStarted
+            case .recoveryCancelled: .recoveryCancelled
+            case .recoveryAttemptsLocked: .recoveryAttemptsLocked
+            case .recoveryCompleted: .recoveryCompleted
+            case .delegationEnded: .delegationEnded
+            case .vaultDeviceAdded: .vaultDeviceAdded
+            case .vaultDeviceRemoved: .vaultDeviceRemoved
+            case .vaultDeleted: .vaultDeleted
+            case .vaultRecoveryRequested: .vaultRecoveryRequested
+            case .vaultRecoveryCancelled: .vaultRecoveryCancelled
+            case .vaultRecoveryReleased: .vaultRecoveryReleased
+            case .vaultRecoveryFetched: .vaultRecoveryFetched
+            case .vaultRestored: .vaultRestored
+            case .approvalKeyEnrolled: .approvalKeyEnrolled
+            case .approvalKeyRevoked: .approvalKeyRevoked
+            case .approvalsFrozen: .approvalsFrozen
+            case .approvalsUnfrozen: .approvalsUnfrozen
+            case .approvalRequestsPaused: .approvalRequestsPaused
+            case .approvalKeyUnconfirmed: .approvalKeyUnconfirmed
+            case .recoveryCredentialAdded: .recoveryCredentialAdded
+            case .businessLinked: .businessLinked
+            case .businessLinkUnconfirmed: .businessLinkUnconfirmed
+            case .devicePairingReported: .devicePairingReported
+            }
+        }
+
+        /// The "Not you? Cancel" button, acting on the notice's `subjectId`.
+        var action: SecurityNoticeAction? {
+            switch self {
+            case .devicePendingReplacement: .cancelDeviceReplacement
+            case .recoveryStarted: .cancelRecovery
+            case .vaultRecoveryRequested, .vaultRecoveryReleased: .cancelVaultRecovery
+            case .phoneTransferRequested: .keepPhoneNumber
+            default: nil
+            }
+        }
+
+        var body: String {
+            switch self {
+            case .newDevice: "A new device was added to your Viadere account. If this wasn't you, open Viadere and remove it."
+            case .newPhone: "A phone number was linked to your Viadere account. If this wasn't you, open Viadere and remove it."
+            case .phoneTransferRequested:
+                "Someone asked to link a phone number on your Viadere account to another Viadere account. If that number is still yours, keep it."
+            case .phoneUnlinked:
+                "Someone texted UNLINK from your phone number, so Viadere paused it. If this wasn't you, link it again in Viadere with a text from that phone. If you remove it instead, the number is free for another account to link."
+            case .phoneTransferred:
+                "Your phone number was moved to another Viadere account because you did not keep it. If that number is still yours, text UNLINK from it and link it again."
+            case .appClip: "A Viadere App Clip session was started for your account. If this wasn't you, open Viadere and remove it."
+            case .deviceReplaced: "A device on your Viadere account was set up again. If this wasn't you, open Viadere and review your devices."
+            case .devicePendingReplacement:
+                "A new device is about to replace one of your Viadere devices. Not you? Open Viadere and cancel it. Until then your current device keeps working."
+            case .replacementCancelled: "A pending device replacement on your Viadere account was cancelled and the new device was removed."
+            case .recoveryStarted:
+                "Account recovery was started for your Viadere account. Not you? Open Viadere and cancel it now. It only takes effect after 72 hours."
+            case .recoveryCancelled:
+                "An account recovery was cancelled. Its recovery codes no longer work: create new ones in Viadere settings."
+            case .recoveryAttemptsLocked:
+                "Someone entered wrong recovery codes for your Viadere account, so recovery is locked for a while. If this wasn't you, make new recovery codes in settings."
+            case .recoveryCompleted:
+                "Your Viadere account was recovered. Household access was ended and your linked phone numbers need to be confirmed again from a trusted device."
+            case .vaultDeviceAdded:
+                "A device was added to your synced Viadere credential vault. If this wasn't you, open Viadere, remove it and change the passwords and passkeys you keep there."
+            case .vaultDeviceRemoved: "A device was removed from your synced Viadere credential vault."
+            case .vaultDeleted: "Your synced Viadere credential vault was deleted from Viadere's servers. Your devices keep their own copies."
+            case .vaultRecoveryRequested:
+                "Someone asked to release the recovery key envelope of your synced Viadere credential vault. Not you? Open Viadere and cancel it now. Nothing is released for 72 hours."
+            case .vaultRecoveryCancelled: "A request to release your vault's recovery key envelope was cancelled."
+            case .vaultRecoveryReleased:
+                "The 72-hour wait ended: your vault's recovery key envelope is now available to the device that asked for it for 24 hours. Not you? Open Viadere and cancel it."
+            case .vaultRecoveryFetched:
+                "The recovery key envelope of your synced Viadere credential vault was downloaded. Without your recovery key it opens nothing. If this wasn't you, open Viadere and replace your recovery key."
+            case .vaultRestored:
+                "Your synced Viadere credential vault was restored on a new device with the recovery key, and the vault key was replaced. If this wasn't you, open Viadere and change the passwords and passkeys you keep there."
+            case .approvalKeyEnrolled:
+                "A business can now ask you to approve requests with a new approval key. If you didn't set this up, open Viadere, remove the key and freeze approvals."
+            case .approvalKeyRevoked: "An approval key was removed, so that business can no longer ask you to approve requests with it."
+            case .approvalsFrozen: "Approvals were frozen. No business can ask you to approve anything until you unfreeze them in Viadere."
+            case .approvalsUnfrozen: "Approvals were unfrozen. If this wasn't you, open Viadere and freeze them again."
+            case .approvalRequestsPaused:
+                "A business sent you several approval requests, so Viadere paused further requests from it for a while. If you don't recognize it, report it in Viadere."
+            case .approvalKeyUnconfirmed:
+                "An approval key you set up was never confirmed by the business, so Viadere removed it. If you didn't just set up approvals with a business, open Viadere and freeze approvals."
+            case .recoveryCredentialAdded:
+                "A passkey was added to your Viadere account. If this wasn't you, open Viadere, review your devices and make new recovery codes."
+            case .businessLinked:
+                "A business linked your Viadere account to your account with them. If this wasn't you, open Viadere, disconnect the business and contact it."
+            case .businessLinkUnconfirmed:
+                "A business never confirmed the link you started, so Viadere ended it. If you didn't just link a business, open Viadere and review your businesses."
+            case .devicePairingReported:
+                "Someone tried to add a device to your Viadere account and you said it wasn't you. Nothing was added. Review your devices in Viadere."
+            case .delegationEnded:
+                "Household access between your Viadere account and another account was ended because that account was recovered. Ask them to invite you again if you still want to share."
+            }
+        }
+    }
+
+    /// Stores the in-app notice (throws when it cannot be stored: callers that must not lose the notice run this inside their transaction).
+    func store(of consumer: UUID, except: UUID?, notice: Notice, subjectId: String? = nil) async throws {
+        try await SecurityNoticeRecord(consumerId: consumer, kind: notice.kind.rawValue, message: notice.body, subjectId: subjectId,
+                                       originDeviceId: except, now: ctx.now, action: notice.action?.rawValue).create(on: db)
+    }
+
+    /// Stores the in-app notice and pushes to every active app device of `consumer` except `except` (the device that just did it).
+    func notifyOtherDevices(of consumer: UUID, except: UUID?, notice: Notice, subjectId: String? = nil) async {
+        do {
+            try await store(of: consumer, except: except, notice: notice, subjectId: subjectId)
+        } catch {
+            ctx.logger.warning("security notice could not be stored", metadata: ["kind": "\(notice.kind.rawValue)"])
+        }
+        await push(to: consumer, except: except, notice: notice)
+    }
+
+    /// The push half (best effort): the stored notice, the audit log and the device list remain the source of truth.
+    func push(to consumer: UUID, except: UUID?, notice: Notice) async {
+        let now = ctx.now
+        do {
+            let devices = try await DeviceRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$revokedAt == nil).all()
+                .filter { $0.id != except && $0.kind == .app && !$0.isExpired(at: now) }
+            let tokens = try await APNsTokenRecord.query(on: db).filter(\.$deviceId ~~ devices.compactMap(\.id)).filter(\.$invalidatedAt == nil).all()
+            for token in tokens {
+                var message = PushPayloadBuilder.securityNotice(body: notice.body, token: token.record, topic: ctx.config.appBundleID)
+                // A notice with a "Not you? Cancel" button uses its own category so the app can attach the action to the notification.
+                if notice.action != nil { message.category = "viadere.security.cancel" }
+                if await ctx.apns.send(message) == .tokenInvalid {
+                    try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: now).update()
+                }
+            }
+            await PushFanout(db: db, ctx: ctx).deliverToOtherProviders(deviceIds: devices.compactMap(\.id)) { _, _ in
+                var message = PushPayloadBuilder.securityNotice(body: notice.body, token: .providerNeutral, topic: ctx.config.appBundleID)
+                if notice.action != nil { message.category = "viadere.security.cancel" }
+                return message
+            }
+        } catch {
+            // Best effort.
+        }
+    }
+
+    /// How far back the app's list reaches. A notice older than this can no longer be shown (R-4).
+    static let listWindow: TimeInterval = 30 * 86_400
+
+    /// The account's undismissed notices of the last 30 days, newest first, without the ones the caller's own device caused.
+    /// **Listing does not record anything.** The app shows only one notice at a time (and loads before the lock screen is passed), so a
+    /// listed notice is not a seen one: `seen` records that the app actually displayed it (R-1).
+    func pending(for consumer: UUID, viewedBy device: UUID?) async throws -> [SecurityNotice] {
+        let cutoff = ctx.now.addingTimeInterval(-Self.listWindow)
+        let rows = try await SecurityNoticeRecord.query(on: db).filter(\.$consumerId == consumer).filter(\.$dismissedAt == nil)
+            .filter(\.$createdAt > cutoff).sort(\.$createdAt, .descending).limit(50).all()
+            .filter { $0.originDeviceId == nil || $0.originDeviceId != device }
+        return rows
+            .compactMap { row in
+                row.id.map { SecurityNotice(id: $0, rawKind: row.kind, message: row.message,
+                                            createdAt: row.createdAt, subjectId: row.subjectId,
+                                            action: row.action.flatMap(SecurityNoticeAction.init(rawValue:))) }
+            }
+    }
+
+    /// The app displayed this notice (with its action, when it has one). **It is not harmless:** a pending phone transfer completes only after the
+    /// holder's app showed its notice (ADR-0027 section 1.3), so this report can let a number move. It therefore counts only from a device that may
+    /// manage the account (the rule that also governs dismissing: a trusted device, or the only kind of device a recovered account has once its own
+    /// cool-down ended). A live app device still in cool-down, for example one enrolled by someone who took the account over through recovery, gets the
+    /// same answer but nothing is recorded (R-9). Keep stays open to every live app device, because it only preserves the status quo.
+    func seen(_ id: UUID, principal: ConsumerPrincipal) async throws {
+        let device = try await DeviceTrust.requireActiveApp(principal, db: db, now: ctx.now)
+        guard let row = try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$consumerId == principal.consumerId.uuid).first()
+        else { throw APIError.notFound }
+        guard try await DeviceTrust.mayManageAccount(device, db: db, now: ctx.now) else { return }
+        // Conditional: the first sighting wins and later ones change nothing.
+        try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$fetchedAt == nil).set(\.$fetchedAt, to: ctx.now).update()
+        _ = row
+    }
+
+    func dismiss(_ id: UUID, principal: ConsumerPrincipal) async throws {
+        _ = try await DeviceTrust.require(principal, db: db, now: ctx.now)
+        guard let row = try await SecurityNoticeRecord.query(on: db).filter(\.$id == id).filter(\.$consumerId == principal.consumerId.uuid).first()
+        else { throw APIError.notFound }
+        if row.fetchedAt == nil { row.fetchedAt = ctx.now }
+        if row.dismissedAt == nil { row.dismissedAt = ctx.now }
+        try await row.update(on: db)
+    }
+}

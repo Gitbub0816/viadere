@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/schemas/loop-definition-v1.schema.json",
+  "title": "Viadere Loop definition, schema version 1",
+  "description": "Documentation of the closed Loop definition contract (SECURITY.md 2.92, plan section 4.3). Normative behavior is ViadereCore LoopDefinition.parse plus LoopPolicyValidator; this schema covers structure only (text, content, graph, registry and publisher rules are in the validator). Conformance vectors: docs/protocol/vectors/loop-definition-v1.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "key", "title", "entry_points", "appearance", "steps", "limits"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$" },
+    "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+    "description": { "$ref": "#/$defs/text", "maxLength": 160 },
+    "entry_points": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "enum": ["business_page", "message", "alert", "widget"] }
+    },
+    "appearance": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "const": "standard" } } },
+        { "type": "object", "additionalProperties": false, "required": ["mode", "kit"],
+          "properties": { "mode": { "const": "brand_kit" }, "kit": { "$ref": "#/$defs/identifier" } } }
+      ]
+    },
+    "steps": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/step" } },
+    "limits": {
+      "type": "object", "additionalProperties": false, "required": ["expires_in_seconds"],
+      "properties": { "expires_in_seconds": { "type": "integer", "minimum": 300, "maximum": 2592000 } }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$" },
+    "text": { "type": "string", "minLength": 1, "description": "Business text: SECURITY.md 2.19 rules, no mention of Viadere, LoopContentRules (no health terms, sensitive-data requests, attribution claims or links)." },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": { "enum": ["form", "summary", "result", "handoff"] },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "body": { "$ref": "#/$defs/text", "maxLength": 300 },
+        "fields": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "$ref": "#/$defs/field" }, "description": "form steps only" },
+        "actions": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "$ref": "#/$defs/action" }, "description": "form and summary steps only" },
+        "show_outcome": { "type": "boolean", "description": "result steps only" },
+        "handoff": { "enum": ["shop"], "description": "handoff steps only; reserved until the shop module ships (FX-5)" }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": {
+          "enum": ["single_choice", "multi_choice", "short_text", "date", "time_slot", "yes_no", "acknowledgement"],
+          "description": "Closed allowlist. There is no type for secrets, payment or bank data, government ids, health information, files or long text."
+        },
+        "label": { "$ref": "#/$defs/text", "maxLength": 40 },
+        "required": { "type": "boolean" },
+        "options": {
+          "type": "array", "minItems": 2, "maxItems": 10,
+          "items": { "type": "object", "additionalProperties": false, "required": ["id", "label"],
+                     "properties": { "id": { "$ref": "#/$defs/identifier" }, "label": { "$ref": "#/$defs/text", "maxLength": 40 } } },
+          "description": "single_choice, multi_choice and time_slot only"
+        },
+        "max_length": { "type": "integer", "minimum": 1, "maximum": 80, "description": "short_text only" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "action", "label", "next"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "action": { "type": "string", "description": "A registered action type (LoopActionRegistry v1). Reserved names (payment*, order*, shop.*, verify_*, identity.*, age.*, health*, medical*, checkout, pay, refund, charge) are always refused." },
+        "label": { "type": "string", "description": "A label key from the action's allowed set (LoopStringCatalog.actionLabels)." },
+        "custom_label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "low-risk actions only" },
+        "next": { "$ref": "#/$defs/identifier" },
+        "routing": {
+          "type": "object", "additionalProperties": false, "required": ["mode"],
+          "properties": { "mode": { "enum": ["hosted", "connected"] }, "queue": { "$ref": "#/$defs/identifier" } },
+          "description": "Required exactly for actions that deliver to the business; connected from Phase 4."
+        },
+        "params": {
+          "type": "object",
+          "description": "Only the action's registered parameters.",
+          "properties": {
+            "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"],
+                        "properties": { "value": { "type": "string", "pattern": "^[0-9]{1,15}(\\.[0-9]+)?$" }, "currency": { "type": "string", "pattern": "^[A-Z]{3}$" } } },
+            "terms": { "$ref": "#/$defs/text", "maxLength": 300 },
+            "reference": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$" }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

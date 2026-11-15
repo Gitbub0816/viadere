@@ -1,0 +1,87 @@
+/* Verify with Viadere v1 — https://viadere.com — styles for <viadere-verify> (docs/VERIFY-BUTTON.md). No external resources.
+   Without JavaScript the same classes style a plain link to your session:
+   <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.com/v/ABCDEFGH" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
+   (add data-vdv-theme="dark" to that link on a dark page; inside <viadere-verify> the theme attribute and the visitor's preference apply).
+   Brand palette only (Design/README.md): charcoal, graphite, silver, ivory, champagne accent. */
+viadere-verify{display:inline-block;vertical-align:middle;line-height:normal}
+.vdv-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:.55em;margin:0;min-height:44px;min-width:44px;padding:0 1.25em;border:1px solid #1F1E1C;border-radius:999px;background:#1F1E1C;color:#F5F2EC;font:600 15px/1.2 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;letter-spacing:-.005em;text-decoration:none;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
+.vdv-btn:hover{background:#4A4844;border-color:#4A4844;color:#F5F2EC;text-decoration:none}
+.vdv-btn:focus-visible{outline:2px solid #8C7550;outline-offset:2px}
+.vdv-btn .vdv-mark{flex:none;width:2em;height:auto}
+.vdv-btn .vdv-label{display:inline-block}
+.vdv-sm{min-height:36px;padding:0 1em;font-size:13px}
+.vdv-sm.vdv-icon{min-width:36px}
+.vdv-lg{min-height:52px;padding:0 1.5em;font-size:17px}
+.vdv-lg.vdv-icon{min-width:52px}
+.vdv-icon{padding:0}
+.vdv-icon.vdv-md{width:44px}
+.vdv-icon.vdv-sm{width:36px}
+.vdv-icon.vdv-lg{width:52px}
+.vdv-icon .vdv-mark{width:1.75em}
+/* Ivory: for dark or photographic backgrounds. Outline: for busy light layouts. */
+.vdv-ivory{background:#F5F2EC;border-color:#C9C4BB;color:#1F1E1C}
+.vdv-ivory:hover{background:#F3F0EA;border-color:#4A4844;color:#1F1E1C}
+.vdv-outline{background:transparent;border-color:#1F1E1C;color:#1F1E1C}
+.vdv-outline:hover{background:#F3F0EA;border-color:#1F1E1C;color:#1F1E1C}
+/* Dark appearance: the filled button turns ivory, the outline turns ivory on transparent. */
+[data-vdv-theme=dark] .vdv-filled,[data-vdv-theme=dark].vdv-filled{background:#F3F0EA;border-color:#F3F0EA;color:#1F1E1C}
+[data-vdv-theme=dark] .vdv-filled:hover,[data-vdv-theme=dark].vdv-filled:hover{background:#C9C4BB;border-color:#C9C4BB;color:#1F1E1C}
+[data-vdv-theme=dark] .vdv-outline,[data-vdv-theme=dark].vdv-outline{border-color:#F3F0EA;color:#F3F0EA}
+[data-vdv-theme=dark] .vdv-outline:hover,[data-vdv-theme=dark].vdv-outline:hover{background:#262523;color:#F3F0EA}
+[data-vdv-theme=dark] .vdv-btn:focus-visible{outline-color:#CDB993}
+@media (prefers-color-scheme:dark){
+  viadere-verify:not([data-vdv-theme=light]) .vdv-filled{background:#F3F0EA;border-color:#F3F0EA;color:#1F1E1C}
+  viadere-verify:not([data-vdv-theme=light]) .vdv-filled:hover{background:#C9C4BB;border-color:#C9C4BB;color:#1F1E1C}
+  viadere-verify:not([data-vdv-theme=light]) .vdv-outline{border-color:#F3F0EA;color:#F3F0EA}
+  viadere-verify:not([data-vdv-theme=light]) .vdv-outline:hover{background:#262523;color:#F3F0EA}
+  viadere-verify:not([data-vdv-theme=light]) .vdv-btn:focus-visible{outline-color:#CDB993}
+}
+
+/* The QR-first panel (a native modal <dialog>: the rest of the page is inert while it is open). */
+.vdv-panel{box-sizing:border-box;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;margin:auto;padding:20px 22px 22px;border:1px solid #C9C4BB;border-radius:20px;background:#FCFBF8;color:#1F1E1C;font:400 15px/1.45 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;text-align:left;box-shadow:0 24px 64px rgba(31,30,28,.28)}
+.vdv-panel::backdrop{background:rgba(18,18,17,.55)}
+.vdv-panel *{box-sizing:border-box}
+.vdv-head{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.vdv-head .vdv-mark{flex:none;width:34px;height:auto;color:#1F1E1C}
+.vdv-title{flex:1;margin:0;font:600 17px/1.25 -apple-system,"SF Pro Display","Segoe UI",system-ui,sans-serif;letter-spacing:-.01em;color:inherit}
+.vdv-close{flex:none;width:44px;height:44px;margin:-8px -10px -8px 0;border:0;border-radius:999px;background:transparent;color:inherit;font:400 26px/1 system-ui,sans-serif;cursor:pointer}
+.vdv-close:hover{background:#F3F0EA}
+.vdv-panel button:focus-visible,.vdv-panel a:focus-visible{outline:2px solid #8C7550;outline-offset:2px}
+.vdv-view[hidden],.vdv-code[hidden]{display:none}
+.vdv-lead{margin:0 0 12px;font-weight:600}
+.vdv-qr-frame{width:100%;max-width:248px;margin:0 auto 14px;padding:8px;border-radius:14px;background:#FFFFFF;border:1px solid #C9C4BB}
+.vdv-qr{display:block;width:100%;height:auto}
+.vdv-explain{margin:0 0 8px;color:#6B675F}
+.vdv-fine{margin:0 0 8px;font-size:13px;color:#6B675F}
+.vdv-secondary{display:block;width:100%;min-height:44px;margin:14px 0 0;padding:0 16px;border:1px solid #1F1E1C;border-radius:999px;background:transparent;color:#1F1E1C;font:600 15px/1.2 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;cursor:pointer}
+.vdv-secondary:hover{background:#F3F0EA}
+.vdv-options{list-style:none;margin:0;padding:0}
+.vdv-options li{margin:0 0 8px;padding:0}
+.vdv-option{display:block;width:100%;min-height:44px;margin:0;padding:12px 14px;border:1px solid #C9C4BB;border-radius:14px;background:#FFFFFF;color:#1F1E1C;font:inherit;text-align:left;text-decoration:none;cursor:pointer}
+.vdv-option:hover{border-color:#4A4844;text-decoration:none;color:#1F1E1C}
+.vdv-option-title{display:block;font-weight:600}
+.vdv-option-detail{display:block;font-size:13px;color:#6B675F}
+.vdv-code{margin:6px 0 0;padding:12px 14px;border-radius:14px;background:#F3F0EA}
+.vdv-code-value{display:block;margin-top:4px;font:600 22px/1.2 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.12em}
+.vdv-status{margin:10px 0 0;font-size:13px;color:#6B675F}
+.vdv-status:empty{display:none}
+.vdv-panel[data-vdv-theme=dark]{background:#1C1B1A;border-color:#4A4844;color:#F3F0EA}
+.vdv-panel[data-vdv-theme=dark] .vdv-head .vdv-mark{color:#F3F0EA}
+.vdv-panel[data-vdv-theme=dark] .vdv-explain,.vdv-panel[data-vdv-theme=dark] .vdv-fine,.vdv-panel[data-vdv-theme=dark] .vdv-option-detail,.vdv-panel[data-vdv-theme=dark] .vdv-status{color:#A29D94}
+.vdv-panel[data-vdv-theme=dark] .vdv-close:hover,.vdv-panel[data-vdv-theme=dark] .vdv-secondary:hover{background:#262523}
+.vdv-panel[data-vdv-theme=dark] .vdv-secondary{border-color:#F3F0EA;color:#F3F0EA}
+.vdv-panel[data-vdv-theme=dark] .vdv-option{background:#262523;border-color:#4A4844;color:#F3F0EA}
+.vdv-panel[data-vdv-theme=dark] .vdv-code{background:#262523}
+.vdv-panel[data-vdv-theme=dark] button:focus-visible,.vdv-panel[data-vdv-theme=dark] a:focus-visible{outline-color:#CDB993}
+@media (prefers-color-scheme:dark){
+  .vdv-panel[data-vdv-theme=auto]{background:#1C1B1A;border-color:#4A4844;color:#F3F0EA}
+  .vdv-panel[data-vdv-theme=auto] .vdv-head .vdv-mark{color:#F3F0EA}
+  .vdv-panel[data-vdv-theme=auto] .vdv-explain,.vdv-panel[data-vdv-theme=auto] .vdv-fine,.vdv-panel[data-vdv-theme=auto] .vdv-option-detail,.vdv-panel[data-vdv-theme=auto] .vdv-status{color:#A29D94}
+  .vdv-panel[data-vdv-theme=auto] .vdv-close:hover,.vdv-panel[data-vdv-theme=auto] .vdv-secondary:hover{background:#262523}
+  .vdv-panel[data-vdv-theme=auto] .vdv-secondary{border-color:#F3F0EA;color:#F3F0EA}
+  .vdv-panel[data-vdv-theme=auto] .vdv-option{background:#262523;border-color:#4A4844;color:#F3F0EA}
+  .vdv-panel[data-vdv-theme=auto] .vdv-code{background:#262523}
+  .vdv-panel[data-vdv-theme=auto] button:focus-visible,.vdv-panel[data-vdv-theme=auto] a:focus-visible{outline-color:#CDB993}
+}
+@media (prefers-reduced-motion:reduce){.vdv-btn{transition:none}}
+@media (forced-colors:active){.vdv-btn,.vdv-option,.vdv-secondary,.vdv-panel{border:1px solid ButtonText}.vdv-qr-frame{forced-color-adjust:none}}

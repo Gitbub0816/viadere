@@ -1,0 +1,1259 @@
+{
+  "cases" : [
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:f084ae89dbb873fe91f0fedd7cf2f679c2d66a546d8510a1afdfc7b5ed2f3567",
+      "expected_tree" : {
+        "compact_origin" : "By Juniper Salon",
+        "origin" : "business",
+        "root" : {
+          "children" : [
+            {
+              "accessibility_label" : "Built by Juniper Salon, a business on Viadere",
+              "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "business_name" : "Juniper Salon",
+              "kind" : "attribution_bar",
+              "protected" : true,
+              "role" : "primary",
+              "text" : "Built by Juniper Salon",
+              "verified" : true,
+              "verified_label" : "Verified business"
+            },
+            {
+              "kind" : "header",
+              "role" : "primary",
+              "text" : "Schedule your pickup"
+            },
+            {
+              "children" : [
+                {
+                  "control" : "list",
+                  "field_id" : "slot",
+                  "kind" : "choice",
+                  "label" : "Pickup time",
+                  "multiple" : false,
+                  "options" : [
+                    {
+                      "id" : "am",
+                      "label" : "Morning"
+                    },
+                    {
+                      "id" : "pm",
+                      "label" : "Afternoon"
+                    }
+                  ],
+                  "required" : true
+                }
+              ],
+              "id" : "s1",
+              "kind" : "field_group"
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "select_option",
+                  "id" : "confirm",
+                  "label" : "Continue",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : false
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : false
+            }
+          ],
+          "id" : "pickup-scheduling",
+          "kind" : "screen",
+          "title" : "Schedule your pickup"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.DjSO_zivc02sWuoV8WG6RNYIO04ULS5TOVxZjE-3JKsG592C-uJOTP7GB9CxdBVfmrkirjMujLsyjqOvdYgIwA",
+      "name" : "t1_default_style",
+      "phase" : {
+        "step" : "s1"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:c77315daddcfad3486af49505200d8c18ac53ac163bffc3a5c9c049f845e87b8",
+      "expected_tree" : {
+        "compact_origin" : "By Juniper Salon",
+        "origin" : "business",
+        "root" : {
+          "children" : [
+            {
+              "accessibility_label" : "Built by Juniper Salon, a business on Viadere",
+              "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "business_name" : "Juniper Salon",
+              "kind" : "attribution_bar",
+              "protected" : true,
+              "role" : "primary",
+              "text" : "Built by Juniper Salon",
+              "verified" : true,
+              "verified_label" : "Verified business"
+            },
+            {
+              "kind" : "header",
+              "role" : "primary",
+              "text" : "Schedule your pickup"
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "acknowledge",
+                  "id" : "submit",
+                  "label" : "Send request",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : false
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : false
+            }
+          ],
+          "id" : "pickup-scheduling",
+          "kind" : "screen",
+          "title" : "Schedule your pickup"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.MBUreXZP8KI1jMUd6hcyREkQix0Ufsd_xnNehHIxeFIM4oee9mwZOZbzc25aiBeMnHNtioelbS4Ae5UIIroQyQ",
+      "name" : "summary_step",
+      "phase" : {
+        "step" : "s2"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:c4d29af7cd438f4e9aed0aa8295619726dda024d548478e9631500a915bf9ce6",
+      "expected_tree" : {
+        "compact_origin" : "By Juniper Salon",
+        "origin" : "business",
+        "root" : {
+          "children" : [
+            {
+              "accessibility_label" : "Built by Juniper Salon, a business on Viadere",
+              "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "business_name" : "Juniper Salon",
+              "kind" : "attribution_bar",
+              "protected" : true,
+              "role" : "primary",
+              "text" : "Built by Juniper Salon",
+              "verified" : true,
+              "verified_label" : "Verified business"
+            },
+            {
+              "kind" : "header",
+              "role" : "primary",
+              "text" : "Schedule your pickup"
+            },
+            {
+              "kind" : "outcome_status",
+              "outcome" : "pending",
+              "protected" : true,
+              "text" : "Sent to Juniper Salon. Waiting for them to confirm."
+            }
+          ],
+          "id" : "pickup-scheduling",
+          "kind" : "screen",
+          "title" : "Schedule your pickup"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.VU9vTuzazLXosFgBfD8RYRXFDcm6fzfUWHH9qePcz50OtDKbnEY2HZIA7jFpbMnpOWLumLp6yzxzqzPiE-ECag",
+      "name" : "result_pending",
+      "phase" : {
+        "outcome" : "pending",
+        "step" : "done"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "brand" : {
+        "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+        "frame_id" : "viadere.frame.hairline.v1",
+        "kit_id" : "spring",
+        "tokens" : {
+          "accent" : "#B5683A",
+          "border" : "hairline",
+          "on_primary" : "auto",
+          "primary" : "#2F5D50",
+          "radius" : "large",
+          "secondary" : "#4A4A48",
+          "surface" : "#FFFDF7",
+          "type_scale" : "standard"
+        }
+      },
+      "definition" : {
+        "appearance" : {
+          "kit" : "spring",
+          "mode" : "brand_kit"
+        },
+        "entry_points" : [
+          "message",
+          "alert"
+        ],
+        "key" : "estimate-review",
+        "limits" : {
+          "expires_in_seconds" : 259200
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "review_estimate",
+                "id" : "ack",
+                "label" : "send_acknowledgement",
+                "next" : "done",
+                "params" : {
+                  "amount" : {
+                    "currency" : "USD",
+                    "value" : "285.28"
+                  },
+                  "reference" : "EST-1042",
+                  "terms" : "Valid for 14 days. Work starts after you approve in person."
+                },
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "estimates"
+                }
+              }
+            ],
+            "body" : "Parts and labor for the front brakes.",
+            "id" : "review",
+            "title" : "Brake repair estimate",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Your repair estimate"
+      },
+      "expected_canonical_sha256" : "sha256:7f05f3e1f292f67efad8543f486e8df7aced27d47311e7143f2ccf87dcc2691f",
+      "expected_tree" : {
+        "compact_origin" : "By Juniper Salon",
+        "origin" : "business",
+        "root" : {
+          "children" : [
+            {
+              "accessibility_label" : "Built by Juniper Salon, a business on Viadere",
+              "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "business_name" : "Juniper Salon",
+              "kind" : "attribution_bar",
+              "protected" : true,
+              "role" : "primary",
+              "text" : "Built by Juniper Salon",
+              "verified" : true,
+              "verified_label" : "Verified business"
+            },
+            {
+              "kind" : "header",
+              "role" : "primary",
+              "text" : "Brake repair estimate"
+            },
+            {
+              "kind" : "text",
+              "role" : "secondary",
+              "text" : "Parts and labor for the front brakes."
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "review_estimate",
+                  "id" : "ack",
+                  "label" : "Send acknowledgment",
+                  "requires_confirmation" : true,
+                  "role" : "primary",
+                  "system" : false
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : false
+            }
+          ],
+          "id" : "estimate-review",
+          "kind" : "screen",
+          "title" : "Your repair estimate"
+        },
+        "style" : {
+          "border" : "hairline",
+          "frame_id" : "viadere.frame.hairline.v1",
+          "kit_id" : "spring",
+          "palette" : {
+            "dark" : {
+              "accent" : "#B5683A",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#B5683A",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#2F5D50",
+              "secondary" : "#4A4A48",
+              "surface" : "#FFFDF7"
+            },
+            "overridden_dark" : [
+              "primary",
+              "secondary"
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "large",
+          "source" : "brand_kit",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjA1ZjJlNzgzOWYyYzA1M2U5ZTQ0ZDBmODRmMTFjM2ZlMDRkMDAyYmU5NzI2NjRiOTAwZDc3ZGMyYzIxODJiNDUiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.whMQt4i_VIdymPa4WqvTBHbi9P1ryhCWetjNg_t0k5ckuoClDs6Iaarj2RxC4mpr7v_2Mo-gDsvg64rMOwL9LA",
+      "name" : "t2_brand_kit",
+      "phase" : {
+        "step" : "review"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "brand" : {
+        "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+        "frame_id" : "viadere.frame.hairline.v1",
+        "kit_id" : "spring",
+        "tokens" : {
+          "accent" : "#B5683A",
+          "border" : "hairline",
+          "on_primary" : "auto",
+          "primary" : "#2F5D50",
+          "radius" : "large",
+          "secondary" : "#4A4A48",
+          "surface" : "#FFFDF7",
+          "type_scale" : "standard"
+        }
+      },
+      "definition" : {
+        "appearance" : {
+          "kit" : "spring",
+          "mode" : "brand_kit"
+        },
+        "entry_points" : [
+          "message",
+          "alert"
+        ],
+        "key" : "estimate-review",
+        "limits" : {
+          "expires_in_seconds" : 259200
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "review_estimate",
+                "id" : "ack",
+                "label" : "send_acknowledgement",
+                "next" : "done",
+                "params" : {
+                  "amount" : {
+                    "currency" : "USD",
+                    "value" : "285.28"
+                  },
+                  "reference" : "EST-1042",
+                  "terms" : "Valid for 14 days. Work starts after you approve in person."
+                },
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "estimates"
+                }
+              }
+            ],
+            "body" : "Parts and labor for the front brakes.",
+            "id" : "review",
+            "title" : "Brake repair estimate",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Your repair estimate"
+      },
+      "expected_canonical_sha256" : "sha256:1466e6542de96edcb5916d831bcfaafac5956b2cf06cc66da705a54e34031d4d",
+      "expected_tree" : {
+        "compact_origin" : "By Juniper Salon",
+        "origin" : "business",
+        "root" : {
+          "children" : [
+            {
+              "accessibility_label" : "Built by Juniper Salon, a business on Viadere",
+              "business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "business_name" : "Juniper Salon",
+              "kind" : "attribution_bar",
+              "protected" : true,
+              "role" : "primary",
+              "text" : "Built by Juniper Salon",
+              "verified" : true,
+              "verified_label" : "Verified business"
+            },
+            {
+              "accessibility_label" : "Estimate from Juniper Salon. Juniper Salon sent you an estimate of $285.28. Sending this tells Juniper Salon you've seen it. It doesn't approve or charge anything. Responsible business: Juniper Salon.",
+              "action_id" : "ack",
+              "amount" : "$285.28",
+              "effect" : "Sending this tells Juniper Salon you've seen it. It doesn't approve or charge anything.",
+              "kind" : "confirmation_panel",
+              "protected" : true,
+              "responsible_business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+              "responsible_business_name" : "Juniper Salon",
+              "statement" : "Juniper Salon sent you an estimate of $285.28.",
+              "title" : "Estimate from Juniper Salon"
+            },
+            {
+              "kind" : "text",
+              "role" : "secondary",
+              "text" : "Valid for 14 days. Work starts after you approve in person."
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "review_estimate",
+                  "id" : "ack",
+                  "label" : "Send acknowledgment",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : false
+                },
+                {
+                  "action_type" : "viadere.cancel",
+                  "id" : "cancel",
+                  "label" : "Cancel",
+                  "requires_confirmation" : false,
+                  "role" : "secondary",
+                  "system" : true
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : true
+            }
+          ],
+          "id" : "estimate-review",
+          "kind" : "screen",
+          "title" : "Your repair estimate"
+        },
+        "style" : {
+          "border" : "hairline",
+          "frame_id" : "viadere.frame.hairline.v1",
+          "kit_id" : "spring",
+          "palette" : {
+            "dark" : {
+              "accent" : "#B5683A",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#B5683A",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#2F5D50",
+              "secondary" : "#4A4A48",
+              "surface" : "#FFFDF7"
+            },
+            "overridden_dark" : [
+              "primary",
+              "secondary"
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "large",
+          "source" : "brand_kit",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjA1ZjJlNzgzOWYyYzA1M2U5ZTQ0ZDBmODRmMTFjM2ZlMDRkMDAyYmU5NzI2NjRiOTAwZDc3ZGMyYzIxODJiNDUiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.Zvtk28ymrsKG3Qf-mompP2-ZdFAJimgaHquEBtHqfWBXYOcy7r5bOmBeGW4A2ejqM5t0zYlQTEjzjLVJ_kC9pg",
+      "name" : "confirmation_panel",
+      "phase" : {
+        "confirm" : {
+          "action" : "ack",
+          "step" : "review"
+        }
+      },
+      "publication_status" : "active"
+    },
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:104d7d9ad9f2e4318ddc299c035708619b0c8263a2b2bc350270c216d55139a2",
+      "expected_tree" : {
+        "origin" : "viadere",
+        "root" : {
+          "children" : [
+            {
+              "kind" : "header",
+              "role" : "primary",
+              "text" : "Schedule your pickup"
+            },
+            {
+              "children" : [
+                {
+                  "control" : "list",
+                  "field_id" : "slot",
+                  "kind" : "choice",
+                  "label" : "Pickup time",
+                  "multiple" : false,
+                  "options" : [
+                    {
+                      "id" : "am",
+                      "label" : "Morning"
+                    },
+                    {
+                      "id" : "pm",
+                      "label" : "Afternoon"
+                    }
+                  ],
+                  "required" : true
+                }
+              ],
+              "id" : "s1",
+              "kind" : "field_group"
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "select_option",
+                  "id" : "confirm",
+                  "label" : "Continue",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : false
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : false
+            }
+          ],
+          "id" : "pickup-scheduling",
+          "kind" : "screen",
+          "title" : "Schedule your pickup"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl90eXBlIjoidmlhZGVyZSIsInJldmlzaW9uIjozLCJyb2xsb3V0Ijp7InBlcmNlbnQiOjEwMH0sInYiOjEsInZhbGlkX2Zyb20iOjE3OTQ3NDA0MDB9.yU-NsQFYdGgl1-s-zdW6DwjKI7xbk2L0gvgxKXDu7nZqbwlm5J9NSI99GeYkw_seNRZbejj2M-eGydjm4Fn9bQ",
+      "name" : "t3_first_party_loop",
+      "phase" : {
+        "step" : "s1"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:cf3b12d16159bb08e5d0b5bb90877137c5904bd12653850663560a2b868411fb",
+      "expected_tree" : {
+        "fallback_reason" : "manifest_missing",
+        "origin" : "unavailable",
+        "root" : {
+          "children" : [
+            {
+              "kind" : "notice",
+              "notice_kind" : "unavailable",
+              "protected" : true,
+              "text" : "Viadere couldn't confirm who built this request, so it isn't shown. You can close it or report it.",
+              "title" : "This request can't be shown"
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "viadere.close",
+                  "id" : "close",
+                  "label" : "Close",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : true
+                },
+                {
+                  "action_type" : "viadere.report",
+                  "id" : "report",
+                  "label" : "Report",
+                  "requires_confirmation" : false,
+                  "role" : "secondary",
+                  "system" : true
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : true
+            }
+          ],
+          "id" : "unavailable",
+          "kind" : "screen",
+          "title" : "This request can't be shown"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "name" : "fallback_missing_manifest",
+      "phase" : {
+        "step" : "s1"
+      },
+      "publication_status" : "active"
+    },
+    {
+      "definition" : {
+        "appearance" : {
+          "mode" : "standard"
+        },
+        "entry_points" : [
+          "business_page",
+          "message",
+          "alert"
+        ],
+        "key" : "pickup-scheduling",
+        "limits" : {
+          "expires_in_seconds" : 86400
+        },
+        "schema_version" : 1,
+        "steps" : [
+          {
+            "actions" : [
+              {
+                "action" : "select_option",
+                "id" : "confirm",
+                "label" : "continue",
+                "next" : "s2"
+              }
+            ],
+            "fields" : [
+              {
+                "id" : "slot",
+                "label" : "Pickup time",
+                "options" : [
+                  {
+                    "id" : "am",
+                    "label" : "Morning"
+                  },
+                  {
+                    "id" : "pm",
+                    "label" : "Afternoon"
+                  }
+                ],
+                "required" : true,
+                "type" : "single_choice"
+              }
+            ],
+            "id" : "s1",
+            "type" : "form"
+          },
+          {
+            "actions" : [
+              {
+                "action" : "acknowledge",
+                "id" : "submit",
+                "label" : "send_request",
+                "next" : "done",
+                "routing" : {
+                  "mode" : "hosted",
+                  "queue" : "pickups"
+                }
+              }
+            ],
+            "id" : "s2",
+            "type" : "summary"
+          },
+          {
+            "id" : "done",
+            "show_outcome" : true,
+            "type" : "result"
+          }
+        ],
+        "title" : "Schedule your pickup"
+      },
+      "expected_canonical_sha256" : "sha256:527f87f61ee9a81e6608f37c9b8f07b3bd2131787b44f05a55ae092833e300d2",
+      "expected_tree" : {
+        "fallback_reason" : "publication_suspended",
+        "origin" : "unavailable",
+        "root" : {
+          "children" : [
+            {
+              "kind" : "notice",
+              "notice_kind" : "paused",
+              "protected" : true,
+              "text" : "Nothing here can be sent right now.",
+              "title" : "This request is paused"
+            },
+            {
+              "actions" : [
+                {
+                  "action_type" : "viadere.close",
+                  "id" : "close",
+                  "label" : "Close",
+                  "requires_confirmation" : false,
+                  "role" : "primary",
+                  "system" : true
+                }
+              ],
+              "kind" : "action_bar",
+              "protected" : true
+            }
+          ],
+          "id" : "paused",
+          "kind" : "screen",
+          "title" : "This request is paused"
+        },
+        "style" : {
+          "border" : "hairline",
+          "palette" : {
+            "dark" : {
+              "accent" : "#CDB993",
+              "on_primary" : "#1F1E1C",
+              "on_surface" : "#F3F0EA",
+              "primary" : "#F3F0EA",
+              "secondary" : "#A29D94",
+              "surface" : "#1C1B1A"
+            },
+            "light" : {
+              "accent" : "#8C7550",
+              "on_primary" : "#F5F2EC",
+              "on_surface" : "#1F1E1C",
+              "primary" : "#1F1E1C",
+              "secondary" : "#6B675F",
+              "surface" : "#FCFBF8"
+            },
+            "overridden_dark" : [
+
+            ],
+            "overridden_light" : [
+
+            ]
+          },
+          "radius" : "medium",
+          "source" : "neutral",
+          "type_scale" : "standard"
+        },
+        "v" : 1
+      },
+      "manifest" : "eyJhbGciOiJFUzI1NiIsImtpZCI6Imxvb3AtcHVibGljYXRpb24tdjEiLCJ0eXAiOiJ2aWFkZXJlLWxvb3AtcHVibGljYXRpb24randzIn0.eyJhdHRyaWJ1dGlvbl9wb2xpY3lfdmVyc2lvbiI6MSwiZGVmaW5pdGlvbl9oYXNoIjoic2hhMjU2OjY2ZDQxM2M1ZjI1OTc1MDQ1MmNkZDIwYmYwMzc5NDUwZWFjN2YwOTRiZjdjNzMyY2E5ZjZhYTg5MjRmYTUwMmMiLCJraWQiOiJsb29wLXB1YmxpY2F0aW9uLXYxIiwibm90X2FmdGVyIjoxNzk3MzMyNDAwLCJwdWJsaXNoZWRfZGVmaW5pdGlvbl9pZCI6IjNjOWQyZTFmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsInB1Ymxpc2hlcl9idXNpbmVzc19pZCI6IjBiMGU1YTRjLTdkMWYtNGUyYS05YzNiLTVmNmE3YjhjOWQwMSIsInB1Ymxpc2hlcl90eXBlIjoiYnVzaW5lc3MiLCJyZXZpc2lvbiI6Mywicm9sbG91dCI6eyJwZXJjZW50IjoxMDB9LCJ2IjoxLCJ2YWxpZF9mcm9tIjoxNzk0NzQwNDAwfQ.DLhwP7vWsV37Bm5VxFf3X8OlX2_WqMxtGOW7wwqP0bpxVPLnEjL3dcqpL06Nz-FWF7CyM-soXoK76OV02NJONA",
+      "name" : "paused",
+      "phase" : {
+        "step" : "s1"
+      },
+      "publication_status" : "suspended"
+    }
+  ],
+  "description" : "PresentationBuilder output (SECURITY.md 2.92, plan 4.4). Inputs: definition, publication manifest JWS (pinned key below), the verified directory record of the publisher, phase, publication status, optional Brand Kit, `now`. A conforming builder produces `expected_tree` exactly (compare canonical JSON; `expected_canonical_sha256` is its hash). Node order is reading order; nodes with protected=true use the neutral protected palette.",
+  "instance_business_id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+  "kid" : "loop-publication-v1",
+  "name" : "presentation-tree-v1",
+  "now" : 1794744000,
+  "public_key" : "BNujSAmPBP_dLSRW1dYcNkQRzTqS_pHsYdYhqvO3tfG1vqMtX4-O6wYXNWzQswLa20NDR5ilKG4MU89NIV_Q-F4",
+  "publisher_record" : {
+    "category" : "retail",
+    "display_name" : "Juniper Salon",
+    "id" : "0b0e5a4c-7d1f-4e2a-9c3b-5f6a7b8c9d01",
+    "verification_status" : "verified"
+  },
+  "version" : 1
+}

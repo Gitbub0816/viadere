@@ -1,0 +1,175 @@
+@preconcurrency import ActivityKit
+import Foundation
+import UIKit
+import ViadereCore
+import ViadereKit
+
+/// Starts and updates Live Activities (order, delivery, flight, appointment) from status interactions, and
+/// registers their push tokens so the server can update them without the app running.
+///
+/// - Update tokens (`pushType: .token`) are registered per activity.
+/// - Push-to-start tokens (iOS 17.2+) are registered once, letting the server start an activity remotely.
+/// - Only genuinely ongoing, non-promotional events qualify (`LiveActivityPolicy` in ViadereCore).
+/// - Decision activities (docs/SECURITY.md §2.16) arrive by push-to-start with a neutral state (no business text). When one appears,
+///   the app fetches the interaction over the authenticated API and writes the sanitized title, detail and options into the activity
+///   itself (`LiveDecisionEnrichment`). If the fetch fails the activity keeps the generic wording. Its buttons run `ViadereDecisionIntent`.
+@MainActor
+final class LiveActivityManager {
+    private let services: ViadereServices
+    private var tracked = Set<String>()
+    private var tasks: [Task<Void, Never>] = []
+    private static let log = ViadereLog.notifications
+
+    private var registrar: PushRegistrar { PushRegistrar(api: services.api, configuration: services.configuration) }
+
+    init(services: ViadereServices) {
+        self.services = services
+        startObserving()
+    }
+
+    private func startObserving() {
+        tasks.append(Task { [weak self] in
+            for await activity in Activity<ViadereActivityAttributes>.activityUpdates { self?.observe(activity) }
+        })
+        if #available(iOS 17.2, *) {
+            tasks.append(Task { [weak self] in
+                for await token in Activity<ViadereActivityAttributes>.pushToStartTokenUpdates {
+                    guard let self else { return }
+                    await self.registerPushToStart(token)
+                }
+            })
+        }
+        for activity in Activity<ViadereActivityAttributes>.activities { observe(activity) }
+    }
+
+    private func observe(_ activity: Activity<ViadereActivityAttributes>) {
+        guard tracked.insert(activity.id).inserted else { return }
+        tasks.append(Task { [weak self] in
+            for await token in activity.pushTokenUpdates {
+                guard let self else { return }
+                await self.registerUpdateToken(activity: activity, token: token)
+            }
+        })
+        if case .decision = activity.content.state {
+            tasks.append(Task { [weak self] in await self?.enrichDecision(activity) })
+        }
+    }
+
+    // MARK: Decision activities
+
+    /// Seconds a finished decision stays on the Lock Screen showing its stage.
+    private static let decisionDismissalDelay: TimeInterval = 8
+
+    /// Adds the interaction's own (sanitized) text to a neutral decision activity, or ends it if it is no longer pending.
+    private func enrichDecision(_ activity: Activity<ViadereActivityAttributes>) async {
+        guard case .decision(let state) = activity.content.state, state.stage == .pending, !state.isEnriched,
+              state.interactionId.description == activity.attributes.interactionId else { return }
+        // A failed fetch leaves the generic wording ("{business} needs a quick decision", Decline and Open).
+        guard let envelope = try? await services.api.interaction(state.interactionId) else { return }
+        var enriched = LiveDecisionEnrichment.enriched(state, businessId: activity.attributes.businessId, from: envelope, now: Date())
+        // F-09: unless the person opted in, no business text is written into the activity at all (it would only be drawn on the Lock Screen).
+        if LiveActivityDisclosure(preferences: services.preferences) == .neutral {
+            enriched.title = nil
+            enriched.detail = nil
+            enriched.options = nil
+        }
+        if enriched.stage == .pending {
+            await activity.update(ActivityContent(state: .decision(enriched), staleDate: enriched.expiresAt))
+        } else {
+            await end(activity, stage: enriched.stage)
+        }
+    }
+
+    /// Shows the final stage of a decision activity and dismisses it shortly after. Called after a Lock Screen answer.
+    func finishDecision(interactionId: String, stage: DecisionActivityState.Stage) async {
+        for activity in Activity<ViadereActivityAttributes>.activities where activity.attributes.interactionId == interactionId {
+            await end(activity, stage: stage)
+        }
+    }
+
+    private func end(_ activity: Activity<ViadereActivityAttributes>, stage: DecisionActivityState.Stage) async {
+        guard case .decision(var state) = activity.content.state else { return }
+        state.stage = stage
+        await activity.end(ActivityContent(state: .decision(state), staleDate: nil),
+                           dismissalPolicy: .after(Date().addingTimeInterval(Self.decisionDismissalDelay)))
+    }
+
+    /// Ends decision activities whose interaction was answered elsewhere, withdrawn or expired while no end push arrived.
+    private func reconcileDecisions() async {
+        for activity in Activity<ViadereActivityAttributes>.activities {
+            guard case .decision(let state) = activity.content.state, state.stage == .pending else { continue }
+            if state.expiresAt <= Date() { await end(activity, stage: .expired); continue }
+            guard let envelope = try? await services.api.interaction(state.interactionId) else { continue }
+            if envelope.status != .pending { await end(activity, stage: DecisionActivityState.stage(for: envelope.status)) }
+        }
+    }
+
+    private func registerUpdateToken(activity: Activity<ViadereActivityAttributes>, token: Data) async {
+        guard (try? await services.records.load()) != nil else { return }
+        do {
+            try await registrar.registerLiveActivity(
+                activityId: activity.id, businessId: BusinessID(activity.attributes.businessId),
+                interactionId: InteractionID(activity.attributes.interactionId), pushToken: token)
+        } catch {
+            Self.log.error("liveactivity.token.failed")
+        }
+    }
+
+    private func registerPushToStart(_ token: Data) async {
+        guard (try? await services.records.load()) != nil else { return }
+        try? await registrar.registerPushToStart(pushToken: token)
+    }
+
+    // MARK: Status handling
+
+    private func running(for interactionId: String) -> Activity<ViadereActivityAttributes>? {
+        Activity<ViadereActivityAttributes>.activities.first { $0.attributes.interactionId == interactionId }
+    }
+
+    /// Reconciles the foreground list of in-progress statuses with running activities.
+    func sync(_ statuses: [InteractionEnvelope]) async {
+        for envelope in statuses { _ = await apply(envelope) }
+        await reconcileDecisions()
+    }
+
+    /// A silent push announced a status change: fetch it and start/update/end the activity.
+    func handleStatusPush(interactionId: InteractionID) async -> Bool {
+        guard let envelope = try? await services.api.interaction(interactionId) else { return false }
+        return await apply(envelope)
+    }
+
+    @discardableResult
+    private func apply(_ envelope: InteractionEnvelope) async -> Bool {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
+        let interaction = envelope.interaction
+        let existing = running(for: interaction.id.description)
+        switch LiveActivityDecision.decide(for: interaction, isRunning: existing != nil) {
+        case .ignore:
+            return false
+        case .start(let status):
+            // ActivityKit only lets an app *start* an activity while it is in the foreground.
+            guard UIApplication.shared.applicationState == .active else { return false }
+            // Brand accent from the verified local cache only (never awaited); BrandSurfacePolicy refuses security requests.
+            let accent = services.brandKits?.liveActivityAccent(business: envelope.business.id, interactionId: interaction.id,
+                                                                purpose: interaction.purpose, kind: interaction.kind)
+            let attributes = ViadereActivityAttributes(
+                businessName: envelope.business.safeName, businessId: envelope.business.id.description,
+                interactionId: interaction.id.description, accentLight: accent?.light?.hex, accentDark: accent?.dark?.hex)
+            do {
+                let activity = try Activity.request(
+                    attributes: attributes, content: ActivityContent(state: status, staleDate: interaction.expiresAt), pushType: .token)
+                observe(activity)
+                return true
+            } catch {
+                Self.log.error("liveactivity.start.failed")
+                return false
+            }
+        case .update(let status):
+            await existing?.update(ActivityContent(state: status, staleDate: interaction.expiresAt))
+            return true
+        case .end(let status):
+            await existing?.end(ActivityContent(state: status, staleDate: nil), dismissalPolicy: .default)
+            return true
+        }
+    }
+}

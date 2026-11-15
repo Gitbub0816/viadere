@@ -1,0 +1,204 @@
+import SwiftUI
+import ViadereCore
+import ViadereKit
+
+/// Settings → Approvals: pending requests, the pairwise keys held per business, the freeze switch, and any warning about a business's keys.
+struct ApproveSettingsView: View {
+    @Bindable var controller: ApproveController
+    @Bindable var model: AppModel
+    @State private var confirmingRemove: LocalApprovalKey?
+    @State private var confirmingChange: PendingRootChange?
+    @State private var enterCode = false
+    @State private var typedCode = ""
+    @State private var typedCheckCode = ""
+    @State private var enrollment: PendingApproveEnrollment?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ViadereSpace.l) {
+                ViadereBackButton { dismiss() }
+                ViadereHeader("Approvals", subtitle: "Payments and sign-ins you confirm with Face ID")
+                if !controller.isAvailable {
+                    ViadereNotice(ApproveText.notAvailable, kind: .info)
+                } else {
+                    if let message = controller.message { ViadereNotice(message, kind: .warning) }
+                    freezeSection
+                    alertsSection
+                    waitingSection
+                    keysSection
+                    setupSection
+                }
+            }
+            .padding(.horizontal, ViadereSpace.screen)
+            .padding(.bottom, ViadereSpace.xl)
+        }
+        .scrollIndicators(.hidden)
+        .viadereScreenBackground()
+        .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await controller.refresh()
+            if let pending = model.pendingApproveEnrollment { enrollment = pending; model.pendingApproveEnrollment = nil }
+        }
+        .onChange(of: model.pendingApproveEnrollment) { _, pending in
+            if let pending { enrollment = pending; model.pendingApproveEnrollment = nil }
+        }
+        .sheet(item: Binding(get: { enrollment.map { EnrollmentItem(code: $0.code, rootKid: $0.rootKid, secret: $0.secret, checkCode: $0.checkCode) } }, set: { if $0 == nil { enrollment = nil } })) { item in
+            ApproveEnrollmentSheet(controller: controller, code: item.code, rootKid: item.rootKid, secret: item.secret, checkCode: item.checkCode)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .confirmationDialog("Remove this key?", isPresented: Binding(get: { confirmingRemove != nil }, set: { if !$0 { confirmingRemove = nil } }), titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { if let key = confirmingRemove { Task { await controller.revoke(key) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(confirmingRemove?.businessName ?? "This business") will no longer be able to ask you to approve anything until you set it up again.")
+        }
+    }
+
+    // MARK: Freeze
+
+    private var freezeSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ViadereSectionHeader("Pause everything")
+            // A deliberate state with a named action, not a switch: freezing is protective, and undoing it needs Face ID on a trusted device.
+            ViadereStateCard("Freeze approvals",
+                             detail: controller.accountFrozen
+                                 ? "No business can ask you to approve anything. Unfreezing needs Face ID on a trusted device."
+                                 : "Stops every business from asking you to approve anything, until you unfreeze with Face ID on a trusted device.",
+                             state: controller.accountFrozen ? "Frozen" : "Off",
+                             stateKind: controller.accountFrozen ? .danger : .neutral,
+                             actionTitle: controller.accountFrozen ? "Unfreeze approvals" : "Freeze approvals",
+                             actionKind: controller.accountFrozen ? .secondary : .destructive) {
+                let freeze = !controller.accountFrozen
+                Task { await controller.setAccountFrozen(freeze) }
+            }
+            .disabled(controller.phase == .working)
+        }
+    }
+
+    // MARK: Warnings about a business's keys
+
+    @ViewBuilder private var alertsSection: some View {
+        let businesses = controller.keys.reduce(into: [BusinessID: String]()) { $0[$1.businessId] = $1.businessName }
+        ForEach(businesses.keys.sorted { $0.description < $1.description }, id: \.self) { id in
+            if let alert = controller.alerts[id.description] {
+                VStack(alignment: .leading, spacing: ViadereSpace.s) {
+                    switch alert {
+                    case .rootChanged(let change):
+                        ViadereNotice("\(businesses[id] ?? "A business") changed its signing key. This is normal when a company rotates keys, and it is also what an attack on its account looks like. Contact them another way to check before you continue.", kind: .warning)
+                        ViadereRowGroup {
+                            ViadereValueRow("Before", KeyIdentifier.displayFingerprint(change.pinnedKid))
+                            ViadereHairline()
+                            ViadereValueRow("Now", KeyIdentifier.displayFingerprint(change.newKid), emphasized: true)
+                        }
+                        Button("I checked. Trust the new key with Face ID") { Task { await controller.acceptRootChange(businessId: id) } }
+                            .buttonStyle(.viadere(.secondary))
+                    case .rootConflict:
+                        ViadereNotice("What \(businesses[id] ?? "this business") shows now does not match its history on this phone. Approvals with it are blocked. Do not continue; tell the business and Viadere.", kind: .danger)
+                        Button("Forget this business's keys") { Task { await controller.acknowledgeConflict(businessId: id) } }
+                            .buttonStyle(.viadere(.destructive))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Requests and keys
+
+    @ViewBuilder private var waitingSection: some View {
+        if !controller.prompts.isEmpty || !controller.rejected.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Waiting for you")
+                ViadereRowGroup {
+                    ForEach(controller.prompts) { prompt in
+                        Button { controller.present(prompt) } label: {
+                            ViadereRow(prompt.business.safeName, subtitle: prompt.inboxLine ?? prompt.promptReason) { ViadereAvatar(name: prompt.business.safeName, size: 36, isVerified: prompt.business.isVerified) }
+                        }
+                        .buttonStyle(.viaderePressable)
+                        ViadereHairline(inset: 50)
+                    }
+                    ForEach(controller.rejected) { item in
+                        ViadereRow(item.businessName, subtitle: "A request failed checks on this phone and was hidden") { ViadereIconTile(systemName: "exclamationmark.shield") }
+                        Button("Dismiss") { controller.dismissRejected(item.id) }.buttonStyle(.viadere(.quiet, fullWidth: false))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var keysSection: some View {
+        let active = controller.keys.filter { $0.status == .active || $0.status == .pendingConfirmation }
+        if !active.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Your keys")
+                ViadereRowGroup {
+                    ForEach(active) { key in
+                        HStack {
+                            ViadereRow(key.businessName, subtitle: key.status == .active ? "Active" : "Waiting for the business to confirm") {
+                                ViadereIconTile(systemName: "key.horizontal")
+                            }
+                            Button { confirmingRemove = key } label: { Image(systemName: "trash") }
+                                .accessibilityLabel("Remove key for \(key.businessName)")
+                                .buttonStyle(.plain)
+                                .foregroundStyle(ViadereColor.danger)
+                        }
+                        if key.id != active.last?.id { ViadereHairline(inset: 50) }
+                    }
+                }
+                Text("Each business has its own key. They cannot be matched with each other.")
+                    .font(ViadereType.footnote).foregroundStyle(ViadereColor.textSecondary).padding(.top, ViadereSpace.xs)
+            }
+        }
+    }
+
+    private var setupSection: some View {
+        VStack(alignment: .leading, spacing: ViadereSpace.s) {
+            ViadereSectionHeader("Set up a business")
+            ViadereEntryField(placeholder: "Setup code from the business", text: $typedCode, status: .none, hint: "Eight letters and numbers", monospaced: true)
+            ViadereEntryField(placeholder: "Check code from the business", text: $typedCheckCode, status: .none, hint: "The second code, also eight letters and numbers", monospaced: true)
+            Button("Continue") {
+                enrollment = PendingApproveEnrollment(code: typedCode, rootKid: nil, checkCode: typedCheckCode)
+                typedCode = ""
+                typedCheckCode = ""
+            }
+            .buttonStyle(.viadere(.secondary))
+            .disabled(typedCode.filter { $0.isLetter || $0.isNumber }.count < 8 || typedCheckCode.filter { $0.isLetter || $0.isNumber }.count < 8)
+        }
+    }
+}
+
+private struct EnrollmentItem: Identifiable, Equatable {
+    var code: String
+    var rootKid: String?
+    var secret: ApprovalEnrollmentSecret?
+    var checkCode: String?
+    var id: String { code + (rootKid ?? "") }
+}
+
+/// The per-business pause shown in a business's settings: a state card with a named action (shown only when this phone holds an approval
+/// key for the business).
+struct ApproveBusinessFreezeRow: View {
+    @Bindable var controller: ApproveController
+    let relationshipId: RelationshipID
+    let businessName: String
+
+    var body: some View {
+        if controller.isAvailable, controller.keys.contains(where: { $0.relationshipId == relationshipId && $0.status != .revoked }) {
+            let frozen = controller.isFrozen(relationship: relationshipId)
+            VStack(alignment: .leading, spacing: 0) {
+                ViadereSectionHeader("Approvals")
+                ViadereStateCard("Approvals from \(businessName)",
+                                 detail: frozen ? "Paused: \(businessName) can't ask you to approve anything until you resume."
+                                                : "Payments and sign-ins \(businessName) asks you to confirm. Pause them if something looks wrong.",
+                                 state: frozen ? "Paused" : "On",
+                                 stateKind: frozen ? .danger : .success,
+                                 actionTitle: frozen ? "Resume approvals" : "Pause approvals",
+                                 actionKind: frozen ? .secondary : .destructive) {
+                    Task { await controller.setFrozen(!frozen, relationship: relationshipId) }
+                }
+                .disabled(controller.phase == .working)
+            }
+        }
+    }
+}

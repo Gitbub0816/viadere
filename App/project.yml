@@ -1,0 +1,388 @@
+# Viadere Xcode project (XcodeGen).
+#
+#   brew install xcodegen
+#   cd App && xcodegen
+#   open Viadere.xcodeproj
+#
+# Settings that vary per developer or per environment live in Configs/*.xcconfig (team id, API URL, APNs
+# environment). See App/README.md.
+
+name: Viadere
+
+options:
+  # Latest stable Xcode (27.1, 2026-10-27); XcodeGen encodes it as MMmp. Deployment targets below are a documented exception.
+  xcodeVersion: "2710"
+  bundleIdPrefix: com.viadere
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+  minimumXcodeGenVersion: "2.40.0"
+
+# Staging is a Release-grade configuration (optimized, no DEBUG, strict ATS) for the staging server and TestFlight; see Configs/Staging.xcconfig.
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
+
+configFiles:
+  Debug: Configs/Debug.xcconfig
+  Staging: Configs/Staging.xcconfig
+  Release: Configs/Release.xcconfig
+
+settings:
+  base:
+    # Swift 6 language mode. If the first Xcode build reports concurrency diagnostics you want to defer,
+    # set SWIFT_VERSION to "5" for the UI targets (the packages stay on Swift 6).
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ENABLE_MODULE_VERIFIER: NO
+    # Strict ATS everywhere. The only exception (http://localhost for the dev server) is added by the
+    # preprocessed Info.plists when the Debug xcconfig defines VIADERE_LOCAL_DEV. Release never gains one.
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      ONLY_ACTIVE_ARCH: YES
+    Release: &releaseSettings
+      SWIFT_COMPILATION_MODE: wholemodule
+      STRIP_INSTALLED_PRODUCT: YES
+      ENABLE_TESTABILITY: NO
+    Staging: *releaseSettings
+
+packages:
+  ViadereCore:
+    path: ../Packages/ViadereCore
+  ViadereKit:
+    path: ../Packages/ViadereKit
+  # Verify (WP3): Didit's native flow for people without a Wallet ID. Core variant (manual capture, no NFC, no OpenSSL, iOS 13+); the NFC
+  # variant (iOS 15+) is only needed if passport chip reading is added. Latest stable tag checked 2026-10-27: 4.9.1.
+  DiditSDK:
+    url: https://github.com/didit-protocol/sdk-ios.git
+    from: "4.9.1"
+  # CKey scanner (the Viadere code on "Sign in with Viadere"). Scan-only product: decoder and camera helper, no renderer, no telemetry
+  # code. CKey is pre-1.0 and C++, so it is pinned to the exact commit of tag v0.1.0-build.127 (Stable-Release), never a range: a new build
+  # is adopted by changing this line after review (CLAUDE.md exceptions, docs/SECURITY.md §2.104).
+  CKey:
+    url: https://github.com/clearkeysolutions/ckey.git
+    revision: d7a068320f860d7ff06463fa53fc1447fc853413
+
+# Reusable pieces ----------------------------------------------------------------------------------------------
+# Networking targets use a hand-written, *preprocessed* Info.plist: the DEBUG-only ATS exception for
+# http://localhost:8080 sits inside `#ifdef VIADERE_LOCAL_DEV`, which only the Debug xcconfig defines.
+targetTemplates:
+  PreprocessedInfoPlist:
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_PREPROCESS: YES
+        INFOPLIST_OTHER_PREPROCESSOR_FLAGS: -traditional
+        INFOPLIST_PREPROCESSOR_DEFINITIONS: $(VIADERE_PLIST_DEFS)
+
+targets:
+  # ------------------------------------------------------------------------------------------------ iOS app
+  Viadere:
+    type: application
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: Viadere
+        excludes: ["Info.plist"]
+      - path: Shared
+        excludes: ["Privacy/**"]
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources
+      # WP5: keeps the system AutoFill identity store in step with the Authenticator vault (shared with the credential provider).
+      - path: ViadereCredentialProvider/IdentityStoreSync.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app
+        INFOPLIST_FILE: Viadere/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Viadere/Viadere.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Accent
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+    entitlements:
+      path: Viadere/Viadere.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        # App Attest: vouches for the keys enrolled at device enrollment. `development` in Debug and Staging, `production` in Release
+        # (Configs/*.xcconfig); the server's APP_ATTEST_ENVIRONMENT must match.
+        # Associated domains come from VIADERE_WEB_DOMAIN: viadere.com, or staging.viadere.com in Staging (Configs/*.xcconfig).
+        com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
+        com.apple.developer.associated-domains:
+          - applinks:$(VIADERE_WEB_DOMAIN)
+          - webcredentials:$(VIADERE_WEB_DOMAIN)
+          - appclips:$(VIADERE_WEB_DOMAIN)
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        # Shared with the notification extensions: the request key and the access token only.
+        # The approval keys live in the app-only group below, which no extension or clip is entitled to.
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.shared
+          - $(AppIdentifierPrefix)com.viadere.app.approval
+          # Authenticator vault keys: shared with the credential-provider extension only.
+          - $(AppIdentifierPrefix)com.viadere.vault
+        # Third-party passkey / one-time-code provider (Authenticator). The extension carries the same entitlement.
+        com.apple.developer.authentication-services.autofill-credential-provider: true
+        com.apple.developer.usernotifications.time-sensitive: true
+        # Verify with Wallet (WP3): Apple grants `com.apple.developer.in-app-identity-presentment` per bundle ID after a request (see App/README.md).
+        # It is NOT listed here on purpose: until Apple approves the request the provisioning profile does not carry it and signing would fail.
+        # After approval add it from Xcode (Signing & Capabilities → Verify with Wallet) and commit the value Apple issued; Wallet is
+        # simply unavailable in the app until then (`checkCanRequestDocument` answers false) and the document method still works.
+        # Apple Wallet: adding passes (PKAddPassesViewController) needs no entitlement, but reading them does: PKPassLibrary's
+        # pass(withPassTypeIdentifier:serialNumber:) returns nil without it (Apple documentation, checked 2026-10-31), so "In Wallet"
+        # needs the server's Pass Type ID here. Owner: enable Wallet on the App ID and select the Pass Type ID (docs/WALLET.md).
+        com.apple.developer.pass-type-identifiers:
+          - $(TeamIdentifierPrefix)$(VIADERE_PASS_TYPE_IDENTIFIER)
+    # Fails an archive (Release, Staging) while the certificate pins are placeholders. Debug is never checked.
+    preBuildScripts:
+      - name: Check release certificate pins
+        script: '"${SRCROOT}/Scripts/check-release-pins.sh"'
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/Scripts/check-release-pins.sh
+          - $(SRCROOT)/../Packages/ViadereKit/Sources/ViadereKit/Config/ViadereConfiguration.swift
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+      - package: DiditSDK
+        product: DiditSDKCore
+      - package: CKey
+        product: CKeyScanner
+      - target: ViadereNotificationService
+      - target: ViadereNotificationContent
+      - target: ViadereCredentialProvider
+      - target: ViadereWidgets
+      - target: ViadereClip
+      - target: ViadereWatch
+
+  # ------------------------------------------------------------------------- notification service extension
+  ViadereNotificationService:
+    type: app-extension
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: ViadereNotificationService
+        excludes: ["Info.plist"]
+      - path: Shared/Runtime
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationService
+        INFOPLIST_FILE: ViadereNotificationService/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereNotificationService/ViadereNotificationService.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereNotificationService/ViadereNotificationService.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.shared
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------------- notification content extension
+  ViadereNotificationContent:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereNotificationContent
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.NotificationContent1 # the plain ID was unavailable in the portal (2026-11-03)
+        INFOPLIST_FILE: ViadereNotificationContent/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereNotificationContent/ViadereNotificationContent.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereNotificationContent/ViadereNotificationContent.entitlements
+      properties:
+        # Read-only use: the person's appearance theme (`com.viadere.appearance.v1`). No keychain group and no vault access.
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # -------------------------------------------------------------------------------- credential provider (WP5)
+  # Passkeys (iOS 17) and one-time codes (iOS 18) for Authenticator. No network code is linked in its use: it builds the vault engine without
+  # a sync client. It shares only the App Group container (ciphertext) and the vault-only keychain group with the app.
+  ViadereCredentialProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereCredentialProvider
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.CredentialProvider
+        INFOPLIST_FILE: ViadereCredentialProvider/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereCredentialProvider/ViadereCredentialProvider.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereCredentialProvider/ViadereCredentialProvider.entitlements
+      properties:
+        com.apple.developer.authentication-services.autofill-credential-provider: true
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.viadere.vault
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------- Live Activities / Dynamic Island
+  ViadereWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ViadereWidgets
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/LiveActivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.Widgets
+        INFOPLIST_FILE: ViadereWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereWidgets/ViadereWidgets.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ViadereWidgets/ViadereWidgets.entitlements
+      properties:
+        # Read-only use: the person's appearance theme (`com.viadere.appearance.v1`). No keychain group and no vault access.
+        com.apple.security.application-groups:
+          - group.com.viadere.shared
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # ------------------------------------------------------------------------------------------- App Clip
+  ViadereClip:
+    type: application.on-demand-install-capable
+    platform: iOS
+    templates: [PreprocessedInfoPlist]
+    sources:
+      - path: ViadereClip
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/Runtime
+      - path: Shared/UI
+      # Copy / screenshot awareness for the recovery codes shown after the Clip creates an account.
+      - path: Viadere/Security/SecurePasteboard.swift
+      - path: Viadere/Security/ScreenCaptureObserver.swift
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.Clip
+        INFOPLIST_FILE: ViadereClip/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViadereClip/ViadereClip.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Accent
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+    entitlements:
+      path: ViadereClip/ViadereClip.entitlements
+      properties:
+        com.apple.developer.parent-application-identifiers:
+          - $(AppIdentifierPrefix)com.viadere.app
+        com.apple.developer.on-demand-install-capable: true
+        # The Clip attests with its own App Attest key (its own app id).
+        com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
+        com.apple.developer.associated-domains:
+          - appclips:$(VIADERE_WEB_DOMAIN)
+          - applinks:$(VIADERE_WEB_DOMAIN)
+          - webcredentials:$(VIADERE_WEB_DOMAIN)
+    # Fails an archive (Release, Staging) while the certificate pins are placeholders. Debug is never checked.
+    preBuildScripts:
+      - name: Check release certificate pins
+        script: '"${SRCROOT}/Scripts/check-release-pins.sh"'
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/Scripts/check-release-pins.sh
+          - $(SRCROOT)/../Packages/ViadereKit/Sources/ViadereKit/Config/ViadereConfiguration.swift
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+  # --------------------------------------------------------------------------------- watchOS companion
+  ViadereWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: ViadereWatch
+        excludes: ["Info.plist"]
+      - path: Shared/DesignSystem
+      - path: Shared/Privacy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.viadere.app.watchkitapp
+        INFOPLIST_FILE: ViadereWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: ViadereKit
+        product: ViadereKit
+      - package: ViadereCore
+        product: ViadereCore
+
+schemes:
+  Viadere:
+    build:
+      targets:
+        Viadere: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  # Staging server + TestFlight: Product > Archive with this scheme. Fill the pins in Configs/Staging.xcconfig first (docs/ops/STAGING-SETUP.md).
+  Staging:
+    build:
+      targets:
+        Viadere: all
+    run:
+      config: Staging
+    profile:
+      config: Staging
+    analyze:
+      config: Staging
+    archive:
+      config: Staging

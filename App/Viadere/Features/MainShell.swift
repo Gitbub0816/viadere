@@ -1,0 +1,177 @@
+import SwiftUI
+import ViadereCore
+import ViadereKit
+
+extension AppTab {
+    var title: String {
+        switch self {
+        case .alerts: "Alerts"
+        case .messages: "Messages"
+        case .benefits: "Benefits"
+        case .businesses: "Businesses"
+        case .you: "You"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .alerts: "bell"
+        case .messages: "bubble.left"
+        case .benefits: "tag"
+        case .businesses: "building.2"
+        case .you: "person.crop.circle"
+        }
+    }
+}
+
+/// The stable bar (docs/APP-IA.md): Alerts, Messages, Benefits, Businesses and You on a hand-built bar, each tab with its own
+/// `NavigationStack` (system bar hidden; the edge swipe back still works, see `ViadereNavigationGestures.swift`). The business selector at
+/// the top of the business tabs filters Messages, Alerts and Benefits the same way; You is the account (security, notifications, privacy,
+/// appearance). Add business opens as a sheet. The bar never grows with the number of businesses.
+struct MainShell: View {
+    @Bindable var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Group {
+                    switch model.selectedTab {
+                    case .alerts: AlertsView(model: model)
+                    case .messages: MessagesView(model: model)
+                    case .benefits: BenefitsView(model: model)
+                    case .businesses: BusinessesView(model: model)
+                    case .you: SettingsView(model: model)
+                    }
+                }
+                .id(model.selectedTab)
+                .transition(.opacity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // A short cross-fade between tabs (none with Reduce Motion): the bar stays put, only the page changes.
+            .animation(reduceMotion ? nil : ViadereMotion.quick, value: model.selectedTab)
+            ViadereTabBar(selection: $model.selectedTab, items: AppTab.allCases.map { tab in
+                ViadereTabBar<AppTab>.Item(tab: tab, title: tab.title, symbol: tab.symbol, badge: badge(for: tab))
+            })
+        }
+        .viadereScreenBackground()
+        .viadereDocumentVerification()
+        .sheet(item: Binding(get: { AppEnvironment.shared.verification.presented.map(PresentedVerification.init) },
+                             set: { value in
+                                 AppEnvironment.shared.verification.presented = value?.id
+                                 // The verification sheet always names its own recipient; the context was frozen while it was open.
+                                 if value == nil { model.organization.endSensitiveFlow() }
+                             })) { presented in
+            VerificationSheetHost(id: presented.id)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: Binding(get: { AppEnvironment.shared.profile.presentedRequest.map(PresentedProfileRequest.init) },
+                             set: { value in
+                                 AppEnvironment.shared.profile.presentedRequest = value?.id
+                                 if value == nil { model.organization.endSensitiveFlow() }
+                             })) { presented in
+            ProfileRequestSheet(id: presented.id)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: Binding(get: { AppEnvironment.shared.loops.presented },
+                             set: { AppEnvironment.shared.loops.presented = $0 })) { presented in
+            LoopInstanceSheet(presented: presented, model: model)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: Binding(get: { AppEnvironment.shared.loops.consentPrompt },
+                             set: { AppEnvironment.shared.loops.consentPrompt = $0 })) { prompt in
+            switch prompt {
+            case .enableLoops:
+                LoopConsentFlowView(consent: model.loopConsent)
+                    .presentationDetents([.large])
+                    .presentationBackground(ViadereColor.background)
+            case .authorize(let business):
+                LoopBusinessAuthorizationSheet(consent: model.loopConsent, business: business)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(ViadereColor.background)
+            }
+        }
+        .loopInstallLinks(model: model)
+        .sheet(item: $model.pendingAuthDelivery) { pending in
+            // A sign-in link push ("Open"): the confirm screen. Nothing is opened until Continue, and nothing at all until the destination is verified.
+            LinkConfirmationSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: $model.pendingOIDCSignIn) { pending in
+            // "Sign in with Viadere" (QR universal link `/o/{ach}` or a `login_hint` push): the authority-signed confirm screen.
+            OIDCSignInSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(item: $model.pendingVerificationSession) { pending in
+            // A business's "Verify with Viadere" button or QR (`/v/…`).
+            VerificationSessionSheet(pending: pending)
+                .presentationDetents([.large])
+                .presentationBackground(ViadereColor.background)
+        }
+        .sheet(isPresented: $model.addBusinessPresented, onDismiss: {
+            Task { await model.businesses.load() }
+        }) {
+            ConnectView(model: model)
+                .presentationDetents([.large])
+                .presentationCornerRadius(ViadereRadius.sheet)
+                .presentationBackground(ViadereColor.background)
+        }
+        .fullScreenCover(isPresented: $model.scannerPresented, onDismiss: {
+            // What the scanner accepted opens only now, with the camera off screen.
+            Task { await model.deliverScanned() }
+        }) {
+            CodeScannerScreen(onCode: { payload, symbology in model.scanned(payload, symbology: symbology) },
+                              onClose: { model.scannerPresented = false })
+                .viaderePullDownToDismiss()
+        }
+        .task { await model.messages.load() }
+        .onChange(of: model.home.content, initial: true) { _, content in
+            // Keep the watch's pending list and any running Live Activities in step with the pending requests.
+            let environment = AppEnvironment.shared
+            environment.watchBridge.push(content)
+            Task { await environment.liveActivities.sync(content.statuses) }
+        }
+        .onChange(of: ViadereThemeRuntime.model.selection, initial: true) { _, selection in
+            AppEnvironment.shared.watchBridge.push(appearance: selection)
+        }
+        .onChange(of: model.activity.liveCandidates) { _, candidates in
+            // Only statuses `LiveActivityPolicy` allows (ongoing orders, deliveries, flights, appointments; never marketing).
+            Task { await AppEnvironment.shared.liveActivities.sync(candidates) }
+        }
+    }
+
+    /// Alerts: what is actionable now (the server's read model, re-checked by the device clock). Messages: unread. Never both for one event.
+    /// You: an account notice (a new device, a recovery in progress) waiting to be reviewed.
+    private func badge(for tab: AppTab) -> Int {
+        switch tab {
+        case .alerts: model.alerts.badgeCount()
+        case .messages: model.messages.unreadTotal
+        case .you: model.securityNotices.current == nil ? 0 : 1
+        default: 0
+        }
+    }
+}
+
+/// `Identifiable` wrapper so a request id can drive `.sheet(item:)`.
+struct PresentedVerification: Identifiable {
+    let id: VerificationRequestID
+}
+
+/// Builds the verification view model once per presentation.
+struct VerificationSheetHost: View {
+    @State private var model: VerificationViewModel
+
+    init(id: VerificationRequestID) {
+        let environment = AppEnvironment.shared
+        _model = State(initialValue: VerificationViewModel(
+            id: id, api: environment.verifyAPI, wallet: PassKitWalletIdentity(), document: DocumentVerificationLauncher.shared,
+            lock: AppEnvironment.services.appLock))
+    }
+
+    var body: some View { VerificationRequestSheet(model: model) }
+}

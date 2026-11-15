@@ -1,0 +1,50 @@
+{
+  "description": "Webhook signature v2 (ADR-0025). string_to_sign is LF-joined with no trailing LF; v2 is kid:base64url(HMAC-SHA256(secret, string_to_sign)). Computed independently in Python; ViadereCore and the Business SDK tests must reproduce every value.",
+  "cases": [
+    {
+      "name": "basic",
+      "secret": "whsec_testsecret_one",
+      "kid": "whk_1a2b3c4d_v1",
+      "t": 1793620800,
+      "method": "POST",
+      "host": "hooks.example.com",
+      "path_and_query": "/viadere/events",
+      "event_id": "evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f",
+      "tenant_id": "ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "body": "{\"id\":\"evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\",\"occurred_at\":\"2026-11-02T12:00:00.000Z\",\"request_id\":\"adl_AAAAAAAAAAAAAAAAAAAAAA\",\"tenant_id\":\"ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\",\"type\":\"auth.delivery.opened\",\"version\":\"2026-10-27\"}",
+      "content_digest": "sha-256=:gYOHe17uDFRzoFU2IC11QWNVwoImU5sTXAEGuajPzPs=:",
+      "string_to_sign": "VIADERE-WEBHOOK-V2\nPOST\nhooks.example.com\n/viadere/events\n1793620800\nevt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\nten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\nwhk_1a2b3c4d_v1\n8183877b5eee0c5473a05536202d75416355c28226539b135c0106b9a8cfccfb",
+      "v2": "whk_1a2b3c4d_v1:cQtEAkNszk2NSl1AYvOy077xOeYEpNx112_fQXBPpzQ"
+    },
+    {
+      "name": "rotation previous secret",
+      "secret": "whsec_testsecret_zero",
+      "kid": "whk_1a2b3c4d_v0",
+      "t": 1793620800,
+      "method": "POST",
+      "host": "hooks.example.com",
+      "path_and_query": "/viadere/events",
+      "event_id": "evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f",
+      "tenant_id": "ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "body": "{\"id\":\"evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\",\"occurred_at\":\"2026-11-02T12:00:00.000Z\",\"request_id\":\"adl_AAAAAAAAAAAAAAAAAAAAAA\",\"tenant_id\":\"ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\",\"type\":\"auth.delivery.opened\",\"version\":\"2026-10-27\"}",
+      "content_digest": "sha-256=:gYOHe17uDFRzoFU2IC11QWNVwoImU5sTXAEGuajPzPs=:",
+      "string_to_sign": "VIADERE-WEBHOOK-V2\nPOST\nhooks.example.com\n/viadere/events\n1793620800\nevt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\nten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\nwhk_1a2b3c4d_v0\n8183877b5eee0c5473a05536202d75416355c28226539b135c0106b9a8cfccfb",
+      "v2": "whk_1a2b3c4d_v0:vXZBsmn2CNHEUxOVNHn5IkL7o4l_JDvz9-9dKJZPm-o"
+    },
+    {
+      "name": "non-default port and query",
+      "secret": "whsec_testsecret_one",
+      "kid": "whk_1a2b3c4d_v1",
+      "t": 1793620800,
+      "method": "POST",
+      "host": "hooks.example.com:8443",
+      "path_and_query": "/a/b%20c?tenant=x&k=1",
+      "event_id": "evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f",
+      "tenant_id": "ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "body": "{\"id\":\"evt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\",\"occurred_at\":\"2026-11-02T12:00:00.000Z\",\"request_id\":\"adl_AAAAAAAAAAAAAAAAAAAAAA\",\"tenant_id\":\"ten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\",\"type\":\"auth.delivery.opened\",\"version\":\"2026-10-27\"}",
+      "content_digest": "sha-256=:gYOHe17uDFRzoFU2IC11QWNVwoImU5sTXAEGuajPzPs=:",
+      "string_to_sign": "VIADERE-WEBHOOK-V2\nPOST\nhooks.example.com:8443\n/a/b%20c?tenant=x&k=1\n1793620800\nevt_0f6c1d2e3a4b4c5d8e9f0a1b2c3d4e5f\nten_7a1b2c3d4e5f60718293a4b5c6d7e8f9\nwhk_1a2b3c4d_v1\n8183877b5eee0c5473a05536202d75416355c28226539b135c0106b9a8cfccfb",
+      "v2": "whk_1a2b3c4d_v1:me39qWL_pQTGBU86ZcuPYxg1QQV2ZQ6Jxr2HGKurctI"
+    }
+  ]
+}

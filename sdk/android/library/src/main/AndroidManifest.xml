@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ADR-0030: the library declares no permissions, no exported components and no <queries> (partner apps merge manifests, so anything here is attack
+     surface). It makes no network requests and does not inspect installed apps. -->
+<manifest />

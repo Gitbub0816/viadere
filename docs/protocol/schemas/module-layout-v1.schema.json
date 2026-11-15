@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/schemas/module-layout-v1.schema.json",
+  "title": "Viadere business surface module layout, version 1",
+  "description": "business_surfaces.layout_json (plan section 4.7, WP-1.6; SECURITY.md 2.93). Template rules (profile first on business_home, widget slot limits and allowed modules), duplicates, gated (loops) and reserved (shop) modules are checked by ViadereCore SurfaceLayout.validate against ModuleRegistry v1. There is no member for navigation, links, styling or code. Vectors: docs/protocol/vectors/module-layout-v1.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "template", "modules"],
+  "properties": {
+    "v": { "const": 1 },
+    "template": { "enum": ["business_home", "widget_small", "widget_medium"] },
+    "modules": {
+      "type": "array", "minItems": 1, "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["module", "size"],
+        "properties": {
+          "module": { "enum": ["profile", "message", "offers", "rewards", "recent_activity", "approvals", "verification_requests", "loops", "shop"] },
+          "size": { "enum": ["compact", "regular", "expanded"] }
+        }
+      }
+    }
+  }
+}

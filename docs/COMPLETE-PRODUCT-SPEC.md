@@ -103,6 +103,7 @@ Every interaction should carry a verified business identity, stable interaction 
 - Future **household/delegated access**: scoped roles, expiration, revocation, and full auditability; never silently inherit sensitive permissions.
 - **Trust Engine**: prioritize genuine security/urgent actions over low-priority notices, choose appropriate channel, limit interruption, detect abuse and business misuse. Businesses cannot pay to override security priority.
 - Verified business registry, suspicious-request reporting, fraud signals, rate limiting, consent enforcement and device/session management.
+- **Customer profiles with selective sharing** (`docs/PROFILES.md`): a public name every connected business sees (first name and last initial by default, or one the customer chooses), optional profile details from a closed catalog, shared per business and per field only with the customer's grant, revocable at any time, with disclosure receipts. A business may only ask for the categories Viadere allowed it at onboarding (operator-approved, none by default). An optional verified profile keeps only facts confirmed with an ID (verified ID, legal name match, age checks), never the ID itself. No health, government ID, payment, biometric, religious, orientation, political or live-location data is ever collected.
 
 ## 13. Viadere universal SMS/MMS gateway — initial launch
 - Obtain a Viadere-owned messaging number through an approved provider and complete applicable U.S. A2P/10DLC or toll-free verification, consent and opt-out obligations.

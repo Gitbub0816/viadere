@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viadere.com/schemas/presentation-tree-v1.schema.json",
+  "title": "Viadere presentation tree, version 1",
+  "description": "Output of ViadereCore PresentationBuilder, the only producer (SECURITY.md 2.92, ADR-0016). Renderers (SwiftUI production, server-side HTML preview, a future Compose renderer) consume it and nothing else. Child order is reading order. Protected nodes use the neutral protected palette and are never covered by frames. An unknown node kind fails the whole tree (the renderer shows the fallback). Vectors: docs/protocol/vectors/presentation-tree-v1.json.",
+  "type": "object",
+  "required": ["v", "origin", "root", "style"],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "const": 1 },
+    "origin": { "enum": ["business", "viadere", "unavailable"] },
+    "root": { "$ref": "#/$defs/screen" },
+    "style": { "$ref": "#/$defs/style" },
+    "fallback_reason": { "type": "string" },
+    "compact_origin": { "type": "string", "maxLength": 24, "description": "\"By {verified name}\" for compact surfaces (A6a.T6); absent for first-party and fallback trees." }
+  },
+  "$defs": {
+    "role": { "enum": ["primary", "secondary", "danger", "surface"] },
+    "color": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
+    "palette": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primary", "on_primary", "secondary", "accent", "surface", "on_surface"],
+      "properties": { "primary": { "$ref": "#/$defs/color" }, "on_primary": { "$ref": "#/$defs/color" }, "secondary": { "$ref": "#/$defs/color" },
+                      "accent": { "$ref": "#/$defs/color" }, "surface": { "$ref": "#/$defs/color" }, "on_surface": { "$ref": "#/$defs/color" } }
+    },
+    "style": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "palette", "radius", "border", "type_scale"],
+      "properties": {
+        "source": { "enum": ["neutral", "brand_kit"] },
+        "kit_id": { "type": "string" },
+        "palette": { "type": "object", "additionalProperties": false, "required": ["light", "dark", "overridden_light", "overridden_dark"],
+                     "properties": { "light": { "$ref": "#/$defs/palette" }, "dark": { "$ref": "#/$defs/palette" },
+                                     "overridden_light": { "type": "array", "items": { "enum": ["primary", "secondary", "accent", "surface"] } },
+                                     "overridden_dark": { "type": "array", "items": { "enum": ["primary", "secondary", "accent", "surface"] } } } },
+        "frame_id": { "type": "string" },
+        "radius": { "enum": ["none", "small", "medium", "large"] },
+        "border": { "enum": ["none", "hairline", "regular"] },
+        "type_scale": { "enum": ["compact", "standard", "large"] }
+      }
+    },
+    "node": {
+      "oneOf": [
+        { "$ref": "#/$defs/screen" },
+        { "type": "object", "required": ["kind", "text", "role"], "properties": { "kind": { "const": "header" }, "text": { "type": "string" }, "role": { "$ref": "#/$defs/role" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "text", "accessibility_label", "business_id", "business_name", "verified", "verified_label", "role", "protected"],
+          "properties": { "kind": { "const": "attribution_bar" }, "text": { "type": "string", "pattern": "^Built by " }, "accessibility_label": { "type": "string" },
+                          "business_id": { "type": "string", "format": "uuid" }, "business_name": { "type": "string" }, "verified": { "type": "boolean" },
+                          "verified_label": { "type": "string" }, "role": { "$ref": "#/$defs/role" }, "protected": { "const": true } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "text", "role"], "properties": { "kind": { "const": "text" }, "text": { "type": "string" }, "role": { "$ref": "#/$defs/role" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "id", "children"], "properties": { "kind": { "const": "field_group" }, "id": { "type": "string" }, "children": { "type": "array", "items": { "$ref": "#/$defs/node" } } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "field_id", "label", "multiple", "control", "required", "options"],
+          "properties": { "kind": { "const": "choice" }, "field_id": { "type": "string" }, "label": { "type": "string" }, "multiple": { "type": "boolean" },
+                          "control": { "enum": ["list", "time_slot"] }, "required": { "type": "boolean" },
+                          "options": { "type": "array", "items": { "type": "object", "required": ["id", "label"], "properties": { "id": { "type": "string" }, "label": { "type": "string" } }, "additionalProperties": false } } },
+          "additionalProperties": false },
+        { "type": "object", "required": ["kind", "field_id", "label", "input", "required"],
+          "properties": { "kind": { "const": "input" }, "field_id": { "type": "string" }, "label": { "type": "string" }, "input": { "enum": ["short_text", "date", "yes_no", "acknowledgement"] },
+                          "required": { "type": "boolean" }, "max_length": { "type": "integer", "maximum": 80 } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "actions", "protected"],
+          "properties": { "kind": { "const": "action_bar" }, "protected": { "type": "boolean" },
+                          "actions": { "type": "array", "items": { "type": "object", "required": ["id", "action_type", "label", "role", "requires_confirmation", "system"],
+                                       "properties": { "id": { "type": "string" }, "action_type": { "type": "string" }, "label": { "type": "string" }, "role": { "$ref": "#/$defs/role" },
+                                                       "requires_confirmation": { "type": "boolean" }, "system": { "type": "boolean" } }, "additionalProperties": false } } },
+          "additionalProperties": false },
+        { "type": "object", "required": ["kind", "action_id", "title", "statement", "effect", "responsible_business_id", "responsible_business_name", "accessibility_label", "protected"],
+          "properties": { "kind": { "const": "confirmation_panel" }, "action_id": { "type": "string" }, "title": { "type": "string" }, "statement": { "type": "string" },
+                          "effect": { "type": "string" }, "amount": { "type": "string" }, "responsible_business_id": { "type": "string", "format": "uuid" },
+                          "responsible_business_name": { "type": "string" }, "accessibility_label": { "type": "string" }, "protected": { "const": true } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "outcome", "text", "protected"],
+          "properties": { "kind": { "const": "outcome_status" }, "outcome": { "enum": ["accepted", "rejected", "pending", "timed_out", "unknown"] }, "text": { "type": "string" }, "protected": { "const": true } },
+          "additionalProperties": false },
+        { "type": "object", "required": ["kind", "module", "size"], "properties": { "kind": { "const": "module_slot" }, "module": { "type": "string" }, "size": { "enum": ["compact", "regular", "expanded"] } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "notice_kind", "text", "protected"],
+          "properties": { "kind": { "const": "notice" }, "notice_kind": { "enum": ["unavailable", "paused", "health_privacy", "preview"] }, "title": { "type": "string" },
+                          "text": { "type": "string" }, "protected": { "const": true } }, "additionalProperties": false }
+      ]
+    },
+    "screen": {
+      "type": "object", "required": ["kind", "id", "title", "children"], "additionalProperties": false,
+      "properties": { "kind": { "const": "screen" }, "id": { "type": "string" }, "title": { "type": "string" }, "children": { "type": "array", "items": { "$ref": "#/$defs/node" } } }
+    }
+  }
+}

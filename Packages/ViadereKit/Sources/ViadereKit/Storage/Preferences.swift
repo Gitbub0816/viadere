@@ -1,0 +1,83 @@
+import Foundation
+
+/// Non-secret local preferences (app group `UserDefaults`, shared with extensions).
+public protocol PreferencesStore: Sendable {
+    func bool(_ key: PreferenceKey) -> Bool
+    func setBool(_ value: Bool, for key: PreferenceKey)
+    func string(_ key: PreferenceKey) -> String?
+    func setString(_ value: String?, for key: PreferenceKey)
+    func removeAll()
+}
+
+public enum PreferenceKey: String, CaseIterable, Sendable {
+    /// Face ID / passcode gate on launch and when returning from the background.
+    case appLockEnabled
+    case onboardingComplete
+    case notificationPrimingShown
+    /// The optional "Protect your account" step (passkey, recovery codes) was completed or skipped.
+    case protectionPromptShown
+    /// Show business detail in notification banners (user controls previews further in iOS Settings).
+    case richNotificationPreviews
+    /// Show a decision Live Activity's question and answers on the Lock Screen and in the Dynamic Island (F-09). Off by default: the neutral
+    /// wording is shown instead. Read by the widget extension through the app group.
+    case liveActivityLockScreenDetails
+    /// "Show business names on the Lock Screen" (UX_COPY §0 rule 5). Off by default: notifications are titled "Viadere" and their lines name no
+    /// business, so a locked phone does not reveal which businesses the person deals with. Read by the notification service extension through
+    /// the app group. An extension cannot tell whether the phone is locked, so off means no business name in any notification.
+    case lockScreenBusinessNames
+    case lastKnownConsumerId
+    /// The saved business context of the Organization views (`OrganizationContext` JSON). A filter only; never sent as authority.
+    case organizationContext
+    /// SHA-256 of Safe Action request ids this phone already accepted, with when each lapses (`PreferencesSafeActionReplayStore`).
+    case safeActionSeenRequests
+}
+
+public final class UserDefaultsPreferences: PreferencesStore, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private static let prefix = "com.viadere.pref."
+
+    /// - Parameter suiteName: the app group id; falls back to `.standard` if the group is unavailable.
+    public init(suiteName: String? = nil) {
+        defaults = suiteName.flatMap { UserDefaults(suiteName: $0) } ?? .standard
+    }
+
+    public func bool(_ key: PreferenceKey) -> Bool { defaults.bool(forKey: Self.prefix + key.rawValue) }
+    public func setBool(_ value: Bool, for key: PreferenceKey) { defaults.set(value, forKey: Self.prefix + key.rawValue) }
+    public func string(_ key: PreferenceKey) -> String? { defaults.string(forKey: Self.prefix + key.rawValue) }
+    public func setString(_ value: String?, for key: PreferenceKey) {
+        if let value { defaults.set(value, forKey: Self.prefix + key.rawValue) } else { defaults.removeObject(forKey: Self.prefix + key.rawValue) }
+    }
+    public func removeAll() {
+        for key in PreferenceKey.allCases { defaults.removeObject(forKey: Self.prefix + key.rawValue) }
+    }
+}
+
+public final class InMemoryPreferences: PreferencesStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [PreferenceKey: String] = [:]
+
+    public init() {}
+
+    var allValues: [String] { lock.lock(); defer { lock.unlock() }; return Array(values.values) }
+
+    public func bool(_ key: PreferenceKey) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return values[key] == "1"
+    }
+    public func setBool(_ value: Bool, for key: PreferenceKey) {
+        lock.lock(); defer { lock.unlock() }
+        values[key] = value ? "1" : "0"
+    }
+    public func string(_ key: PreferenceKey) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return values[key]
+    }
+    public func setString(_ value: String?, for key: PreferenceKey) {
+        lock.lock(); defer { lock.unlock() }
+        values[key] = value
+    }
+    public func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        values.removeAll()
+    }
+}

@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build for the Viadere backend.
+# The build context must be the REPOSITORY ROOT (the server depends on ../Packages/ViadereCore):
+#
+#   docker build -f Server/Dockerfile -t viadere-server .
+#
+# ---- build ----------------------------------------------------------------
+FROM swift:6.4.1-resolute AS build
+WORKDIR /build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libssl-dev zlib1g-dev ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Resolve dependencies first so they are cached between source changes.
+COPY Packages/ViadereCore ./Packages/ViadereCore
+# ViadereKit is a test-only dependency of the server tests (ST-MFA-10/11); SwiftPM resolves every path dependency, so it must exist
+# in the build stage. It is never linked into ViadereServer and the runtime stage copies only the server binary.
+COPY Packages/ViadereKit ./Packages/ViadereKit
+COPY Server/Package.swift Server/Package.resolved ./Server/
+WORKDIR /build/Server
+# SwiftPM requires every declared target's directory to exist, even when only one product is built.
+COPY Server/Sources ./Sources
+COPY Server/Tests ./Tests
+# The SwiftPM build directory is a BuildKit cache mount: a build that is interrupted (remote builders have time limits; a cold
+# release build of the server takes about 30 minutes) resumes where it stopped, and later builds recompile only what changed.
+# The binary is copied out of the mount, so the image never depends on the cache. CI release builds run on fresh runners and
+# start from an empty cache.
+RUN --mount=type=cache,id=viadere-server-build,target=/build/Server/.build \
+    swift package resolve \
+ && swift build -c release --product ViadereServer --static-swift-stdlib \
+ && mkdir -p /staging \
+ && cp "$(swift build -c release --show-bin-path)/ViadereServer" /staging/ViadereServer
+
+# ---- runtime --------------------------------------------------------------
+FROM ubuntu:26.04 AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/* \
+ # Unprivileged user with no shell and no home directory contents.
+ && groupadd --system --gid 10001 viadere \
+ && useradd --system --uid 10001 --gid viadere --no-create-home --shell /usr/sbin/nologin viadere
+
+WORKDIR /app
+COPY --from=build --chown=viadere:viadere /staging/ViadereServer /app/ViadereServer
+# Static, immutable, SRI-pinned assets served under /connect-button/v1/ (the "Connect with Viadere" button).
+COPY --chown=viadere:viadere Server/Public /app/Public
+
+ENV ENVIRONMENT=production \
+    BIND_HOST=0.0.0.0 \
+    PORT=8080
+
+USER viadere:viadere
+EXPOSE 8080
+
+ENTRYPOINT ["/app/ViadereServer"]
+CMD ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]

@@ -1,0 +1,3124 @@
+openapi: 3.1.0
+info:
+  title: Viadere Business API
+  version: "2026-10-28"
+  summary: Issue structured interactions to verified customers, receive their decisions, and exchange messages.
+  description: |
+    The business API lets a **verified** business ask a connected customer to confirm, choose, acknowledge, reply,
+    authenticate or authorize something, route support messages, publish ongoing-event statuses, and receive signed
+    webhooks when anything changes.
+
+    Hand-written from the route catalog (`Packages/ViadereCore/Sources/ViadereCore/API/APIRoutes.swift`) and the DTOs in
+    `ViadereCore`; wire formats are normative in `docs/SECURITY.md`. See `docs/BUSINESS-INTEGRATION.md` for a quickstart.
+
+    ## Authentication delivery
+    Magic-link, one-time-code and security-notice delivery (`/v1/business/auth-deliveries`, `/v1/auth-deliveries`) and the webhook signature `v2` upgrade are specified in
+    `contracts/openapi/auth-delivery-v1.yaml` (OpenAPI 3.1, ADR-0020) with JSON Schemas in `contracts/schemas/`. They answer `404` while `AUTH_DELIVERY_ENABLED` is off.
+
+    ## Authentication
+    `Authorization: Bearer vdk_live_…` (real customers) or `vdk_test_…` (sandbox only). Keys are created in the
+    business dashboard, are scoped, revocable, and shown once. Suspended or unverified businesses receive `403`.
+
+    ## Capabilities and key scopes
+    Every key carries a set of **capabilities** (`message.send`, `auth.challenge`, `transaction.approve`, ...) besides its operational
+    scopes, and a capability is usable only if the **key carries it and the business is entitled to it now**: Viadere grants
+    entitlements, by an audited operator decision with a recorded purpose; every verified business holds the messaging capabilities
+    (`message.send`, `contact.reachable`, `consent.request`) and nothing else by default. Revoking an entitlement removes the
+    capability from every existing key on its next request. An interaction of kind `authenticate` needs `auth.challenge`, `authorize`
+    needs `transaction.approve`, every other kind `message.send`; reading or cancelling an interaction needs the capability of its
+    kind. A key without it gets `403 insufficient_scope`; a business without the entitlement `403 not_entitled`; a capability Viadere
+    switched off `403 capability_disabled`. `GET /v1/business/capabilities` lists what the key can do right now and the capability
+    catalog (inputs, evidence, disclosed output fields, retention, revocation behavior).
+
+    ## Customer references
+    A customer is addressed by `relationshipId`, by `subjectRef`, or by both (which must agree). `subjectRef` (`sub_…`) is a pairwise
+    pseudonym: stable for your business, unrelated to the same customer's reference at any other business, and not derivable by
+    anyone without Viadere's key. A reference or id that is not yours is `404`, the same as one that does not exist. The older
+    per-business `consumerId` / `consumerReference` pseudonym is still returned but deprecated: use `subjectRef`.
+
+    ## Test mode
+    A `vdk_test_…` key can **only address sandbox relationships**, never a real customer: create one with
+    `POST /v1/business/sandbox/relationships`. Sandbox consumers have no device and no phone, so test traffic is never pushed,
+    texted, decided by a real device, counted against your quota, or billed. A live key cannot address a sandbox relationship
+    (`404`), and a test key used with a real relationship is `403`. The same applies to rewards, points, redemption codes, reward revocation, interaction outcome and cancel (a test key sees only test objects), and a test key cannot change the loyalty program or issue a reward to every member. `interaction.decided` webhooks never carry the raw signed decision (`deviceRef` and `verification` instead).
+
+    ## Idempotency
+    Every `POST` that creates something takes an `Idempotency-Key` header which **must equal** the body's `idempotencyKey`.
+    Repeating a request with the same key and body returns the original result (`200` instead of `201`); the same key with a
+    different body is `409 idempotency_conflict`. Webhook creation, webhook secret rotation and interaction cancel also
+    **require** an `Idempotency-Key` header (1-128 characters of `A-Za-z0-9_.-:`, no body field to match; a missing or invalid one is
+    `422`). A retry of one of those returns the original result (`200`); because creation and rotation return a one-time secret,
+    the sealed result is replayable for 24 hours, after which a replay is `410 gone` (rotate to get a new secret).
+
+    ## Errors
+    Every error body is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.
+
+    ## Rate limits
+    Per business (default burst 120, sustained 600 requests/minute) plus a daily live-interaction quota. Exceeding either
+    returns `429` with `Retry-After` (seconds). Complaint and opt-out rates above Viadere's thresholds automatically reduce
+    both limits; paying never changes the priority of your messages or bypasses a customer's consent.
+
+    ## Security model
+    * Security-sensitive kinds (`authenticate`, `authorize`, unknown kinds, or any `high`/`critical` sensitivity) can only be
+      approved by a device-signed decision in the Viadere app. They are never approvable by SMS or RCS reply; text channels
+      receive a notice to open the Viadere app instead (no link and no code are ever texted).
+    * You see a per-business pseudonym for each customer, never their Viadere identity or phone number. A decision names the
+      deciding **device** by a per-business pseudonym (`deviceRef`) and carries the server's attestation that the device
+      signature, the shown context and the assurance were verified (`verification`). You never receive the raw device-signed
+      decision (it contains the global device id); Viadere keeps it for disputes.
+    * Business text shown on approval screens may not contain bidirectional, zero-width, control or line-separator
+      characters, may not start with (or, for names, mention) "Viadere", and is capped in graphemes, unicode scalars and UTF-8
+      bytes; violations are `422 validation_failed`.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Viadere
+servers:
+  - url: https://viadere.com
+    description: Production
+security:
+  - apiKey: []
+tags:
+  - name: Interactions
+  - name: Messages
+  - name: Statuses
+  - name: Webhooks
+  - name: Rewards
+  - name: Wallet
+  - name: Capabilities
+  - name: Verification
+  - name: Approve
+  - name: KeyDirectory
+  - name: LinkSessions
+  - name: Profiles
+  - name: Loops
+
+paths:
+  /v1/business/capabilities:
+    get:
+      tags: [Capabilities]
+      operationId: getCapabilities
+      summary: What this key can do right now
+      description: |
+        Any valid key. Returns the business's risk tiers, the capabilities Viadere granted it (the ceiling), the capabilities this key
+        carries, their intersection minus anything switched off (`effective`), and the capability catalog. Informational: every request
+        is still evaluated by the policy engine, and a capability withdrawn a moment ago may still be listed until the next request.
+      responses:
+        "200":
+          description: The key's capabilities.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessCapabilitiesResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/profile-requests:
+    post:
+      tags: [Profiles]
+      operationId: createProfileRequest
+      summary: Ask a customer for profile fields
+      description: |
+        Scope `profiles:read`. Every `fieldKeys` entry must be a catalog key (docs/PROFILES.md) in a category Viadere allowed your business at
+        onboarding; anything else is `403 not_entitled` before the customer is looked up (no category is allowed by default). `purpose` is shown to
+        the customer verbatim and must pass the display-text rules (no control or invisible characters, no line breaks, at most 200 characters,
+        no "Viadere"). The customer approves field by field (partial approval is normal) or declines. A test key reaches sandbox customers only, and
+        a sandbox request is answered at once with simulated values. Idempotent on `Idempotency-Key`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProfileRequest" }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "200":
+          description: Replay of the same idempotency key and body.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/profile-requests/{requestId}:
+    get:
+      tags: [Profiles]
+      operationId: getProfileRequest
+      summary: One of your profile requests
+      description: Scope `profiles:read`. `answered` carries `approvedKeys` (possibly fewer than asked, possibly none). Another business's request is `404`.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The request.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProfileRequestResource" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/profiles/{subjectRef}:
+    get:
+      tags: [Profiles]
+      operationId: getProfile
+      summary: The public name and currently granted fields of a customer
+      description: |
+        Scope `profiles:read`. Always returns the customer's public name. Other fields only while the customer grants them **and** your business
+        holds the field's category entitlement; a revocation by the customer or by Viadere takes effect on the next call. Every read is audited
+        (field keys only). `Cache-Control: no-store`. A customer of another business, or in the other environment, is `404`.
+      parameters:
+        - { name: subjectRef, in: path, required: true, schema: { $ref: "#/components/schemas/SubjectRef" } }
+      responses:
+        "200":
+          description: The profile view.
+          content: { application/json: { schema: { $ref: "#/components/schemas/BusinessProfileView" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/interactions:
+    post:
+      tags: [Interactions]
+      operationId: issueInteraction
+      summary: Issue an interaction
+      description: |
+        Requires scope `interactions:write` and the capability of the interaction's kind (`authenticate` needs `auth.challenge`,
+        `authorize` needs `transaction.approve`, every other kind `message.send`). For `authenticate` and `authorize` the customer must also have a registered authenticator (an enrolled device), else `403 policy_denied`. The relationship must belong to your business and be active, the customer must have
+        consented to the `purpose`, and your daily quota must not be exhausted. Priority is clamped by the Trust Engine
+        (marketing and rewards never exceed `normal`; `urgent` is reserved for security authenticate/authorize).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueInteractionRequest" }
+            examples:
+              confirmPickup:
+                summary: Ask a customer to confirm a pickup
+                value:
+                  relationshipId: 11111111-2222-4333-8444-555555555555
+                  kind: confirm
+                  purpose: transactional
+                  payload:
+                    title: Confirm pickup
+                    details: Thursday 10:30 at Main Street
+                    reference: BK-20418
+                  priority: normal
+                  sensitivity: standard
+                  allowedChannels: [nativePush, inApp, rcs, sms]
+                  ttlSeconds: 3600
+                  idempotencyKey: order-1042-confirm
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "200":
+          description: The idempotency key was already used with an identical request; the original interaction is returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/interactions/{interactionId}:
+    get:
+      tags: [Interactions]
+      operationId: getInteractionOutcome
+      summary: Get an interaction's outcome
+      description: Requires scope `interactions:read` and the capability of the interaction's kind. Pending interactions past their expiry are reported as `expired`.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+      responses:
+        "200":
+          description: The current outcome.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InteractionOutcome" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/interactions/{interactionId}/cancel:
+    post:
+      tags: [Interactions]
+      operationId: cancelInteraction
+      summary: Cancel a pending interaction
+      description: |
+        Requires scope `interactions:write`, the capability of the interaction's kind and an `Idempotency-Key` header. Cancelling an interaction that is already final returns
+        its outcome unchanged. The same key with another interaction is `409 idempotency_conflict`.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The outcome after cancellation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InteractionOutcome" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/messages:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Send a message to a customer
+      description: |
+        Requires scope `messages:write` and the capability `message.send`. Delivered into the customer's active SMS session with you, or held in the
+        conversation history. Always attributed to your verified business name. To send images, upload each to the conversation first
+        (`POST /v1/business/conversations/{sessionId}/attachments`) and list their ids in `attachmentIds` with the same `sessionId` (at most 4;
+        `body` may then be empty). An SMS thread never receives an image or a link to one: the text says an image is waiting in the Viadere app.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessSendMessageRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationMessage" }
+        "200":
+          description: Idempotent replay of an earlier identical request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationMessage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/conversations/{sessionId}/attachments:
+    post:
+      tags: [Messages]
+      operationId: uploadAttachment
+      summary: Upload an image to a conversation
+      description: |
+        Requires scope `messages:write` and the capability `message.send` (SECURITY.md §2.113). The body is the raw image, `Content-Type: image/png`
+        or `image/jpeg`, at most 2 MiB (a larger `Content-Length` is refused before the body is read). The image is decoded by Viadere's pure-Swift
+        decoder, refused if it is malformed, animated, has trailing data or is larger than 8192 px per side or 25 megapixels, and **re-encoded**
+        (longest side at most 2048 px; JPEG when opaque, PNG with transparency): EXIF, GPS, ICC, XMP and every other metadata is dropped. The
+        stored image is encrypted at rest and bound to this conversation of your organization. The answer is a **pending** attachment: name it in
+        `attachmentIds` of `POST /v1/business/messages` (with the same `sessionId`) within an hour, or it expires. At most 8 pending uploads per
+        conversation. A test key reaches sandbox conversations only.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary, maxLength: 2097152 }
+          image/jpeg:
+            schema: { type: string, format: binary, maxLength: 2097152 }
+      responses:
+        "201":
+          description: Stored as a pending attachment of this conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageAttachment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: The body is larger than 2 MiB. Nothing was read past the limit. }
+        "415": { description: The body is not declared as `image/png` or `image/jpeg`. }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { description: Image uploads are not available right now. }
+  /v1/business/conversations/{sessionId}/attachments/{attachmentId}:
+    get:
+      tags: [Messages]
+      operationId: getAttachment
+      summary: Download an image of a conversation
+      description: |
+        Requires scope `messages:write` and the capability `message.send`. Returns the stored (re-encoded) image of a conversation of your
+        organization: a customer's image named in a `message.received` webhook, or one you sent. The response is the image itself with
+        `Content-Type` from the stored type, `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a `default-src 'none'; sandbox`
+        CSP and `Cache-Control: private, no-store`; there is never a redirect to storage and no public URL exists. Compare the bytes with
+        `sha256` and `byteSize` of the reference. An id of another conversation or another organization is the same `404` as an unknown id.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+        - { name: attachmentId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The image.
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/statuses:
+    post:
+      tags: [Statuses]
+      operationId: updateStatus
+      summary: Publish an ongoing-event status
+      description: |
+        Requires scope `statuses:write` and the capability `message.send`. A newer status with the same `activityKey` replaces the earlier one. Eligible
+        purposes (`transactional`, `accountService`, `support`) may drive a Live Activity on the customer's device.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessStatusUpdateRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Interaction" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/sandbox/relationships:
+    post:
+      tags: [Interactions]
+      operationId: createSandboxRelationship
+      summary: Create a sandbox relationship (test keys only)
+      description: |
+        Creates a sandbox consumer connected to your business and returns the relationship id to use with a `vdk_test_…` key.
+        Requires scope `interactions:write` and a **test** key (`403` with a live key). At most 50 per business.
+      responses:
+        "201":
+          description: The sandbox relationship.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SandboxRelationship" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/enrollments:
+    post:
+      tags: [Approve]
+      operationId: createApprovalEnrollment
+      summary: Start enrolling a customer's pairwise approval key
+      description: |
+        Requires scope `approvals:manage` and the capability `auth.challenge` or `transaction.approve`; live keys only. The customer must be
+        connected to your business. Do not show the returned `deep_link`: use the BusinessSDK's `createApprovalEnrollment`, which builds the link with your
+        own root key id and a 256-bit enrollment secret in the URL fragment (`#es=`, never sent to Viadere) and refuses a ticket naming another root.
+        Show the link or QR in your **own signed-in session**; never send it by SMS or email. Single use; lifetime 10 minutes by default, at most 15; at
+        most 3 open enrollments per relationship. Then wait for `approve.enrollment.device_completed`, fetch the enrollment and **authenticate the
+        statement with your secret** (the `binding_tag`, or the SAS the customer types in) before verifying and confirming it (SECURITY.md 2.53). A
+        statement that verifies proves only possession of its key, not who sent it. A completed enrollment you do not confirm within its lifetime plus
+        5 minutes is ended and the pending key revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateApprovalEnrollmentRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalEnrollmentTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/enrollments/{enrollmentId}:
+    get:
+      tags: [Approve]
+      operationId: getApprovalEnrollment
+      summary: Read an enrollment, including the device's signed statement
+      description: |
+        Requires scope `approvals:manage`. `device_statement` is the signed `approval-enrollment` statement the phone made with its **new**
+        key. Verify it yourself (signature by the statement's own key, `business_id`, `subject_ref`, `enrollment_id`, assurance) before confirming.
+      parameters:
+        - { name: enrollmentId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The enrollment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalEnrollmentView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/enrollments/{enrollmentId}/confirm:
+    post:
+      tags: [Approve]
+      operationId: confirmApprovalEnrollment
+      summary: Confirm the device's key with a signed confirmation
+      description: |
+        Requires scope `approvals:manage`. The confirmation is signed by your published `approval-enrollment-confirmation` key over the digest of
+        the device statement. Viadere checks its form and that the signing key is in your directory, but **cannot forge it**; the phone verifies it
+        against the transparency log before activating the key, so a substituted key is detected on the phone.
+      parameters:
+        - { name: enrollmentId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmApprovalEnrollmentRequest" }
+      responses:
+        "200":
+          description: The key, now active.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalKeyView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/enrollments/{enrollmentId}/cancel:
+    post:
+      tags: [Approve]
+      operationId: cancelApprovalEnrollment
+      summary: Cancel an open enrollment
+      description: Requires scope `approvals:manage`.
+      parameters:
+        - { name: enrollmentId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The enrollment, cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalEnrollmentView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/keys:
+    get:
+      tags: [Approve]
+      operationId: listApprovalKeys
+      summary: List approval keys Viadere holds for a customer
+      description: |
+        Requires scope `approvals:manage`; query `subject_ref`. **For display and reconciliation only.** Authorize against your own store of the
+        keys you verified at enrollment, never against this list.
+      parameters:
+        - { name: subject_ref, in: query, required: true, schema: { $ref: "#/components/schemas/SubjectRef" } }
+      responses:
+        "200":
+          description: Keys.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApprovalKeyView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/keys/{kid}/revoke:
+    post:
+      tags: [Approve]
+      operationId: revokeApprovalKey
+      summary: Revoke an approval key
+      description: "Requires scope `approvals:manage`. Also mark the key revoked in your own store: that is what you verify against. Emits `approve.key.revoked`."
+      parameters:
+        - { name: kid, in: path, required: true, schema: { type: string, minLength: 43, maxLength: 43 } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeApprovalKeyRequest" }
+      responses:
+        "200":
+          description: The key, revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalKeyView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/requests:
+    post:
+      tags: [Approve]
+      operationId: createApprovalRequest
+      summary: Ask a customer to approve a payment or a sign-in
+      description: |
+        Requires scope `approvals:manage` and the capability `auth.challenge` (an `authentication` object) or `transaction.approve` (a `transaction`
+        object); live keys only. `request_id` makes the call idempotent (the same id with different content is `409 idempotency_conflict`).
+
+        **End to end (recommended):** send `envelopes` (1 to 8): one `E2EEEnvelope` per enrolled device, each carrying your signed
+        `ApprovalRequest` (SECURITY.md 2.54). No plaintext fields are allowed; Viadere relays ciphertext. **Server-visible:** send `challenge` plus
+        `transaction` or `authentication`; Viadere can read it and the app labels the request as not end-to-end protected.
+
+        A customer without an active key gets `409` with `details.reason = "no_active_key"`. Per customer: a warning from the third request in an
+        hour, at most 6 an hour (`429`, `Retry-After`), a pause after 3 refusals (`409 approvals_paused`), a freeze (`409 approvals_frozen`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateApprovalRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalRequestView" }
+        "200":
+          description: "The same `request_id` with identical content: the original request."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalRequestView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/requests/{requestId}:
+    get:
+      tags: [Approve]
+      operationId: getApprovalRequest
+      summary: The relay's view of a request
+      description: |
+        Requires scope `approvals:manage`. **`status` is information for your UI and is never sufficient to act.** Fetch the signed result with
+        `result_ref` and verify it against your own records.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: The request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalRequestView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/requests/{requestId}/cancel:
+    post:
+      tags: [Approve]
+      operationId: cancelApprovalRequest
+      summary: Cancel a pending request
+      description: Requires scope `approvals:manage`. A request already decided is `409`.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: The request, cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalRequestView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/results/{resultRef}:
+    get:
+      tags: [Approve]
+      operationId: getApprovalResult
+      summary: The signed ApprovalResult (compact JWS)
+      description: |
+        Requires scope `approvals:manage`; recipient-bound (only the audience business can read it). Verify the JWS (ES256, `typ viadere-approval+jws`)
+        with the key you enrolled for the customer, against the request you created (SECURITY.md 2.54); use `ApprovalVerifier` in the Swift SDK.
+        Do not grant anything on the strength of this response alone.
+      parameters:
+        - { name: resultRef, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: The signed result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalResultResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/freeze:
+    post:
+      tags: [Approve]
+      operationId: freezeApprovals
+      summary: Freeze or unfreeze approvals for one customer, from your side
+      description: Requires scope `approvals:manage`. You can lift only a freeze you set; a freeze the customer set stays in place.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessFreezeRequest" }
+      responses:
+        "200":
+          description: The state for this customer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FreezeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/approve/freezes/{freezeRef}:
+    get:
+      tags: [Approve]
+      operationId: getApprovalFreeze
+      summary: Resolve the opaque reference of an `approve.frozen` webhook
+      description: |
+        Requires scope `approvals:manage`. The `approve.frozen` event carries a random, per-business `frz_...` reference in `request_id`, never the
+        customer's `subject_ref`; this call returns the customer it stands for and whether approvals are frozen now. Another business's reference is a 404.
+      parameters:
+        - name: freezeRef
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The customer and the current state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FreezeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/loops/events/{eventRef}:
+    get:
+      tags: [Loops]
+      operationId: getLoopEvent
+      summary: Read a connected Loop action event
+      description: |
+        Requires scope `loops:read` and a live key. `eventRef` is the `result_ref` of a `loop.action.submitted` webhook (`lev_` plus a lowercase UUID).
+        Returns the answers with their reviewed labels, the binding estimate approval for `approve_estimate` (amount, terms, reference, the
+        signed context digest, `biometric`), and the current outcome. The customer is identified only by `instance_ref`: no account id,
+        `subject_ref`, name or device. Another business's reference, a hosted (inbox) event and a malformed reference are all 404.
+      parameters:
+        - name: eventRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lev_[0-9a-f-]{36}$" }
+      responses:
+        "200":
+          description: The event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopBusinessEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/loops/events/{eventRef}/outcome:
+    post:
+      tags: [Loops]
+      operationId: answerLoopEvent
+      summary: Answer a connected Loop action event
+      description: |
+        Requires scope `loops:write` and a live key. Exactly `outcome` (`accepted`, `rejected`, or `pending` to confirm receipt after Viadere showed
+        the customer `unknown`) and `idempotency_key`. The same key with the same outcome returns the stored answer (`200`, `replayed: true`); the
+        same key with another outcome, or any change after a final outcome, is 409. The customer sees only Viadere's wording for the outcome.
+      parameters:
+        - name: eventRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lev_[0-9a-f-]{36}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoopOutcomeCallbackRequest" }
+      responses:
+        "201":
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopOutcomeCallbackResult" }
+        "200":
+          description: A repeated idempotency key; nothing new was recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopOutcomeCallbackResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/loops/instances/{instanceRef}:
+    get:
+      tags: [Loops]
+      operationId: getLoopInstance
+      summary: Read a connected Loop instance
+      description: |
+        Requires scope `loops:read` and a live key. `instanceRef` is the `request_id` of a `loop.instance.expired` webhook (`lin_` plus a lowercase
+        UUID) or the `instance_ref` of an event. Only instances with at least one connected event are readable; anything else is 404.
+      parameters:
+        - name: instanceRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lin_[0-9a-f-]{36}$" }
+      responses:
+        "200":
+          description: The instance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopBusinessInstance" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/approve/settings:
+    get:
+      tags: [Approve]
+      operationId: getApproveSettings
+      summary: Your Approve settings
+      description: Requires scope `approvals:manage`. `device_policy` is `any_enrolled` (default) or `single_device` (SECURITY.md 2.55).
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Approve]
+      operationId: putApproveSettings
+      summary: Change your device policy
+      description: |
+        Requires scope `approvals:manage` and an approval capability. `single_device`: when a key is activated, the customer's other keys for your
+        business are revoked, and requests go to the newest active key only. The policy in force is recorded on every key and every request. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+      responses:
+        "200":
+          description: The settings now in force.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveBusinessSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/link-sessions:
+    post:
+      tags: [LinkSessions]
+      operationId: createLinkSession
+      summary: Start linking the customer you just authenticated to their Viadere app
+      description: |
+        Requires scope `links:manage`, a live key, a registered key-directory root and a published `approval-enrollment-confirmation` key, and the
+        capabilities you ask for (each must be a registered, linkable action: `message.send`, `contact.reachable`, `consent.request`, `auth.challenge`,
+        `transaction.approve`). Step the customer up in your own session immediately before; the session lives at most 5 minutes and is single use.
+        `customer_ref` is your own opaque reference (stored only as a keyed hash, for per-customer rate limits). Do not show the returned `link`: the
+        BusinessSDK (`createLinkSession`) builds the link with your session secret in the fragment (`#es=`, never sent to Viadere), and the check
+        code for the typed path. Rate limited per business and per `customer_ref` (SECURITY.md 2.59).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLinkSessionRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/link-sessions/{sessionId}:
+    get:
+      tags: [LinkSessions]
+      operationId: getLinkSession
+      summary: A link session, with the device's statement once completed
+      description: |
+        Requires scope `links:manage`. After `link.completed`: `subject_ref` (alias `connection_id`), the device's `statement`, the `binding_tag` (QR
+        path), the `approval_statement` (approval capabilities) and `result`, Viadere's signed account (key `link-descriptor`). **Authenticate the
+        statement yourself** (binding tag and/or SAS) and have the person compare or type the SAS in your signed-in session before confirming.
+        Another business's session is a 404.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/link-sessions/{sessionId}/confirm:
+    post:
+      tags: [LinkSessions]
+      operationId: confirmLinkSession
+      summary: Confirm a completed link session (activates the connection)
+      description: |
+        Requires scope `links:manage`. `confirmation` is your `LinkConfirmation` (VIADERE-LINK-CONFIRM-V1) and, with approval capabilities,
+        `approval_confirmation` is your `ApprovalEnrollmentConfirmation` of the approval key (enrollment id = session id), both signed by a currently
+        published `approval-enrollment-confirmation` key. The connection becomes `active` only now. Too late (expiry + 5 minutes) is `410`. Then send
+        the customer an out-of-band notice through your own channel ("A Viadere app was linked to your account. Not you?").
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmLinkSessionRequest" }
+      responses:
+        "200":
+          description: Confirmed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { description: Too late to confirm. }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/link-sessions/{sessionId}/cancel:
+    post:
+      tags: [LinkSessions]
+      operationId: cancelLinkSession
+      summary: Cancel a link session (also ends a pending connection and key)
+      description: Requires scope `links:manage`. Idempotent.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/verification-sessions:
+    post:
+      tags: [Verification]
+      operationId: createVerificationSession
+      summary: Start a "Verify with Viadere" session for the button on one of your web origins
+      description: |
+        Server side only, live keys only. Needs the capability (`age.minimum`, `identity.name`, `identity.address`, `identity.verified`) on the key
+        **and** in your business's entitlements, like `POST /v1/verification-requests`. `origin` must be `https://{host}` inside one of your
+        verified domains; `return_url` (optional) must be on exactly that origin. The session lives 60-300 s (default 300) and is accepted once.
+        Give `link` (`https://{link domain}/v/{CODE}`) to the button (docs/VERIFY-BUTTON.md); keep `session_id` with your visitor's session.
+        SECURITY.md 2.100.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVerificationSessionRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/verification-sessions/{sessionId}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationSession
+      summary: A verification session, with Viadere's signed result once completed
+      description: |
+        `status`: `open`, `accepted` (the person continued in the app; `request_id` and `subject_ref` present), `completed` (`result` and
+        `result_ref` present), `expired`, `cancelled`. **Verify `result` yourself** against the `link-descriptor` keys you pinned
+        (`VIADERE-VERIFY-SESSION-RESULT-V1`) and check `session_id`, `business_id`, `origin`, `capability` and the `result_ref` digest. Attribute
+        values come once from `GET /v1/verification-results/{result_ref}`. Another business's session is a 404.
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/verification-sessions/{sessionId}/cancel:
+    post:
+      tags: [Verification]
+      operationId: cancelVerificationSession
+      summary: Cancel an open verification session (an accepted one runs to its result)
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationSessionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/key-directory/entries:
+    post:
+      tags: [KeyDirectory]
+      operationId: publishKeyEntry
+      summary: Publish a signed key-directory entry
+      description: |
+        Requires scope `keydirectory:manage`; live keys only. `entry` is the base64url canonical `KeyLogEntry` (SECURITY.md 2.51): a `root`
+        registration, a `root-succession`, a `key` or a `revoke`. Viadere checks the signatures and the replay rules (contiguous serial, current root,
+        validity at most 400 days, no reused kid) inside the log lock and appends; it holds none of your keys. Not retried automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublishKeyEntryRequest" }
+      responses:
+        "201":
+          description: Appended.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishKeyEntryResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [KeyDirectory]
+      operationId: listKeyEntries
+      summary: Your own directory entries with proofs
+      description: Requires scope `keydirectory:manage`. Query `since` is the tree size you last verified (adds a consistency proof). Verify everything; run `viadere-key-monitor`.
+      parameters:
+        - { name: since, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: The signed tree head, the optional consistency proof and your entries with inclusion proofs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KeyDirectoryResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/key-directory/sth:
+    get:
+      tags: [KeyDirectory]
+      operationId: keyDirectorySignedTreeHead
+      summary: The latest signed tree head (public)
+      security: []
+      responses:
+        "200":
+          description: The head, signed by Viadere's log key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedTreeHead" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/key-directory/consistency:
+    get:
+      tags: [KeyDirectory]
+      operationId: keyDirectoryConsistency
+      summary: A Merkle consistency proof between two tree sizes (public)
+      security: []
+      parameters:
+        - { name: first, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: second, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The proof (RFC 6962 / RFC 9162), hex node hashes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsistencyProofResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/key-directory/businesses/{businessId}:
+    get:
+      tags: [KeyDirectory]
+      operationId: keyDirectoryBusiness
+      summary: A business's published keys with proofs (public)
+      description: |
+        The signed tree head, an optional consistency proof from `since`, and every entry of this business with its inclusion proof. Clients verify
+        all of it (SECURITY.md 2.51); the server is not trusted.
+      security: []
+      parameters:
+        - { name: businessId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+        - { name: since, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: The directory page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KeyDirectoryResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      summary: List webhook endpoints
+      description: Requires scope `webhooks:manage`.
+      responses:
+        "200":
+          description: Active subscriptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WebhookSubscription" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      summary: Create a webhook endpoint
+      description: |
+        Requires scope `webhooks:manage`. The URL must be a public `https` URL (private, loopback, link-local and cloud
+        metadata addresses are refused, and redirects are never followed). The signing `secret` in the response is shown
+        **once**. At most 10 active endpoints per business. Requires an `Idempotency-Key` header: a retry with the same key and body
+        returns the same subscription and secret (`200`) for 24 hours; the same key with another body is `409 idempotency_conflict`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWebhookRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "200":
+          description: The idempotency key was already used with an identical request; the original subscription and secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}:
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook endpoint
+      description: Requires scope `webhooks:manage`. Pending deliveries to the endpoint are dropped.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200":
+          description: Deleted (an empty object).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: false }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/rotate-secret:
+    post:
+      tags: [Webhooks]
+      operationId: rotateWebhookSecret
+      summary: Rotate a webhook signing secret
+      description: |
+        Requires scope `webhooks:manage`. The previous secret keeps signing for 24 hours (the `Viadere-Signature` header then
+        carries two `v1=` values) so you can switch over without dropping events. Requires an `Idempotency-Key` header: a retry with the
+        same key returns the same new secret instead of rotating again (24 hours; the same key for another webhook is
+        `409 idempotency_conflict`).
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The new secret (shown once).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecretResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/verify:
+    post:
+      tags: [Webhooks]
+      operationId: verifyWebhook
+      summary: Prove you control a webhook endpoint
+      description: |
+        Requires scope `webhooks:manage`. Until an endpoint is verified it receives **no events**, not even test events. Viadere POSTs a signed `webhook.verification` request
+        (same headers as every delivery) whose JSON body holds a single-use `challenge`, valid for ten minutes; the endpoint must answer 2xx with
+        `{"challenge_response": "<hex HMAC-SHA256 keyed by the endpoint signing secret over viadere.webhook.verification.v1: + challenge>"}`. A plain echo is refused. Each call uses a fresh challenge, so an old response never verifies a later attempt. At most 6 calls per endpoint per hour (`429`).
+        Verifying an already verified endpoint returns `verified: true`. A failed check is a `200` with `verified: false` and a `failure` of `no_echo`, `http_<status>` or `unreachable`.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200":
+          description: The result of the check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookVerificationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/test:
+    post:
+      tags: [Webhooks]
+      operationId: sendWebhookTestEvent
+      summary: Send a signed test event to one endpoint
+      description: |
+        Requires scope `webhooks:manage`. Queues a `webhook.test` event (no customer data) through the normal delivery worker, so it carries the real `Viadere-Signature`, `Viadere-Delivery-Id` and
+        `Viadere-Key-Id` and follows the real retry schedule. `409` if the endpoint is not verified or is paused; at most 10 a minute per endpoint.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200": { description: Queued. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/webhooks/{webhookId}/pause:
+    post:
+      tags: [Webhooks]
+      operationId: pauseWebhook
+      summary: Pause delivery to one endpoint
+      description: |
+        Requires scope `webhooks:manage`. Events keep queueing but are neither sent nor dead-lettered; they go out after `resume` (or expire with the delivery retention period).
+        Idempotent. Viadere may also pause delivery for your whole organization or platform-wide during an incident; the console shows a banner and the queue is kept.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PauseWebhookRequest" }
+      responses:
+        "200": { description: Paused. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/webhooks/{webhookId}/resume:
+    post:
+      tags: [Webhooks]
+      operationId: resumeWebhook
+      summary: Resume delivery to a paused endpoint
+      description: Requires scope `webhooks:manage`. Idempotent. Queued deliveries are sent in order of their next attempt.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      responses:
+        "200": { description: Resumed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/loyalty/program:
+    get:
+      tags: [Rewards]
+      operationId: getLoyaltyProgram
+      summary: Read your loyalty program
+      description: Requires scope `rewards:write`. `404` until you create one.
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessLoyaltyProgram" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    put:
+      tags: [Rewards]
+      operationId: saveLoyaltyProgram
+      summary: Create or replace your loyalty program
+      description: |
+        Requires scope `rewards:write`. One program per business. `timeZone` is the IANA zone whose midnight starts a "day" for
+        recurring rewards and per-day limits. Changing `termsVersion` makes customers accept the new terms to join (an enroll call
+        with the old version is `409`); existing members keep their balance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertLoyaltyProgramRequest" }
+      responses:
+        "200":
+          description: The saved program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessLoyaltyProgram" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/loyalty/points:
+    post:
+      tags: [Rewards]
+      operationId: adjustLoyaltyPoints
+      summary: Add or remove points for an enrolled customer
+      description: |
+        Requires scope `rewards:write`. Idempotent on `idempotencyKey` (the `Idempotency-Key` header must equal it): a replay changes
+        nothing and returns `applied: false`. A balance never goes below zero (`409`). The customer must have joined your program (`409`).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdjustLoyaltyPointsRequest" }
+      responses:
+        "200":
+          description: The new balance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoyaltyPointsResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/rewards:
+    get:
+      tags: [Rewards]
+      operationId: listRewards
+      summary: List your rewards
+      description: Requires scope `rewards:write`. Newest first, at most 200.
+      responses:
+        "200":
+          description: Your rewards.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Rewards]
+      operationId: createReward
+      summary: Create a reward
+      description: |
+        Requires scope `rewards:write`. Without `relationshipId` the reward belongs to your program and every connected customer sees
+        it with their own **server-computed** eligibility; with one, only that customer does. Kinds: `coupon` and `offer` are claimed
+        before use; `perk` and `pointsReward` are redeemed directly. A `recurrence` limits the reward to ISO weekdays (1 = Monday)
+        evaluated in the recurrence's time zone, with `perDayLimit` redemptions per local day; without one, coupons, offers and perks
+        can be redeemed once per customer and points rewards as often as the balance allows.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IssueRewardRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/rewards/{rewardId}/revoke:
+    post:
+      tags: [Rewards]
+      operationId: revokeReward
+      summary: Withdraw a reward
+      description: |
+        Requires scope `rewards:write`. Outstanding redemption codes stop validating (`410`), held points return to customers, and
+        Wallet passes for the reward are voided. Safe to repeat.
+      parameters:
+        - name: rewardId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: The revoked reward.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/business/redemptions/consume:
+    post:
+      tags: [Rewards]
+      operationId: consumeRedemption
+      summary: Validate and consume a redemption code
+      description: |
+        Requires scope `rewards:write`. Validation and consumption are **one atomic step**: of any number of concurrent calls for a code,
+        exactly one succeeds. Codes look like `K7M2Q-9XPB4`, are valid for about two minutes after the customer asks for them, and are
+        single use; case, dashes and spaces are ignored.
+
+        | Result | Meaning |
+        |---|---|
+        | `200` | Redeemed. Give the customer their reward. |
+        | `404` | Unknown, malformed or another business's code (indistinguishable on purpose). |
+        | `409` | Already used (`details.redeemedAt`). |
+        | `410` | Expired, or the reward was withdrawn. |
+        | `429` | Too many attempts; the budget (60/min, burst 30 per business) bounds code guessing. |
+
+        This call is not retried automatically by the SDK: if a response is lost, a repeat answers `409`, so confirm with the customer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConsumeRedemptionRequest" }
+      responses:
+        "200":
+          description: Consumed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedemptionReceipt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410":
+          description: The code expired or the reward was withdrawn.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/wallet/passes:
+    post:
+      tags: [Wallet]
+      operationId: issueWalletPass
+      summary: Issue a Wallet pass for a connected customer
+      description: |
+        Requires scope `wallet:write` and the `message.send` capability. **Live keys only**: a test-mode key never produces a pass
+        (`403`). `storeCard` needs the customer's loyalty membership, `coupon` a reward the customer can see, `eventTicket` and
+        `generic` (reservations, appointments) a `ticket` interaction you sent them. One pass per customer and subject: a repeat returns
+        the existing pass with `200`. The customer adds it to Apple Wallet from the Viadere app; you never receive the `.pkpass`.
+        Pass content is only what the customer's own card shows; Viadere never puts a name, phone, e-mail or member number in a pass.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessIssueWalletPassRequest" }
+      responses:
+        "200":
+          description: The existing pass.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "201":
+          description: Issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [Wallet]
+      operationId: listWalletPasses
+      summary: List your Wallet passes
+      description: Requires scope `wallet:write`. Newest first; query `limit` (1-200, default 50). Whether a customer added a pass to Wallet is not disclosed.
+      responses:
+        "200":
+          description: Passes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/BusinessWalletPass" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/business/wallet/passes/{passId}:
+    patch:
+      tags: [Wallet]
+      operationId: updateWalletPass
+      summary: Change a ticket or reservation pass, or rotate its code
+      description: |
+        Requires scope `wallet:write`, live keys. `venue`, `seat` and `startsAt` apply to `eventTicket` and `generic` passes (`409` for
+        others); the customer's Wallet shows "Venue changed to ..." style notices for them. `rotateScanCode` invalidates the QR currently
+        in the pass (for any kind) and pushes a new one. Updates are operational, never marketing: a pass accepts 6 updates a day (`429`).
+      parameters:
+        - { name: passId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWalletPassRequest" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/business/wallet/passes/{passId}/void:
+    post:
+      tags: [Wallet]
+      operationId: voidWalletPass
+      summary: Void a Wallet pass
+      description: Requires scope `wallet:write`, live keys. Final. The code stops scanning at once; Wallet shows the pass as void after its next refresh (pushed now).
+      parameters:
+        - { name: passId, in: path, required: true, schema: { $ref: "#/components/schemas/Uuid" } }
+      responses:
+        "200":
+          description: Voided (also when it already was).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessWalletPass" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/business/wallet/scan:
+    post:
+      tags: [Wallet]
+      operationId: scanWalletPass
+      summary: Validate a scanned pass code
+      description: |
+        Requires scope `wallet:write` and `message.send`. Codes look like `VQ1.` followed by 48 base64url characters; only Viadere can
+        mint or check one. What happens depends on the pass:
+
+        | Pass | Result |
+        |---|---|
+        | `coupon` | **Redeemed**, atomically and once (the same rules, limits, webhook and receipt as `POST /v1/business/redemptions/consume`). |
+        | `eventTicket`, `generic` | **Checked in**, once. A second scan is `409` with `details.usedAt`. Before the ticket's validity window: `409` `notYetValid`; after it: `410`. |
+        | `storeCard` | **Member** identified, with the points balance (add points with `POST /v1/business/loyalty/points`). |
+
+        `404` for a forged, altered, rotated-out or malformed code, another business's pass, or a pass whose customer disconnected (all the
+        same on purpose). `410` for a voided pass or an expired coupon. `429` when the per-business budget is spent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WalletScanRequest" }
+      responses:
+        "200":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WalletScanResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/verification-requests:
+    post:
+      tags: [Verification]
+      operationId: createVerificationRequest
+      summary: Ask a customer to verify an age threshold or an identity attribute
+      description: |
+        Needs the capability (`age.minimum`, `identity.name`, `identity.address` or `identity.verified`) on the key **and** in your business's
+        entitlements (risk tier V; identity attributes also need a recorded heightened review). A key that carries only messaging
+        capabilities gets `403 insufficient_scope`. The request is checked by the policy engine before anything about the customer is read.
+
+        The customer sees who you are, the purpose, **exactly** what will be shared, who receives it and when the request expires, and gives
+        consent for that disclosure (a consent receipt). Wallet (an ID in Apple Wallet) is offered first; document scanning is the alternative.
+        `callback_id` names one of **your registered webhook endpoints** subscribed to `verification.completed`; a URL is never accepted.
+        `expires_in_seconds` is 30 to 600 (default 300).
+
+        An `age.minimum` result discloses only `meets_threshold`, `assurance`, `issued_at`, `expires_at` and `audience`: never a birthdate,
+        an age, a name or a document number.
+        Idempotent on the `Idempotency-Key` header.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVerificationRequest" }
+            example:
+              subject_ref: "sub_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+              capability: age.minimum
+              parameters: { years: 18 }
+              purpose_code: age_restricted_access
+              callback_id: "5d1b2a60-0000-4000-8000-000000000001"
+              expires_in_seconds: 180
+      responses:
+        "200":
+          description: The idempotency key was used before with the same request; the original request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "201":
+          description: Created and delivered to the customer's app.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/verification-requests/{requestId}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationRequest
+      summary: The state of a verification request
+      description: |
+        `pending` until the request ends, then `completed` with a `result_ref`. There is no "declined", "expired" or "failed" here: every end
+        that is not a positive result is the same `not_verified` result (a customer under the threshold, a customer who said no and a
+        failed check are indistinguishable to you, AGE-005). Needs the request's capability on the key.
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" } }
+      responses:
+        "200":
+          description: The request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/verification-results/{resultRef}:
+    get:
+      tags: [Verification]
+      operationId: getVerificationResult
+      summary: Retrieve a verification result (once)
+      description: |
+        Authenticated and **bound to your business**: another business's `result_ref` is a plain `404`. **Single use**: the first successful
+        call returns the result and erases it; any later call is `410`. Results expire 15 minutes after they are issued (`410`). The response is
+        `Cache-Control: no-store`. Store what you need.
+
+        `outcome` is `verified` or `not_verified` (with an empty `result`). `result` holds exactly the capability's output fields.
+        `result.assurance` names the evidence and binding (for example `issuer_signed_credential_device_bound` for a Wallet ID,
+        `document_and_biometric_match` for a scanned document, `sandbox_simulated` for test mode); it is **not** a NIST IAL/AAL claim.
+        A selfie age estimate never produces `meets_threshold`.
+      parameters:
+        - { name: resultRef, in: path, required: true, schema: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$" } }
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerificationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+webhooks:
+  interaction.decided:
+    post:
+      summary: A customer decided an interaction
+      description: |
+        Sent once when the decision is recorded. `data.assurance`, `data.deviceRef` and `data.verification` are present for
+        device-signed decisions (there is no `signedDecision`: see the security model); a decision made over a text channel
+        (RCS suggested reply to a low-sensitivity `confirm`/`choose`) carries `channel: rcs` and **no** assurance or
+        verification, and you must treat it accordingly.
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  interaction.expired:
+    post:
+      summary: An interaction expired undecided
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  interaction.cancelled:
+    post:
+      summary: An interaction was cancelled (by you, or because the customer disconnected)
+      requestBody: { $ref: "#/components/requestBodies/InteractionEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  message.received:
+    post:
+      summary: A customer's message was forwarded to you
+      description: The only event whose payload contains customer-authored text. The dashboard delivery log redacts it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: message.received }
+                    data: { $ref: "#/components/schemas/MessageReceivedData" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  relationship.connected:
+    post:
+      summary: A customer connected to your business
+      requestBody: { $ref: "#/components/requestBodies/RelationshipEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  relationship.disconnected:
+    post:
+      summary: A customer disconnected; pending interactions were cancelled
+      requestBody: { $ref: "#/components/requestBodies/RelationshipEvent" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  reward.redeemed:
+    post:
+      summary: A redemption code was consumed
+      description: Sent once when you consume a code. `data` is the same `RedemptionReceipt` the consume call returned (pseudonymous).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: reward.redeemed }
+                    data: { $ref: "#/components/schemas/RedemptionReceipt" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  consent.updated:
+    post:
+      summary: A customer changed a consent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: consent.updated }
+                    data: { $ref: "#/components/schemas/ConsentUpdatedData" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+  verification.completed:
+    post:
+      summary: A verification request ended
+      description: |
+        Sent to the endpoint named by the request's `callback_id` when the request ends, with **any** outcome (a positive result, a decline, an
+        expiry and a failed check all send the same event). The body is opaque: it names the request and the result and carries nothing else.
+        Fetch the result with `GET /v1/verification-results/{result_ref}`. Subscriptions that opted into the `2026-10-27` envelope receive the
+        spec 14.3 form (`id`, `type`, `version`, `tenant_id`, `request_id`, `occurred_at`, `result_ref`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+                - type: object
+                  properties:
+                    type: { const: verification.completed }
+                    data:
+                      type: object
+                      required: [request_id, result_ref]
+                      additionalProperties: false
+                      properties:
+                        request_id: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" }
+                        result_ref: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$" }
+      responses: { "2XX": { $ref: "#/components/responses/WebhookAck" } }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "vdk_live_<kid>.<secret> | vdk_test_<kid>.<secret>"
+      description: |
+        A business API key. Format `vdk_<live|test>_<kid>.<secret>`: `kid` is a 16-character **non-secret** key id (it is safe to log and to quote in support requests) and
+        `secret` is 256 bits from a CSPRNG (43 base64url characters). The secret is shown once, when the key is created or rotated in the console; Viadere stores only a verifier.
+        A key is bound to its environment (`test` keys reach sandbox customers only), to your organization and to its scopes, and may carry an expiry (30, 90 or 365 days), an
+        IP allow-list and a bound client certificate (Tier E, mutual TLS). Rotation in the console issues a replacement with the same restrictions and keeps the old key working for the
+        overlap you choose (none, 1 hour, 1 day, 7 days or 30 days) before revoking it automatically. Every rejection (unknown, revoked, expired, wrong address, missing certificate) is the same
+        `401`, so a probe learns nothing. Keys issued before key ids existed (`vdk_live_<43 characters>`) keep working. Required scope per operation is listed on each operation.
+
+        **RFC 9421 request signatures** (optional, `docs/SECURITY.md` section 2.112): a request may also carry `Signature-Input`, `Signature` and (with a body) `Content-Digest`
+        made with a P-256 key registered for this API key in the console (Security > Request signing). A signed request is verified on every route before any handler runs, and a
+        signature that does not verify is `401 signature_invalid` (`clock_skew`, `replay_detected` for the time window and a reused nonce). On the authentication routes of
+        `contracts/openapi/auth-delivery-v1.yaml` a live key needs a signature or mutual TLS. Profile: `ecdsa-p256-sha256` raw r||s low S; components exactly
+        `"@method" "@authority" "@path" "@query" "content-digest" "content-type"` (the first four without a body); parameters `created`, `expires`, `keyid` (`vsk_` + 16 hex),
+        `nonce`, `tag="viadere-api-v1"`; 300 s windows; single-use nonce.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Must equal the request body's `idempotencyKey` where the body has one (issue, messages, statuses, rewards, points); webhook create, webhook rotate and interaction cancel have no body key, the header alone identifies the operation. Up to 128 characters of `A-Z a-z 0-9 _ . - :`.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    InteractionId:
+      name: interactionId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+
+  headers:
+    WebhookSignature:
+      description: "`t={unix seconds},v1={hex HMAC-SHA256(secret, \"{t}.\" + raw body)}`; several `v1=` values during secret rotation."
+      schema: { type: string }
+    WebhookEventId:
+      description: "The delivery id (`WebhookEvent.id`). Deliveries are at-least-once: deduplicate on it."
+      schema: { type: string, format: uuid }
+    WebhookEventType:
+      description: The event type (`WebhookEvent.type`).
+      schema: { type: string }
+
+  requestBodies:
+    InteractionEvent:
+      required: true
+      description: |
+        Headers sent with every delivery: `Viadere-Signature`, `Viadere-Event-Id`, `Viadere-Event-Type`, `Content-Type: application/json`.
+        Reject (4xx) when `|now - t| > 300 s` or no `v1` matches (constant-time compare). Respond `2xx` within 10 seconds;
+        failures retry at 30 s, 2 min, 10 min, 1 h, 6 h, 12 h, 24 h, then dead-letter.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/InteractionOutcome" }
+    RelationshipEvent:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/WebhookEventEnvelope" }
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/RelationshipEventData" }
+
+  responses:
+    WebhookAck:
+      description: Acknowledge with any 2xx. Anything else (or a timeout) is retried.
+    BadRequest:
+      description: Malformed request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Unauthorized:
+      description: Missing, malformed, unknown, revoked or expired API key, a request from an address outside the key's allow-list, or a certificate-bound key without its verified client certificate.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Forbidden:
+      description: The key lacks the required scope (`insufficient_scope`), the capability or the business's entitlement (`insufficient_scope`, `not_entitled`), the capability is switched off (`capability_disabled`), a policy rule or evidence requirement denies it (`policy_denied`), the business is not active (unverified or suspended), or consent is required (`consent_required`).
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    NotFound:
+      description: Not found. Other businesses' resources are indistinguishable from missing ones.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Conflict:
+      description: State conflict, or `idempotency_conflict` when the key was used with a different body.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    Gone:
+      description: The request was already completed and its one-time secret can no longer be replayed.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    ValidationFailed:
+      description: The request failed validation; `error.details` maps field paths to issue codes.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    RateLimited:
+      description: Rate limit or daily quota exceeded.
+      headers:
+        Retry-After:
+          description: Seconds to wait.
+          schema: { type: integer, minimum: 1 }
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+
+  schemas:
+    SignedStatement:
+      type: object
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload: { type: string, description: base64url of the canonical JSON payload }
+        signature: { type: string, description: base64url raw r||s (64 bytes, low-S) over domain || payload }
+    BusinessSignedStatement:
+      type: object
+      additionalProperties: false
+      required: [kid, payload, signature]
+      properties:
+        kid: { type: string, minLength: 43, maxLength: 43, description: Id of the directory key that signed. }
+        payload: { type: string }
+        signature: { type: string }
+    E2EEEnvelope:
+      type: object
+      additionalProperties: false
+      required: [v, suite, kid, enc, ct, ctx]
+      properties:
+        v: { const: 1 }
+        suite: { const: hpke-0010-0001-0002 }
+        kid: { type: string, description: "Recipient key id (SECURITY.md 2.50)." }
+        enc: { type: string, description: "base64url HPKE encapsulated key, 65 bytes." }
+        ct: { type: string, description: "base64url AEAD ciphertext and tag, at most 64 KiB plaintext." }
+        ctx:
+          type: object
+          additionalProperties: false
+          required: [exp, purpose, recipient, request_id, sender]
+          properties:
+            exp: { type: integer }
+            purpose: { type: string, pattern: "^[a-z0-9._-]{1,64}$" }
+            recipient: { type: string }
+            request_id: { type: string }
+            sender: { type: string }
+    TransactionDetails:
+      type: object
+      additionalProperties: false
+      required: [currency, amount_minor, payee_display, transaction_reference]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        amount_minor: { type: integer, minimum: 1, description: "Minor units (cents)." }
+        payee_display: { type: string, maxLength: 80 }
+        transaction_reference: { type: string, maxLength: 64 }
+    AuthenticationDetails:
+      type: object
+      additionalProperties: false
+      required: [action_display]
+      properties:
+        action_display: { type: string, maxLength: 120 }
+        reference: { type: string, maxLength: 64 }
+    CreateApprovalEnrollmentRequest:
+      type: object
+      additionalProperties: false
+      required: [subject_ref, capability]
+      properties:
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { enum: [auth.challenge, transaction.approve] }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 900 }
+    ApprovalEnrollmentTicket:
+      type: object
+      required: [enrollment_id, code, deep_link, expires_at]
+      properties:
+        enrollment_id: { $ref: "#/components/schemas/Uuid" }
+        code: { type: string, description: "Eight characters, no separator." }
+        deep_link: { type: string, description: "The relay's suggestion (https://viadere.com/a/{CODE}?rk={root key id}). Do not show it: it carries no enrollment secret and its rk is not authenticated. The SDK builds the link you show, with your own root key id and the secret in the fragment (#es=)." }
+        expires_at: { type: string, format: date-time }
+    ApprovalEnrollmentView:
+      type: object
+      required: [enrollment_id, subject_ref, capability, status, expires_at, created_at]
+      properties:
+        enrollment_id: { $ref: "#/components/schemas/Uuid" }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { type: string }
+        status: { enum: [open, device_completed, confirmed, cancelled, expired] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        device_statement: { $ref: "#/components/schemas/SignedStatement" }
+        kid: { type: string }
+        confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        binding_tag:
+          type: string
+          description: "base64url HMAC-SHA256(es, \"VIADERE-ENROLL-BIND-V1\\n\" || statement payload), made by the customer's app when it opened a link carrying the enrollment secret. Verify it with your own secret before confirming; the relay cannot."
+    ConfirmApprovalEnrollmentRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmation]
+      properties:
+        confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+    ApprovalKeyView:
+      type: object
+      required: [kid, subject_ref, status, assurance, public_key, hpke_kid, hpke_public_key, created_at, device_statement]
+      properties:
+        kid: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        status: { enum: [pending, active, revoked] }
+        assurance: { enum: [biometric, device_passcode] }
+        public_key: { type: string, description: "base64url X9.63 P-256 point." }
+        hpke_kid: { type: string }
+        hpke_public_key: { type: string }
+        created_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        revoked_by: { type: string }
+        device_statement: { $ref: "#/components/schemas/SignedStatement" }
+    RevokeApprovalKeyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 120 }
+    ApprovalEnvelopeDelivery:
+      type: object
+      additionalProperties: false
+      required: [kid, envelope]
+      properties:
+        kid: { type: string, description: The approval key this copy is for. }
+        envelope: { $ref: "#/components/schemas/E2EEEnvelope" }
+    CreateApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, subject_ref, capability]
+      properties:
+        request_id: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,128}$" }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { enum: [auth.challenge, transaction.approve] }
+        challenge: { type: string, description: "Server-visible only: 22 to 128 base64url characters, single use." }
+        transaction: { $ref: "#/components/schemas/TransactionDetails" }
+        authentication: { $ref: "#/components/schemas/AuthenticationDetails" }
+        envelopes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { $ref: "#/components/schemas/ApprovalEnvelopeDelivery" }
+        expires_in_seconds: { type: integer, minimum: 30, maximum: 600, default: 120 }
+    ApprovalRequestView:
+      type: object
+      required: [request_id, subject_ref, capability, status, protection, expires_at, created_at, delivered_to]
+      properties:
+        request_id: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { type: string }
+        status: { enum: [pending, approved, denied, reported, expired, cancelled], description: "Information only. Verify the signed result before acting." }
+        protection: { enum: [end_to_end, server_visible] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
+        result_ref: { type: string }
+        reason: { type: string }
+        delivered_to: { type: integer }
+    ApprovalResultResponse:
+      type: object
+      required: [result_ref, request_id, result, kid, decided_at]
+      properties:
+        result_ref: { type: string }
+        request_id: { type: string }
+        result: { type: string, description: "Compact JWS, typ viadere-approval+jws, alg ES256 (SECURITY.md 2.54)." }
+        kid: { type: string }
+        decided_at: { type: string, format: date-time }
+    BusinessFreezeRequest:
+      type: object
+      additionalProperties: false
+      required: [subject_ref, frozen]
+      properties:
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        frozen: { type: boolean }
+        reason: { type: string, maxLength: 120 }
+    ApproveBusinessSettings:
+      type: object
+      additionalProperties: false
+      required: [device_policy]
+      properties:
+        device_policy: { enum: [any_enrolled, single_device] }
+    CreateLinkSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [customer_ref, capabilities]
+      properties:
+        customer_ref: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]+$" }
+        capabilities: { type: array, minItems: 1, maxItems: 8, items: { enum: [message.send, contact.reachable, consent.request, auth.challenge, transaction.approve] } }
+        display_hint: { type: string, maxLength: 40, description: "Non-sensitive context shown in the app (no run of more than four digits)." }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 300, default: 300 }
+    LinkSessionTicket:
+      type: object
+      required: [session_id, code, link, root_kid, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        code: { type: string, description: "Eight characters, no separator." }
+        link: { type: string, description: "The relay's suggestion (https://{link domain}/k/{CODE}); do not show it. The SDK builds the link with your secret." }
+        root_kid: { type: string, description: "Your registered root key id; the SDK refuses a ticket naming another." }
+        expires_at: { type: string, format: date-time }
+    LinkSessionView:
+      type: object
+      required: [session_id, status, capabilities, created_at, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        status: { enum: [open, device_completed, confirmed, expired, cancelled] }
+        capabilities: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        connection_id: { $ref: "#/components/schemas/SubjectRef" }
+        statement: { $ref: "#/components/schemas/SignedStatement" }
+        binding_tag: { type: string }
+        approval_statement: { $ref: "#/components/schemas/SignedStatement" }
+        result: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        completed_at: { type: string, format: date-time }
+        confirmed_at: { type: string, format: date-time }
+    ConfirmLinkSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmation]
+      properties:
+        confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        approval_confirmation: { $ref: "#/components/schemas/BusinessSignedStatement" }
+    CreateVerificationSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [capability, purpose_code, origin]
+      properties:
+        capability: { enum: [age.minimum, identity.name, identity.address, identity.verified] }
+        parameters: { type: object, description: "The capability's typed parameters, e.g. years: 21. Flat; at most 8." }
+        purpose_code: { type: string, pattern: "^[a-z][a-z0-9_]{1,63}$" }
+        origin: { type: string, description: "https://{host} inside one of your verified domains; no port, path, query or fragment." }
+        return_url: { type: string, maxLength: 512, description: "https URL on exactly the origin; the app offers it after the verification." }
+        callback_id: { type: string, description: "A registered webhook endpoint subscribed to verification.completed (never a URL)." }
+        expires_in_seconds: { type: integer, minimum: 60, maximum: 300 }
+    VerificationSessionTicket:
+      type: object
+      required: [session_id, code, link, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        code: { type: string, description: "Eight characters, no separator; shown as ABCD-EFGH for typing into the app." }
+        link: { type: string, description: "https://{link domain}/v/{CODE}: the button's target and the QR content. No secret." }
+        expires_at: { type: string, format: date-time }
+    VerificationSessionView:
+      type: object
+      required: [session_id, status, capability, purpose_code, origin, created_at, expires_at]
+      properties:
+        session_id: { $ref: "#/components/schemas/Uuid" }
+        status: { enum: [open, accepted, completed, expired, cancelled] }
+        capability: { type: string }
+        purpose_code: { type: string }
+        origin: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        request_id: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        result_ref: { type: string }
+        result: { $ref: "#/components/schemas/BusinessSignedStatement" }
+        completed_at: { type: string, format: date-time }
+    FreezeStatus:
+      type: object
+      required: [subject_ref, frozen]
+      properties:
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        frozen: { type: boolean }
+    PublishKeyEntryRequest:
+      type: object
+      additionalProperties: false
+      required: [entry]
+      properties:
+        entry: { type: string, description: "base64url canonical KeyLogEntry {business_id, sigs, statement, type, v}." }
+    PublishKeyEntryResponse:
+      type: object
+      required: [index, tree_size, sth]
+      properties:
+        index: { type: integer }
+        tree_size: { type: integer }
+        sth: { $ref: "#/components/schemas/SignedTreeHead" }
+    SignedTreeHead:
+      type: object
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload: { type: string, description: "base64url canonical {v, log_id, tree_size, root_hash (hex), timestamp}." }
+        signature: { type: string, description: "base64url raw r||s over 'VIADERE-STH-V1\\n' || payload, by the Viadere log key." }
+    KeyDirectoryResponse:
+      type: object
+      required: [sth, entries]
+      properties:
+        sth: { $ref: "#/components/schemas/SignedTreeHead" }
+        consistency_from: { type: integer }
+        consistency_proof: { type: array, items: { type: string, description: hex node hash } }
+        entries:
+          type: array
+          items:
+            type: object
+            required: [index, entry, inclusion_proof]
+            properties:
+              index: { type: integer }
+              entry: { type: string, description: base64url canonical KeyLogEntry (the Merkle leaf). }
+              inclusion_proof: { type: array, items: { type: string, description: hex node hash } }
+    ConsistencyProofResponse:
+      type: object
+      required: [first, second, proof]
+      properties:
+        first: { type: integer }
+        second: { type: integer }
+        proof: { type: array, items: { type: string } }
+    LoopBusinessAnswer:
+      type: object
+      required: [step_id, field_id, label, value]
+      properties:
+        step_id: { type: string }
+        field_id: { type: string }
+        label: { type: string, description: "The reviewed field label." }
+        value: { description: "Option id(s), a boolean, a YYYY-MM-DD date or short text, as submitted." }
+    LoopBusinessApproval:
+      type: object
+      required: [approval_id, amount, terms, reference, context_digest, assurance, approved_at]
+      description: The binding approval of an approve_estimate event. Approved with a device-bound biometric signature; it charges nothing.
+      properties:
+        approval_id: { $ref: "#/components/schemas/Uuid" }
+        amount: { $ref: "#/components/schemas/MoneyAmount" }
+        terms: { type: string }
+        reference: { type: string }
+        context_digest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        assurance: { enum: [biometric] }
+        approved_at: { $ref: "#/components/schemas/Timestamp" }
+    LoopBusinessEvent:
+      type: object
+      required: [ref, instance_ref, loop_key, revision, step_id, action_id, action_type, queue, answers, outcome, created_at]
+      properties:
+        ref: { type: string }
+        instance_ref: { type: string }
+        loop_key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        step_id: { type: string }
+        action_id: { type: string }
+        action_type: { type: string }
+        queue: { type: string }
+        answers: { type: array, items: { $ref: "#/components/schemas/LoopBusinessAnswer" } }
+        approval: { $ref: "#/components/schemas/LoopBusinessApproval" }
+        outcome: { enum: [accepted, rejected, pending, timed_out, unknown] }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        respond_by: { $ref: "#/components/schemas/Timestamp" }
+    LoopBusinessInstance:
+      type: object
+      required: [ref, loop_key, revision, state, expires_at, event_refs]
+      properties:
+        ref: { type: string }
+        loop_key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        state: { enum: [active, submitted, completed, expired, cancelled] }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
+        event_refs: { type: array, items: { type: string } }
+    LoopOutcomeCallbackRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome, idempotency_key]
+      properties:
+        outcome: { enum: [accepted, rejected, pending] }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    LoopOutcomeCallbackResult:
+      type: object
+      required: [ref, outcome, replayed]
+      properties:
+        ref: { type: string }
+        outcome: { enum: [accepted, rejected, pending, timed_out, unknown] }
+        replayed: { type: boolean }
+    WebhookEnvelopeV2:
+      type: object
+      additionalProperties: false
+      required: [id, type, version, tenant_id, request_id, occurred_at]
+      description: |
+        The opaque v2 delivery (a subscription created with `envelope_version: "2026-10-27"`). Ids only: no customer data, amount or decision.
+        Headers: `Viadere-Signature`, `Viadere-Event-Id`, `Viadere-Event-Type`, `Viadere-Delivery-Id`, `Viadere-Key-Id` (`whk_<prefix>_v<secret version>`),
+        `Viadere-Webhook-Version`.
+      properties:
+        id: { type: string }
+        type: { enum: [approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen, loop.action.submitted, loop.instance.expired] }
+        version: { const: "2026-10-27" }
+        tenant_id: { type: string }
+        request_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+        result_ref: { type: string }
+    Uuid:
+      type: string
+      format: uuid
+      description: Lowercase UUID.
+    Timestamp:
+      type: string
+      format: date-time
+      description: "ISO 8601 UTC with milliseconds, e.g. `2026-10-27T08:00:00.000Z`."
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: object
+              additionalProperties: { type: string }
+    ErrorCode:
+      type: string
+      description: Stable machine codes. Unknown future codes should be treated as `unknown`.
+      enum: [bad_request, validation_failed, unauthorized, signature_invalid, replay_detected, clock_skew, forbidden, not_found, conflict,
+             gone, expired, insufficient_assurance, consent_required, insufficient_scope, not_entitled, capability_disabled, policy_denied, rate_limited, idempotency_conflict, internal_error, unavailable,
+             passkey_assertion_required, device_cool_down, context_digest_required, context_mismatch, unknown]
+
+    InteractionKind:
+      type: string
+      description: Extensible. Unknown kinds are treated as maximally sensitive and never rendered as actionable.
+      enum: [authenticate, authorize, confirm, choose, acknowledge, reply, status, reward, ticket, message]
+    InteractionPurpose:
+      type: string
+      description: Consent is granted per purpose. `security` and `accountService` cannot be turned off by the customer; `marketing` and `rewards` are opt-in.
+      enum: [security, accountService, transactional, support, marketing, rewards]
+    InteractionPriority:
+      type: string
+      description: A request. Viadere clamps it; it can never be bought.
+      enum: [low, normal, high, urgent]
+    Sensitivity:
+      type: string
+      description: Drives the required assurance. `authenticate`/`authorize` are never below `standard`.
+      enum: [low, standard, high, critical]
+    Channel:
+      type: string
+      description: |
+        Where Viadere may deliver. Text channels (`sms`, `rcs`, `appleMessagesForBusiness`) can only carry unauthenticated replies, so
+        security-sensitive interactions sent there become a notice to open the Viadere app (no link, no code). `rcs` implies SMS fallback.
+      enum: [nativePush, inApp, web, sms, rcs, appleMessagesForBusiness]
+    ActionRole:
+      type: string
+      enum: [approve, deny, confirm, decline, select, reply, acknowledge, open, report, redeem]
+    Decision:
+      type: string
+      enum: [approve, deny, confirm, decline, select, reply, acknowledge, report]
+    DecisionAssurance:
+      type: string
+      enum: [none, devicePasscode, biometric]
+    InteractionStatus:
+      type: string
+      enum: [pending, approved, denied, confirmed, declined, selected, replied, acknowledged, reported, expired, cancelled, delivered]
+
+    MoneyAmount:
+      type: object
+      required: [value, currency]
+      properties:
+        value: { type: string, pattern: "^[0-9]{1,15}(\\.[0-9]+)?$", description: Plain decimal string with the currency's minor-unit digits, e.g. "285.28". }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    RiskIndicator:
+      type: object
+      required: [code, label, severity]
+      properties:
+        code: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 80 }
+        severity: { type: string, enum: [info, warning, high] }
+    RequestedAction:
+      type: object
+      required: [id, label, role]
+      properties:
+        id: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 32 }
+        role: { $ref: "#/components/schemas/ActionRole" }
+
+    AuthenticatePayload:
+      type: object
+      required: [service, device, attemptedAt]
+      properties:
+        service: { type: string, maxLength: 80 }
+        device: { type: string, maxLength: 80 }
+        approximateLocation: { type: string, maxLength: 80 }
+        ipRegion: { type: string, maxLength: 80 }
+        attemptedAt: { $ref: "#/components/schemas/Timestamp" }
+        riskIndicators: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/RiskIndicator" } }
+    AuthorizePayload:
+      type: object
+      required: [actionDescription]
+      properties:
+        actionDescription: { type: string, maxLength: 120 }
+        amount: { $ref: "#/components/schemas/MoneyAmount" }
+        merchant: { type: string, maxLength: 80 }
+        location: { type: string, maxLength: 80 }
+        effectOfApproval: { type: string, maxLength: 160 }
+        riskIndicators: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/RiskIndicator" } }
+    ConfirmPayload:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 80 }
+        details: { type: string, maxLength: 160 }
+        reference: { type: string, maxLength: 64 }
+        scheduledAt: { $ref: "#/components/schemas/Timestamp" }
+    ChoiceOption:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+        label: { type: string, maxLength: 80 }
+    ChoosePayload:
+      type: object
+      required: [prompt, options]
+      properties:
+        prompt: { type: string, maxLength: 160 }
+        options: { type: array, minItems: 2, maxItems: 10, items: { $ref: "#/components/schemas/ChoiceOption" } }
+        allowsMultiple: { type: boolean, default: false }
+    AcknowledgePayload:
+      type: object
+      required: [title, body]
+      properties:
+        title: { type: string, maxLength: 80 }
+        body: { type: string, maxLength: 1000 }
+        documentURL: { type: string, format: uri }
+        documentVersion: { type: string, maxLength: 40 }
+        documentDigest: { type: string, pattern: "^[0-9a-f]{64}$", description: Lowercase hex SHA-256 of the document shown. It is kept in the customer's acknowledgment record. }
+    ReplyPayload:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, maxLength: 160 }
+        maxLength: { type: integer, default: 280 }
+        suggestedReplies: { type: array, maxItems: 4, items: { type: string } }
+    StatusPayload:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 80 }
+        body: { type: string, maxLength: 240 }
+        liveActivity: { $ref: "#/components/schemas/LiveActivityStatus" }
+    LiveActivityStatus:
+      type: object
+      description: "`{\"type\":\"delivery\",\"delivery\":{…}}` — exactly one state object matching `type`."
+      required: [type]
+      properties:
+        type: { type: string, enum: [order, delivery, flight, appointment] }
+        order:
+          type: object
+          required: [orderReference, stage]
+          properties:
+            orderReference: { type: string }
+            stage: { type: string, enum: [placed, preparing, ready, completed, cancelled] }
+            estimatedReadyAt: { $ref: "#/components/schemas/Timestamp" }
+            note: { type: string }
+        delivery:
+          type: object
+          required: [trackingReference, stage]
+          properties:
+            trackingReference: { type: string }
+            stage: { type: string, enum: [labelCreated, inTransit, outForDelivery, delivered, exception] }
+            carrierName: { type: string }
+            estimatedDeliveryAt: { $ref: "#/components/schemas/Timestamp" }
+            stopsAway: { type: integer }
+        flight:
+          type: object
+          required: [flightNumber, departureAirport, arrivalAirport, stage, scheduledDeparture]
+          properties:
+            flightNumber: { type: string }
+            departureAirport: { type: string }
+            arrivalAirport: { type: string }
+            stage: { type: string, enum: [scheduled, delayed, boarding, departed, landed, cancelled, diverted] }
+            scheduledDeparture: { $ref: "#/components/schemas/Timestamp" }
+            estimatedDeparture: { $ref: "#/components/schemas/Timestamp" }
+            estimatedArrival: { $ref: "#/components/schemas/Timestamp" }
+            gate: { type: string }
+            seat: { type: string }
+        appointment:
+          type: object
+          required: [title, startsAt, stage]
+          properties:
+            title: { type: string }
+            startsAt: { $ref: "#/components/schemas/Timestamp" }
+            location: { type: string }
+            providerName: { type: string }
+            stage: { type: string, enum: [upcoming, checkInOpen, checkedIn, inProgress, completed, cancelled] }
+    MessagePayload:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+    RewardPayload:
+      type: object
+      description: Announces a reward in the customer's inbox. Create the reward itself with `POST /v1/business/rewards`.
+      required: [rewardId, title]
+      properties:
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        title: { type: string }
+        details: { type: string }
+        redeemBy: { $ref: "#/components/schemas/Timestamp" }
+        walletPassId: { $ref: "#/components/schemas/Uuid" }
+    TicketPayload:
+      type: object
+      description: |
+        A ticket, pass or admission. `venue`, `seat` and `startsAt` appear on the customer's Activity row and on the Wallet pass. Tickets,
+        status updates and confirmations that share a `correlationId` (an order, trip or appointment id) are shown as one Activity item.
+      required: [title, ticketType]
+      properties:
+        title: { type: string }
+        ticketType: { type: string, description: "boarding_pass, event, admission, reservation…" }
+        holderName: { type: string }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        walletPassId: { $ref: "#/components/schemas/Uuid" }
+        venue: { type: string, maxLength: 80, description: "e.g. Orpheum Theatre, or Gate B4." }
+        seat: { type: string, maxLength: 80, description: "e.g. Row F · Seat 12." }
+        startsAt: { $ref: "#/components/schemas/Timestamp" }
+    InteractionPayload:
+      description: The payload object for the declared `kind` (payload shapes overlap, so the sibling `kind` is the discriminator).
+      anyOf:
+        - { $ref: "#/components/schemas/AuthenticatePayload" }
+        - { $ref: "#/components/schemas/AuthorizePayload" }
+        - { $ref: "#/components/schemas/ConfirmPayload" }
+        - { $ref: "#/components/schemas/ChoosePayload" }
+        - { $ref: "#/components/schemas/AcknowledgePayload" }
+        - { $ref: "#/components/schemas/ReplyPayload" }
+        - { $ref: "#/components/schemas/StatusPayload" }
+        - { $ref: "#/components/schemas/RewardPayload" }
+        - { $ref: "#/components/schemas/TicketPayload" }
+        - { $ref: "#/components/schemas/MessagePayload" }
+
+    CreateVerificationRequest:
+      type: object
+      required: [subject_ref, capability, purpose_code]
+      additionalProperties: false
+      properties:
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        capability: { type: string, enum: [age.minimum, identity.name, identity.address, identity.verified] }
+        parameters:
+          type: object
+          description: "`age.minimum`: `{ \"years\": 13 | 16 | 18 | 21 | 25 }`. The identity capabilities take none. Unknown parameters are rejected."
+        purpose_code: { type: string, pattern: "^[a-z][a-z0-9_]{2,47}$", examples: [age_restricted_access] }
+        callback_id:
+          type: string
+          format: uuid
+          description: The id of a webhook endpoint you registered (subscribed to `verification.completed`). Never a URL.
+        expires_in_seconds: { type: integer, minimum: 30, maximum: 600, default: 300 }
+    VerificationRequest:
+      type: object
+      required: [request_id, capability, subject_ref, purpose_code, status, created_at, expires_at]
+      properties:
+        request_id: { type: string, pattern: "^req_[A-Za-z0-9_-]{22}$" }
+        capability: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        purpose_code: { type: string }
+        status: { type: string, enum: [pending, completed] }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
+        result_ref: { type: string, pattern: "^res_[A-Za-z0-9_-]{43}$", description: Present once `completed`. }
+    VerificationResult:
+      type: object
+      required: [result_ref, request_id, capability, subject_ref, parameters, created_at, outcome, result]
+      additionalProperties: false
+      properties:
+        result_ref: { type: string }
+        request_id: { type: string }
+        capability: { type: string }
+        subject_ref: { $ref: "#/components/schemas/SubjectRef" }
+        parameters: { type: object }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        outcome: { type: string, enum: [verified, not_verified] }
+        result:
+          type: object
+          description: |
+            Exactly the capability's output fields and nothing else. `age.minimum`: `meets_threshold`, `assurance`, `issued_at`, `expires_at`,
+            `audience`. `identity.name`: `given_name`, `family_name` + the same four. `identity.address`: `address` + the same four.
+            `identity.verified`: `verified` + the same four. Empty for `not_verified`.
+          properties:
+            meets_threshold: { type: boolean }
+            verified: { type: boolean }
+            given_name: { type: string }
+            family_name: { type: string }
+            address: { type: object }
+            assurance: { type: string }
+            issued_at: { $ref: "#/components/schemas/Timestamp" }
+            expires_at: { $ref: "#/components/schemas/Timestamp" }
+            audience: { type: string, description: The business the result is bound to (yours). }
+    SubjectRef:
+      type: string
+      pattern: "^sub_[A-Za-z0-9_-]{43}$"
+      description: |
+        Pairwise customer reference: `sub_` + base64url(HMAC-SHA256(Viadere's subject key, "VIADERE-SUBJECT-V1\n{businessId}\n{customerId}")).
+        Stable for your business, unrelated at any other business, not enumerable.
+
+    IssueInteractionRequest:
+      type: object
+      required: [kind, purpose, payload, ttlSeconds, idempotencyKey]
+      description: Name the customer with `relationshipId`, `subjectRef`, or both (they must agree).
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        kind: { $ref: "#/components/schemas/InteractionKind" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        payload: { $ref: "#/components/schemas/InteractionPayload" }
+        requestedActions: { type: array, maxItems: 4, default: [], items: { $ref: "#/components/schemas/RequestedAction" } }
+        priority: { $ref: "#/components/schemas/InteractionPriority" }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        allowedChannels:
+          type: array
+          default: [nativePush, inApp]
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Channel" }
+        ttlSeconds:
+          type: integer
+          minimum: 1
+          maximum: 2592000
+          description: Lifetime. At most 15 minutes (900) for `authenticate` and `authorize`, 30 days otherwise.
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        correlationId: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        accountReference: { type: string, maxLength: 64, description: 'Shown to the customer, e.g. "Checking ••1234".' }
+      allOf:
+        - if: { properties: { kind: { const: authenticate } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AuthenticatePayload" } } }
+        - if: { properties: { kind: { const: authorize } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AuthorizePayload" } } }
+        - if: { properties: { kind: { const: confirm } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ConfirmPayload" } } }
+        - if: { properties: { kind: { const: choose } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ChoosePayload" } } }
+        - if: { properties: { kind: { const: acknowledge } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/AcknowledgePayload" } } }
+        - if: { properties: { kind: { const: reply } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/ReplyPayload" } } }
+        - if: { properties: { kind: { const: status } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/StatusPayload" } } }
+        - if: { properties: { kind: { const: message } }, required: [kind] }
+          then: { properties: { payload: { $ref: "#/components/schemas/MessagePayload" } } }
+    Interaction:
+      type: object
+      description: |
+        As seen by the business. `scope.consumerId` is a **per-business pseudonym** (stable for your business, different for every
+        other), and `challenge` is a one-way reference, not the device challenge.
+      required: [schemaVersion, id, businessId, scope, kind, purpose, payload, priority, sensitivity, allowedChannels, createdAt, expiresAt, idempotencyKey, challenge]
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        id: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        scope:
+          type: object
+          required: [consumerId, relationshipId]
+          properties:
+            consumerId: { $ref: "#/components/schemas/Uuid", description: "Deprecated per-business pseudonym; use subjectRef." }
+            relationshipId: { $ref: "#/components/schemas/Uuid" }
+            subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+            accountReference: { type: string }
+        kind: { $ref: "#/components/schemas/InteractionKind" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        payload: { $ref: "#/components/schemas/InteractionPayload" }
+        requestedActions: { type: array, items: { $ref: "#/components/schemas/RequestedAction" } }
+        priority: { $ref: "#/components/schemas/InteractionPriority" }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        allowedChannels: { type: array, items: { $ref: "#/components/schemas/Channel" } }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        idempotencyKey: { type: string }
+        correlationId: { type: string }
+        challenge: { type: string, description: One-way reference. }
+    SignedDecision:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload: { type: string, description: Canonical JSON of the decision (docs/SECURITY.md §2.4), as signed by the device. }
+        signature: { type: string, description: ECDSA P-256 / SHA-256, raw r‖s, base64url. }
+    InteractionOutcome:
+      type: object
+      required: [interactionId, businessId, status]
+      properties:
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        status: { $ref: "#/components/schemas/InteractionStatus" }
+        decision: { $ref: "#/components/schemas/Decision" }
+        selectedOptionIds: { type: array, items: { type: string } }
+        reply: { type: string }
+        assurance:
+          description: Present for device-signed decisions. **Absent for decisions made on a text channel.**
+          $ref: "#/components/schemas/DecisionAssurance"
+        channel: { $ref: "#/components/schemas/Channel" }
+        decidedAt: { $ref: "#/components/schemas/Timestamp" }
+        correlationId: { type: string }
+        deviceRef:
+          type: string
+          description: Per-business pseudonym of the deciding device (stable for you, unlinkable across businesses). Device-signed decisions only.
+        verification:
+          description: The server's attestation that the decision was verified. Absent for text-channel decisions.
+          $ref: "#/components/schemas/DecisionVerification"
+    DecisionVerification:
+      type: object
+      required: [verified, keyPurpose, contextBound, verifiedAt, evidenceRef]
+      properties:
+        verified: { type: boolean, description: Always true when present. }
+        keyPurpose: { type: string, enum: [request, approvalUserPresence, approvalBiometric], description: The device key that signed (`approvalBiometric` = device-bound biometric). }
+        contextBound: { type: boolean, description: The decision was signed over the digest of what was shown (v2 payload) and it matched. }
+        verifiedAt: { $ref: "#/components/schemas/Timestamp" }
+        evidenceRef: { type: string, description: Opaque reference to the stored signed decision; quote it in a dispute. }
+    SandboxRelationship:
+      type: object
+      required: [relationshipId, createdAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    MessageAttribution:
+      type: object
+      required: [senderType, displayName]
+      properties:
+        senderType: { type: string, enum: [consumer, business, agent, automated, viadere] }
+        displayName: { type: string }
+        agentName: { type: string }
+    ConversationMessage:
+      type: object
+      required: [id, sessionId, businessId, direction, attribution, body, channel, createdAt, deliveryStatus]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        direction: { type: string, enum: [consumerToBusiness, businessToConsumer] }
+        attribution: { $ref: "#/components/schemas/MessageAttribution" }
+        body: { type: string }
+        channel: { $ref: "#/components/schemas/Channel" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        deliveredAt: { $ref: "#/components/schemas/Timestamp" }
+        readAt: { $ref: "#/components/schemas/Timestamp" }
+        deliveryStatus: { type: string, enum: [queued, sent, delivered, read, failed] }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        attachments:
+          type: array
+          maxItems: 4
+          items: { $ref: "#/components/schemas/MessageAttachment" }
+          description: Images sent with the message, in display order. Metadata only; fetch the bytes by id.
+    MessageAttachment:
+      type: object
+      description: An image of a conversation (SECURITY.md §2.113). Metadata only; never bytes and never a URL.
+      required: [id, sessionId, mediaType, byteSize, width, height, sha256, state]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        mediaType: { type: string, enum: [image/png, image/jpeg], description: Type of the stored, re-encoded image. }
+        byteSize: { type: integer, minimum: 1, maximum: 3145728 }
+        width: { type: integer, minimum: 1, maximum: 2048 }
+        height: { type: integer, minimum: 1, maximum: 2048 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: SHA-256 of the stored image bytes the download returns. }
+        state: { type: string, enum: [pending, attached] }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    BusinessSendMessageRequest:
+      type: object
+      required: [body, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        body: { type: string, maxLength: 1600, description: 1 to 1600 characters; may be empty when `attachmentIds` is present. }
+        agentName: { type: string, maxLength: 40 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        attachmentIds:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Uuid" }
+          description: Pending images uploaded to `sessionId` (required with this member). An id of another conversation is `404`.
+    BusinessStatusUpdateRequest:
+      type: object
+      required: [purpose, status, activityKey, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        status: { $ref: "#/components/schemas/StatusPayload" }
+        activityKey: { type: string, minLength: 1, maxLength: 64, description: Stable key for the ongoing event (an order id) so updates replace earlier ones. }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+        correlationId: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$", description: Groups this status with the tickets and confirmations of the same order, trip or appointment in the customer's Activity feed. }
+
+    RewardKind:
+      type: string
+      enum: [coupon, perk, offer, pointsReward]
+    RewardRecurrence:
+      type: object
+      required: [weekdays, perDayLimit, timeZone]
+      properties:
+        weekdays: { type: array, minItems: 1, items: { type: integer, minimum: 1, maximum: 7 }, description: ISO weekdays, 1 = Monday. }
+        perDayLimit: { type: integer, minimum: 1, maximum: 20, description: Redemptions allowed per local day per customer. }
+        timeZone: { type: string, description: IANA zone; its midnight is the day boundary (DST-aware). }
+    IssueRewardRequest:
+      type: object
+      required: [title, idempotencyKey]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef", description: "Alternative to relationshipId: issues the reward to that one customer." }
+        title: { type: string, minLength: 1, maxLength: 80 }
+        kind: { $ref: "#/components/schemas/RewardKind" }
+        details: { type: string, maxLength: 300 }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        recurrence: { $ref: "#/components/schemas/RewardRecurrence" }
+        pointsCost: { type: integer, minimum: 1, description: Required for `pointsReward`. }
+        issueWalletPass: { type: boolean, default: false, description: For a reward issued to one customer, also issue a Wallet coupon pass. }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    Reward:
+      type: object
+      required: [id, business, title, status]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        business: { type: object, description: Your verified business summary. }
+        title: { type: string }
+        details: { type: string }
+        status: { type: string, enum: [available, redeemed, expired, revoked] }
+        validFrom: { $ref: "#/components/schemas/Timestamp" }
+        validUntil: { $ref: "#/components/schemas/Timestamp" }
+        recurrence: { $ref: "#/components/schemas/RewardRecurrence" }
+    LoyaltyTier:
+      type: object
+      required: [name, minimumPoints]
+      properties:
+        name: { type: string, maxLength: 30 }
+        minimumPoints: { type: integer, minimum: 0 }
+    UpsertLoyaltyProgramRequest:
+      type: object
+      required: [programName, summary, termsVersion, timeZone]
+      properties:
+        programName: { type: string, maxLength: 60 }
+        summary: { type: string, maxLength: 280 }
+        termsVersion: { type: string, maxLength: 32 }
+        timeZone: { type: string }
+        tiers: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/LoyaltyTier" } }
+    BusinessLoyaltyProgram:
+      allOf:
+        - { $ref: "#/components/schemas/UpsertLoyaltyProgramRequest" }
+        - type: object
+          required: [memberCount, updatedAt]
+          properties:
+            memberCount: { type: integer }
+            updatedAt: { $ref: "#/components/schemas/Timestamp" }
+    AdjustLoyaltyPointsRequest:
+      type: object
+      required: [delta, idempotencyKey]
+      anyOf:
+        - required: [relationshipId]
+        - required: [subjectRef]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        delta: { type: integer, description: Non-zero; at most 1,000,000 in magnitude. }
+        reason: { type: string, maxLength: 40, pattern: "^[A-Za-z0-9_.-]+$" }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    LoyaltyPointsResult:
+      type: object
+      required: [relationshipId, pointsBalance, applied]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        pointsBalance: { type: integer }
+        statusName: { type: string }
+        applied: { type: boolean, description: "False when this call replayed an earlier request with the same key." }
+    ConsumeRedemptionRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "The code the customer shows, e.g. K7M2Q-9XPB4." }
+        locationCode: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$", description: Optional till or store id recorded with the redemption. }
+    RedemptionReceipt:
+      type: object
+      required: [redemptionId, rewardId, rewardTitle, kind, consumerReference, redeemedAt]
+      properties:
+        redemptionId: { $ref: "#/components/schemas/Uuid" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        rewardTitle: { type: string }
+        kind: { $ref: "#/components/schemas/RewardKind" }
+        consumerReference: { $ref: "#/components/schemas/Uuid", description: "Deprecated per-business pseudonym; use subjectRef." }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        redeemedAt: { $ref: "#/components/schemas/Timestamp" }
+        pointsSpent: { type: integer }
+        locationCode: { type: string }
+
+    WalletPassKind:
+      type: string
+      enum: [storeCard, coupon, eventTicket, boardingPass, generic]
+    BusinessIssueWalletPassRequest:
+      type: object
+      required: [kind]
+      description: Name the customer with `relationshipId` or `subjectRef` (both must agree when sent together).
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+    BusinessWalletPass:
+      type: object
+      required: [id, kind, issuedBy, voided, createdAt, updatedAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        rewardId: { $ref: "#/components/schemas/Uuid" }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        issuedBy: { type: string, enum: [customer, business] }
+        voided: { type: boolean }
+        usedAt: { $ref: "#/components/schemas/Timestamp" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+    UpdateWalletPassRequest:
+      type: object
+      properties:
+        venue: { type: string, maxLength: 80 }
+        seat: { type: string, maxLength: 80 }
+        startsAt: { $ref: "#/components/schemas/Timestamp" }
+        rotateScanCode: { type: boolean }
+    WalletScanRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "The scanned QR text, VQ1.<48 base64url characters>." }
+        locationCode: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" }
+    WalletScanResult:
+      type: object
+      required: [outcome, passId, kind, relationshipId, scannedAt]
+      properties:
+        outcome: { type: string, enum: [redeemed, checkedIn, member] }
+        passId: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/WalletPassKind" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        title: { type: string }
+        pointsBalance: { type: integer }
+        redemption: { $ref: "#/components/schemas/RedemptionReceipt" }
+        scannedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    Capability:
+      type: string
+      description: Stable capability ID. Unknown future IDs must be treated as not granted.
+      enum: [message.send, contact.reachable, consent.request, auth.challenge, transaction.approve, age.minimum, identity.name, identity.address, identity.verified]
+    BusinessRiskTier:
+      type: string
+      description: "M messaging, A approvals, V verified attributes, E enterprise. Holding a tier grants no capability by itself."
+      enum: [M, A, V, E]
+    BusinessCapabilitiesResponse:
+      type: object
+      required: [businessId, environment, tiers, entitlements, keyScopes, effective, catalog]
+      properties:
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        environment: { type: string, enum: [live, test] }
+        tiers: { type: array, items: { $ref: "#/components/schemas/BusinessRiskTier" } }
+        entitlements: { type: array, description: What Viadere granted the business (the ceiling)., items: { $ref: "#/components/schemas/Capability" } }
+        keyScopes: { type: array, description: What this key carries., items: { $ref: "#/components/schemas/Capability" } }
+        effective: { type: array, description: Key scopes intersected with entitlements, minus anything switched off., items: { $ref: "#/components/schemas/Capability" } }
+        catalog: { type: array, items: { $ref: "#/components/schemas/CapabilityDefinition" } }
+    CapabilityDefinition:
+      type: object
+      required: [capability, title, summary, parameters, requiresPurpose, requiredEvidence, sensitivity, minimumTier, consent, customerUX, output, maxResultRetentionSeconds, auditFields, revocation, auditsAllowedDecisions]
+      properties:
+        capability: { $ref: "#/components/schemas/Capability" }
+        title: { type: string }
+        summary: { type: string }
+        parameters:
+          type: array
+          description: Typed inputs; unknown parameters are rejected.
+          items:
+            type: object
+            required: [name, type, required, summary]
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [string, integer, boolean, timestamp, object] }
+              required: { type: boolean }
+              allowedIntegers: { type: array, items: { type: integer } }
+              allowedStrings: { type: array, items: { type: string } }
+              maxLength: { type: integer }
+              minimum: { type: integer }
+              maximum: { type: integer }
+              summary: { type: string }
+        requiresPurpose: { type: boolean }
+        requiredEvidence: { type: string, enum: [none, registeredAuthenticator, verifiedAgeThreshold, verifiedIdentity] }
+        sensitivity: { $ref: "#/components/schemas/Sensitivity" }
+        minimumTier: { $ref: "#/components/schemas/BusinessRiskTier" }
+        consent:
+          type: object
+          required: [mode, purpose]
+          properties:
+            mode: { type: string, enum: [none, activeRelationship, relationshipPurpose, perRequestReceipt] }
+            purpose: { type: string }
+        customerUX: { type: string, enum: [none, notification, secureSheet, verificationFlow] }
+        output:
+          type: object
+          required: [fields]
+          description: The explicit list of fields a result may carry. `age.minimum` lists only meets_threshold, assurance, issued_at, expires_at and audience.
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                required: [name, type, class, summary]
+                properties:
+                  name: { type: string }
+                  type: { type: string, enum: [string, integer, boolean, timestamp, object] }
+                  class: { type: string, enum: [assertion, assurance, metadata, personal_data] }
+                  summary: { type: string }
+        maxResultRetentionSeconds: { type: integer }
+        auditFields: { type: array, items: { type: string } }
+        revocation: { type: string, enum: [stops_future_use, cancels_pending, expires_assertion] }
+        auditsAllowedDecisions: { type: boolean }
+
+    WebhookEventType:
+      type: string
+      description: Open set; ignore (and acknowledge) types you do not recognize.
+      examples: [interaction.decided]
+      enum: [interaction.decided, interaction.expired, interaction.cancelled, message.received, relationship.connected, relationship.disconnected, consent.updated, reward.redeemed, approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen, loop.action.submitted, loop.instance.expired]
+    WebhookSubscription:
+      type: object
+      required: [id, url, events, active, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        envelopeVersion: { type: string, const: "2026-10-27", description: "Present when the endpoint opted into the opaque v2 envelope (WebhookEnvelopeV2)." }
+        secretVersion: { type: integer, minimum: 1, description: "Version of the signing secret; also in the Viadere-Key-Id header." }
+        verifiedAt: { $ref: "#/components/schemas/Timestamp", description: "When ownership of the endpoint was proven (POST …/verify). Until then it receives no events." }
+        pausedAt: { $ref: "#/components/schemas/Timestamp", description: "Set while delivery to the endpoint is paused." }
+        active: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+    WebhookVerificationResult:
+      type: object
+      required: [verified]
+      properties:
+        verified: { type: boolean }
+        failure: { type: string, description: "Present when not verified: `no_echo` (answered 2xx without a valid proof), `http_<status>` (e.g. `http_503`) or `unreachable`.", pattern: "^(no_echo|unreachable|http_[0-9]{3})$" }
+    PauseWebhookRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 200 }
+    CreateWebhookRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        envelopeVersion: { type: string, const: "2026-10-27", description: "Opt into the opaque v2 envelope (ids and a result_ref only). Limited to the approve.* events, interaction.decided/expired/cancelled and verification.completed (SECURITY.md 2.56)." }
+    WebhookSecretResponse:
+      type: object
+      required: [subscription, secret]
+      properties:
+        subscription: { $ref: "#/components/schemas/WebhookSubscription" }
+        secret: { type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: Shown once. HMAC key is the UTF-8 bytes of the whole string, prefix included. }
+
+    WebhookEventEnvelope:
+      type: object
+      required: [id, type, createdAt, businessId, apiVersion, data]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        type: { $ref: "#/components/schemas/WebhookEventType" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        businessId: { $ref: "#/components/schemas/Uuid" }
+        apiVersion: { type: string, examples: ["2026-10-27"] }
+        data: { description: Event-specific payload. }
+    MessageReceivedData:
+      type: object
+      required: [sessionId, relationshipId, messageId, text, channel, receivedAt]
+      properties:
+        sessionId: { $ref: "#/components/schemas/Uuid" }
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        messageId: { $ref: "#/components/schemas/Uuid" }
+        text: { type: string, description: May be empty when the customer sent only images. }
+        channel: { $ref: "#/components/schemas/Channel" }
+        receivedAt: { $ref: "#/components/schemas/Timestamp" }
+        attachments:
+          type: array
+          maxItems: 4
+          items: { $ref: "#/components/schemas/MessageAttachment" }
+          description: The customer's images as ids and metadata only (never bytes, never a URL). Fetch each with `GET /v1/business/conversations/{sessionId}/attachments/{attachmentId}`.
+    RelationshipEventData:
+      type: object
+      required: [relationshipId, occurredAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        publicName: { type: string, maxLength: 32, description: "The customer's public name (first name and last initial, or a name they chose). Not private; sent to every connected business. Absent when the customer has none." }
+        source: { type: string, enum: [handle, code, qr, button, link, search, sms, appClip] }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }
+    ConsentUpdatedData:
+      type: object
+      required: [relationshipId, purpose, granted, occurredAt]
+      properties:
+        relationshipId: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        purpose: { $ref: "#/components/schemas/InteractionPurpose" }
+        granted: { type: boolean }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }
+    ProfileValue:
+      description: A string, an address object, or (derived fields such as `birthdate.age_over_18` and `verified.*`) a boolean.
+      oneOf:
+        - { type: string }
+        - { type: boolean }
+        - type: object
+          required: [line1, locality, country]
+          properties:
+            line1: { type: string }
+            line2: { type: string }
+            locality: { type: string }
+            region: { type: string }
+            postalCode: { type: string }
+            country: { type: string, minLength: 2, maxLength: 2 }
+    CreateProfileRequest:
+      type: object
+      required: [subjectRef, fieldKeys, purpose]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+        purpose: { type: string, minLength: 1, maxLength: 200 }
+        expiresInSeconds: { type: integer, minimum: 3600, maximum: 2592000 }
+    ProfileRequestResource:
+      type: object
+      required: [id, subjectRef, fieldKeys, purpose, status, livemode, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, items: { type: string } }
+        purpose: { type: string }
+        status: { type: string, enum: [pending, answered, declined, expired, cancelled] }
+        approvedKeys: { type: array, items: { type: string } }
+        livemode: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        answeredAt: { $ref: "#/components/schemas/Timestamp" }
+    BusinessProfileView:
+      type: object
+      required: [subjectRef, fields, grantedWithoutValue, catalogVersion, livemode]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        publicName: { type: string, maxLength: 32 }
+        fields:
+          type: array
+          items:
+            type: object
+            required: [key, value]
+            properties:
+              key: { type: string }
+              entry: { type: string, description: "Multi-entry fields: the airline code or program name." }
+              value: { $ref: "#/components/schemas/ProfileValue" }
+              verification:
+                type: object
+                description: Provenance of a verified fact (method, time, assurance). Never a document number or image.
+                properties:
+                  fact: { type: string }
+                  method: { type: string }
+                  verifiedAt: { $ref: "#/components/schemas/Timestamp" }
+                  assurance: { type: string }
+                  policyVersion: { type: string }
+        grantedWithoutValue: { type: array, items: { type: string } }
+        catalogVersion: { type: integer }
+        livemode: { type: boolean }
+    ProfileAccessEventData:
+      type: object
+      description: "Data of `profile.access_granted`, `profile.access_revoked` and `profile.request_expired`: field keys only, never values."
+      required: [subjectRef, fieldKeys, occurredAt]
+      properties:
+        subjectRef: { $ref: "#/components/schemas/SubjectRef" }
+        fieldKeys: { type: array, items: { type: string } }
+        requestId: { $ref: "#/components/schemas/Uuid" }
+        occurredAt: { $ref: "#/components/schemas/Timestamp" }

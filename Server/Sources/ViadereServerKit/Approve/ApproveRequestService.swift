@@ -1,0 +1,575 @@
+import Fluent
+import SQLKit
+import Foundation
+import ViadereCore
+
+/// Approval requests (`auth.challenge` and `transaction.approve`, spec 14.2): creation by the business, delivery to the customer's enrolled
+/// devices, and the **signed, audience-bound result** coming back.
+///
+/// The relay is a courier. It verifies what it can (defense in depth) but it **cannot** authorize anything on a business's behalf: the
+/// business fetches the signed result and verifies it itself against its own transaction record (APP-005, acceptance 5).
+struct ApproveRequestService {
+    let db: any Database
+    let ctx: ServerContext
+
+    /// What the relay keeps of a server-visible request's displayed details (end-to-end requests keep nothing).
+    struct StoredDetails: Codable {
+        var transaction: TransactionDetails?
+        var authentication: AuthenticationDetails?
+        /// `auth-approvals`, server-visible only: the code the device compares the typed number with (sealed, deleted at the terminal state).
+        var numberMatchCode: String?
+        var subject: ApprovalSubject? {
+            if let transaction { return .transaction(transaction) }
+            if let authentication { return .authentication(authentication) }
+            return nil
+        }
+    }
+
+    static let sealContext = "approve_requests.details"
+    static let defaultLifetime = 120
+    static let envelopeMaxFuture: TimeInterval = 900
+
+    // MARK: Business: create
+
+    func create(principal: BusinessPrincipal, body: CreateApprovalRequest, authApproval: AuthApprovalExtras? = nil) async throws -> (view: ApprovalRequestView, created: Bool) {
+        let settings = ctx.config.approve
+        guard body.capability == .authChallenge || body.capability == .transactionApprove else {
+            throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
+        }
+        guard ApproveIdentifiers.isValidRequestId(body.requestId) else { throw APIError.validation("request_id is invalid.", details: ["request_id": "invalid"]) }
+        // S5-03: the legacy route has no number; with `AUTH_NUMBER_MATCHING_REQUIRED` on it creates no approval at all.
+        if authApproval == nil { try AuthApprovalService.requireNumberMatching(ctx) }
+        // The registered action (spec v4 A4) fixes the allowed lifetime; a capability without one is never an approval.
+        guard let action = ActionRegistry.approval(for: body.capability), action.isLive else {
+            throw APIError.validation("capability must be auth.challenge or transaction.approve.", details: ["capability": "invalid"])
+        }
+        let lifetime = body.expiresInSeconds ?? action.defaultTimeout
+        guard action.timeout.contains(lifetime) else { throw APIError.validation("expires_in_seconds must be between 30 and 600.", details: ["expires_in_seconds": "invalid"]) }
+
+        // The shape: exactly one way to carry the details.
+        let endToEnd = body.envelopes != nil
+        var details: ApprovalSubject?
+        if endToEnd {
+            guard body.transaction == nil, body.authentication == nil, body.challenge == nil, let envelopes = body.envelopes, (1...8).contains(envelopes.count) else {
+                throw APIError.validation("An end-to-end request carries only encrypted envelopes (1 to 8).", details: ["envelopes": "invalid"])
+            }
+        } else {
+            switch body.capability {
+            case .transactionApprove:
+                guard let transaction = body.transaction, body.authentication == nil else { throw APIError.validation("transaction is required.", details: ["transaction": "required"]) }
+                details = .transaction(transaction)
+            default:
+                guard let authentication = body.authentication, body.transaction == nil else { throw APIError.validation("authentication is required.", details: ["authentication": "required"]) }
+                details = .authentication(authentication)
+            }
+            guard let challenge = body.challenge, ChallengeNonce(challenge) != nil else {
+                throw APIError.validation("challenge must be a base64url nonce of 22 to 128 characters.", details: ["challenge": "invalid"])
+            }
+            do { try details?.validate() } catch let error as ApprovalTransactionError {
+                if case .invalid(let field) = error { throw APIError.validation("A displayed parameter is invalid.", details: [field: "invalid"]) }
+                throw APIError.validation("A displayed parameter is invalid.")
+            }
+        }
+
+        // Policy first: key scope, entitlement, tier, kill switches, typed parameters (server-visible requests).
+        let policy = PolicyService(db: db, ctx: ctx)
+        var parameters: [String: JSONValue]?
+        if case .transaction(let t)? = details {
+            parameters = ["currency": .string(t.currency), "amount_minor": .integer(t.amountMinor), "payee_display": .string(t.payeeDisplay),
+                          "transaction_reference": .string(t.transactionReference), "challenge": .string(body.challenge ?? "")]
+        }
+        try await policy.enforce(PolicyInput(body.capability, parameters: parameters), principal: principal, auditAllowed: false)
+        try await ctx.limiter.enforce("approve-request", key: principal.businessId.description, rule: settings.requestRate)
+
+        // Idempotency on the business's request id.
+        let hash = try authApproval?.requestHash ?? SecureToken.sha256Hex(try ViadereJSON.encode(body))
+        if let existing = try await ApproveRequestRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid).filter(\.$requestId == body.requestId).first() {
+            guard ConstantTime.equals(existing.requestHash, hash) else {
+                throw APIError(.conflict, .idempotencyConflict, "This request_id was already used with a different request.")
+            }
+            return (try view(existing), false)
+        }
+
+        let relationship = try await SubjectResolver(db: db, ctx: ctx).relationship(businessId: principal.businessId, subjectRef: body.subjectRef)
+        guard relationship.isActive else { throw APIError.conflict("The customer is not connected to your business.") }
+        try await Sandbox(db: db).requireMatching(relationship: relationship, livemode: principal.livemode)
+        let subjectFacts = try await policy.subjectFacts(relationship: relationship, capability: body.capability, interactionPurpose: .security)
+        try await policy.enforce(PolicyInput(body.capability, subjectRef: body.subjectRef, parameters: parameters, purpose: InteractionPurpose.security.rawValue, requestId: body.requestId),
+                                 principal: principal, stage: .full, subject: subjectFacts)
+        try await ApproveFreezeService(db: db, ctx: ctx).requireNotFrozen(consumerId: relationship.consumerId, relationshipId: relationship.id!)
+
+        let keyService = ApproveKeyService(db: db, ctx: ctx)
+        let devicePolicy = try await keyService.devicePolicy(businessId: principal.businessId.uuid)
+        var active = try await keyService.activeKeys(relationshipId: relationship.id!)
+        // `single_device` (WP-C2): only the most recently confirmed key may answer, whatever older keys survived.
+        if devicePolicy == .singleDevice, let newest = active.max(by: { ($0.key.activatedAt ?? $0.key.createdAt) < ($1.key.activatedAt ?? $1.key.createdAt) }) {
+            active = [newest]
+        }
+        guard !active.isEmpty else {
+            throw APIError(.conflict, .conflict, "The customer has no active approval key for your business. Enroll one first.", details: ["reason": "no_active_key"])
+        }
+
+        // Prompt-fatigue protection (SEC-DEV-008), before anything is stored or pushed. This early look only avoids work: the authoritative check runs
+        // again inside the transaction that inserts the request, under a per-relationship lock (gate finding F5), so concurrent requests cannot all
+        // pass a count that none of them has yet changed.
+        let now = ctx.now
+        let isAuth = authApproval != nil
+        let early = try await promptVerdict(relationshipId: relationship.id!, now: now, authApproval: isAuth)
+        // `auth-approvals` (ADR-0022 §5.1, S1-A2-6): per-customer budgets limit **alerting, not availability**. Over budget the request is still created and
+        // reachable from the app, but delivered silently (no push); only the per-tenant rate refuses. The legacy route keeps its `429`. Whether it is silent is
+        // decided again inside the transaction, under the relationship lock (S5-04).
+        if case .rateLimited(let retry) = early, !isAuth { throw Self.rateLimited(retry) }
+        // Number-match allocation (ADR-0020 §2a): refused with a `409` before anything is stored; repeated under the row lock inside the transaction.
+        if let authApproval {
+            try await AuthMatchGroups(db: db, ctx: ctx).check(businessId: principal.businessId.uuid, consumerId: relationship.consumerId, members: authApproval.tags)
+        }
+
+        // Targets.
+        var deliveries: [(key: ApproveKeyRecord, device: DeviceRecord, envelope: E2EEEnvelope?)] = []
+        if let envelopes = body.envelopes {
+            var seen = Set<String>()
+            for delivery in envelopes {
+                guard seen.insert(delivery.kid).inserted, let target = active.first(where: { $0.key.kid == delivery.kid }) else {
+                    throw APIError.validation("An envelope names a key that is not an active approval key of this customer.", details: ["envelopes": "invalid_key"])
+                }
+                let ctxe = delivery.envelope.context
+                guard delivery.envelope.kid == target.key.hpkeKid, ctxe.purpose == "approve.request", ctxe.requestId == body.requestId,
+                      ctxe.sender == ApproveIdentifiers.sender(principal.businessId), ctxe.recipient == ApproveIdentifiers.recipient(kid: target.key.kid),
+                      ctxe.expiresAt > now, ctxe.expiresAt <= now.addingTimeInterval(Self.envelopeMaxFuture) else {
+                    throw APIError.validation("An envelope is not bound to this request, business and key.", details: ["envelopes": "invalid_binding"])
+                }
+                deliveries.append((target.key, target.device, delivery.envelope))
+            }
+        } else {
+            deliveries = active.map { ($0.key, $0.device, nil) }
+        }
+
+        let record = ApproveRequestRecord()
+        record.id = UUID()
+        record.businessId = principal.businessId.uuid
+        record.requestId = body.requestId
+        record.relationshipId = relationship.id!
+        record.consumerId = relationship.consumerId
+        record.subjectRef = body.subjectRef.rawValue
+        record.capability = body.capability.rawValue
+        record.protection = (endToEnd ? ApprovalProtection.endToEnd : .serverVisible).rawValue
+        record.requestHash = hash
+        record.attempts = 0
+        record.devicePolicy = devicePolicy.rawValue
+        record.challenge = endToEnd ? nil : body.challenge
+        if let details {
+            let stored = StoredDetails(transaction: body.transaction, authentication: body.authentication, numberMatchCode: authApproval?.code)
+            _ = details
+            record.detailsSealed = try ctx.cipher.seal(try ViadereJSON.encode(stored), context: Self.sealContext, rowId: record.id!)
+        }
+        record.createdAt = now
+        record.expiresAt = now.addingTimeInterval(TimeInterval(lifetime))
+        record.matchDigits = authApproval?.digits
+        record.sessionHandle = authApproval?.sessionHandle
+        let actor = AuditActor(kind: .businessAPIKey, id: principal.keyId.uuidString.lowercased())
+        // Delivery ids are drawn here so the push can carry each device's own id (`req`) after the transaction committed.
+        let targets = deliveries.map { (key: $0.key, device: $0.device, envelope: $0.envelope, id: UUID()) }
+        let deliveryRows = targets.map { (deviceId: $0.device.id!, deliveryId: $0.id) }
+        let service = self
+        let isAuthApproval = authApproval != nil
+        do {
+            try await DB.retryingTransient { try await db.transaction { tx in
+                // Serialize requests per relationship (`SELECT ... FOR UPDATE` on PostgreSQL; SQLite serializes writers), then decide on the history
+                // as it is now, including every request that committed while this one waited.
+                try await DB.lockForUpdate(tx, table: RelationshipRecord.schema, id: relationship.id!)
+                let verdict = try await ApproveRequestService(db: tx, ctx: service.ctx).promptVerdict(relationshipId: relationship.id!, now: now, authApproval: isAuthApproval)
+                var denied = false
+                var overBudget = false
+                switch verdict {
+                case .rateLimited(let retry): if !isAuthApproval { throw Self.rateLimited(retry) } else { overBudget = true }
+                case .autoDeny: denied = true
+                case .allow: break
+                }
+                record.silent = isAuthApproval && overBudget ? true : nil
+                record.status = denied ? ApprovalRequestStatus.denied.rawValue : ApprovalRequestStatus.pending.rawValue
+                record.reason = denied ? "auto_denied" : nil
+                record.delivered = denied ? 0 : targets.count
+                if denied { record.decidedAt = now }
+                let isAutoDenied = denied
+                try await record.create(on: tx)
+                // ADR-0022 §1: the auth-delivery record of method `push_approval` (mirrors this request's state).
+                if isAuthApproval { try await PushApprovalDelivery.create(on: tx, ctx: ctx, request: record, principal: principal, now: now) }
+                if !isAutoDenied {
+                    for target in targets {
+                        let row = ApproveDeliveryRecord()
+                        row.id = target.id
+                        row.requestId = record.id!
+                        row.kid = target.key.kid
+                        row.deviceId = target.device.id!
+                        row.consumerId = relationship.consumerId
+                        row.envelope = try target.envelope.map { String(decoding: try $0.serialized(), as: UTF8.self) }
+                        row.createdAt = now
+                        try await row.create(on: tx)
+                    }
+                    if let authApproval {
+                        try await AuthMatchGroups(db: tx, ctx: service.ctx).reserve(businessId: record.businessId, consumerId: record.consumerId, refId: record.id!,
+                                                                                    members: authApproval.tags)
+                        try await AuthApprovalService(db: tx, ctx: service.ctx).supersede(new: record, handle: authApproval.sessionHandle)
+                    }
+                    // The expiry is a scheduled message at `expires_at` (the maintenance sweep remains the safety net).
+                    try await Outbox.enqueue(QueueHandlers.approveExpire, ref: record.id!, notBefore: record.expiresAt, on: tx, ctx: ctx)
+                }
+                // The audit record names the request and the protection mode. Never the amount, the payee or an envelope.
+                _ = try await AuditService(db: tx, ctx: ctx).record(isAutoDenied ? "approve.request_auto_denied" : "approve.request_created", actor: actor,
+                    consumerId: ConsumerID(relationship.consumerId), businessId: principal.businessId, subjectType: "approve_request", subjectId: record.id?.uuidString.lowercased(),
+                    correlationId: body.requestId, metadata: ["capability": body.capability.rawValue, "protection": record.protection, "devices": String(record.delivered)])
+            } }
+        } catch {
+            // A concurrent request with the same id won the race: replay it.
+            if error.isConstraintViolation, let existing = try await ApproveRequestRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid)
+                .filter(\.$requestId == body.requestId).first(), ConstantTime.equals(existing.requestHash, hash) {
+                return (try view(existing), false)
+            }
+            throw error
+        }
+        if record.reason == "auto_denied" {
+            await pauseNotice(relationship: relationship)
+        } else {
+            if record.silent != true { await ApproveNotifier(db: db, ctx: ctx).pushRequest(to: deliveryRows) }
+            if authApproval != nil { await AuthApprovalService(db: db, ctx: ctx).pressure(businessId: record.businessId, consumerId: record.consumerId) }
+        }
+        return (try view(record), true)
+    }
+
+    // MARK: Prompt fatigue
+
+    static func rateLimited(_ retry: TimeInterval) -> APIError {
+        APIError(.tooManyRequests, .rateLimited, "Too many approval requests for this customer.", headers: ["Retry-After": String(Int(retry.rounded(.up)))])
+    }
+
+    /// - Parameter authApproval: an `auth-approvals` create. Open requests then never make the next one silent; only the hourly count does (S5-04).
+    func promptVerdict(relationshipId: UUID, now: Date, authApproval: Bool = false) async throws -> ApprovalPromptPolicy.Verdict {
+        let policy = ctx.config.approve.prompt
+        let since = now.addingTimeInterval(-max(policy.window, policy.pauseDuration))
+        let rows = try await ApproveRequestRecord.query(on: db).filter(\.$relationshipId == relationshipId).filter(\.$createdAt > since).all()
+        return policy.evaluate(history: Self.promptRecords(rows, now: now), now: now, limitOpenRequests: !authApproval)
+    }
+
+    /// The history the pause counts (ADR-0022 §5.2 item 2, §5.4, S5-02):
+    /// - an auto-denied request is not a decision of the customer and must not extend the pause;
+    /// - one group Deny, "This wasn't me" or automatic `number_mismatch` deny closes N requests with one `answer_group` and counts as **one** refusal;
+    /// - a `destination_unverified` denial is an integrity signal about the business's link, not the customer's answer, and is never counted.
+    static func promptRecords(_ rows: [ApproveRequestRecord], now: Date) -> [ApprovalPromptPolicy.Record] {
+        var counted = Set<String>()
+        return rows.sorted { $0.createdAt < $1.createdAt }.map { row -> ApprovalPromptPolicy.Record in
+            var decision = row.reason == "auto_denied" ? nil : row.decision.flatMap(ApprovalDecision.init(rawValue:))
+            if row.denyReason == ApprovalDenyReason.destinationUnverified.rawValue { decision = nil }
+            if decision == .deny || decision == .report, let group = row.answerGroup, !counted.insert(row.consumerId.uuidString + "|" + group).inserted { decision = nil }
+            return ApprovalPromptPolicy.Record(createdAt: row.createdAt, decision: decision, isOpen: row.statusValue == .pending && row.expiresAt > now)
+        }
+    }
+
+    private func pauseNotice(relationship: RelationshipRecord) async {
+        // Once per pause, not once per refused request.
+        guard await ctx.limiter.allow("approve-pause-notice", key: relationship.id!.uuidString, rule: .perHour(1, burst: 1)) else { return }
+        await ApproveNotifier(db: db, ctx: ctx).notice(.approvalRequestsPaused, consumerId: relationship.consumerId, subjectId: relationship.id?.uuidString.lowercased())
+    }
+
+    // MARK: Business: read, cancel, result
+
+    func record(requestId: String, principal: BusinessPrincipal) async throws -> ApproveRequestRecord {
+        guard let record = try await ApproveRequestRecord.query(on: db).filter(\.$businessId == principal.businessId.uuid).filter(\.$requestId == requestId).first(),
+              try await Sandbox(db: db).matches(consumerId: record.consumerId, livemode: principal.livemode) else { throw APIError.notFound }
+        return record
+    }
+
+    func view(_ record: ApproveRequestRecord) throws -> ApprovalRequestView {
+        guard let subject = SubjectRef(record.subjectRef) else { throw APIError.internalError }
+        var status = record.statusValue
+        if status == .pending, record.expiresAt <= ctx.now { status = .expired }
+        return ApprovalRequestView(requestId: record.requestId, subjectRef: subject, capability: Capability(rawValue: record.capability), status: status,
+                                   protection: record.protectionValue, expiresAt: record.expiresAt, createdAt: record.createdAt, decidedAt: record.decidedAt,
+                                   resultRef: record.resultRef, reason: record.reason, deliveredTo: record.delivered)
+    }
+
+    func cancel(principal: BusinessPrincipal, requestId: String) async throws -> ApproveRequestRecord {
+        let record = try await record(requestId: requestId, principal: principal)
+        if record.statusValue == .pending, record.expiresAt > ctx.now { _ = try await finish(record, status: .cancelled, reason: "cancelled_by_business", notify: false) }
+        else if record.statusValue == .pending { _ = try await finish(record, status: .expired, reason: nil, notify: true) }
+        return try await self.record(requestId: requestId, principal: principal)
+    }
+
+    /// The signed result, to the business it is addressed to only. A reference of another business is a plain 404.
+    func result(principal: BusinessPrincipal, resultRef: String) async throws -> ApprovalResultResponse {
+        guard ApproveIdentifiers.isValidResultRef(resultRef),
+              let record = try await ApproveRequestRecord.query(on: db).filter(\.$resultRef == resultRef).filter(\.$businessId == principal.businessId.uuid).first(),
+              try await Sandbox(db: db).matches(consumerId: record.consumerId, livemode: principal.livemode),
+              let jws = record.resultJWS, let kid = record.decidedKid, let decidedAt = record.decidedAt else { throw APIError.notFound }
+        return ApprovalResultResponse(resultRef: resultRef, requestId: record.requestId, result: jws, kid: kid, decidedAt: decidedAt)
+    }
+
+    // MARK: Finishing
+
+    /// pending -> `status` (cancelled / expired) exactly once, with the opaque event when asked.
+    @discardableResult
+    func finish(_ record: ApproveRequestRecord, status: ApprovalRequestStatus, reason: String?, notify: Bool) async throws -> Bool {
+        let swapped = try await DB.swap(db, table: ApproveRequestRecord.schema, id: record.id!, column: "status", expected: ApprovalRequestStatus.pending.rawValue,
+                                        newValue: status.rawValue)
+        guard swapped else { return false }
+        try await AuthMatchGroups(db: db, ctx: ctx).release(refId: record.id!)
+        try await PushApprovalDelivery.mirror(on: db, ctx: ctx, approvalId: record.id!, status: status, reason: reason, actor: .system, now: ctx.now)
+        if let reason { try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$reason, to: reason).update() }
+        // The relay keeps nothing it does not need: the displayed details and the nonce go as soon as the request is over.
+        try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
+        record.status = status.rawValue
+        record.reason = reason
+        _ = try await AuditService(db: db, ctx: ctx).record("approve.request_\(status.rawValue)", actor: AuditActor(kind: .system), consumerId: ConsumerID(record.consumerId),
+            businessId: BusinessID(record.businessId), subjectType: "approve_request", subjectId: record.id?.uuidString.lowercased(), metadata: ["reason": reason ?? ""])
+        if notify { try await ApproveWebhooks(db: db, ctx: ctx).requestExpired(record) }
+        return true
+    }
+
+    /// Maintenance: expire everything overdue (the business gets one opaque event per request).
+    @discardableResult
+    func expireDue(limit: Int = 200) async throws -> Int {
+        let now = ctx.now
+        let overdue = try await ApproveRequestRecord.query(on: db).filter(\.$status == ApprovalRequestStatus.pending.rawValue).filter(\.$expiresAt <= now).limit(limit).all()
+        var count = 0
+        for record in overdue where try await finish(record, status: .expired, reason: nil, notify: true) { count += 1 }
+        // Request metadata is purged 30 days after its terminal state by the retention sweep (`RetentionClass.authDeliveryMetadata`, ADR-0026); a signed
+        // result stays as high-value evidence on the `signed_decisions` schedule.
+        // Enrollments the customer never completed.
+        // Read first so an idle tick takes no write lock.
+        if try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now).count() > 0 {
+            try await ApproveEnrollmentRecord.query(on: db).filter(\.$status == ApprovalEnrollmentStatus.pending.rawValue).filter(\.$expiresAt <= now)
+                .set(\.$status, to: ApprovalEnrollmentStatus.expired.rawValue).update()
+        }
+        try await ApproveEnrollmentService(db: db, ctx: ctx).expireUnconfirmed()
+        // Link sessions nobody completed, and completed ones the business never confirmed (WP-C1; the same job tick, no new job).
+        try await LinkSessionService(db: db, ctx: ctx).expireDue()
+        return count
+    }
+
+    // MARK: Device: list and read
+
+    func deviceRequest(delivery: ApproveDeliveryRecord, request: ApproveRequestRecord, key: ApproveKeyRecord, business: BusinessSummary,
+                       verdict: ApprovalPromptPolicy.Verdict?) throws -> ApproveDeviceRequest {
+        guard let subject = SubjectRef(request.subjectRef) else { throw APIError.internalError }
+        var envelope: E2EEEnvelope?
+        if let raw = delivery.envelope { envelope = try E2EEEnvelope.parse(Data(raw.utf8)) }
+        var stored: StoredDetails?
+        if let sealed = request.detailsSealed, request.protectionValue == .serverVisible {
+            stored = try ViadereJSON.decode(StoredDetails.self, from: try ctx.cipher.open(sealed, context: Self.sealContext, rowId: request.id!))
+        }
+        var requests = 1
+        var warn = false
+        if case .allow(let count, let showWarning)? = verdict { requests = count; warn = showWarning }
+        // The request as a durable alert (spec v4 C5): one event id for the request, whatever device or push asks; never actionable once expired.
+        let capability = Capability(rawValue: request.capability)
+        let action = ActionRegistry.approval(for: capability)
+        let alertStatus: AlertStatus
+        switch request.statusValue {
+        case .pending: alertStatus = request.expiresAt > ctx.now ? .pending : .expired
+        case .approved, .denied, .reported: alertStatus = .completed
+        case .expired: alertStatus = .expired
+        case .cancelled, .locked: alertStatus = .cancelled
+        case .unknown: alertStatus = .unknown
+        }
+        let alert = AlertDescriptor(eventId: AlertDescriptor.eventId(kind: "approve_request", id: request.id!), category: .approval, businessId: business.id,
+                                    urgency: AlertUrgency(risk: action?.risk ?? .high), status: alertStatus, expiresAt: request.expiresAt, action: action?.id, now: ctx.now)
+        return ApproveDeviceRequest(id: delivery.id!, requestId: request.requestId, business: business, subjectRef: subject, capability: capability,
+                                    kid: key.kid, protection: request.protectionValue, status: request.statusValue, createdAt: request.createdAt, expiresAt: request.expiresAt,
+                                    envelope: envelope, challenge: request.challenge, transaction: stored?.transaction, authentication: stored?.authentication,
+                                    requestsInWindow: requests, showFatigueWarning: warn, alert: alert,
+                                    numberMatch: request.matchDigits.map { AuthApprovalNumberMatch(digits: $0, code: stored?.numberMatchCode) },
+                                    silent: request.silent == true ? true : nil)
+    }
+
+    /// Pending requests for the calling device's active keys.
+    func pending(principal: ConsumerPrincipal) async throws -> [ApproveDeviceRequest] {
+        guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
+        let now = ctx.now
+        let deliveries = try await ApproveDeliveryRecord.query(on: db).filter(\.$deviceId == deviceId.uuid).filter(\.$consumerId == principal.consumerId.uuid)
+            .sort(\.$createdAt, .descending).limit(100).all()
+        var out: [ApproveDeviceRequest] = []
+        var summaries: [UUID: BusinessSummary] = [:]
+        let freezes = ApproveFreezeService(db: db, ctx: ctx)
+        for delivery in deliveries {
+            guard let request = try await ApproveRequestRecord.find(delivery.requestId, on: db), request.statusValue == .pending, request.expiresAt > now,
+                  let key = try await ApproveKeyRecord.query(on: db).filter(\.$kid == delivery.kid).first(), key.isActive else { continue }
+            // While approvals are frozen the customer is not shown requests at all.
+            if try await freezes.frozenBy(consumerId: request.consumerId, relationshipId: request.relationshipId) != nil { continue }
+            if summaries[request.businessId] == nil { summaries[request.businessId] = try? await ApproveKeyService(db: db, ctx: ctx).businessSummary(request.businessId) }
+            guard let summary = summaries[request.businessId] else { continue }
+            let verdict = try await promptVerdictForDisplay(relationshipId: request.relationshipId, now: now)
+            out.append(try deviceRequest(delivery: delivery, request: request, key: key, business: summary, verdict: verdict))
+        }
+        return out
+    }
+
+    /// The count and warning shown with a request: the same policy, evaluated over the history **including** this request.
+    private func promptVerdictForDisplay(relationshipId: UUID, now: Date) async throws -> ApprovalPromptPolicy.Verdict {
+        let policy = ctx.config.approve.prompt
+        let rows = try await ApproveRequestRecord.query(on: db).filter(\.$relationshipId == relationshipId)
+            .filter(\.$createdAt > now.addingTimeInterval(-policy.window)).all().filter { $0.reason != "auto_denied" }
+        let count = rows.count
+        return .allow(requestsInWindow: count, showWarning: count >= policy.warnAtRequests)
+    }
+
+    func get(principal: ConsumerPrincipal, deliveryId: UUID) async throws -> ApproveDeviceRequest {
+        guard let deviceId = principal.deviceId,
+              let delivery = try await ApproveDeliveryRecord.find(deliveryId, on: db), delivery.deviceId == deviceId.uuid, delivery.consumerId == principal.consumerId.uuid,
+              let request = try await ApproveRequestRecord.find(delivery.requestId, on: db),
+              let key = try await ApproveKeyRecord.query(on: db).filter(\.$kid == delivery.kid).first(), key.isActive else { throw APIError.notFound }
+        let summary = try await ApproveKeyService(db: db, ctx: ctx).businessSummary(request.businessId)
+        return try deviceRequest(delivery: delivery, request: request, key: key, business: summary,
+                                 verdict: try await promptVerdictForDisplay(relationshipId: request.relationshipId, now: ctx.now))
+    }
+
+    // MARK: Device: invalid submissions (WP-C2)
+
+    /// Reasons that count as an invalid submission: the result itself was wrong (malformed, signed by another key, for another request, too weak,
+    /// from the future) or the device's integrity assertion failed.
+    static let countedReasons: Set<String> = ["malformed", "kid_mismatch", "bad_signature", "signed_in_future", "context_mismatch", "insufficient_assurance",
+                                             "binding_mismatch", "assertion_failed"]
+
+    /// `attempts = attempts + 1` in one statement (no lost update under concurrency), then locks the request once it reaches the limit.
+    func countInvalidSubmission(_ request: ApproveRequestRecord) async throws {
+        guard let id = request.id, let sql = db as? any SQLDatabase else { return }
+        try await sql.update(ApproveRequestRecord.schema).set(SQLIdentifier("attempts"), to: SQLRaw("attempts + 1"))
+            .where("id", .equal, id).where("status", .equal, ApprovalRequestStatus.pending.rawValue).run()
+        guard let fresh = try await ApproveRequestRecord.find(id, on: db), fresh.statusValue == .pending,
+              fresh.attempts >= ctx.config.approve.maxInvalidSubmissions else { return }
+        _ = try await finish(fresh, status: .locked, reason: "too_many_invalid_submissions", notify: true)
+    }
+
+    // MARK: Device: the signed result
+
+    func submit(principal: ConsumerPrincipal, deliveryId: UUID, body: SubmitApprovalResultRequest) async throws -> SubmitApprovalResultResponse {
+        guard let deviceId = principal.deviceId else { throw APIError.signatureInvalid }
+        let now = ctx.now
+        guard let delivery = try await ApproveDeliveryRecord.find(deliveryId, on: db), delivery.deviceId == deviceId.uuid, delivery.consumerId == principal.consumerId.uuid,
+              let request = try await ApproveRequestRecord.find(delivery.requestId, on: db) else { throw APIError.notFound }
+        // A malformed group id is a malformed request, not a way to skip the count (S5-02).
+        if let group = body.answerGroup, !ApprovalAnswerGroup.isValid(group) { throw APIError.validation("The request failed validation.", details: ["answer_group": "invalid"]) }
+        let audit = AuditService(db: db, ctx: ctx)
+        func reject(_ reason: String, _ error: APIError) async throws -> Never {
+            _ = try? await audit.record("approve.decision_rejected", outcome: .denied, principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",
+                                        subjectId: request.id?.uuidString.lowercased(), metadata: ["reason": reason])
+            // An invalid result counts against the request (WP-C2): after `maxInvalidSubmissions` it locks and accepts nothing more. Refusals that are
+            // not the submitter's fault (expired, frozen, already decided, an untrusted device) do not count.
+            if Self.countedReasons.contains(reason) { try? await countInvalidSubmission(request) }
+            throw error
+        }
+        guard request.statusValue != .locked else {
+            try await reject("locked", APIError(.locked, .requestLocked, "This request was locked after too many invalid answers. Ask the business to send a new one."))
+        }
+        guard request.statusValue == .pending else { try await reject("not_pending", .conflict("This request has already been resolved.")) }
+        if request.expiresAt <= now {
+            _ = try await finish(request, status: .expired, reason: nil, notify: true)
+            try await reject("expired", .gone("This request has expired."))
+        }
+        guard let key = try await ApproveKeyRecord.query(on: db).filter(\.$kid == delivery.kid).first(), key.isActive, key.deviceId == deviceId.uuid,
+              key.consumerId == principal.consumerId.uuid, key.relationshipId == request.relationshipId else {
+            try await reject("key_not_active", APIError(.forbidden, .forbidden, "This approval key is not active."))
+        }
+        guard let device = try await DeviceRecord.find(deviceId.uuid, on: db), device.kind == .app, device.revokedAt == nil else {
+            try await reject("device", APIError(.forbidden, .forbidden, "This device can't respond to requests."))
+        }
+        guard try await DirectoryService(db: db).verified(id: request.businessId) != nil else { try await reject("business_unavailable", .gone("This request is no longer available.")) }
+        // An attested device asserts over exactly this result (`APP_ATTEST_ASSERTION_MODE`, WP-C2).
+        do {
+            try await AppAttestAssertionPolicy(db: db, ctx: ctx).check(device: device, assertion: body.appAttestAssertion,
+                                                                       clientData: ApprovalAppAttest.clientData(deliveryId: deliveryId, result: body.result),
+                                                                       purpose: "approve_result", principal: principal)
+        } catch let error as APIError {
+            try await reject("assertion_failed", error)
+        }
+
+        let parts: ApprovalResultJWS.Parts
+        do { parts = try ApprovalResultJWS.parse(body.result) } catch { try await reject("malformed", .badRequest("The result could not be read.")) }
+        guard parts.kid == key.kid else { try await reject("kid_mismatch", .forbidden) }
+        guard let subject = SubjectRef(request.subjectRef), let publicKey = try? DevicePublicKey(base64URL: key.publicKey) else { throw APIError.internalError }
+        var details: ApprovalSubject?
+        if let sealed = request.detailsSealed, request.protectionValue == .serverVisible {
+            details = try ViadereJSON.decode(StoredDetails.self, from: try ctx.cipher.open(sealed, context: Self.sealContext, rowId: request.id!)).subject
+        }
+        let capability = Capability(rawValue: request.capability)
+        let required = ApprovalAMR.required(for: capability.definition?.sensitivity ?? .critical)
+        // Number matching (ADR-0022 §3): the relay checks the typed `match` against the code it holds (server-visible) or at least its presence and length
+        // (end to end). Defense in depth: the business verifies it against its own record.
+        var numberMatch = NumberMatchExpectation.notRequested
+        if let digits = request.matchDigits {
+            var code: String?
+            if let sealed = request.detailsSealed, request.protectionValue == .serverVisible {
+                code = try ViadereJSON.decode(StoredDetails.self, from: try ctx.cipher.open(sealed, context: Self.sealContext, rowId: request.id!)).numberMatchCode
+            }
+            numberMatch = code.map { .required(code: $0) } ?? .relayRequired(digits: digits)
+        }
+        let expectation = ApprovalExpectation(relayAudience: BusinessID(request.businessId), subject: subject, requestId: request.requestId, capability: capability,
+                                              challenge: request.challenge, subjectDetails: details, numberMatch: numberMatch, requestExpiresAt: request.expiresAt,
+                                              minimumAMR: required)
+        let verified: VerifiedApproval
+        do {
+            verified = try ApprovalResultVerifier.verify(body.result, expecting: expectation,
+                                                         keys: [EnrolledApprovalKey(kid: key.kid, publicKey: publicKey, subject: subject, assurance: key.assuranceValue)], now: now)
+        } catch let error as ApprovalVerificationError {
+            switch error {
+            case .malformed, .unsupportedVersion, .unsupportedType, .unsupportedAlgorithm, .unknownCriticalHeader, .lifetimeTooLong:
+                try await reject("malformed", .badRequest("The result could not be read."))
+            case .badSignature, .unknownKey, .keyRevoked: try await reject("bad_signature", .signatureInvalid)
+            case .expired: try await reject("result_expired", .gone("This result has expired."))
+            case .issuedInFuture: try await reject("signed_in_future", APIError(.unauthorized, .clockSkew, "The result timestamp is invalid."))
+            case .challengeMismatch, .transactionMismatch: try await reject("context_mismatch", APIError(.conflict, .contextMismatch, "This request changed. Review it again."))
+            case .insufficientAuthentication, .amrExceedsKey:
+                try await reject("insufficient_assurance", APIError(.forbidden, .insufficientAssurance, "This request needs stronger verification."))
+            default: try await reject("binding_mismatch", .forbidden)
+            }
+        }
+        // v2 `jti` (ADR-0023 §7): recorded once; the same signed result presented again anywhere is refused.
+        if let jti = verified.claims.jti {
+            let fresh = try await DatabaseReplayGuard(db: db).registerIfFresh(nonce: jti, scope: "approval-jti:\(request.businessId)",
+                                                                               expiresAt: verified.claims.expiresAtDate.addingTimeInterval(60), now: now)
+            guard fresh else { try await reject("replayed", APIError(.conflict, .replayDetected, "This result was already used.")) }
+        }
+        let decision = verified.decision
+        // A frozen relationship or account accepts only refusals; a device in its new-device cool-down may not approve high-risk requests.
+        if decision == .approve {
+            if let by = try await ApproveFreezeService(db: db, ctx: ctx).frozenBy(consumerId: request.consumerId, relationshipId: request.relationshipId) {
+                try await reject("frozen", APIError(.conflict, .approvalsFrozen, "Approvals are frozen.", details: ["frozen_by": by]))
+            }
+            // High-risk approval needs a D1 device, or a key the business itself enrolled for this (D0) device after it existed (business
+            // re-enrollment, `DeviceTrust.mayCompleteBusinessEnrollment`). Never time.
+            if (capability.definition?.sensitivity ?? .critical) >= .high, !DeviceTrust.isTrusted(device, at: now) {
+                // The key came from an Approve enrollment or from a link session (WP-C1; the key's enrollment id is the session id).
+                let enrollment = try await ApproveEnrollmentRecord.find(key.enrollmentId, on: db)
+                var businessEnrolled = enrollment.map { $0.statusValue == .confirmed && $0.createdAt >= device.createdAt } ?? false
+                if enrollment == nil, let session = try await LinkSessionRecord.find(key.enrollmentId, on: db) {
+                    businessEnrolled = session.statusValue == .confirmed && session.createdAt >= device.createdAt && session.claimedDeviceId == device.id
+                }
+                if !businessEnrolled {
+                    try await reject("device_not_trusted", APIError(.forbidden, .deviceCoolDown,
+                        "This device hasn't been approved yet. Approve it from a device you already trust, or ask the business to set it up again."))
+                }
+            }
+        }
+        let resultRef = ApproveIdentifiers.newResultRef()
+        let status: ApprovalRequestStatus = decision == .approve ? .approved : (decision == .deny ? .denied : .reported)
+        try await db.transaction { tx in
+            let swapped = try await DB.swap(tx, table: ApproveRequestRecord.schema, id: request.id!, column: "status", expected: ApprovalRequestStatus.pending.rawValue,
+                                            newValue: status.rawValue, extra: [("decided_at", now), ("decided_kid", key.kid), ("decision", decision.rawValue),
+                                                                               ("amr", verified.claims.amr.rawValue), ("result_ref", resultRef), ("result_jws", body.result)])
+            guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
+            try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil)
+                .set(\.$denyReason, to: verified.claims.denyReason?.rawValue).set(\.$answerGroup, to: decision == .approve ? nil : body.answerGroup).update()
+            try await PushApprovalDelivery.mirror(on: tx, ctx: ctx, approvalId: request.id!, status: status, reason: verified.claims.denyReason?.rawValue, actor: .device, now: now)
+            try await AuthMatchGroups(db: tx, ctx: ctx).release(refId: request.id!)
+            guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
+            if decision == .approve { try await AuthApprovalService(db: tx, ctx: ctx).closeGroup(after: decided) }
+            try await ApproveWebhooks(db: tx, ctx: ctx).requestDecided(decided)
+            let auditService = AuditService(db: tx, ctx: ctx)
+            _ = try await auditService.record("approve.request_decided", principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",
+                                              subjectId: request.id?.uuidString.lowercased(), metadata: ["decision": decision.rawValue, "amr": verified.claims.amr.rawValue])
+            if decision == .report {
+                _ = try await auditService.record("approve.reported_suspicious", principal: principal, businessId: BusinessID(request.businessId), subjectType: "approve_request",
+                                                  subjectId: request.id?.uuidString.lowercased())
+            }
+        }
+        return SubmitApprovalResultResponse(id: deliveryId, status: status)
+    }
+}
