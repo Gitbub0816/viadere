@@ -115,6 +115,8 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | LS-06 | Expired · already answered · gone | This sign-in link has expired. Ask for a new one where you started signing in. · This sign-in link was already answered. · This request is no longer active. |
 | LS-07 | Statement not verified (E-01) · answer refused | We couldn't confirm this sign-in request came from Viadere. Nothing was approved. · Viadere didn't accept this answer, so nobody was signed in. Ask for a new link where you started signing in. |
 | LS-08 | No biometric approval key · offline | Approving sign-ins needs Face ID or Touch ID on this device. · E-02 offline line, with Try again |
+| LS-09 | Same device: accepted and the system opened the business's page (`#vdr_code=` hand-off) | Opened {host}. Finish signing in there. |
+| LS-10 | Same device: the page could not be opened (the system declined, the request ran out, or the link would not open exactly as signed); the code was discarded | We couldn't open {host}, so you're not signed in. Ask for a new link where you started signing in. |
 
 ## 3. Push approval and payment screens (ADR-0022)
 
