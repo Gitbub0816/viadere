@@ -41,7 +41,9 @@ struct AuthorityRecoveryService {
     // MARK: Challenges
 
     func prepareChallenge(_ purpose: AuthorityPurpose, _ o: [String: JSONValue], accountRef: String, binding: AuthorityChallengeBinding) async throws -> JSONValue {
-        _ = try requireSeal()
+        // A cancel is reduce-only and opens no envelope: it never waits for the seal key (an unavailable seal key must not keep a person from
+        // stopping a recovery that activation would complete without one).
+        if purpose == .recoveryCancel { guard ctx.config.recoveryEnabled else { throw Abort(.notFound) } } else { try requireSealAvailable() }
         switch purpose {
         case .recoveryCodesSet:
             // The device names its own set id before it asks (S3-A3-05 item 1).
@@ -99,23 +101,23 @@ struct AuthorityRecoveryService {
         let now = ctx.now
         switch c.parsed.claims.purpose {
         case .recoveryCodesSet:
-            let seal = try requireSeal()
+            try requireSealAvailable()
             // D1-equivalent (ADR-0032 §3.1, ST-REC-16): a grant-capable approvalBiometric key past its cool-down.
             guard c.key.keyPurpose == DeviceKeyPurpose.approvalBiometric.rawValue, c.key.grantCapable, c.key.usableFrom <= now,
                   c.parsed.claims.userVerification == .biometric else { throw await refuse("approver_not_eligible", ref) }
-            guard let envelopeValue = o["envelope"], let envelope = try? RecoverySealEnvelope.parse(envelopeValue) else { throw await refuse("envelope_malformed", ref) }
+            guard let envelope = parseSeal(o["envelope"]) else { throw await refuse("envelope_malformed", ref) }
             guard let committed = c.parsed.claims.envelopeDigest, ConstantTime.equals(committed, envelope.digest) else { throw await refuse("envelope_digest", ref) }
-            guard ConstantTime.equals(envelope.kid, seal.kid) else { throw await refuse("seal_kid", ref) }
-            let plaintext: [String: JSONValue]
-            do {
-                plaintext = try RecoverySeal.open(envelope, with: seal.privateKey, purpose: .codesSet, environment: ctx.environment,
-                                                  challengeId: c.challenge.id!, nonce: c.challenge.nonce)
-            } catch { throw await refuse("envelope_open_failed", ref) }
+            let opened: OpenedSeal
+            do { opened = try await openSeal(envelope, purpose: .codesSet, challenge: c.challenge) } catch let refusal as SealRefusal {
+                throw await refuse(refusal.reason, ref)
+            }
+            let sealKid = opened.sealKid
+            let plaintext = opened.plaintext
             guard let set = try? RecoverySeal.parseSet(plaintext) else { throw await refuse("envelope_plaintext", ref) }
             guard ConstantTime.equals(set.accountRef, ref) else { throw await refuse("envelope_account", ref) }
             guard let boundSet = c.binding.setId, ConstantTime.equals(set.setId, boundSet) else { throw await refuse("envelope_set_id", ref) }
             guard ConstantTime.equals(set.nonce, c.challenge.nonce) else { throw await refuse("envelope_nonce", ref) }
-            guard try await swap(c.challenge.id!, "used") else { throw await refuse("challenge_not_pending", ref) }
+            guard try await swapState(c.challenge.id!, from: opened.consumedFrom, to: "used") else { throw await refuse("challenge_not_pending", ref) }
             let verifiers = set.codes.map { verifier(accountRef: ref, setId: set.setId, code: $0) }
             try await db.transaction { tx in
                 try await AuthorityRecoveryCode.query(on: tx).filter(\.$accountRef == ref).filter(\.$state == "active").set(\.$state, to: "superseded").update()
@@ -123,14 +125,14 @@ struct AuthorityRecoveryService {
                     let row = AuthorityRecoveryCode()
                     row.accountRef = ref
                     row.setId = set.setId
-                    row.sealKid = seal.kid
+                    row.sealKid = sealKid
                     row.verifier = value
                     row.state = "active"
                     row.createdAt = now
                     try await row.create(on: tx)
                 }
                 try await AuthorityKeyLog.append(tx, accountRef: ref, type: "recovery_codes_set", kid: c.key.id!, publicKey: c.key.publicKey, keyPurpose: c.key.keyPurpose,
-                                                 detail: ["set_id": .string(set.setId), "count": .integer(Int64(verifiers.count)), "seal_kid": .string(seal.kid)], now: now)
+                                                 detail: ["set_id": .string(set.setId), "count": .integer(Int64(verifiers.count)), "seal_kid": .string(sealKid)], now: now)
             }
             await AuthorityAudit.record(db, "authority.recovery_codes_set", outcome: "success", accountRef: ref, challengeId: c.challenge.id, kid: c.key.id, at: now)
             return ["ach": .string(c.challenge.id!), "decision": .string("approve"), "head": .string(try await AuthorityHeads(ctx: ctx, db: db).signed(accountRef: ref))]
@@ -139,13 +141,16 @@ struct AuthorityRecoveryService {
             // Reduce-only: any logged, active key of the account (grant capability not required).
             guard let recoveryRow = c.binding.recoveryId else { throw await refuse("binding", ref) }
             guard try await swap(c.challenge.id!, "used") else { throw await refuse("challenge_not_pending", ref) }
-            try await db.transaction { tx in
-                guard let recovery = try await AuthorityRecovery.find(recoveryRow, on: tx), recovery.state == "pending", recovery.accountRef == ref else { return }
+            let cancelled: Bool = try await db.transaction { tx in
+                guard let recovery = try await AuthorityRecovery.find(recoveryRow, on: tx), recovery.state == "pending", recovery.accountRef == ref else { return false }
                 recovery.state = "cancelled"
                 try await recovery.update(on: tx)
                 try await AuthorityKeyLog.append(tx, accountRef: ref, type: "recovery_cancel", kid: c.key.id!, publicKey: c.key.publicKey, keyPurpose: c.key.keyPurpose,
                                                  detail: ["recovery_id": .string(recovery.recoveryId)], now: now)
+                return true
             }
+            // A recovery that activated (or was cancelled) after the challenge was created is never reported as cancelled.
+            guard cancelled else { throw await refuse("recovery_not_pending", ref) }
             await AuthorityAudit.record(db, "authority.recovery_cancel", outcome: "success", accountRef: ref, challengeId: c.challenge.id, kid: c.key.id, at: now)
             return ["ach": .string(c.challenge.id!), "decision": .string("approve"), "head": .string(try await AuthorityHeads(ctx: ctx, db: db).signed(accountRef: ref))]
         default:
@@ -157,7 +162,7 @@ struct AuthorityRecoveryService {
 
     /// `{ach, envelope, keys:[{public_key, key_purpose, pop}]}`. The account is the one bound to the challenge, never a request value.
     func start(_ o: [String: JSONValue], caller: AuthorityCaller?) async throws -> [String: JSONValue] {
-        let seal = try requireSeal()
+        try requireSealAvailable()
         _ = try ctx.requireKeys()
         guard ctx.config.keylogEnabled, Set(o.keys) == ["ach", "envelope", "keys"] else { throw Abort(.unprocessableEntity, reason: "invalid_request") }
         let now = ctx.now
@@ -176,19 +181,19 @@ struct AuthorityRecoveryService {
         try await requireAttemptBudget(accountRef: ref, recoveryId: recoveryId)
         let keys: [SubmittedKey]
         do { keys = try SubmittedKey.parseList(o["keys"]) } catch { throw await refuse("keys_malformed", counts: false) }
-        guard let envelopeValue = o["envelope"], let envelope = try? RecoverySealEnvelope.parse(envelopeValue) else { throw await refuse("envelope_malformed", counts: true) }
-        guard ConstantTime.equals(envelope.kid, seal.kid) else { throw await refuse("seal_kid", counts: true) }
-        let plaintext: [String: JSONValue]
-        do {
-            plaintext = try RecoverySeal.open(envelope, with: seal.privateKey, purpose: .start, environment: ctx.environment, challengeId: ach, nonce: challenge.nonce)
-        } catch { throw await refuse("envelope_open_failed", counts: true) }
-        guard let start = try? RecoverySeal.parseStart(plaintext), ConstantTime.equals(start.nonce, challenge.nonce), start.recoveryId == recoveryId else {
-            throw await refuse("envelope_plaintext", counts: true)
-        }
-        // The PoP keys equal `new_kids` exactly (no superset, no subset), and each PoP commits to the envelope digest (ST-REC-15).
-        guard RecoverySeal.sortedKids(keys.map(\.kid)) == start.newKids else { throw await refuse("new_kids_mismatch", counts: true) }
+        guard let envelope = parseSeal(o["envelope"]) else { throw await refuse("envelope_malformed", counts: true) }
+        // Each PoP commits to the envelope digest (ST-REC-15). Checked before anything is opened, so a JWE start with a wrong PoP costs no Key Vault call.
         let keyLog = AuthorityKeyLogService(ctx: ctx, db: db)
         guard keyLog.verifyPoPs(keys, type: "recovery_started", nonce: challenge.nonce, extra: [envelope.digest]) else { throw await refuse("pop_invalid", counts: true) }
+        let opened: OpenedSeal
+        do { opened = try await openSeal(envelope, purpose: .start, challenge: challenge) } catch let refusal as SealRefusal {
+            throw await refuse(refusal.reason, counts: refusal.reason != "challenge_not_pending")
+        }
+        guard let start = try? RecoverySeal.parseStart(opened.plaintext), ConstantTime.equals(start.nonce, challenge.nonce), start.recoveryId == recoveryId else {
+            throw await refuse("envelope_plaintext", counts: true)
+        }
+        // The PoP keys equal `new_kids` exactly (no superset, no subset) (ST-REC-15).
+        guard RecoverySeal.sortedKids(keys.map(\.kid)) == start.newKids else { throw await refuse("new_kids_mismatch", counts: true) }
         do { try await keyLog.requireUnused(keys.map(\.kid)) } catch { throw await refuse("key_in_use", counts: false) }
         // The verifier uses the account's single active authority set (S3-A3-05 item 2); no active set: nothing to verify against.
         guard let active = try await AuthorityRecoveryCode.query(on: db).filter(\.$accountRef == ref).filter(\.$state == "active").first() else {
@@ -200,7 +205,7 @@ struct AuthorityRecoveryService {
         let used = try await sql.update(AuthorityRecoveryCode.schema).set("state", to: "used").where("account_ref", .equal, ref).where("verifier", .equal, value)
             .where("state", .equal, "active").where("set_id", .equal, active.setId).returning("id").all()
         guard used.count == 1 else { throw await refuse("code_mismatch", counts: true) }
-        guard try await keyLog.swap(ach, to: "used") else { throw await refuse("challenge_not_pending", counts: false) }
+        guard try await swapState(ach, from: opened.consumedFrom, to: "used") else { throw await refuse("challenge_not_pending", counts: false) }
         let recovery = AuthorityRecovery()
         recovery.id = "rec_" + Base64URL.encode(SecureToken.randomBytes(16))
         recovery.accountRef = ref

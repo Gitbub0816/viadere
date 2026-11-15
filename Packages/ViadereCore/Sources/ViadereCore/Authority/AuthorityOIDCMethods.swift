@@ -40,6 +40,17 @@ extension OIDCProfile {
         default: []
         }
     }
+
+    /// The same list with the WebAuthn RP id known (ADR-0023 §3a item 2): `oidc_login` → exactly the issuer origin; the reduce-only `recovery_cancel`
+    /// → the issuer origin and `https://<RP_ID>` (the existing Viadere web origin, which is also the origin the app's own passkey ceremony reports);
+    /// every other purpose → none. Without the RP id (the two-argument form) `recovery_cancel` has no origin, so it fails closed.
+    public static func passkeyOrigins(for purpose: AuthorityPurpose, issuer: String, relyingPartyID: String) -> [String] {
+        switch purpose {
+        case .oidcLogin: [issuer]
+        case .recoveryCancel: [issuer, "https://" + relyingPartyID]
+        default: []
+        }
+    }
 }
 
 /// `POST /v1/oidc/passkey/challenges`: the authorization request the code will be bound to (the same members and checks as the app path).

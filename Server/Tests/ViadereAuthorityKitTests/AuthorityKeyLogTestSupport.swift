@@ -113,7 +113,7 @@ extension AuthorityHarness {
     func reloadSeal(pins: [String]) async throws {
         let ctx = app.authority
         let seal = try await SealKeyHolder.load(kms: ctx.kms, db: app.db, pinnedKids: pins, now: clock.now)
-        app.authority = AuthorityContext(config: ctx.config, kms: ctx.kms, keys: ctx.keys, clock: ctx.clock, seal: seal)
+        app.authority = AuthorityContext(config: ctx.config, kms: ctx.kms, keys: ctx.keys, clock: ctx.clock, seal: seal, rsaSeal: ctx.rsaSeal, appAttest: ctx.appAttest)
     }
 
     var sealPublicKey: P256.KeyAgreement.PublicKey { app.authority.seal!.privateKey.publicKey }

@@ -13,6 +13,8 @@ public struct AuthorityOverrides: Sendable {
     public var clock: (@Sendable () -> Date)?
     /// Called after migrations and before keys load (tests register clients and pins here).
     public var prepare: (@Sendable (any Database) async throws -> Void)?
+    /// A synthetic App Attest root for tests (refused in staging and production, where only Apple's root is trusted).
+    public var appAttest: AppAttestAttestation?
     public init() {}
 }
 
@@ -56,6 +58,7 @@ public enum AuthorityApplication {
         app.migrations.add(CreateAuthorityKeyLogSchema())
         app.migrations.add(CreateAuthorityOIDCMethodsSchema())
         app.migrations.add(CreateAuthorityTenantKeysSchema())
+        app.migrations.add(CreateAuthorityKeyLogV4Schema())
         if migrateInMemory {
             // Tests: a fresh schema every time (PostgreSQL test databases are reused between tests).
             try await app.autoRevert()
@@ -92,16 +95,23 @@ public enum AuthorityApplication {
         // Keys load only when enabled and only when serving (the migrate and admin jobs hold no Key Vault role).
         var keys: AuthorityKeyRing?
         var seal: SealKeyHolder?
+        var rsaSeal: RSASealKey?
         if config.enabled, loadKeys {
             // The reviewed inventory is checked against Key Vault before the pin check, so the first pins can be reviewed (S6-06). Nothing is printed.
             try await AuthorityKeyInventory.verifyPending(kms: kms, db: app.db, now: clock())
             // Reviewed key imports staged by the admin job need ACCOUNT_REF_KEY, which only the serving authority holds.
             try await AuthorityAdmin.applyPendingImports(db: app.db, config: config, now: clock())
             keys = try await AuthorityKeyRing.load(kms: kms, config: config, db: app.db)
-            if config.recoveryEnabled { seal = try await SealKeyHolder.load(kms: kms, db: app.db, pinnedKids: config.sealPins, now: clock()) }
+            if config.recoveryEnabled {
+                switch config.recoverySeal {
+                case .hpke: seal = try await SealKeyHolder.load(kms: kms, db: app.db, pinnedKids: config.sealPins, now: clock())
+                case .jweRSA: rsaSeal = try await RSASealKey.load(kms: kms, db: app.db, name: config.recoverySealRSAKeyName, pinnedKids: config.sealPins)
+                }
+            }
             if config.deployment != .testing { app.lifecycle.use(AuthorityMaintenanceLoop()) }
         }
-        app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock, seal: seal)
+        let appAttest = try GenesisAttestation.verifier(config: config, override: overrides.appAttest)
+        app.authority = AuthorityContext(config: config, kms: kms, keys: keys, clock: clock, seal: seal, rsaSeal: rsaSeal, appAttest: appAttest)
         try routes(app, verifier: verifier)
         try keyLogRoutes(app, verifier: verifier)
         try tenantKeyRoutes(app, verifier: verifier)

@@ -6,6 +6,21 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Authority: passkey cancel, `passkey_added`, App Attest at genesis, JWE seal (2026-11-15, G30).** A pending recovery can be cancelled with a UV
+passkey assertion (`POST /v1/keylog/recovery/passkey-cancel/challenges`, then `/passkey-cancel`): its own WebAuthn challenge bound to the account and
+the recovery, origins = issuer and `https://<RP_ID>`, the passkey must belong to that account, logged as `recovery_cancel` (`key_purpose: passkey`).
+Both cancel paths now refuse (`recovery_not_pending`) a recovery that activated or was cancelled meanwhile (the factor path used to answer
+`approve`), and neither needs the seal key. `keylog_passkey_added` challenges (strict base64url credential id and canonical ES256 COSE key) are
+approved by a grant-capable biometric device key and add a grant-capable passkey with a `passkey_added` entry; no WebAuthn assertion can add one.
+Genesis takes an optional `integrity` App Attest **attestation** bound to the genesis nonce and kids, verified by the authority with the api's own
+checks (moved to `ViadereServiceSupport/AppAttestAttestation.swift`; `ViadereServerKit.AppAttestVerifier` delegates), one genesis per App Attest key;
+`AUTHORITY_APP_ATTEST_MODE` defaults to `require` when strict (needs `APPLE_TEAM_ID` with the key log on). The ADR-0034 §9 JWE seal
+(`RSA-OAEP-256` + `A256GCM` to `recovery-seal-rsa`) is selected by `AUTHORITY_KEY_SEAL_RSA` (HPKE stays the default): header and PoP checks first,
+`pending → opening`, a `decrypt` record with the challenge id, one Key Vault `decrypt`; `KeyManagementService.decrypt` is new (LocalKMS and Key
+Vault), reconciliation covers `KeyDecrypt`. Migration `Authority.v4` (additive). Normative: [`SECURITY.md`](SECURITY.md) §2.103. Open: the app and api
+relay sides of all four; RSA seal pins in `AuthorityPinnedKeys`; app OAEP sealing and vectors; production recovery stays refused (C-16, ADR-0034
+§9.4, owner + A3); recovery activation does not revoke earlier passkeys; the passkey PoP in a recovery start; Android integrity at genesis.
+
 **`auth.delivery.fallback_used` webhook and Kotlin request signing (2026-11-15).** When a delivery that asked for the email fallback had its email
 accepted by the provider, the business now receives `auth.delivery.fallback_used` once (v2 opaque envelope, ids only; never for a suppressed or
 failed email; no address or code in any encoding, tested). Additive in contract v1.x: event schema, test-event enum, Core

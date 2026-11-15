@@ -33,7 +33,8 @@ let package = Package(
         .package(url: "https://github.com/tayloraswift/swift-jpeg.git", from: "2.1.0"),
     ],
     targets: [
-        // Shared by the ordinary server and the authority: KMS, Azure managed identity, Key Vault, outbound guard, token-auth PostgreSQL.
+        // Shared by the ordinary server and the authority: KMS, Azure managed identity, Key Vault, outbound guard, token-auth PostgreSQL, and the
+        // App Attest attestation checks (device enrollment in the api, key-log genesis in the authority).
         .target(
             name: "ViadereServiceSupport",
             dependencies: [
@@ -42,6 +43,8 @@ let package = Package(
                 .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
             ]
@@ -73,7 +76,8 @@ let package = Package(
             name: "ViadereServer",
             dependencies: ["ViadereServerKit"]
         ),
-        // ADR-0019 §2: ViadereCore, Vapor, Fluent + PostgreSQL, swift-crypto, async-http-client (through ViadereServiceSupport). No APNs, email,
+        // ADR-0019 §2: ViadereCore, Vapor, Fluent + PostgreSQL, swift-crypto, async-http-client and swift-certificates (App Attest at genesis; all
+        // through ViadereServiceSupport). No APNs, email,
         // SMS, Wallet, Didit or Service Bus code. SQLite only for development and tests (refused in staging and production by the config).
         .target(
             name: "ViadereAuthorityKit",
@@ -102,6 +106,9 @@ let package = Package(
                 .product(name: "XCTVapor", package: "vapor"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
+                // A synthetic App Attest PKI for the genesis attestation tests (production trusts only Apple's root).
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
             ]
         ),
         .testTarget(

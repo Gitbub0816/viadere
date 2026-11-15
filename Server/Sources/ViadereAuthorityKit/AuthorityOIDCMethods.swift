@@ -28,7 +28,7 @@ final class AuthorityPasskey: Model, @unchecked Sendable {
     init() {}
 }
 
-/// A passkey challenge (`oidc_login` only). Kept apart from `authority_challenges`, so a passkey assertion can never be matched to an app-path,
+/// A passkey challenge (`oidc_login`, and the reduce-only `recovery_cancel`). Kept apart from `authority_challenges`, so a passkey assertion can never be matched to an app-path,
 /// link or key-log challenge (ADR-0023 §3a item 1, ST-REC-17), and a factor JWS can never be matched to a passkey challenge.
 final class AuthorityPasskeyChallenge: Model, @unchecked Sendable {
     static let schema = "authority_passkey_challenges"
@@ -45,6 +45,9 @@ final class AuthorityPasskeyChallenge: Model, @unchecked Sendable {
     @Field(key: "created_at") var createdAt: Date
     @Field(key: "expires_at") var expiresAt: Date
     @OptionalField(key: "used_at") var usedAt: Date?
+    /// `recovery_cancel` only (`Authority.v4`): the account and the pending recovery the challenge was created for.
+    @OptionalField(key: "account_ref") var accountRef: String?
+    @OptionalField(key: "recovery_ref") var recoveryRef: String?
     init() {}
 }
 
@@ -298,17 +301,8 @@ struct PasskeyEvidenceVerifier {
         //    signature counter.
         let verified: VerifiedAuthentication
         do {
-            let manager = WebAuthnManager(configuration: .init(relyingPartyID: ctx.config.webAuthnRelyingPartyID, relyingPartyName: "Viadere",
-                                                               relyingPartyOrigin: clientData.origin))
-            guard let publicKey = Base64URL.decode(passkey.publicKey) else { throw await refuse("unknown_passkey") }
-            var response: [String: Any] = ["authenticatorData": credential.authenticatorData, "clientDataJSON": credential.clientDataJSON, "signature": credential.signature]
-            if let handle = credential.userHandle { response["userHandle"] = handle }
-            let json = try JSONSerialization.data(withJSONObject: ["id": credentialId, "rawId": credentialId, "type": "public-key", "response": response])
-            let decoded = try JSONDecoder().decode(AuthenticationCredential.self, from: json)
-            verified = try manager.finishAuthentication(credential: decoded, expectedChallenge: [UInt8](nonce), credentialPublicKey: [UInt8](publicKey),
-                                                        credentialCurrentSignCount: UInt32(clamping: passkey.signCount), requireUserVerification: true)
-        } catch let abort as Abort {
-            throw abort
+            verified = try PasskeyWebAuthn.finish(credential, credentialId: credentialId, origin: clientData.origin, passkey: passkey, nonce: nonce,
+                                                  relyingPartyID: ctx.config.webAuthnRelyingPartyID)
         } catch {
             throw await refuse("assertion_invalid")
         }
@@ -318,16 +312,12 @@ struct PasskeyEvidenceVerifier {
               OIDCClientRules.redirectURIs(client).contains(challenge.redirectURI) else { throw await refuse("client_inactive") }
 
         // 7. Signature counter: moves forward exactly once (a counter that did not grow was refused above as a possible clone).
-        if verified.newSignCount > 0 {
-            guard let sql = db as? any SQLDatabase,
-                  try await sql.update(AuthorityPasskey.schema).set("sign_count", to: Int(verified.newSignCount)).where("credential_id", .equal, credentialId)
-                    .where("sign_count", .equal, passkey.signCount).returning("credential_id").all().count == 1 else { throw await refuse("sign_count_race") }
+        guard try await PasskeyWebAuthn.advanceCounter(db, credentialId: credentialId, from: passkey.signCount, to: verified.newSignCount) else {
+            throw await refuse("sign_count_race")
         }
 
         // 8. Single use: exactly one row moves pending → used.
-        guard let sql = db as? any SQLDatabase,
-              try await sql.update(AuthorityPasskeyChallenge.schema).set("state", to: "used").set("used_at", to: now).where("id", .equal, challenge.id!)
-                .where("state", .equal, "pending").returning("id").all().count == 1 else { throw await refuse("challenge_not_pending") }
+        guard try await PasskeyWebAuthn.consume(db, challengeId: challenge.id!, now: now) else { throw await refuse("challenge_not_pending") }
 
         let evidence = VerifiedPasskey(challengeId: challenge.id!, accountId: accountId, accountRef: passkey.accountRef, credentialId: credentialId,
                                        hardwareBound: passkey.hardwareBound)
@@ -482,12 +472,7 @@ enum AuthorityPasskeyImport {
     }
 
     /// `{1: 2, 3: -7, -1: 1, -2: x(32), -3: y(32)}` in CTAP2 canonical order, with a point on P-256.
-    static func isCanonicalES256COSE(_ key: Data) -> Bool {
-        let bytes = [UInt8](key)
-        let prefix: [UInt8] = [0xA5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]
-        guard bytes.count == 77, Array(bytes[0..<10]) == prefix, bytes[42] == 0x22, bytes[43] == 0x58, bytes[44] == 0x20 else { return false }
-        return (try? P256.Signing.PublicKey(rawRepresentation: Data(bytes[10..<42]) + Data(bytes[45..<77]))) != nil
-    }
+    static func isCanonicalES256COSE(_ key: Data) -> Bool { PasskeyCOSE.es256PublicKey(key) != nil }
 
     /// Staging check (admin job): no credential already active in the log.
     static func checkUnused(_ parsed: [UUID: [Imported]], db: any Database) async throws {

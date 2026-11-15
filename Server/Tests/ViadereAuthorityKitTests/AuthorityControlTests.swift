@@ -354,6 +354,8 @@ final class AuthorityControlTests: XCTestCase {
                                 "POST /v1/keylog/nonces", "POST /v1/keylog/genesis", "POST /v1/keylog/head", "POST /v1/keylog/challenges",
                                 "POST /v1/keylog/device-added", "POST /v1/keylog/evidence", "POST /v1/keylog/recovery/start",
                                 "POST /v1/keylog/recovery/legacy-start", "POST /v1/link/redeem",
+                                // Passkey recovery cancel (reduce-only, ADR-0023 §3a).
+                                "POST /v1/keylog/recovery/passkey-cancel/challenges", "POST /v1/keylog/recovery/passkey-cancel",
                                 // Passkey method and consents (S6-01, S6-02).
                                 "POST /v1/oidc/passkey/challenges", "POST /v1/oidc/passkey/evidence", "POST /v1/oidc/consents", "POST /v1/oidc/consents/revoke",
                                 // Tenant destination keys (ADR-0031 §1, §2): read and reduce only, nothing adds a key or a host.
