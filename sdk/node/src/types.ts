@@ -715,6 +715,8 @@ export const BUSINESS_WEBHOOK_EVENT_TYPES = [
   "approve.request.decided",
   "approve.request.expired",
   "approve.frozen",
+  "loop.action.submitted",
+  "loop.instance.expired",
 ] as const;
 /**
  * Event types the Swift SDK and `ViadereCore` define that the OpenAPI `WebhookEventType` enum does not list (the enum is declared an open set).
@@ -1003,6 +1005,70 @@ export interface FreezeStatus {
   frozen: boolean;
 }
 
+// ---- Connected Loops (WP-4.1, SECURITY.md 2.115) ----------------------------------------------------------------------------------------------
+
+/** Outcomes of a Loop action event. `pending` until the business answers; `unknown` when Viadere couldn't confirm delivery. */
+export const LOOP_ACTION_OUTCOMES = ["accepted", "rejected", "pending", "timed_out", "unknown"] as const;
+export type LoopActionOutcome = (typeof LOOP_ACTION_OUTCOMES)[number];
+/** What a connected business may answer: `pending` only confirms receipt after an `unknown`. */
+export const LOOP_CONNECTED_OUTCOMES = ["accepted", "rejected", "pending"] as const;
+export type LoopConnectedOutcome = (typeof LOOP_CONNECTED_OUTCOMES)[number];
+export const LOOP_INSTANCE_STATES = ["active", "submitted", "completed", "expired", "cancelled"] as const;
+export type LoopInstanceState = (typeof LOOP_INSTANCE_STATES)[number];
+
+export interface LoopBusinessAnswer {
+  step_id: string;
+  field_id: string;
+  label: string;
+  /** Option id(s), a boolean, a `YYYY-MM-DD` date or short text, as the customer submitted it. */
+  value: unknown;
+}
+/** The binding approval of an `approve_estimate` event: approved with a device-bound biometric signature; it charges nothing. */
+export interface LoopBusinessApproval {
+  approval_id: Uuid;
+  amount: MoneyAmount;
+  terms: string;
+  reference: string;
+  context_digest: string;
+  assurance: "biometric";
+  approved_at: Timestamp;
+}
+/** `GET /v1/business/loops/events/{eventRef}`. No customer identity of any kind. */
+export interface LoopBusinessEvent {
+  ref: string;
+  instance_ref: string;
+  loop_key: string;
+  revision: number;
+  step_id: string;
+  action_id: string;
+  action_type: string;
+  queue: string;
+  answers: LoopBusinessAnswer[];
+  approval?: LoopBusinessApproval;
+  outcome: LoopActionOutcome;
+  created_at: Timestamp;
+  respond_by?: Timestamp;
+}
+/** `GET /v1/business/loops/instances/{instanceRef}`. */
+export interface LoopBusinessInstance {
+  ref: string;
+  loop_key: string;
+  revision: number;
+  state: LoopInstanceState;
+  expires_at: Timestamp;
+  event_refs: string[];
+}
+/** `POST /v1/business/loops/events/{eventRef}/outcome`: exactly these two members. */
+export interface LoopOutcomeCallbackRequest {
+  outcome: LoopConnectedOutcome;
+  idempotency_key: string;
+}
+export interface LoopOutcomeCallbackResult {
+  ref: string;
+  outcome: LoopActionOutcome;
+  replayed: boolean;
+}
+
 export const AUTH_APPROVAL_RISKS = ["low", "medium", "high", "critical"] as const;
 export type AuthApprovalRisk = (typeof AUTH_APPROVAL_RISKS)[number];
 export interface AuthApprovalNumberMatch {
@@ -1197,7 +1263,7 @@ export interface KeyDirectoryResponse {
 }
 
 /** Event types of the opaque envelope in `docs/openapi.yaml` (`WebhookEnvelopeV2`). */
-export const OPAQUE_ENVELOPE_EVENT_TYPES = ["approve.enrollment.device_completed", "approve.enrollment.confirmed", "approve.key.revoked", "approve.request.decided", "approve.request.expired", "approve.frozen"] as const;
+export const OPAQUE_ENVELOPE_EVENT_TYPES = ["approve.enrollment.device_completed", "approve.enrollment.confirmed", "approve.key.revoked", "approve.request.decided", "approve.request.expired", "approve.frozen", "loop.action.submitted", "loop.instance.expired"] as const;
 /**
  * The opaque envelope (`envelopeVersion: "2026-10-27"`, `WebhookEnvelopeV2` in the OpenAPI document): ids only, no customer data, amount or
  * decision. `result_ref` names what to fetch (`getApprovalResult`, `getVerificationResult`); a status in it would not be trusted anyway.
@@ -1218,6 +1284,9 @@ export const BUSINESS_ROUTES = {
   createProfileRequest: { method: "POST", path: "/v1/business/profile-requests" },
   getProfileRequest: { method: "GET", path: "/v1/business/profile-requests/{requestId}" },
   getProfile: { method: "GET", path: "/v1/business/profiles/{subjectRef}" },
+  getLoopEvent: { method: "GET", path: "/v1/business/loops/events/{eventRef}" },
+  answerLoopEvent: { method: "POST", path: "/v1/business/loops/events/{eventRef}/outcome" },
+  getLoopInstance: { method: "GET", path: "/v1/business/loops/instances/{instanceRef}" },
   issueInteraction: { method: "POST", path: "/v1/business/interactions" },
   getInteractionOutcome: { method: "GET", path: "/v1/business/interactions/{interactionId}" },
   cancelInteraction: { method: "POST", path: "/v1/business/interactions/{interactionId}/cancel" },

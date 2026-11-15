@@ -90,6 +90,7 @@ tags:
   - name: KeyDirectory
   - name: LinkSessions
   - name: Profiles
+  - name: Loops
 
 paths:
   /v1/business/capabilities:
@@ -697,6 +698,87 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FreezeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/loops/events/{eventRef}:
+    get:
+      tags: [Loops]
+      operationId: getLoopEvent
+      summary: Read a connected Loop action event
+      description: |
+        Requires scope `loops:read` and a live key. `eventRef` is the `result_ref` of a `loop.action.submitted` webhook (`lev_` plus a lowercase UUID).
+        Returns the answers with their reviewed labels, the binding estimate approval for `approve_estimate` (amount, terms, reference, the
+        signed context digest, `biometric`), and the current outcome. The customer is identified only by `instance_ref`: no account id,
+        `subject_ref`, name or device. Another business's reference, a hosted (inbox) event and a malformed reference are all 404.
+      parameters:
+        - name: eventRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lev_[0-9a-f-]{36}$" }
+      responses:
+        "200":
+          description: The event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopBusinessEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/business/loops/events/{eventRef}/outcome:
+    post:
+      tags: [Loops]
+      operationId: answerLoopEvent
+      summary: Answer a connected Loop action event
+      description: |
+        Requires scope `loops:write` and a live key. Exactly `outcome` (`accepted`, `rejected`, or `pending` to confirm receipt after Viadere showed
+        the customer `unknown`) and `idempotency_key`. The same key with the same outcome returns the stored answer (`200`, `replayed: true`); the
+        same key with another outcome, or any change after a final outcome, is 409. The customer sees only Viadere's wording for the outcome.
+      parameters:
+        - name: eventRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lev_[0-9a-f-]{36}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoopOutcomeCallbackRequest" }
+      responses:
+        "201":
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopOutcomeCallbackResult" }
+        "200":
+          description: A repeated idempotency key; nothing new was recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopOutcomeCallbackResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+  /v1/business/loops/instances/{instanceRef}:
+    get:
+      tags: [Loops]
+      operationId: getLoopInstance
+      summary: Read a connected Loop instance
+      description: |
+        Requires scope `loops:read` and a live key. `instanceRef` is the `request_id` of a `loop.instance.expired` webhook (`lin_` plus a lowercase
+        UUID) or the `instance_ref` of an event. Only instances with at least one connected event are readable; anything else is 404.
+      parameters:
+        - name: instanceRef
+          in: path
+          required: true
+          schema: { type: string, pattern: "^lin_[0-9a-f-]{36}$" }
+      responses:
+        "200":
+          description: The instance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopBusinessInstance" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2073,6 +2155,67 @@ components:
         first: { type: integer }
         second: { type: integer }
         proof: { type: array, items: { type: string } }
+    LoopBusinessAnswer:
+      type: object
+      required: [step_id, field_id, label, value]
+      properties:
+        step_id: { type: string }
+        field_id: { type: string }
+        label: { type: string, description: "The reviewed field label." }
+        value: { description: "Option id(s), a boolean, a YYYY-MM-DD date or short text, as submitted." }
+    LoopBusinessApproval:
+      type: object
+      required: [approval_id, amount, terms, reference, context_digest, assurance, approved_at]
+      description: The binding approval of an approve_estimate event. Approved with a device-bound biometric signature; it charges nothing.
+      properties:
+        approval_id: { $ref: "#/components/schemas/Uuid" }
+        amount: { $ref: "#/components/schemas/MoneyAmount" }
+        terms: { type: string }
+        reference: { type: string }
+        context_digest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        assurance: { enum: [biometric] }
+        approved_at: { $ref: "#/components/schemas/Timestamp" }
+    LoopBusinessEvent:
+      type: object
+      required: [ref, instance_ref, loop_key, revision, step_id, action_id, action_type, queue, answers, outcome, created_at]
+      properties:
+        ref: { type: string }
+        instance_ref: { type: string }
+        loop_key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        step_id: { type: string }
+        action_id: { type: string }
+        action_type: { type: string }
+        queue: { type: string }
+        answers: { type: array, items: { $ref: "#/components/schemas/LoopBusinessAnswer" } }
+        approval: { $ref: "#/components/schemas/LoopBusinessApproval" }
+        outcome: { enum: [accepted, rejected, pending, timed_out, unknown] }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        respond_by: { $ref: "#/components/schemas/Timestamp" }
+    LoopBusinessInstance:
+      type: object
+      required: [ref, loop_key, revision, state, expires_at, event_refs]
+      properties:
+        ref: { type: string }
+        loop_key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        state: { enum: [active, submitted, completed, expired, cancelled] }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
+        event_refs: { type: array, items: { type: string } }
+    LoopOutcomeCallbackRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome, idempotency_key]
+      properties:
+        outcome: { enum: [accepted, rejected, pending] }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.:-]+$" }
+    LoopOutcomeCallbackResult:
+      type: object
+      required: [ref, outcome, replayed]
+      properties:
+        ref: { type: string }
+        outcome: { enum: [accepted, rejected, pending, timed_out, unknown] }
+        replayed: { type: boolean }
     WebhookEnvelopeV2:
       type: object
       additionalProperties: false
@@ -2083,7 +2226,7 @@ components:
         `Viadere-Webhook-Version`.
       properties:
         id: { type: string }
-        type: { enum: [approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen] }
+        type: { enum: [approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen, loop.action.submitted, loop.instance.expired] }
         version: { const: "2026-10-27" }
         tenant_id: { type: string }
         request_id: { type: string }
@@ -2825,7 +2968,7 @@ components:
       type: string
       description: Open set; ignore (and acknowledge) types you do not recognize.
       examples: [interaction.decided]
-      enum: [interaction.decided, interaction.expired, interaction.cancelled, message.received, relationship.connected, relationship.disconnected, consent.updated, reward.redeemed, approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen]
+      enum: [interaction.decided, interaction.expired, interaction.cancelled, message.received, relationship.connected, relationship.disconnected, consent.updated, reward.redeemed, approve.enrollment.device_completed, approve.enrollment.confirmed, approve.key.revoked, approve.request.decided, approve.request.expired, approve.frozen, loop.action.submitted, loop.instance.expired]
     WebhookSubscription:
       type: object
       required: [id, url, events, active, createdAt]

@@ -1018,6 +1018,32 @@ export class ViadereClient {
   }
 
   // ===========================================================================================================================================
+  // Connected Loops (scopes `loops:read` / `loops:write`, live keys; SECURITY.md 2.115)
+
+  /**
+   * `GET /v1/business/loops/events/{eventRef}`: a connected Loop action of your business (the `result_ref` of `loop.action.submitted`): the
+   * answers with their reviewed labels, the binding estimate approval for `approve_estimate`, and the current outcome. No customer identity.
+   */
+  async getLoopEvent(eventRef: string): Promise<T.LoopBusinessEvent> {
+    return assertResponse(schemas.LoopBusinessEvent, (await this.#send("GET", `/v1/business/loops/events/${pathParameter("loopEventRef", "eventRef", eventRef)}`)).body);
+  }
+
+  /**
+   * `POST /v1/business/loops/events/{eventRef}/outcome`: your answer. Safe to retry with the same `idempotency_key` (the stored answer comes back
+   * with `replayed: true`); the same key with another outcome, or a change after a final outcome, is `409`.
+   */
+  async answerLoopEvent(eventRef: string, request: T.LoopOutcomeCallbackRequest): Promise<T.LoopOutcomeCallbackResult> {
+    assertValidRequest(schemas.LoopOutcomeCallbackRequest, request);
+    const path = `/v1/business/loops/events/${pathParameter("loopEventRef", "eventRef", eventRef)}/outcome`;
+    return assertResponse(schemas.LoopOutcomeCallbackResult, (await this.#send("POST", path, { body: request, naturallyIdempotent: true })).body);
+  }
+
+  /** `GET /v1/business/loops/instances/{instanceRef}`: an instance with connected events (the `request_id` of `loop.instance.expired`). */
+  async getLoopInstance(instanceRef: string): Promise<T.LoopBusinessInstance> {
+    return assertResponse(schemas.LoopBusinessInstance, (await this.#send("GET", `/v1/business/loops/instances/${pathParameter("loopInstanceRef", "instanceRef", instanceRef)}`)).body);
+  }
+
+  // ===========================================================================================================================================
   // Key directory (scope `keydirectory:manage`, live keys)
 
   /**

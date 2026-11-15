@@ -418,6 +418,25 @@ export const PublishKeyEntryRequest = define<T.PublishKeyEntryRequest>()("Publis
 export const PublishKeyEntryResponse = define<T.PublishKeyEntryResponse>()("PublishKeyEntryResponse", { required: ["index", "tree_size", "sth"], properties: { index: ANY, tree_size: ANY, sth: ANY } });
 export const SignedTreeHead = define<T.SignedTreeHead>()("SignedTreeHead", { closed: true, required: ["payload", "signature"], properties: { payload: ANY, signature: ANY } });
 export const KeyDirectoryResponse = define<T.KeyDirectoryResponse>()("KeyDirectoryResponse", { required: ["sth", "entries"], properties: { sth: ANY, consistency_from: ANY, consistency_proof: ANY, entries: ANY } });
+export const LoopBusinessAnswer = define<T.LoopBusinessAnswer>()("LoopBusinessAnswer", { required: ["step_id", "field_id", "label", "value"], properties: { step_id: ANY, field_id: ANY, label: ANY, value: ANY } });
+export const LoopBusinessApproval = define<T.LoopBusinessApproval>()("LoopBusinessApproval", {
+  required: ["approval_id", "amount", "terms", "reference", "context_digest", "assurance", "approved_at"],
+  properties: { approval_id: ANY, amount: ANY, terms: ANY, reference: ANY, context_digest: ANY, assurance: ANY, approved_at: ANY },
+});
+export const LoopBusinessEvent = define<T.LoopBusinessEvent>()("LoopBusinessEvent", {
+  required: ["ref", "instance_ref", "loop_key", "revision", "step_id", "action_id", "action_type", "queue", "answers", "outcome", "created_at"],
+  properties: { ref: ANY, instance_ref: ANY, loop_key: ANY, revision: ANY, step_id: ANY, action_id: ANY, action_type: ANY, queue: ANY, answers: ANY, approval: ANY, outcome: ANY, created_at: ANY, respond_by: ANY },
+});
+export const LoopBusinessInstance = define<T.LoopBusinessInstance>()("LoopBusinessInstance", {
+  required: ["ref", "loop_key", "revision", "state", "expires_at", "event_refs"],
+  properties: { ref: ANY, loop_key: ANY, revision: ANY, state: ANY, expires_at: ANY, event_refs: ANY },
+});
+export const LoopOutcomeCallbackRequest = define<T.LoopOutcomeCallbackRequest>()("LoopOutcomeCallbackRequest", {
+  closed: true,
+  required: ["outcome", "idempotency_key"],
+  properties: { outcome: E(T.LOOP_CONNECTED_OUTCOMES), idempotency_key: IDEMPOTENCY },
+});
+export const LoopOutcomeCallbackResult = define<T.LoopOutcomeCallbackResult>()("LoopOutcomeCallbackResult", { required: ["ref", "outcome", "replayed"], properties: { ref: ANY, outcome: ANY, replayed: ANY } });
 /** `WebhookEnvelopeV2` in the document. */
 export const OpaqueWebhookEnvelope = define<T.OpaqueWebhookEnvelope>()("WebhookEnvelopeV2", {
   closed: true,
@@ -437,5 +456,6 @@ export const OPENAPI_SCHEMAS: readonly SchemaDef[] = [
   ConfirmApprovalEnrollmentRequest, ApprovalKeyView, RevokeApprovalKeyRequest, ApprovalEnvelopeDelivery, CreateApprovalRequest, ApprovalRequestView, ApprovalResultResponse,
   BusinessFreezeRequest, ApproveBusinessSettings, FreezeStatus, CreateLinkSessionRequest, LinkSessionTicket, LinkSessionView, ConfirmLinkSessionRequest, CreateVerificationSessionRequest,
   VerificationSessionTicket, VerificationSessionView, CreateVerificationRequest, VerificationRequest, VerificationResult, PublishKeyEntryRequest, PublishKeyEntryResponse, SignedTreeHead,
-  KeyDirectoryResponse, OpaqueWebhookEnvelope,
+  KeyDirectoryResponse, OpaqueWebhookEnvelope, LoopBusinessAnswer, LoopBusinessApproval, LoopBusinessEvent, LoopBusinessInstance, LoopOutcomeCallbackRequest,
+  LoopOutcomeCallbackResult,
 ];

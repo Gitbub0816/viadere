@@ -194,6 +194,9 @@ const PATH_RULES = {
   token: { pattern: /^[A-Za-z0-9_.:-]{1,128}$/, what: "1 to 128 characters of A-Z a-z 0-9 _ . : -" },
   verificationRequestId: { pattern: schemas.VERIFICATION_REQUEST_ID_PATTERN, what: "req_ plus 22 base64url characters" },
   verificationResultRef: { pattern: schemas.VERIFICATION_RESULT_REF_PATTERN, what: "res_ plus 43 base64url characters" },
+  /** Connected Loop references (`loop.action.submitted` / `loop.instance.expired`): the prefix and a lowercase UUID. */
+  loopEventRef: { pattern: /^lev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, what: "lev_ plus a lowercase UUID" },
+  loopInstanceRef: { pattern: /^lin_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, what: "lin_ plus a lowercase UUID" },
 } as const;
 
 /**
