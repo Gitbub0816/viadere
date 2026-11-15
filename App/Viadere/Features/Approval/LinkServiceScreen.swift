@@ -4,7 +4,9 @@ import ViadereKit
 /// "Sign in to {Business}?" for a Viadere link-service delivery (`link_mode: "viadere"`; UX_COPY LS-01 to LS-08, SECURITY.md §2.110). Shown by
 /// `LinkConfirmationSheet` when the delivery is one. Everything on it comes from the authority-signed `link_open` statement (`LinkServiceViewModel`);
 /// the number field appears only when the challenge asks for one. This wasn't me, Deny and Approve are one component of equal buttons with the
-/// safe actions first. Nothing is signed until a tap, "Approved" appears only after the authority accepted, and this screen never opens a URL.
+/// safe actions first. Nothing is signed until a tap, "Approved" appears only after the authority accepted. The one URL it opens is the same-device
+/// hand-off (ADR-0021 §5.3): after the authority accepted, the signed return URL with `#vdr_code=`, once, through `UIApplication.open` (never a
+/// web view, never prefetched, never logged); if that fails the code is discarded and LS-10 says the sign-in did not finish.
 struct LinkServiceScreen: View {
     @State private var model: LinkServiceViewModel
     @Environment(\.dismiss) private var dismiss
@@ -15,7 +17,8 @@ struct LinkServiceScreen: View {
         // Signed only with the biometric approval key (`biometricOnly`), against the build-pinned statement keys (empty pins: fails closed).
         _model = State(initialValue: LinkServiceViewModel(
             deliveryId: deliveryId, api: services.linkService, signer: DeviceKeyFactorSigner(keys: services.keys, biometricOnly: true),
-            pinnedKeys: AuthorityStatementKeyPins.effective(configuration: services.configuration), environment: services.configuration.authorityEnvironment))
+            pinnedKeys: AuthorityStatementKeyPins.effective(configuration: services.configuration), environment: services.configuration.authorityEnvironment,
+            opener: UIApplicationURLOpener()))
     }
 
     var body: some View {
@@ -97,7 +100,7 @@ struct LinkServiceScreen: View {
     /// Success only for an accepted approval; a refusal the person chose is neutral; everything that stopped the request is a caution.
     private var outcomeKind: ViadereOutcome.Kind {
         switch model.phase {
-        case .approved: .success
+        case .approved, .opened: .success
         case .denied, .reported: .neutral
         default: .caution
         }
