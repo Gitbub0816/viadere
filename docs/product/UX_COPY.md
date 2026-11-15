@@ -96,6 +96,26 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | S-LINK-12 | Device clock outside the allowed window (ADR-0031 §4) | We couldn't check this sign-in link. Check your phone's date and time, then try again. |
 | | Button | Try again |
 
+### 2.1 Viadere link service (`link_mode: "viadere"`, ADR-0021 §5, SECURITY §2.110)
+
+`{Business}` is the authority-signed `tenant_name`; the website is the signed `return_url`'s host; nothing comes from api display fields.
+
+| Id | Element | Copy |
+|---|---|---|
+| LS-01 | Title | Sign in to {Business}? |
+| | Rows | Website: {host} (as S-LINK-01's host row) · Service: {client name} (only when it differs from {Business}) |
+| | Subtitle | Only approve if you asked {Business} to sign you in. |
+| | Buttons (one component, equal, safe actions first) | This wasn't me · Deny · Approve |
+| LS-02 | Number field (only when the challenge asks for one) | Label and helper: S-LINK-03 (Number on {Business} · Enter the 2-digit number on the {Business} screen where you're signing in. No number there, or someone gave it to you? Tap This wasn't me.) |
+| | Wrong number | That number doesn't match the one on {Business}. Check it and try again. |
+| | Third wrong number | This sign-in was stopped after three wrong numbers. Ask {Business} for a new link. |
+| LS-03 | Approved (after the authority accepted) | Approved. Go back to {Business} to finish signing in. |
+| LS-04 | Denied | Denied. Nobody was signed in. |
+| LS-05 | This wasn't me | S-LINK-05 |
+| LS-06 | Expired · already answered · gone | This sign-in link has expired. Ask for a new one where you started signing in. · This sign-in link was already answered. · This request is no longer active. |
+| LS-07 | Statement not verified (E-01) · answer refused | We couldn't confirm this sign-in request came from Viadere. Nothing was approved. · Viadere didn't accept this answer, so nobody was signed in. Ask for a new link where you started signing in. |
+| LS-08 | No biometric approval key · offline | Approving sign-ins needs Face ID or Touch ID on this device. · E-02 offline line, with Try again |
+
 ## 3. Push approval and payment screens (ADR-0022)
 
 | Id | Element | Copy |

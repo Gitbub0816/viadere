@@ -23,6 +23,10 @@ struct LinkConfirmationSheet: View {
                 }
             case .link?:
                 LinkConfirmationScreen(deliveryId: deliveryId)
+            case .linkService?:
+                // `link_mode: "viadere"`: the authority-signed challenge, answered on its own screen (the server offers the mode only
+                // while `AUTH_LINK_SERVICE_ENABLED` is on; the app has no flag of its own for it).
+                LinkServiceScreen(deliveryId: deliveryId)
             case .code?:
                 CodeDeliverySheet(deliveryId: deliveryId)
             case let resolved?:

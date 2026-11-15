@@ -125,13 +125,19 @@ public enum AuthorityFactorSigningError: Error, Sendable, Equatable {
     case keyMismatch
 }
 
-/// The account device's approval keys: `approvalBiometric` when present, else `approvalUserPresence`.
+/// The account device's approval keys: `approvalBiometric` when present, else `approvalUserPresence` (unless `biometricOnly`, which the
+/// link service uses: then only the biometric key signs, and a device without one has no approval key).
 public struct DeviceKeyFactorSigner: AuthorityFactorSigning {
     let keys: any DeviceKeyStore
-    public init(keys: any DeviceKeyStore) { self.keys = keys }
+    let biometricOnly: Bool
+    public init(keys: any DeviceKeyStore, biometricOnly: Bool = false) {
+        self.keys = keys
+        self.biometricOnly = biometricOnly
+    }
 
     private func key() async -> (any ManagedSigningKey)? {
         if let key = try? await keys.existingKey(for: .approvalBiometric) { return key }
+        guard !biometricOnly else { return nil }
         return try? await keys.existingKey(for: .approvalUserPresence)
     }
 

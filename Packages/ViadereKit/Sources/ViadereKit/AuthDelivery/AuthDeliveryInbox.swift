@@ -27,6 +27,9 @@ public struct AuthDeliveryInboxRow: Sendable, Equatable, Identifiable {
 /// Which sheet a delivery opens.
 public enum AuthDeliverySurface: Sendable, Equatable {
     case link
+    /// A Viadere link-service delivery (`link_mode: "viadere"`): answered on the link-service screen (`LinkServiceViewModel`), never opened.
+    /// Chosen from the delivery's `link_mode` only; the server refuses the mode unless `AUTH_LINK_SERVICE_ENABLED` is on.
+    case linkService
     case code
     /// A security notice (N-06): there is nothing to open; the sheet says who sent it. The name is already sanitized.
     case notice(business: String)
@@ -39,7 +42,7 @@ public enum AuthDeliverySurface: Sendable, Equatable {
             let item = try await api.item(deliveryId: deliveryId)
             // An expired or used link or code still goes to its own sheet, which says so in its own words (S-LINK-06/07, C-OTP-02).
             switch item.kind {
-            case .link: return .link
+            case .link: return item.linkService ? .linkService : .link
             case .code: return .code
             case .notice: return .notice(business: UntrustedText.name(item.business, max: 40, attribution: nil).text)
             }
@@ -55,7 +58,7 @@ public enum AuthDeliverySurface: Sendable, Equatable {
     /// The line for `.notice` (N-06) and `.none` (E-02, E-03).
     public var message: String? {
         switch self {
-        case .link, .code: return nil
+        case .link, .linkService, .code: return nil
         case .notice(let business): return AuthDeliveryCopy.n06Body(business: business)
         case .none(.offline): return AuthDeliveryCopy.offline
         case .none: return AuthDeliveryCopy.noLongerActive
