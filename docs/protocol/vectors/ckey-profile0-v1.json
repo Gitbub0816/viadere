@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "source": "clearkeysolutions/ckey v0.1.0-build.85 (ede38f57aa1a20c456b1858f4fccd919e98ef269), ckey_encode_scalable + ckey_render_scalable_styled_svg, scale 16, built with GCC 13 on Linux x86-64",
+ "source": "clearkeysolutions/ckey v0.1.0-build.127 (d7a068320f860d7ff06463fa53fc1447fc853413), ckey_encode_scalable (CKEY_LAYOUT_STANDARD, Format 0.27) + ckey_render_scalable_styled_svg, scale 16, built with GCC 13 on Linux x86-64",
  "vectors": [
   {
    "name": "oidc-link",

@@ -4,7 +4,7 @@ import Testing
 @testable import ViadereCore
 
 /// Custom CKey styles against the reference core (`docs/protocol/vectors/ckey-style-v1.json`, made by clearkeysolutions/ckey
-/// v0.1.0-build.85): the same verdict and message for every style in the table, and the same SVG byte for byte for every accepted one.
+/// v0.1.0-build.127): the same verdict and message for every style in the table, and the same SVG byte for byte for every accepted one.
 /// Then the rules Viadere adds for a business's own code (`BusinessCodeStyle`, docs/SECURITY.md §2.105).
 @Suite struct CKeyStyleTests {
     struct Vectors: Decodable {

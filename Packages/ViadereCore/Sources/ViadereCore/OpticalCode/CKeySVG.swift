@@ -1,8 +1,8 @@
 import Foundation
 
 // CKey SVG renderer: a Swift port of `ckey_render_scalable_styled_svg` in the CKey reference core
-// (https://github.com/clearkeysolutions/ckey, tag v0.1.0-build.85, `src/api_render.inc`). For the two certified presets it produces the
-// reference's output byte for byte (`CKeySymbolTests`), and for custom styles as well (`CKeyStyleTests`). A style's members stay internal:
+// (https://github.com/clearkeysolutions/ckey, ported at tag v0.1.0-build.85, `src/api_render.inc`; unchanged in and checked against
+// v0.1.0-build.127, the current Stable-Release). For the two certified presets it produces the reference's output byte for byte (`CKeySymbolTests`), and for custom styles as well (`CKeyStyleTests`). A style's members stay internal:
 // outside this module a style is one of the presets or comes from `CKeyStyle(validating:)`, which runs the port of the reference's
 // scan-safety check (`CKeyStyleCheck.swift`). The centre logo of the reference is not ported: it spends error correction.
 //

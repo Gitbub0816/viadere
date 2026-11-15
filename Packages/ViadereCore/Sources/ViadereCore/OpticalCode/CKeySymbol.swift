@@ -1,7 +1,9 @@
 import Foundation
 
 // CKey Profile 0 encoder (Format 0.27.0, standard layout): a line-for-line Swift port of the CKey reference core
-// (https://github.com/clearkeysolutions/ckey, tag v0.1.0-build.85, `src/core_internal.inc` and `src/api_codec.inc`).
+// (https://github.com/clearkeysolutions/ckey, ported at tag v0.1.0-build.85, `src/core_internal.inc` and `src/api_codec.inc`). Build 127 (the
+// current Stable-Release) encodes `CKEY_LAYOUT_STANDARD` identically; its new layouts (Arc, byte-grouped, print, pixel), its default
+// `CKEY_LAYOUT_AUTO` (Arc from version 8) and its levels U and X are not ported: Viadere draws Format 0.27 only.
 //
 // Why a port and not the C++ core: the server and the business SDK only ever *draw* codes, from text they made themselves, and the
 // project keeps C codecs out of the server (CLAUDE.md, ADR-0017). Reading codes from camera frames is the app's job and uses the

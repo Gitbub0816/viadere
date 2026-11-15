@@ -4,7 +4,7 @@ import Testing
 @testable import ViadereCore
 
 /// The CKey port against the reference core (`docs/protocol/vectors/ckey-profile0-v1.json`, made by clearkeysolutions/ckey
-/// v0.1.0-build.85): the same version choice, the same codeword bit for bit, and the same SVG for both presets.
+/// v0.1.0-build.127, `CKEY_LAYOUT_STANDARD`): the same version choice, the same codeword bit for bit, and the same SVG for both presets.
 @Suite struct CKeySymbolTests {
     struct Vectors: Decodable {
         struct Vector: Decodable {

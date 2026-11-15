@@ -1,7 +1,7 @@
 import Foundation
 
 // CKey style safety: a Swift port of `structural_problem` and `safety_problem` (strict policy) in the CKey reference core
-// (https://github.com/clearkeysolutions/ckey, tag v0.1.0-build.85, `src/core_internal.inc`). `CKeyStyleTests` checks every verdict, and the
+// (https://github.com/clearkeysolutions/ckey, ported at tag v0.1.0-build.85, `src/core_internal.inc`; unchanged in v0.1.0-build.127). `CKeyStyleTests` checks every verdict, and the
 // reference's own message, against a table made by the reference build (`docs/protocol/vectors/ckey-style-v1.json`).
 //
 // Not ported: the adaptive and override policies (a refused style is never repaired or drawn anyway), the centre logo and its

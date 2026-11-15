@@ -276,7 +276,7 @@ import Testing
         #expect(throws: CKeySafeAction.ParseError.lifetime) { try CKeySafeAction.parse(text: reversed.payload) }
     }
 
-    // MARK: ES256 (CKey 0.1.0-build.118+, `docs/protocol/vectors/ckey-safe-actions-es256-v1.json` copied unchanged from the CKey scratch branch)
+    // MARK: ES256 (CKey 0.1.0-build.118+, `docs/protocol/vectors/ckey-safe-actions-es256-v1.json` copied unchanged from CKey Stable-Release 0.1.0-build.127)
 
     struct ES256Vectors: Decodable {
         struct Vector: Decodable {
