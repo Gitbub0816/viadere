@@ -168,6 +168,8 @@ enum OperatorRoutes {
         OperatorOps.register(pages)
         OperatorLoops.register(pages)
         OperatorBrand.register(pages)
+        OperatorProfileChanges.register(pages)
+        OperatorRecovery.register(pages)
     }
 
     private static func operatorPrincipal(_ req: Request) throws -> DashboardPrincipal {
@@ -198,6 +200,8 @@ enum OperatorRoutes {
             ConsoleUI.Stat(String(counts.legal), "Legal entity reviews", tone: counts.legal > 0 ? .accent : nil, href: "#legal"),
             ConsoleUI.Stat(String(counts.brand), "Brand items waiting", tone: counts.brand > 0 ? .accent : nil, href: "/operator/brand"),
             ConsoleUI.Stat(String(counts.loops), "Loop revisions waiting", tone: counts.loops > 0 ? .accent : nil, href: "/operator/loops"),
+            ConsoleUI.Stat(String(counts.profiles), "Profile changes waiting", tone: counts.profiles > 0 ? .accent : nil, href: "/operator/profile-changes"),
+            ConsoleUI.Stat(String(counts.recoveries), "Console recoveries open", tone: counts.recoveries > 0 ? .warning : nil, href: "/operator/recoveries"),
             ConsoleUI.Stat(String(counts.support), "Open tickets and appeals", tone: counts.support > 0 ? .warning : nil, href: "/operator/support"),
         ])
         let table = ConsoleUI.card("Pending applications", description: "Oldest first. Verify the organization exists, the website is theirs and the use fits Viadere's policy.",

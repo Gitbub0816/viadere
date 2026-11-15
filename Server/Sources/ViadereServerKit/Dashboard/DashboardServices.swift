@@ -46,16 +46,39 @@ struct DashboardAnalytics {
 
     static let decidedStatuses: [InteractionStatus] = [.approved, .denied, .confirmed, .declined, .selected, .replied, .acknowledged, .reported]
 
-    func overview(businessId: UUID, days: Int) async throws -> Overview {
+    /// Where the per-day counts come from: the daily rollup for closed days plus today's live rows (the console), or the raw rows for the whole
+    /// window (the reference the rollup is tested against).
+    enum Source { case rollup, raw }
+
+    /// The window is the last `days` UTC calendar days, today included. Counts that add up per day (issued, decided, webhook and channel
+    /// outcomes, disconnects, the daily chart) come from `AnalyticsRollup` for closed days and from the raw rows for today; latencies, pending
+    /// webhooks, abuse signals and campaign credits are read live (they are not additive or are bounded already).
+    func overview(businessId: UUID, days: Int, source: Source = .rollup) async throws -> Overview {
         let days = [7, 30, 90].contains(days) ? days : 30
         let now = ctx.now
-        let from = now.addingTimeInterval(-TimeInterval(days) * 86_400)
+        let today = AnalyticsRollup.startOfDay(now)
+        let from = AnalyticsRollup.day(today, plus: -(days - 1))
         var out = Overview(days: days)
+        let rollup = AnalyticsRollup(db: db, ctx: ctx)
+        var perDay: [(day: Date, counts: [String: Int])]
+        switch source {
+        case .rollup:
+            perDay = try await rollup.closedDays(businessId: businessId, from: from, to: today)
+            perDay.append((today, try await rollup.rawCounts(from: today, to: now.addingTimeInterval(1), businessId: businessId)[businessId] ?? [:]))
+        case .raw:
+            perDay = []
+            var day = from
+            while day <= today {
+                let next = AnalyticsRollup.day(day, plus: 1)
+                perDay.append((day, try await rollup.rawCounts(from: day, to: min(next, now.addingTimeInterval(1)), businessId: businessId)[businessId] ?? [:]))
+                day = next
+            }
+        }
+        var totals: [String: Int] = [:]
+        for entry in perDay { for (metric, n) in entry.counts { totals[metric, default: 0] += n } }
         for kind in InteractionKind.known {
-            let issued = try await InteractionRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$livemode == true)
-                .filter(\.$createdAt >= from).filter(\.$kind == kind.rawValue).count()
-            let decided = try await InteractionRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$livemode == true)
-                .filter(\.$createdAt >= from).filter(\.$kind == kind.rawValue).filter(\.$decidedAt != nil).count()
+            let issued = totals[AnalyticsRollup.Metric.issued(kind.rawValue)] ?? 0
+            let decided = totals[AnalyticsRollup.Metric.decided(kind.rawValue)] ?? 0
             out.issuedByKind.append((kind.rawValue, issued))
             out.decidedByKind.append((kind.rawValue, decided))
             out.totalIssued += issued
@@ -67,23 +90,16 @@ struct DashboardAnalytics {
         out.latencySamples = latencies.count
         out.medianLatency = Self.percentile(latencies, 0.5)
         out.p90Latency = Self.percentile(latencies, 0.9)
-        func webhooks(_ status: String) async throws -> Int {
-            try await WebhookDeliveryRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$createdAt >= from).filter(\.$status == status).count()
-        }
-        out.webhookSucceeded = try await webhooks("succeeded")
-        out.webhookDead = try await webhooks("dead")
-        out.webhookPending = try await webhooks("pending")
-        for status in ["sent", "delivered"] {
-            out.channelDelivered += try await ChannelOutboundRecord.query(on: db).filter(\.$businessId == businessId)
-                .filter(\.$createdAt >= from).filter(\.$status == status).count()
-        }
-        out.channelFailed = try await ChannelOutboundRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$createdAt >= from)
-            .filter(\.$status == "failed").count()
+        out.webhookSucceeded = totals[AnalyticsRollup.Metric.webhookSucceeded] ?? 0
+        out.webhookDead = totals[AnalyticsRollup.Metric.webhookDead] ?? 0
+        out.webhookPending = try await WebhookDeliveryRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$createdAt >= from).filter(\.$status == "pending").count()
+        out.channelDelivered = totals[AnalyticsRollup.Metric.channelDelivered] ?? 0
+        out.channelFailed = totals[AnalyticsRollup.Metric.channelFailed] ?? 0
         let abuse = try await AbuseService(db: db, ctx: ctx).metrics(for: businessId, window: TimeInterval(days) * 86_400)
         out.optOuts = abuse.optOuts
         out.reports = abuse.reports
         out.activeRelationships = abuse.activeRelationships
-        out.disconnects = try await RelationshipRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$disconnectedAt >= from).count()
+        out.disconnects = totals[AnalyticsRollup.Metric.disconnects] ?? 0
         out.consentRevocations = max(0, abuse.optOuts - out.disconnects)
         let campaignService = CampaignService(db: db, ctx: ctx)
         let credited = try await campaignService.connectCounts(businessId: businessId, since: from)
@@ -97,16 +113,10 @@ struct DashboardAnalytics {
             out.campaigns.sort { ($0.connects, $1.publicId) > ($1.connects, $0.publicId) }
             out.campaigns = Array(out.campaigns.prefix(10))
         }
-        // Daily series (UTC).
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-        let today = calendar.startOfDay(for: now)
-        let span = min(days, 30)
-        for offset in stride(from: span - 1, through: 0, by: -1) {
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today), let next = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
-            let count = try await InteractionRecord.query(on: db).filter(\.$businessId == businessId).filter(\.$livemode == true)
-                .filter(\.$createdAt >= day).filter(\.$createdAt < next).count()
-            out.daily.append((day, count))
+        // Daily series (UTC), at most the last 30 days.
+        let issuedMetrics = InteractionKind.known.map { AnalyticsRollup.Metric.issued($0.rawValue) }
+        for entry in perDay.suffix(min(days, 30)) {
+            out.daily.append((entry.day, issuedMetrics.reduce(0) { $0 + (entry.counts[$1] ?? 0) }))
         }
         return out
     }

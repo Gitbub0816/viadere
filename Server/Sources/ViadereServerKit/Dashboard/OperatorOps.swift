@@ -510,14 +510,16 @@ enum OperatorOps {
     }
 
     /// Counts for the operator's landing page.
-    static func queueCounts(_ req: Request) async throws -> (goLive: Int, legal: Int, brand: Int, loops: Int, support: Int) {
+    static func queueCounts(_ req: Request) async throws -> (goLive: Int, legal: Int, brand: Int, loops: Int, support: Int, profiles: Int, recoveries: Int) {
         let goLive = try await BusinessOnboardingRecord.query(on: req.db).filter(\.$goLiveStatus == OnboardingGoLive.requested.rawValue).count()
         let legal = try await BusinessOnboardingRecord.query(on: req.db).filter(\.$legalStatus == OnboardingReview.submitted.rawValue).count()
         let kits = try await BrandKitRecord.query(on: req.db).filter(\.$status == BrandKitService.KitStatus.pendingReview.rawValue).count()
         let assets = try await BrandAssetRecord.query(on: req.db).filter(\.$state == BrandKitService.AssetState.pendingReview.rawValue).count()
         let loops = try await LoopRevisionRecord.query(on: req.db).filter(\.$state == LoopRevisionState.inReview.rawValue).count()
         let support = try await SupportTicketRecord.query(on: req.db).filter(\.$status != "closed").count()
-        return (goLive, legal, kits + assets, loops, support)
+        let profiles = try await OperatorProfileChanges.openCount(req.db)
+        let recoveries = try await ConsoleRecoveryRecord.query(on: req.db).filter(\.$state ~~ ConsoleRecoveryRecord.openStates).count()
+        return (goLive, legal, kits + assets, loops, support, profiles, recoveries)
     }
 
     /// Open onboarding reviews, for the operator's landing page.

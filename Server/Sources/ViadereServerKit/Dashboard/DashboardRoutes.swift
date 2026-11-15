@@ -643,6 +643,11 @@ enum DashboardRoutes {
                 actions = ConsoleUI.confirm("Remove", ariaLabel: "Remove \(name)", ConsoleUI.form("/dashboard/team/members/\(id)/remove", csrf: DashboardUI.csrf(p),
                     "<p>\(DashboardUI.esc(name)) loses access to this organization at once and is signed out here. Removing an admin may need your passkey or a second approver.</p>"
                         + ConsoleUI.button("Remove from the team", .dangerSolid, small: true)))
+                    + ConsoleUI.confirm("Recover passkey", ariaLabel: "Recover the passkey of \(name)", style: .secondary, ConsoleUI.form("/dashboard/team/members/\(id)/recover", csrf: DashboardUI.csrf(p),
+                        "<p>For a member who lost every passkey. \(DashboardUI.esc(name)) is signed out everywhere and gets a one-hour link at their own email address to set up a new passkey; their old passkeys stop working when they do.</p>"
+                        + ConsoleUI.reason(id: "rr-\(id)", help: "Recorded in the audit log and sent to your administrators.")
+                        + ConsoleUI.button("Send recovery link", .primary, small: true, passkey: true) + ConsoleUI.passkeyNote()))
+                actions = "<div class=\"row\">\(actions)</div>"
             }
             return [ConsoleUI.Cell(html: "<strong>\(DashboardUI.esc(name))</strong>\(isSelf ? " " + ConsoleUI.pill("You", .neutral) : "")", sort: .text(name)),
                     .text(email), ConsoleUI.Cell(html: role, sort: .text(roleTitle)), .date(m.createdAt), ConsoleUI.Cell(html: actions)]
@@ -669,7 +674,9 @@ enum DashboardRoutes {
         let roles = OrgRole.allCases.sorted(by: >).map { "<tr><th scope=\"row\">\($0.title)</th><td>\(DashboardUI.esc($0.summary))</td></tr>" }.joined()
         let rolesTable = "<div class=\"tw\"><table><caption class=\"vh\">Roles and what they can do</caption><tbody>\(roles)</tbody></table></div>"
         let state = ConsoleUI.TableState(req, id: "members")
-        let body = ConsoleUI.card("Members", description: "\(members.count) \(members.count == 1 ? "person" : "people") with access.",
+        let recoveries = try await ConsoleRecoveryRoutes.card(req, p: p, businessId: businessId,
+                                                              names: Dictionary(users.compactMap { u in u.id.map { ($0, u.displayName) } }, uniquingKeysWith: { a, _ in a }))
+        let body = recoveries + ConsoleUI.card("Members", description: "\(members.count) \(members.count == 1 ? "person" : "people") with access.",
                                   ConsoleUI.table([ConsoleUI.Column("Name", key: "name"), ConsoleUI.Column("Email", key: "email"), ConsoleUI.Column("Role", key: "role"),
                                                    ConsoleUI.Column("Joined", key: "joined"), ConsoleUI.Column("", actions: true)], memberRows, caption: "Team members", state: state))
             + ConsoleUI.card("Pending invitations", description: "Invitations expire after \(Int(ctx.config.dashboard.inviteTTL / 86_400)) days.",

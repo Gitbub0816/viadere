@@ -108,6 +108,10 @@ struct TenantDataRequests {
             try await BusinessSecuritySettingsRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await SupportTicketRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await PendingChangeRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            try await BusinessProfileChangeRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            try await ConsoleRecoveryRecord.query(on: tx).filter(\.$businessId == businessId).filter(\.$state ~~ ConsoleRecoveryRecord.openStates)
+                .set(\.$state, to: "cancelled").update()
+            try await BusinessDailyStatRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BusinessSurfaceRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await LoopTenantData.delete(businessId: businessId, on: tx)
             // Brand Kits: kits, schedule, image rows and manifests (the private blobs stop being servable with their rows).

@@ -52,6 +52,13 @@ enum DashboardFormat {
         "cert": "Certificate saved.", "cert-removed": "Certificate removed.", "switch": "Switch updated.", "frozen": "Account frozen and signed out.",
         "unfrozen": "Account unfrozen.", "notice": "Notice queued for delivery.", "revoked-all": "Keys revoked.", "hold": "Legal hold recorded.",
         "root-authorized": "Root key change authorized for 15 minutes. Publish the signed entry from your tooling now.", "golive-approved": "Production access approved.", "golive-rejected": "Request declined.", "reviewed": "Review recorded.",
+        "profile-requested": "Profile change sent for Viadere's review. Customers keep seeing the current profile until it is approved.",
+        "profile-cancelled": "Profile change cancelled.", "profile-first": "First approval recorded. A second operator has to approve it.",
+        "profile-applied": "Profile change applied.", "profile-rejected": "Profile change declined.",
+        "recovery-started": "Recovery started. The member gets an email with a one-hour link to set up a new passkey.",
+        "recovery-requested": "Recovery requested. A second operator has to approve it.",
+        "recovery-approved": "Recovery approved. The waiting period has started and the organization was notified.",
+        "recovery-released": "Enrollment link sent to the member's email address.", "recovery-cancelled": "Recovery cancelled.",
     ]
 
     static func flash(_ request: Request) -> String? { request.query[String.self, at: "m"].flatMap { flash[$0] } }

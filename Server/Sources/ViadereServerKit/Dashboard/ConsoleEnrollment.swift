@@ -19,6 +19,8 @@ final class ConsoleEnrollmentRecord: Model, @unchecked Sendable {
     @Field(key: "expires_at") var expiresAt: Date
     @Field(key: "created_at") var createdAt: Date
     @OptionalField(key: "used_at") var usedAt: Date?
+    /// Set when the link completes a passkey recovery (`ConsoleRecovery`, §2.111): finishing it deletes the member's older passkeys.
+    @OptionalField(key: "recovery_id") var recoveryId: UUID?
 
     init() {}
 

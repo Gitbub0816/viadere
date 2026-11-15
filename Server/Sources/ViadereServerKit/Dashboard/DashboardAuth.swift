@@ -538,9 +538,13 @@ struct DashboardAuthService {
         guard Base64URL.isValid(token, minLength: 20, maxLength: 64),
               let enrollment = try await ConsoleEnrollmentRecord.query(on: db).filter(\.$tokenHash == SecureToken.hash(token)).first(),
               enrollment.state == "open", enrollment.expiresAt > ctx.now,
-              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business", user.status == "active",
+              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business",
+              user.status == "active" || (enrollment.recoveryId != nil && user.status == ConsoleRecovery.userStatus),
               try await OrgMembershipRecord.query(on: db).filter(\.$userId == enrollment.userId).filter(\.$businessId == enrollment.businessId)
                   .filter(\.$removedAt == nil).first() != nil else { return nil }
+        if let recoveryId = enrollment.recoveryId {
+            guard try await ConsoleRecoveryRecord.find(recoveryId, on: db)?.state == "released" else { return nil }
+        }
         return enrollment
     }
 
@@ -562,7 +566,8 @@ struct DashboardAuthService {
               let idText = payload["enrollmentId"], let enrollmentId = UUID(uuidString: idText),
               let enrollment = try await ConsoleEnrollmentRecord.find(enrollmentId, on: db), ceremony.userId == enrollment.userId,
               enrollment.state == "open", enrollment.expiresAt > ctx.now,
-              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business", user.status == "active",
+              let user = try await DashboardUserRecord.find(enrollment.userId, on: db), user.kind == "business",
+              user.status == "active" || (enrollment.recoveryId != nil && user.status == ConsoleRecovery.userStatus),
               try await OrgMembershipRecord.query(on: db).filter(\.$userId == enrollment.userId).filter(\.$businessId == enrollment.businessId)
                   .filter(\.$removedAt == nil).first() != nil else { throw APIError.unauthorized }
         let verified = try await verifyRegistration(finish, ceremony: ceremony)
@@ -570,12 +575,15 @@ struct DashboardAuthService {
             guard try await DB.swap(tx, table: ConsoleEnrollmentRecord.schema, id: enrollmentId, column: "state", expected: "open", newValue: "used",
                                     extra: [("used_at", ctx.now)])
             else { throw APIError.unauthorized }
+            // A recovery link: every earlier passkey and session of the member goes first, then the new passkey is the only one (§2.111).
+            if let recoveryId = enrollment.recoveryId {
+                guard try await ConsoleRecovery.complete(recoveryId: recoveryId, userId: user.id!, on: tx, ctx: ctx) else { throw APIError.unauthorized }
+            }
             try await savePasskey(verified, userId: user.id!, on: tx)
             _ = try await AuditService(db: tx, ctx: ctx).record("dashboard.console_enrolled", actor: AuditActor(kind: .business, id: user.id?.uuidString.lowercased()),
                                                                businessId: BusinessID(enrollment.businessId), subjectType: "user", subjectId: user.id?.uuidString.lowercased())
         }
-        user.lastLoginAt = ctx.now
-        try await user.update(on: db)
+        try await DashboardUserRecord.query(on: db).filter(\.$id == user.id!).set(\.$lastLoginAt, to: ctx.now).update()
         return try await store.create(userId: user.id!, realm: .business, businessId: enrollment.businessId, replacing: previousCookie)
     }
 

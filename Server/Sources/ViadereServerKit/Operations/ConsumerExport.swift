@@ -137,6 +137,36 @@ struct ConsumerExports {
         return envelopes
     }
 
+    /// The most interactions listed per business in `historyByBusiness` (the app shows only the last ten; the export carries the history the
+    /// server still holds, per business, so one busy business cannot crowd the others out of the global `interactions` list).
+    static let historyPerBusiness = 1000
+
+    /// G21: the person's history with each business they are or were connected to: the relationship, counts by kind and outcome, and the
+    /// interactions themselves (newest first, metadata only; the content is in `interactions`). Only rows the server still holds: whatever
+    /// retention already purged is gone, and content erased by retention says so. Live interactions only (never a business's test traffic).
+    func historyByBusiness(consumerId: UUID, relationships: [RelationshipRecord], names: [UUID: String], iso: (Date?) -> Any) async throws -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        for businessId in Set(relationships.map(\.businessId)).sorted(by: { $0.uuidString < $1.uuidString }) {
+            let rows = try await InteractionRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$businessId == businessId).filter(\.$livemode == true)
+                .sort(\.$createdAt, .descending).limit(Self.historyPerBusiness).all()
+            let total = try await InteractionRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$businessId == businessId).filter(\.$livemode == true).count()
+            let messages = try await ConversationMessageRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$businessId == businessId).count()
+            var byKind: [String: Int] = [:]
+            var byStatus: [String: Int] = [:]
+            for row in rows { byKind[row.kind, default: 0] += 1; byStatus[row.status, default: 0] += 1 }
+            let relationship = relationships.filter { $0.businessId == businessId }.sorted { $0.connectedAt > $1.connectedAt }.first
+            out.append([
+                "businessId": businessId.uuidString.lowercased(), "business": names[businessId] ?? "",
+                "relationshipStatus": relationship?.status ?? "", "connectedAt": iso(relationship?.connectedAt), "disconnectedAt": iso(relationship?.disconnectedAt),
+                "interactionCount": total, "messageCount": messages, "firstInteractionAt": iso(rows.last?.createdAt), "lastInteractionAt": iso(rows.first?.createdAt),
+                "byKind": byKind, "byStatus": byStatus, "truncated": total > rows.count,
+                "interactions": rows.map { ["id": $0.id?.uuidString.lowercased() ?? "", "kind": $0.kind, "purpose": $0.purpose, "status": $0.status,
+                                            "createdAt": iso($0.createdAt), "decidedAt": iso($0.decidedAt), "contentErased": $0.contentErased] as [String: Any] },
+            ])
+        }
+        return out
+    }
+
     /// Everything the server holds about the account, as the person would want it: no hashes of secrets, no signatures, no other people's data.
     func document(for consumerId: UUID) async throws -> [String: Any] {
         guard let consumer = try await ConsumerRecord.find(consumerId, on: db) else { throw APIError.notFound }
@@ -155,8 +185,10 @@ struct ConsumerExports {
         out["consents"] = consents.map { ["businessId": $0.businessId.uuidString.lowercased(), "purpose": $0.purpose, "granted": $0.granted, "version": $0.version,
                                           "policyVersion": $0.policyVersion, "source": $0.source, "at": iso($0.createdAt)] }
         let interactions = try await InteractionRecord.query(on: db).filter(\.$consumerId == consumerId).filter(\.$livemode == true).sort(\.$createdAt, .descending).limit(2000).all()
-        out["interactions"] = interactions.map { ["id": $0.id?.uuidString.lowercased() ?? "", "business": names[$0.businessId] ?? "", "kind": $0.kind, "purpose": $0.purpose, "status": $0.status,
+        out["interactions"] = interactions.map { ["id": $0.id?.uuidString.lowercased() ?? "", "business": names[$0.businessId] ?? "", "businessId": $0.businessId.uuidString.lowercased(),
+                                                  "kind": $0.kind, "purpose": $0.purpose, "status": $0.status,
                                                   "createdAt": iso($0.createdAt), "decidedAt": iso($0.decidedAt), "content": $0.contentErased ? "erased by retention" : $0.interactionJSON] }
+        out["historyByBusiness"] = try await historyByBusiness(consumerId: consumerId, relationships: relationships, names: names, iso: iso)
         let decisions = try await DecisionRecord.query(on: db).filter(\.$consumerId == consumerId).sort(\.$decidedAt, .descending).limit(2000).all()
         out["decisions"] = decisions.map { ["interactionId": $0.interactionId.uuidString.lowercased(), "decision": $0.decision, "assurance": $0.assurance, "channel": $0.channel, "at": iso($0.decidedAt)] }
         let messages = try await ConversationMessageRecord.query(on: db).filter(\.$consumerId == consumerId).sort(\.$createdAt, .descending).limit(5000).all()
