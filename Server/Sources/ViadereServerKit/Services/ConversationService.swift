@@ -287,6 +287,14 @@ struct ConversationService {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }
             }
+            await PushFanout(db: db, ctx: ctx).deliverToOtherProviders(deviceIds: devices.compactMap(\.id)) { _, _ in
+                var message = PushPayloadBuilder.messageNotice(business: summary, token: .providerNeutral, topic: ctx.config.appBundleID)
+                if quiet {
+                    message.interruptionLevel = "passive"
+                    message.highPriority = false
+                }
+                return message
+            }
         } catch {}
     }
 }

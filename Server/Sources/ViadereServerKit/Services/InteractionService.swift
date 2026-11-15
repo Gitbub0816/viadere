@@ -542,6 +542,15 @@ struct InteractionService {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: ctx.now).update()
                 }
             }
+            // The same content to the other providers' tokens (FCM, SECURITY.md §2.114): rendered data-only, opaque ids only.
+            await PushFanout(db: db, ctx: ctx).deliverToOtherProviders(deviceIds: devices.compactMap(\.id)) { _, consumerId in
+                var message = PushPayloadBuilder.message(for: interaction, business: summary, token: .providerNeutral, topic: topic)
+                if quietFor.contains(consumerId) {
+                    message.interruptionLevel = "passive"
+                    message.highPriority = false
+                }
+                return message
+            }
             // An eligible confirm/choose also gets a decision Live Activity (§2.16), under the same gate and never when muted. Only the
             // consumer's own devices; the content carries no business text.
             if !quietFor.contains(record.consumerId) {

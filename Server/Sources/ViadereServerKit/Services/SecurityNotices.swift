@@ -157,6 +157,11 @@ struct SecurityNotices {
                     try await APNsTokenRecord.query(on: db).filter(\.$id == token.id!).set(\.$invalidatedAt, to: now).update()
                 }
             }
+            await PushFanout(db: db, ctx: ctx).deliverToOtherProviders(deviceIds: devices.compactMap(\.id)) { _, _ in
+                var message = PushPayloadBuilder.securityNotice(body: notice.body, token: .providerNeutral, topic: ctx.config.appBundleID)
+                if notice.action != nil { message.category = "viadere.security.cancel" }
+                return message
+            }
         } catch {
             // Best effort.
         }

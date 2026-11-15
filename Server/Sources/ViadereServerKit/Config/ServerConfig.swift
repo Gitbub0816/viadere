@@ -204,6 +204,10 @@ public struct ServerConfig: Sendable {
     public var brandKits = BrandKitSettings()
     /// Message attachments (SECURITY.md §2.113): the private store and upload limits.
     public var attachments = AttachmentSettings()
+    /// Android: assetlinks identity, the FCM sender and Play Integrity keys (SECURITY.md §2.114). Everything off by default.
+    public var android = AndroidSettings()
+    /// OTLP/HTTP export of request spans and the `/metrics` counters (`OTEL_EXPORTER_OTLP_ENDPOINT`; off when unset; SECURITY.md §2.114).
+    public var telemetry = TelemetrySettings()
 
     /// Whether a real database is configured (a password URL or Entra token authentication); `false` = in-memory SQLite (tests).
     public var hasDatabase: Bool { databaseURL != nil || databaseEntra != nil }
@@ -396,6 +400,8 @@ public struct ServerConfig: Sendable {
         try config.applyOperationsEnvironment(env, production: production)
         try config.applyBrandKitEnvironment(env, production: production)
         try config.applyAttachmentEnvironment(env, production: production)
+        try config.applyAndroidEnvironment(env)
+        try config.applyTelemetryEnvironment(env, strict: production)
         return config
     }
 
