@@ -278,6 +278,7 @@ const METHOD_OF: Record<keyof typeof BUSINESS_ROUTES | keyof typeof ROUTES, stri
   createAuthApproval: "createAuthApproval",
   getAuthApproval: "getAuthApproval",
   redeemAuthLink: "redeemAuthLink",
+  readDestinationKeyRegistrationNonce: "readDestinationKeyRegistrationNonce",
 };
 
 describe("business API parity: operations", () => {

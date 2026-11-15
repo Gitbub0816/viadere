@@ -125,7 +125,8 @@ struct ClientTests {
                                     "business.verificationSessions.create", "business.verificationSessions.get", "business.verificationSessions.cancel",
                                     "business.authDeliveries.create", "business.authDeliveries.get", "business.authDeliveries.cancel", "business.authDeliveries.complete",
                                     "business.webhooks.update", "business.authWebhooks.test", "business.authApprovals.create", "business.authApprovals.get",
-                                    "business.authLinks.redeem", "business.attachments.upload", "business.attachments.get"]
+                                    "business.authLinks.redeem", "business.attachments.upload", "business.attachments.get",
+                                    "business.destinationKeys.registrationNonce"]
 
         #expect(Set(business).subtracting(covered).sorted() == [])
     }

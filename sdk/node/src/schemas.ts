@@ -357,6 +357,18 @@ export const AuthLinkRedeemRequest = define<T.AuthLinkRedeemRequest>()("AuthLink
 });
 export const AuthLinkRedeemResponse = define<T.AuthLinkRedeemResponse>()("AuthLinkRedeemResponse", { closed: true, required: ["grant", "delivery_id"], properties: { grant: ANY, delivery_id: ANY } });
 
+/** `readDestinationKeyRegistrationNonce` in `contracts/openapi/auth-delivery-v1.yaml`. */
+export const DestinationKeyNonceRequest = define<T.DestinationKeyNonceRequest>()("DestinationKeyNonceRequest", {
+  closed: true,
+  required: ["kid"],
+  properties: { kid: S({ pattern: /^[A-Za-z0-9_-]{43}$/ }) },
+});
+export const DestinationKeyNonceResponse = define<T.DestinationKeyNonceResponse>()("DestinationKeyNonceResponse", {
+  closed: true,
+  required: ["tenant_id", "aud", "kid", "hosts", "nonce", "expires_at"],
+  properties: { tenant_id: ANY, aud: ANY, kid: ANY, hosts: ANY, nonce: ANY, expires_at: ANY },
+});
+
 // ---- link sessions, verification, key directory (snake_case) ----------------------------------------------------------------------------------
 
 export const CreateLinkSessionRequest = define<T.CreateLinkSessionRequest>()("CreateLinkSessionRequest", {

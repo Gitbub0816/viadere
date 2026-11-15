@@ -177,6 +177,7 @@ export const ROUTES = {
   createAuthApproval: { method: "POST", path: "/v1/business/auth-approvals" },
   getAuthApproval: { method: "GET", path: "/v1/business/auth-approvals/{requestId}" },
   redeemAuthLink: { method: "POST", path: "/v1/business/auth-links/redeem" },
+  readDestinationKeyRegistrationNonce: { method: "POST", path: "/v1/business/destination-keys/registration-nonce" },
 } as const;
 
 /** Members of the closed create request, for validation and parity. */
@@ -1031,6 +1032,20 @@ export interface AuthLinkRedeemResponse {
   /** The `viadere-grant+jwt`. Verify it against the static grant JWKS and consume its `jti` once before you sign the person in. */
   grant: string;
   delivery_id: string;
+}
+
+/** `POST /v1/business/destination-keys/registration-nonce`: the RFC 7638 thumbprint of one of your registered destination keys. */
+export interface DestinationKeyNonceRequest {
+  kid: string;
+}
+/** Exactly what the registration proof signs (ADR-0031 §1.2); reading consumes nothing, the registration consumes the nonce once. */
+export interface DestinationKeyNonceResponse {
+  tenant_id: string;
+  aud: string;
+  kid: string;
+  hosts: string[];
+  nonce: string;
+  expires_at: number;
 }
 
 export interface CreateLinkSessionRequest {

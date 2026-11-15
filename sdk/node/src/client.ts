@@ -615,6 +615,17 @@ export class ViadereClient {
     return assertResponse(schemas.AuthLinkRedeemResponse, (await this.#send("POST", "/v1/business/auth-links/redeem", { body: request })).body);
   }
 
+  /**
+   * `POST /v1/business/destination-keys/registration-nonce` (ADR-0031 §1.2, SECURITY §2.110): reads the nonce the authority issued for one of
+   * **your own** destination keys, plus exactly what `viadere-destination-key-registration+jws` must sign. Live keys only; reading consumes
+   * nothing (the registration consumes the nonce once), so a retry is safe. Every "not available" case is the same `404`.
+   */
+  async readDestinationKeyRegistrationNonce(request: T.DestinationKeyNonceRequest): Promise<T.DestinationKeyNonceResponse> {
+    assertValidRequest(schemas.DestinationKeyNonceRequest, request);
+    return assertResponse(schemas.DestinationKeyNonceResponse,
+      (await this.#send("POST", "/v1/business/destination-keys/registration-nonce", { body: request, naturallyIdempotent: true })).body);
+  }
+
   // ===========================================================================================================================================
   // Push approvals with number matching (ADR-0022)
 
