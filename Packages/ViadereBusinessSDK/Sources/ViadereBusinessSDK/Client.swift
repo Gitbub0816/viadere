@@ -38,6 +38,8 @@ public struct IssuedInteraction: Sendable, Equatable {
 /// * Sets `Idempotency-Key` from the request's `idempotencyKey` so retries are safe.
 /// * Retries `429`, `5xx` and network failures with backoff, honouring `Retry-After`.
 /// * Never logs or prints the key (`description` is redacted).
+/// * With `requestSigner`, signs every request with an RFC 9421 HTTP Message Signature (SECURITY §2.112): what a live key needs on the
+///   authentication routes when it is not bound to mutual TLS. Each attempt, retries included, gets a fresh nonce and `created`.
 public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     public static let userAgent = "ViadereBusinessSDK/1.0 (Swift)"
 
@@ -49,13 +51,17 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     /// The universal-link host the links you show must use (`viadere.com`; your staging integration passes the staging host). The SDK builds
     /// Approve and link-session links on it and refuses a relay ticket that names any other host.
     public let linkDomain: LinkDomain
+    /// The RFC 9421 request-signing key (registered under Security > Request signing), or `nil` for unsigned requests.
+    private let requestSigner: HTTPRequestSigner?
 
     /// - Parameters:
     ///   - apiKey: `vdk_live_…` or `vdk_test_…`.
     ///   - baseURL: defaults to `https://viadere.com`. Must be https (plain http only for loopback development).
+    ///   - requestSigner: opt-in RFC 9421 signing (`HTTPRequestSigningKey`: a `SoftwareHTTPRequestSigningKey`, or your own type that asks a KMS or
+    ///     HSM to sign). The key id is the `vsk_…` the console showed when you registered the public key.
     public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.defaultDomain)")!, transport: any BusinessTransport = URLSessionTransport(),
                 retry: RetryPolicy = .standard, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
-                linkDomain: LinkDomain = .production) throws {
+                linkDomain: LinkDomain = .production, requestSigner: (any HTTPRequestSigningKey)? = nil, now: @escaping @Sendable () -> Date = { Date() }) throws {
         guard (apiKey.hasPrefix("vdk_live_") || apiKey.hasPrefix("vdk_test_")), apiKey.count >= 20, apiKey.count <= 80,
               apiKey.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) else { throw ViadereSDKError.invalidAPIKey }
         let loopback = ["localhost", "127.0.0.1", "::1"].contains(baseURL.host ?? "")
@@ -68,7 +74,19 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         self.retry = retry
         self.sleep = sleep
         self.linkDomain = linkDomain
+        if let requestSigner {
+            guard HTTPSignatureProfile.isValidKeyId(requestSigner.keyId) else { throw ViadereSDKError.invalidSigningKey }
+            self.requestSigner = HTTPRequestSigner(key: requestSigner)
+        } else {
+            self.requestSigner = nil
+        }
+        self.now = now
     }
+
+    private let now: @Sendable () -> Date
+
+    /// Whether requests are signed (RFC 9421).
+    public var signsRequests: Bool { requestSigner != nil }
 
     /// Whether this client uses a live key (real customers) or a test key.
     public var isLive: Bool { apiKey.hasPrefix("vdk_live_") }
@@ -324,7 +342,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
         while true {
             attempt += 1
             let outcome: Result<BusinessHTTPResponse, any Error>
-            do { outcome = .success(try await transport.send(request)) } catch { outcome = .failure(error) }
+            do { outcome = .success(try await transport.send(try await signed(request))) } catch { outcome = .failure(error) }
             switch outcome {
             case .success(let response):
                 if (200..<300).contains(response.status) { return response }
@@ -343,6 +361,12 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
                 throw ViadereSDKError.transport(String(describing: type(of: error)))
             }
         }
+    }
+
+    /// Signs this attempt (a fresh nonce and `created` every time); a signing failure is never sent unsigned.
+    private func signed(_ request: BusinessHTTPRequest) async throws -> BusinessHTTPRequest {
+        guard let requestSigner else { return request }
+        return try await ViadereRequestSigning.sign(request, with: requestSigner, now: now())
     }
 
     static func apiError(_ response: BusinessHTTPResponse) -> ViadereAPIError {

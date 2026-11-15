@@ -42,6 +42,10 @@ public enum ViadereSDKError: Error, Sendable, Equatable {
     case invalidPath
     /// The request failed locally (network, TLS, timeout) on every attempt.
     case transport(String)
+    /// The request signer's key id is not a `vsk_` id (SECURITY §2.112).
+    case invalidSigningKey
+    /// The request signer failed, or returned a signature that does not verify under its public key; nothing was sent.
+    case signingFailed
 }
 
 /// Why a webhook was rejected. Respond `400` (or `401`) and do **not** process the event.
