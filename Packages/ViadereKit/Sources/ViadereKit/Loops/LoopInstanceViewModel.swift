@@ -15,17 +15,26 @@ public struct LoopRenderContext: Sendable {
     public var brand: BrandKitStore?
     public var clock: @Sendable () -> Date
     public var makeIdempotencyKey: @Sendable () -> String
+    /// Signs a binding estimate approval (`LoopApprovalSigner.sign`) with the device-bound biometric key; `nil` on a device that can't, so an
+    /// `approve_estimate` button is never sent without one (WP-4.4).
+    public var signApproval: (@Sendable (Interaction, String) async throws -> SignedDecision)?
+    /// The newest phase this build can render and re-validate on the device (Phase 4: connected routing and `approve_estimate`). The server
+    /// enforces its own phase on every action; this only lets the device show what the server reviewed and signed.
+    public var platformPhase: LoopPlatformPhase
 
     public init(keys: @escaping @Sendable () -> [PinnedManifestKey], publisher: @escaping @Sendable (BusinessID) -> VerifiedBusinessRecord?,
                 consent: @escaping @Sendable (BusinessID) -> LoopStartDecision, brand: BrandKitStore? = nil,
                 clock: @escaping @Sendable () -> Date = { Date() },
-                makeIdempotencyKey: @escaping @Sendable () -> String = { "loop-" + UUID().uuidString.lowercased() }) {
+                makeIdempotencyKey: @escaping @Sendable () -> String = { "loop-" + UUID().uuidString.lowercased() },
+                signApproval: (@Sendable (Interaction, String) async throws -> SignedDecision)? = nil, platformPhase: LoopPlatformPhase = .connected) {
         self.keys = keys
         self.publisher = publisher
         self.consent = consent
         self.brand = brand
         self.clock = clock
         self.makeIdempotencyKey = makeIdempotencyKey
+        self.signApproval = signApproval
+        self.platformPhase = platformPhase
     }
 }
 
@@ -129,7 +138,7 @@ public final class LoopInstanceViewModel {
         let status: LoopPublicationStatus = view.paused ? .suspended : view.publicationStatus
         let presentation = LoopPresentationContext(manifest: view.manifest, pinnedKeys: context.keys(), definition: definition,
                                                    instanceBusinessId: view.businessId, publisher: context.publisher(view.businessId),
-                                                   publicationStatus: status, brand: brand, now: context.clock())
+                                                   publicationStatus: status, brand: brand, now: context.clock(), phase: context.platformPhase)
         let phase = self.phase ?? .step(view.currentStepId, outcome: latestOutcome(view))
         tree = PresentationRendering.validated(PresentationBuilder.build(presentation, phase: phase))
     }
@@ -216,7 +225,32 @@ public final class LoopInstanceViewModel {
         isSubmitting = true
         defer { isSubmitting = false }
         do {
-            let result = try await api.submitAction(view.id, LoopActionRequest(stepId: stepId, actionId: actionId, inputs: inputs, idempotencyKey: key))
+            // WP-4.4: a binding estimate approval is signed only for the challenge that matches what this device rendered from its own verified
+            // definition and directory record; anything else is never signed and never sent.
+            var approval: LoopActionApproval?
+            if let binding = definition?.step(stepId)?.actions.first(where: { $0.id == actionId }), binding.action == LoopEstimateApproval.actionType {
+                guard let signer = context.signApproval, let record = context.publisher(view.businessId),
+                      let name = LoopEstimateApproval.merchantName(record.displayName) else {
+                    errorMessage = "This device can't approve estimates. Nothing was approved."
+                    return
+                }
+                let challenge = try await api.startApproval(view.id, LoopApprovalStartRequest(stepId: stepId, actionId: actionId))
+                guard LoopEstimateApproval.matches(challenge, instanceId: view.id, stepId: stepId, binding: binding, businessId: view.businessId,
+                                                   businessName: name, now: context.clock()) else {
+                    pendingKeys[digest] = nil
+                    phase = nil
+                    errorMessage = "This estimate changed. Nothing was approved."
+                    await load()
+                    return
+                }
+                do {
+                    approval = LoopActionApproval(approvalId: challenge.approvalId, signedDecision: try await signer(challenge.interaction, name))
+                } catch {
+                    errorMessage = "Not approved. Nothing was sent."
+                    return
+                }
+            }
+            let result = try await api.submitAction(view.id, LoopActionRequest(stepId: stepId, actionId: actionId, inputs: inputs, idempotencyKey: key, approval: approval))
             pendingKeys[digest] = nil
             phase = nil
             apply(result.instance)

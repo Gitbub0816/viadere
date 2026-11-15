@@ -78,6 +78,29 @@ enum LoopRoutes {
             let id: LoopDefinitionID = try req.uuidParameter("loopId")
             return try req.jsonResponse(try await LoopInstallService(db: req.db, ctx: req.ctx).uninstall(principal: try req.consumer, loopId: id))
         }
+        // Binding estimate approvals (WP-4.4, §2.115).
+        routes.api(APIRoutes.loopInstanceApprovalStart) { req in
+            let id: LoopInstanceID = try req.uuidParameter("instanceId")
+            let body: LoopApprovalStartRequest = try req.decodeBody()
+            return try req.jsonResponse(try await LoopApprovalService(db: req.db, ctx: req.ctx).start(principal: try req.consumer, instanceId: id.uuid, request: body),
+                                        status: .created)
+        }
+        // Connected mode, business side (WP-4.1, §2.115): API key with `loops:read` / `loops:write`; live keys only.
+        routes.api(APIRoutes.businessLoopEventGet, scope: BusinessAPIKeys.Scope.loopsRead) { req in
+            let response = try req.jsonResponse(try await LoopConnectedService(db: req.db, ctx: req.ctx).event(principal: try req.business, ref: req.parameters.get("eventRef") ?? ""))
+            response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
+            return response
+        }
+        routes.api(APIRoutes.businessLoopEventOutcome, scope: BusinessAPIKeys.Scope.loopsWrite) { req in
+            let body = try await req.collectedBody(limit: 4096)
+            let (result, created) = try await LoopConnectedService(db: req.db, ctx: req.ctx).answer(principal: try req.business, ref: req.parameters.get("eventRef") ?? "", body: body)
+            return try req.jsonResponse(result, status: created ? .created : .ok)
+        }
+        routes.api(APIRoutes.businessLoopInstanceGet, scope: BusinessAPIKeys.Scope.loopsRead) { req in
+            let response = try req.jsonResponse(try await LoopConnectedService(db: req.db, ctx: req.ctx).instance(principal: try req.business, ref: req.parameters.get("instanceRef") ?? ""))
+            response.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
+            return response
+        }
         routes.api(APIRoutes.loopKeys) { req in
             _ = try req.consumer
             return try req.jsonResponse(try LoopPublicationService(db: req.db, ctx: req.ctx).keySet())

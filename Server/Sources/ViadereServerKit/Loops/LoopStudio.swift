@@ -112,7 +112,7 @@ struct LoopStudioService {
     func validationContext(_ business: BusinessRecord) async throws -> LoopValidationContext {
         let publisher = LoopPublisherIdentity(publisherType: .business, businessId: BusinessID(business.id!), verificationStatus: business.status,
                                               category: BusinessCategory(rawValue: business.category))
-        return LoopValidationContext(submittingBusinessId: BusinessID(business.id!), publisher: publisher, phase: .hosted,
+        return LoopValidationContext(submittingBusinessId: BusinessID(business.id!), publisher: publisher, phase: ctx.config.loops.platformPhase,
                                      brandKitKeys: try await LoopPublicationService.approvedBrandKitKeys(businessId: business.id!, on: db))
     }
 
@@ -161,7 +161,7 @@ struct LoopStudioService {
 
     /// Saves an edited draft. The Loop key never changes; the form was rendered from `expectedVersion` (else 409).
     @discardableResult
-    func save(businessId: UUID, id: UUID, expectedVersion: Int, definition input: LoopDefinition, authorId: UUID) async throws -> LoopStudioDraftRecord {
+    func save(businessId: UUID, id: UUID, expectedVersion: Int, definition input: LoopDefinition, authorId: UUID, editor: String = "form") async throws -> LoopStudioDraftRecord {
         _ = try await authoringBusiness(businessId)
         let record = try await draft(businessId: businessId, id: id)
         guard record.version == expectedVersion else { throw APIError.conflict("This draft changed in another window. Reload it and try again.") }
@@ -176,7 +176,7 @@ struct LoopStudioService {
         }
         try await AuditService(db: db, ctx: ctx).record("loop.studio_draft_saved", actor: LoopPublicationService.businessActor(authorId),
                                                         businessId: BusinessID(businessId), subjectType: "loop_studio_draft", subjectId: id.uuidString.lowercased(),
-                                                        metadata: ["loop": record.loopKey, "version": String(expectedVersion + 1)])
+                                                        metadata: ["loop": record.loopKey, "version": String(expectedVersion + 1), "editor": editor])
         return try await draft(businessId: businessId, id: id)
     }
 

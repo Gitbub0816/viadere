@@ -777,6 +777,8 @@ public extension WebhookEventType {
         .interactionDecided, .interactionExpired, .interactionCancelled,
         // Verify (WP3): `verification.completed` carries only `request_id` and `result_ref`.
         .verificationCompleted,
+        // Connected Loops (WP-4.1): ids only, never answers or amounts.
+        .loopActionSubmitted, .loopInstanceExpired,
         // Auth deliveries (ADR-0020): opaque, signature v2 only.
     ] + WebhookEventType.authEvents
 }

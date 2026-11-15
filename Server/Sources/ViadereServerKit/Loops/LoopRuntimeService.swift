@@ -153,6 +153,11 @@ struct LoopRuntimeService {
                             details: ["reason": denial])
         case "invalid_action", "invalid_inputs", "invalid_key", "entry_point":
             return APIError.validation("Check the request.", details: ["reason": denial])
+        case "approval_required", "approval_invalid", "approval_expired", "approval_insufficient_assurance":
+            // WP-4.4: a binding approval is missing, not this one, used, over other terms, or signed with a key below device-bound biometrics.
+            return APIError(.forbidden, .forbidden, "Approve this with Face ID or Touch ID on this iPhone first.", details: ["reason": denial])
+        case "device_not_trusted":
+            return APIError(.forbidden, .deviceCoolDown, "This device hasn't been approved yet. Approve it from a device you already trust first.", details: ["reason": denial])
         default:
             return APIError.notFound
         }
@@ -329,15 +334,31 @@ struct LoopRuntimeService {
         guard request.stepId == instance.currentStepId, let step = definition.step(request.stepId) else {
             throw await refuse("step_mismatch", principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
         }
+        // The phase the server runs (Phase 3 unless `LOOPS_CONNECTED_ENABLED`): an action or a routing mode of a later phase is refused, even
+        // if a revision carrying it was published while the phase was on.
+        let phase = ctx.config.loops.platformPhase
         guard let binding = step.actions.first(where: { $0.id == request.actionId }), let next = binding.next, let nextStep = definition.step(next),
-              case .registered(let action) = LoopActionRegistry.v1.resolve(binding.action), action.isAvailable(in: .hosted) else {
+              case .registered(let action) = LoopActionRegistry.v1.resolve(binding.action), action.isAvailable(in: phase),
+              binding.routing.map({ $0.mode != .connected || phase >= .connected }) ?? true else {
             throw await refuse("invalid_action", principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
         }
         guard LoopInputValidator.issues(request.inputs, step: step).isEmpty else {
             throw await refuse("invalid_inputs", principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
         }
+        // WP-4.4: a binding approval needs a fresh, single-use, amount-bound device-bound biometric decision over this exact step and action.
+        var verifiedApproval: (row: LoopApprovalRecord, payload: DecisionPayload)?
+        if action.bindsApproval {
+            do {
+                verifiedApproval = try await LoopApprovalService(db: db, ctx: ctx).verify(principal: principal, instance: instance, stepId: request.stepId,
+                                                                                  binding: binding, approval: request.approval)
+            } catch let refusal as LoopApprovalService.Refusal {
+                throw await refuse(refusal.reason, principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
+            }
+        }
+        let approval = verifiedApproval
         let now = ctx.now
-        let delivers = action.deliversToBusiness && binding.routing?.mode == .hosted
+        let routing = action.deliversToBusiness ? binding.routing?.mode : nil
+        let delivers = routing != nil
         let terminal = nextStep.type == .result || nextStep.type == .handoff
         let previouslyDelivered = try await LoopActionEventRecord.query(on: db).filter(\.$instanceId == instanceId).filter(\.$delivers == true).count() > 0
         let newState: LoopInstanceState = terminal ? ((delivers || previouslyDelivered) ? .submitted : .completed) : .active
@@ -365,6 +386,22 @@ struct LoopRuntimeService {
                 // The instance advances by compare-and-swap on (step, state): two racing actions on one step cannot both apply.
                 guard try await DB.swap(tx, table: LoopInstanceRecord.schema, id: instanceId, column: "current_step_id", expected: request.stepId, newValue: next,
                                         extra: [("state", newState.rawValue), ("updated_at", now)]) else { throw StepRace() }
+                if let approval {
+                    // Single use: the approval moves from unconsumed to this event exactly once.
+                    guard try await DB.swapFromNull(tx, table: LoopApprovalRecord.schema, id: approval.row.id!, column: "consumed_at", newValue: now,
+                                                    extra: [("event_id", event.id!), ("context_digest", approval.payload.contextDigest ?? ""),
+                                                            ("assurance", approval.payload.assurance.rawValue)]) else { throw ApprovalRace() }
+                }
+                if routing == .connected {
+                    let marker = LoopConnectedEventRecord()
+                    marker.id = UUID()
+                    marker.eventId = event.id!
+                    marker.instanceId = instanceId
+                    marker.businessId = event.businessId
+                    marker.definitionId = publication.definitionId
+                    marker.createdAt = now
+                    try await marker.create(on: tx)
+                }
                 if delivers {
                     try await Self.appendOutcome(tx, event: event, outcome: LoopOutcomeMachine.initial, source: .system, actor: nil, reason: nil, seq: 1, ctx: ctx)
                     try await Outbox.enqueue(LoopQueue.deliver, ref: event.id!, tenant: event.businessId, on: tx, ctx: ctx)
@@ -376,6 +413,8 @@ struct LoopRuntimeService {
             }
         } catch is StepRace {
             throw await refuse("step_mismatch", principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
+        } catch is ApprovalRace {
+            throw await refuse("approval_invalid", principal: principal, business: instance.businessId, subject: instanceId, operation: "act")
         } catch let error where error.isConstraintViolation {
             // A concurrent request with the same key won: answer with its result.
             if let stored = try await LoopActionEventRecord.query(on: db).filter(\.$instanceId == instanceId).filter(\.$idempotencyKey == request.idempotencyKey).first(),
@@ -390,6 +429,7 @@ struct LoopRuntimeService {
     }
 
     private struct StepRace: Error {}
+    private struct ApprovalRace: Error {}
 
     func report(principal: ConsumerPrincipal, instanceId: UUID, reason: LoopReportReason) async throws {
         let consumer = principal.consumerId.uuid
@@ -469,8 +509,10 @@ struct LoopRuntimeService {
 
     func expireIfDue(_ instance: LoopInstanceRecord) async throws {
         guard instance.stateValue == .active, instance.expiresAt <= ctx.now, let id = instance.id else { return }
-        _ = try await DB.swap(db, table: LoopInstanceRecord.schema, id: id, column: "state", expected: LoopInstanceState.active.rawValue,
-                              newValue: LoopInstanceState.expired.rawValue, extra: [("updated_at", ctx.now)])
+        guard try await DB.swap(db, table: LoopInstanceRecord.schema, id: id, column: "state", expected: LoopInstanceState.active.rawValue,
+                                newValue: LoopInstanceState.expired.rawValue, extra: [("updated_at", ctx.now)]) else { return }
+        // Connected Loops (WP-4.1): the bound endpoint learns of the expiry once (the compare-and-swap above has one winner).
+        try await LoopConnectedService(db: db, ctx: ctx).instanceExpired(instance)
     }
 
     // MARK: Views

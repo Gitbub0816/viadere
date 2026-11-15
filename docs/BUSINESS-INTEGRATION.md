@@ -576,6 +576,24 @@ Polling `client.approvalRequest(requestId:)` is fine for UX, but the only thing 
 Each customer has a different approval key and `subject_ref` for you; nothing links them to other businesses. Viadere clears displayed details at the terminal state and keeps requests for 400 days; the signed result is kept as evidence. In end-to-end mode Viadere never sees the amount or payee.
 
 
+## 5c-2. Connected Loops (Phase 4; off until Viadere turns it on)
+
+A Loop button can send requests to **your own system** instead of the Viadere inbox (Studio: "Where requests go" → "Your own system"). Every Loop and
+revision is still reviewed by Viadere before customers see it.
+
+1. Create a webhook endpoint with the opaque envelope (`envelopeVersion: "2026-10-27"`) subscribed to `loop.action.submitted` (and, if you want
+   it, `loop.instance.expired`), and verify it (section 3a). `loop.*` events are never sent to a v1 endpoint.
+2. On the Loops page of the console, choose that endpoint for the Loop ("Connected endpoints"). You need a role with both Loop submission and
+   webhook management, and you confirm with your passkey.
+3. Each event carries ids only (`result_ref` = `lev_…`). Fetch it with a key holding `loops:read` (`GET /v1/business/loops/events/{ref}`): the
+   answers with your reviewed field labels and, for `approve_estimate`, the approved amount, terms and reference. You never get a customer id or name.
+4. Answer with a key holding `loops:write`: `POST /v1/business/loops/events/{ref}/outcome` with exactly `{"outcome": "accepted" | "rejected" |
+   "pending", "idempotency_key": "…"}`. Retrying with the same key is safe; `accepted` and `rejected` are final.
+
+If your endpoint is unbound, paused, or keeps failing, the customer sees "We couldn't confirm that {you} received this." You can still answer later.
+`approve_estimate` records the customer's approval of an amount and terms with Face ID or Touch ID on their device. **It never charges anything** and
+can never lead to a checkout; take payment through your own systems.
+
 ## 5d. Customer conversations in the console
 Customers you are connected to can write to you from the Viadere app (and, where you use it, over SMS). With an integration, messages reach
 you as `message.received` webhooks and you answer with `POST /v1/business/messages`. Without one, use **Conversations** in the console: the

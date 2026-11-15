@@ -43,6 +43,7 @@ const R = {
   vresult: { result_ref: "res_" + "B".repeat(43), request_id: "req_" + "A".repeat(22), capability: "age.minimum", subject_ref: SUBJECT_REF, parameters: { years: 18 }, created_at: TS, outcome: "verified", result: { meets_threshold: true } },
   profileRequest: { id: UUID_1, subjectRef: SUBJECT_REF, fieldKeys: ["email"], purpose: "Receipts", status: "pending", livemode: false, createdAt: TS, expiresAt: TS },
   profile: { subjectRef: SUBJECT_REF, fields: [], grantedWithoutValue: [], catalogVersion: 1, livemode: false },
+  loopEvent: { ref: `lev_${UUID_1}`, instance_ref: `lin_${UUID_2}`, loop_key: "pickup", revision: 1, step_id: "s2", action_id: "send", action_type: "acknowledge", queue: "pickups", answers: [{ step_id: "s1", field_id: "slot", label: "Time", value: "am" }], outcome: "pending", created_at: TS },
   published: { index: 3, tree_size: 4, sth: statement },
   directory: { sth: statement, entries: [] },
 };
@@ -56,6 +57,9 @@ const approvalRequest = { request_id: "req-1", subject_ref: SUBJECT_REF, capabil
  *         "caller" = the key passed in options; "none" = no header.
  *   retry: whether a 503 is retried. A POST without a key that is not idempotent by nature must not be.
  */
+const LOOP_EVENT_REF = `lev_${UUID_1}`;
+const LOOP_INSTANCE_REF = `lin_${UUID_2}`;
+
 interface Row { op: keyof typeof BUSINESS_ROUTES | keyof typeof ROUTES; call: (c: ViadereClient) => Promise<unknown>; path: string; body?: unknown; response?: unknown; idem: "body" | "derived" | "random" | "caller" | "none"; retry: boolean; query?: string }
 const ROWS: Row[] = [
   { op: "getCapabilities", call: (c) => c.getCapabilities(), path: "/v1/business/capabilities", response: R.capabilities, idem: "none", retry: true },
@@ -104,6 +108,9 @@ const ROWS: Row[] = [
   { op: "createProfileRequest", call: (c) => c.createProfileRequest({ subjectRef: SUBJECT_REF, fieldKeys: ["email"], purpose: "Receipts" }, { idempotencyKey: "prof-1" }), path: "/v1/business/profile-requests", response: R.profileRequest, idem: "caller", retry: true },
   { op: "getProfileRequest", call: (c) => c.getProfileRequest(UUID_1), path: `/v1/business/profile-requests/${UUID_1}`, response: R.profileRequest, idem: "none", retry: true },
   { op: "getProfile", call: (c) => c.getProfile(SUBJECT_REF), path: `/v1/business/profiles/${SUBJECT_REF}`, response: R.profile, idem: "none", retry: true },
+  { op: "getLoopEvent", call: (c) => c.getLoopEvent(LOOP_EVENT_REF), path: `/v1/business/loops/events/${LOOP_EVENT_REF}`, response: R.loopEvent, idem: "none", retry: true },
+  { op: "answerLoopEvent", call: (c) => c.answerLoopEvent(LOOP_EVENT_REF, { outcome: "accepted", idempotency_key: "ans-1" }), path: `/v1/business/loops/events/${LOOP_EVENT_REF}/outcome`, body: { outcome: "accepted", idempotency_key: "ans-1" }, response: { ref: LOOP_EVENT_REF, outcome: "accepted", replayed: false }, idem: "none", retry: true },
+  { op: "getLoopInstance", call: (c) => c.getLoopInstance(LOOP_INSTANCE_REF), path: `/v1/business/loops/instances/${LOOP_INSTANCE_REF}`, response: { ref: LOOP_INSTANCE_REF, loop_key: "pickup", revision: 1, state: "expired", expires_at: "2026-11-15T10:00:00Z", event_refs: [LOOP_EVENT_REF] }, idem: "none", retry: true },
   { op: "publishKeyEntry", call: (c) => c.publishKeyEntry({ entry: "eyJ2IjoxfQ" }), path: "/v1/business/key-directory/entries", body: { entry: "eyJ2IjoxfQ" }, response: R.published, idem: "none", retry: false },
   { op: "listKeyEntries", call: (c) => c.listKeyEntries({ since: 4 }), path: "/v1/business/key-directory/entries", query: "?since=4", response: R.directory, idem: "none", retry: true },
   { op: "listWebhooks", call: (c) => c.listWebhooks(), path: "/v1/business/webhooks", response: [R.subscription], idem: "none", retry: true },

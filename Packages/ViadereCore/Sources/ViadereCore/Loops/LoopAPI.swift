@@ -222,12 +222,16 @@ public struct LoopActionRequest: Codable, Sendable, Hashable {
     public var actionId: String
     public var inputs: [String: JSONValue]
     public var idempotencyKey: String
+    /// Required exactly for `approve_estimate` (WP-4.4, §2.115): the single-use challenge's id and the signed decision over it. Not part of
+    /// the request digest: a replay of the same key returns the stored result without a new approval. Additive: older clients omit it.
+    public var approval: LoopActionApproval?
 
-    public init(stepId: String, actionId: String, inputs: [String: JSONValue] = [:], idempotencyKey: String) {
+    public init(stepId: String, actionId: String, inputs: [String: JSONValue] = [:], idempotencyKey: String, approval: LoopActionApproval? = nil) {
         self.stepId = stepId
         self.actionId = actionId
         self.inputs = inputs
         self.idempotencyKey = idempotencyKey
+        self.approval = approval
     }
 }
 
@@ -311,6 +315,6 @@ extension APIRoutes {
     public static let loopEndpoints: [AnyEndpoint] = [
         loopConsentGet.descriptor, loopConsentPut.descriptor, loopConsentDelete.descriptor, loopBusinessConsentPut.descriptor,
         loopBusinessConsentDelete.descriptor, loopsAvailable.descriptor, loopInstanceCreate.descriptor, loopInstanceGet.descriptor,
-        loopInstanceAction.descriptor, loopInstanceReport.descriptor, loopKeys.descriptor,
+        loopInstanceAction.descriptor, loopInstanceReport.descriptor, loopKeys.descriptor, loopInstanceApprovalStart.descriptor,
     ]
 }

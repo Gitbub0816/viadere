@@ -47,10 +47,25 @@ enum ConsoleLoopStudio {
             guard let base = LoopStudioService.definition(record) else { throw APIError.validation("This draft could not be read.") }
             guard let version = form["version"].flatMap(Int.init) else { throw APIError.validation("Reload the draft and try again.") }
             let kits = try await LoopPublicationService.approvedBrandKitKeys(businessId: businessId, on: req.db)
-            var definition = try LoopStudioForm.apply(form, to: base, approvedKits: kits)
+            var definition = try LoopStudioForm.apply(form, to: base, approvedKits: kits, phase: req.ctx.config.loops.platformPhase)
             let anchor = try LoopStudioForm.perform(form["op"] ?? "save", form: form, on: &definition)
             try await service.save(businessId: businessId, id: id, expectedVersion: version, definition: definition, authorId: userId)
             return DashboardResponses.redirect("\(path)/drafts/\(id.uuidString.lowercased())?sm=saved\(anchor.map { "#\($0)" } ?? "")")
+        }
+        // Advanced mode (WP-4.7): the draft as JSON. Data only, the same closed schema as the form, and the same pipeline on submission.
+        pages.post("dashboard", "loops", "studio", "drafts", ":id", "schema") { req -> Response in
+            let (_, businessId, userId) = try editor(req)
+            let id = try req.uuid("id")
+            let form = try req.content.decode([String: String].self)
+            let service = LoopStudioService(db: req.db, ctx: req.ctx)
+            _ = try await service.authoringBusiness(businessId)
+            let record = try await service.draft(businessId: businessId, id: id)
+            guard let base = LoopStudioService.definition(record) else { throw APIError.validation("This draft could not be read.") }
+            guard let version = form["version"].flatMap(Int.init) else { throw APIError.validation("Reload the draft and try again.") }
+            let kits = try await LoopPublicationService.approvedBrandKitKeys(businessId: businessId, on: req.db)
+            let definition = try LoopSchemaEditor.parse(form["schema"] ?? "", base: base, approvedKits: kits, phase: req.ctx.config.loops.platformPhase)
+            try await service.save(businessId: businessId, id: id, expectedVersion: version, definition: definition, authorId: userId, editor: "schema")
+            return DashboardResponses.redirect("\(path)/drafts/\(id.uuidString.lowercased())?sm=saved#schema")
         }
         pages.post("dashboard", "loops", "studio", "drafts", ":id", "submit") { req -> Response in
             let (_, businessId, userId) = try editor(req)
@@ -170,7 +185,8 @@ enum ConsoleLoopStudio {
         <section class="card"><header class="card-h"><div><h2 id="preview">Preview</h2><p class="d">\(DashboardUI.esc(LoopWebRenderer.previewLabel)). It updates when you save.</p></div></header>\
         \(ConsoleUI.preview(src: "\(draftPath)/preview?v=\(record.version)", title: "Preview of \(definition.title), not exactly what customers see", width: 380, height: 860))</section>
         """
-        body += "<div class=\"split wa\"><div>\(editorForm(definition, record: record, kits: kits, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath))</div>"
+        body += "<div class=\"split wa\"><div>\(editorForm(definition, record: record, kits: kits, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath, phase: req.ctx.config.loops.platformPhase))"
+            + schemaCard(definition, record: record, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath) + "</div>"
         body += "<div>" + reportCard(report) + submitCard(report: report, record: record, canEdit: canEdit, csrf: DashboardUI.csrf(p), action: draftPath) + preview + "</div></div>"
         body += try await tracker(req, revisions: revisions, p: p)
         if canEdit {
@@ -275,10 +291,27 @@ enum ConsoleLoopStudio {
     static func typeName(_ type: LoopFieldType) -> String { fieldTypeNames.first { $0.0 == type }?.1 ?? type.rawValue }
     static func stepName(_ type: LoopStepType) -> String { stepTypeNames.first { $0.0 == type }?.1 ?? type.rawValue }
 
-    /// Registered actions a hosted (Phase 3) Loop may use.
-    static var availableActions: [LoopActionDefinition] { LoopActionRegistry.v1.definitions.filter { $0.isAvailable(in: .hosted) } }
+    /// Registered actions a Loop may use in the phase the server runs (Phase 4 adds `approve_estimate`).
+    static func availableActions(_ phase: LoopPlatformPhase) -> [LoopActionDefinition] { LoopActionRegistry.v1.definitions.filter { $0.isAvailable(in: phase) } }
 
-    static func editorForm(_ d: LoopDefinition, record: LoopStudioDraftRecord, kits: [BrandKitRecord], canEdit: Bool, csrf: String, action: String) -> String {
+    /// Advanced mode (WP-4.7): the draft's canonical JSON in a plain textarea. Saving parses it strictly and applies the same closed-schema
+    /// checks as the form (`LoopSchemaEditor`); there is still no publish path.
+    static func schemaCard(_ d: LoopDefinition, record: LoopStudioDraftRecord, canEdit: Bool, csrf: String, action: String) -> String {
+        let json = (try? d.canonicalJSON()).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let dis = canEdit ? "" : " readonly"
+        let save = canEdit ? ConsoleUI.formActions(ConsoleUI.button("Save JSON", .secondary)) : ""
+        return """
+        <details class="card" id="schema"><summary><h2 style="display:inline">Advanced: edit as JSON</h2></summary>\
+        <p class="help" id="schema-h">The Loop definition schema (v1) as data. Only registered actions, allowed labels, the field types the form offers, your own steps and your \
+        approved Brand Kits are accepted, and the Loop key stays \(DashboardUI.esc(record.loopKey)). Saving runs the same automated checks; submitting still goes to Viadere review.</p>\
+        <form method="post" action="\(action)/schema">\(csrf)<input type="hidden" name="version" value="\(record.version)">\
+        <div class="field"><label for="schema-json">Definition (JSON)</label><textarea id="schema-json" name="schema" rows="18" spellcheck="false" \
+        maxlength="\(LoopSchemaEditor.maxBytes)" aria-describedby="schema-h"\(dis)>\(DashboardUI.esc(json))</textarea></div>\(save)</form></details>
+        """
+    }
+
+    static func editorForm(_ d: LoopDefinition, record: LoopStudioDraftRecord, kits: [BrandKitRecord], canEdit: Bool, csrf: String, action: String,
+                           phase: LoopPlatformPhase = .hosted) -> String {
         let esc = DashboardUI.esc
         let dis = canEdit ? "" : " disabled"
         func button(_ op: String, _ label: String, _ accessible: String? = nil, style: String = "s sm") -> String {
@@ -354,14 +387,19 @@ enum ConsoleLoopStudio {
                     let ap = "\(sp)_a\(k)"
                     let def: LoopActionDefinition? = if case .registered(let def) = LoopActionRegistry.v1.resolve(binding.action) { def } else { nil }
                     html += "<fieldset id=\"step-\(i)-button-\(k)\"><legend>Button \(k + 1)</legend>"
-                    html += select("\(ap)_action", "What it does", availableActions.map { ($0.actionType, "\($0.title) (\($0.riskClass.rawValue) risk)") }, selected: binding.action)
+                    html += select("\(ap)_action", "What it does", availableActions(phase).map { ($0.actionType, "\($0.title) (\($0.riskClass.rawValue) risk)") }, selected: binding.action)
                     html += select("\(ap)_label", "Label", (def?.allowedLabelKeys ?? []).map { ($0, LoopStringCatalog.actionLabels[$0] ?? $0) }, selected: binding.label)
                     if def?.customLabelAllowed == true {
                         html += input("\(ap)_custom", "Custom label (optional, replaces the label)", binding.customLabel, max: LoopLimits.customLabelLength)
                     }
                     html += select("\(ap)_next", "Leads to", [("", "Choose a step")] + stepTargets.filter { $0.0 != step.id }, selected: binding.next)
                     if def?.deliversToBusiness == true {
-                        html += input("\(ap)_queue", "Inbox queue (optional)", binding.routing?.queue, max: 40, hint: "Requests arrive in your Viadere inbox under this queue.")
+                        // Integration mapping (WP-4.7): hosted inbox or the Loop's connected endpoint (Phase 4 only).
+                        if phase >= .connected, def?.routing.contains(.connected) == true {
+                            html += select("\(ap)_routing", "Where requests go", [("hosted", "Your Viadere inbox"), ("connected", "Your own system (the Loop's connected endpoint)")],
+                                           selected: binding.routing?.mode.rawValue ?? "hosted")
+                        }
+                        html += input("\(ap)_queue", "Queue (optional)", binding.routing?.queue, max: 40, hint: "Requests arrive under this queue in your inbox, or carry it to your endpoint.")
                     }
                     for parameter in def?.parameters ?? [] {
                         let pp = "\(ap)_p_\(parameter.name)"
@@ -487,7 +525,7 @@ enum LoopStudioForm {
         return value.isEmpty ? nil : value
     }
 
-    static func apply(_ form: [String: String], to base: LoopDefinition, approvedKits: Set<String>) throws -> LoopDefinition {
+    static func apply(_ form: [String: String], to base: LoopDefinition, approvedKits: Set<String>, phase: LoopPlatformPhase = .hosted) throws -> LoopDefinition {
         var d = base
         d.title = try text(form, "title") ?? ""
         d.description = try text(form, "description")
@@ -505,7 +543,7 @@ enum LoopStudioForm {
             d.limits.expiresInSeconds = hours * 3600
         }
         let stepIds = Set(base.steps.map(\.id))
-        let actionTypes = Set(ConsoleLoopStudio.availableActions.map(\.actionType))
+        let actionTypes = Set(ConsoleLoopStudio.availableActions(phase).map(\.actionType))
         for (i, step) in base.steps.enumerated() {
             let sp = "s\(i)"
             var s = step
@@ -552,7 +590,16 @@ enum LoopStudioForm {
                     guard stepIds.contains(next) else { throw APIError.validation("Choose a step from the list.", details: ["\(ap)_next": "unknown_next_step"]) }
                     a.next = next
                 }
-                a.routing = def.deliversToBusiness ? LoopRouting(mode: .hosted, queue: try text(form, "\(ap)_queue")) : nil
+                var mode = LoopRoutingMode.hosted
+                if let raw = form["\(ap)_routing"], !raw.isEmpty {
+                    guard let chosen = LoopRoutingMode(rawValue: raw), def.routing.contains(chosen), chosen != .connected || phase >= .connected else {
+                        throw APIError.validation("Choose where requests go from the list.", details: ["\(ap)_routing": "routing_mode_not_available"])
+                    }
+                    mode = chosen
+                } else if let stored = binding.routing?.mode, stored != .connected || phase >= .connected {
+                    mode = stored
+                }
+                a.routing = def.deliversToBusiness ? LoopRouting(mode: mode, queue: try text(form, "\(ap)_queue")) : nil
                 var params: [String: JSONValue] = [:]
                 for parameter in def.parameters {
                     let pp = "\(ap)_p_\(parameter.name)"

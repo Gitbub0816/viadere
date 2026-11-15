@@ -24,6 +24,9 @@ public protocol LoopsAPI: Sendable {
     func uninstall(_ loop: LoopDefinitionID) async throws -> [InstalledLoop]
     /// Allow or stop this installed Loop's own alerts in Alerts (owner decision F-4). Never subscribes to anything else from the business.
     func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop
+
+    /// The single-use challenge of an `approve_estimate` action on the current step (WP-4.4, SECURITY.md §2.115).
+    func startApproval(_ id: LoopInstanceID, _ request: LoopApprovalStartRequest) async throws -> LoopApprovalChallenge
 }
 
 /// Defaults for test doubles written before installable Loops: the server answers `404` (nothing installable).
@@ -42,6 +45,10 @@ extension LoopsAPI {
         throw APIError.server(status: 404, code: .notFound, message: "Not found.")
     }
     public func setLoopAlerts(_ loop: LoopDefinitionID, enabled: Bool) async throws -> InstalledLoop {
+        throw APIError.server(status: 404, code: .notFound, message: "Not found.")
+    }
+    /// Servers before Phase 4 have no binding approvals.
+    public func startApproval(_ id: LoopInstanceID, _ request: LoopApprovalStartRequest) async throws -> LoopApprovalChallenge {
         throw APIError.server(status: 404, code: .notFound, message: "Not found.")
     }
 }
@@ -88,6 +95,10 @@ public struct LiveLoopsAPI: LoopsAPI {
     }
 
     public func publicationKeys() async throws -> LoopPublicationKeySet { try await client.call(APIRoutes.loopKeys) }
+
+    public func startApproval(_ id: LoopInstanceID, _ request: LoopApprovalStartRequest) async throws -> LoopApprovalChallenge {
+        try await client.call(APIRoutes.loopInstanceApprovalStart, params: ["instanceId": id.description], body: request)
+    }
 
     public func directory(query: String?, category: LoopDirectoryCategory?, business: BusinessID?) async throws -> LoopDirectoryPage {
         var items: [(String, String)] = []

@@ -16,7 +16,7 @@ struct WebhookService {
         .relationshipDisconnected, .consentUpdated, .rewardRedeemed, .verificationCompleted,
         .approveEnrollmentDeviceCompleted, .approveEnrollmentConfirmed, .approveKeyRevoked, .approveRequestDecided, .approveRequestExpired, .approveFrozen,
         .linkCompleted, .linkExpired, .profileAccessGranted, .profileAccessRevoked, .profileRequestExpired,
-    ] + WebhookEventType.authEvents
+    ] + WebhookEventType.authEvents + WebhookEventType.loopEvents
     static let rotationOverlap: TimeInterval = 24 * 3600
 
     // MARK: Subscriptions
@@ -60,6 +60,10 @@ struct WebhookService {
                                details: ["events": "signature_version_required"])
             }
         }
+        // Connected Loop events (WP-4.1) are opaque only: a v1 subscription never names them.
+        if events.contains(where: { e in WebhookEventType.loopEvents.contains { $0.rawValue == e } }), request.envelopeVersion != WebhookEnvelopeV2.version {
+            throw APIError.validation("loop.* events need the opaque envelope (envelopeVersion 2026-10-27).", details: ["events": "envelope_v2_required"])
+        }
         let existing = try await WebhookSubscriptionRecord.query(on: db).filter(\.$businessId == businessId.uuid)
             .filter(\.$active == true).count()
         guard existing < Self.maxSubscriptionsPerBusiness else { throw APIError.conflict("Webhook limit reached.") }
@@ -87,9 +91,11 @@ struct WebhookService {
             .filter(\.$businessId == businessId.uuid).first() else { throw APIError.notFound }
         record.active = false
         try await record.update(on: db)
-        // Stop pending deliveries for a removed endpoint.
+        // Stop pending deliveries for a removed endpoint. Connected Loop events among them become `unknown` for the customer (WP-4.1).
+        let stopped = try await WebhookDeliveryRecord.query(on: db).filter(\.$subscriptionId == id.uuid).filter(\.$status == "pending").all()
         try await WebhookDeliveryRecord.query(on: db).filter(\.$subscriptionId == id.uuid).filter(\.$status == "pending")
             .set(\.$status, to: "dead").update()
+        for delivery in stopped { await LoopConnectedService(db: db, ctx: ctx).deliveryDead(delivery) }
         _ = try await AuditService(db: db, ctx: ctx).record("webhook.deleted", actor: AuditActor(kind: .business, id: businessId.description),
                                                            businessId: businessId, subjectType: "webhook", subjectId: id.description)
     }
@@ -259,6 +265,7 @@ struct WebhookService {
             delivery.status = "dead"
             delivery.lastError = "subscription_inactive"
             try await delivery.update(on: db)
+            await LoopConnectedService(db: db, ctx: ctx).deliveryDead(delivery)
             return
         }
         guard let body = deliveryBody(delivery) else {
@@ -356,6 +363,8 @@ struct WebhookService {
         attemptRecord.error = success ? nil : delivery.lastError
         try await attemptRecord.create(on: db)
         if delivery.status == "dead" {
+            // A connected Loop event that can no longer be delivered: the customer sees `unknown` (WP-4.1).
+            await LoopConnectedService(db: db, ctx: ctx).deliveryDead(delivery)
             ctx.metrics.count(.webhookDeadLettered)
             _ = try await AuditService(db: db, ctx: ctx).record("webhook.dead_lettered", outcome: .failure,
                 actor: AuditActor(kind: .system), businessId: BusinessID(delivery.businessId), subjectType: "webhook_delivery",

@@ -102,6 +102,8 @@ struct TenantDataRequests {
             let deliveries = try await WebhookDeliveryRecord.query(on: tx).filter(\.$businessId == businessId).all().compactMap(\.id)
             if !deliveries.isEmpty { try await WebhookAttemptRecord.query(on: tx).filter(\.$deliveryId ~~ deliveries).delete() }
             try await WebhookDeliveryRecord.query(on: tx).filter(\.$businessId == businessId).delete()
+            // Loop endpoint bindings reference the subscriptions (LoopsPhase4.v1): they go first.
+            try await LoopTenantData.deletePhase4(businessId: businessId, on: tx)
             if !hooks.isEmpty { try await WebhookSubscriptionRecord.query(on: tx).filter(\.$id ~~ hooks).delete() }
             try await BusinessDomainRecord.query(on: tx).filter(\.$businessId == businessId).delete()
             try await BusinessMTLSCertRecord.query(on: tx).filter(\.$businessId == businessId).delete()

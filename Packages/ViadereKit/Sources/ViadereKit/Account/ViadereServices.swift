@@ -61,6 +61,9 @@ public struct ViadereServices: Sendable {
 
     public var approvals: ApprovalService { ApprovalService(api: api, keys: keys, records: records, clock: clock) }
 
+    /// Binding `approve_estimate` approvals of Loops (WP-4.4): the device-bound biometric key over the challenge's context digest.
+    public var loopApprovals: LoopApprovalSigner { LoopApprovalSigner(keys: keys, records: records, clock: clock) }
+
     public var confirmations: ConfirmationService { ConfirmationService(api: api, keys: keys, records: records, clock: clock) }
 
     public var notificationHandler: NotificationActionHandler {

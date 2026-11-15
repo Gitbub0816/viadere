@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+### Connected Loops (SECURITY section 2.115, additive)
+
+- `getLoopEvent(eventRef)`, `answerLoopEvent(eventRef, { outcome, idempotency_key })` and `getLoopInstance(instanceRef)` for
+  `/v1/business/loops/...` (scopes `loops:read` / `loops:write`, live keys). References are checked locally (`lev_` / `lin_` plus a lowercase
+  UUID); the answer body is exactly the two members and is retried safely (the key travels in the body).
+- `loop.action.submitted` and `loop.instance.expired` join `BUSINESS_WEBHOOK_EVENT_TYPES` and `OPAQUE_ENVELOPE_EVENT_TYPES` (opaque only).
+- Types `LoopBusinessEvent`, `LoopBusinessAnswer`, `LoopBusinessApproval`, `LoopBusinessInstance`, `LoopOutcomeCallbackRequest`,
+  `LoopOutcomeCallbackResult` and their OpenAPI schemas.
+
 ### `auth.delivery.fallback_used` (contract v1.x, additive)
 
 - `WEBHOOK_EVENT_TYPES` (and `WebhookEventType`) gain `auth.delivery.fallback_used`: the code of a delivery that asked for the email fallback left
