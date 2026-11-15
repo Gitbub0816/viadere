@@ -94,6 +94,9 @@ struct AuthorityChallengeService {
         challenge.displayDigest = try AuthorityDisplay.digest(display)
         try await challenge.create(on: db)
         let statement = try await StatementBuilder(kms: ctx.kms, keys: keys, environment: ctx.environment).sign(challenge)
+        // The Viadere code as a CKey Safe Action (oidc_login only, when the key is configured). A signing failure costs only the Safe Action:
+        // the page then draws the plain link, which names the same challenge.
+        let safeAction = try? await SafeActionBuilder(kms: ctx.kms, keys: keys, config: ctx.config).sign(challenge, now: now)
         await AuthorityAudit.record(db, "authority.challenge_created", outcome: "success", tenant: challenge.tenantId, challengeId: challenge.id,
                                     caller: caller?.name, detail: challenge.purpose, at: now)
         if let hintAccepted {
@@ -101,7 +104,8 @@ struct AuthorityChallengeService {
                                         challengeId: challenge.id, caller: caller?.name, at: now)
         }
         return AuthorityChallengeCreateResponse(challengeId: challenge.id!, statement: statement, matchCode: challenge.matchCode,
-                                                expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970), hintAccepted: hintAccepted)
+                                                expiresAt: Int64(challenge.expiresAt.timeIntervalSince1970), hintAccepted: hintAccepted,
+                                                safeAction: safeAction ?? nil)
     }
 }
 

@@ -50,6 +50,9 @@ struct AuthorityKeyRing: Sendable {
     let statement: PinnedP256Key
     let oidcES256: PinnedP256Key?
     let oidcRS256: PinnedRSAKey?
+    /// The CKey Safe Action issuer key: loaded only with the OIDC provider on, `CKEY_SAFE_ACTION_ISSUER` set and a reviewed pin. No pin: Safe
+    /// Actions are off (the page draws the plain link). A pin whose key does not match its thumbprint stops the start like every other key.
+    var ckeySafeAction: PinnedP256Key? = nil
 
     static func load(kms: any KeyManagementService, config: AuthorityConfig, db: any Database) async throws -> AuthorityKeyRing {
         func pin(_ name: String) async throws -> AuthorityKeyPin {
@@ -80,14 +83,29 @@ struct AuthorityKeyRing: Sendable {
         let grant = try await p256(config.grantKeyName)
         var es: PinnedP256Key?
         var rs: PinnedRSAKey?
+        var safeAction: PinnedP256Key?
         if config.oidcEnabled {
             es = try await p256(config.oidcES256KeyName)
             rs = try await rsa(config.oidcRS256KeyName)
+            if config.ckeySafeActionIssuer != nil, try await AuthorityKeyPin.find(config.ckeySafeActionKeyName, on: db) != nil {
+                safeAction = try await p256(config.ckeySafeActionKeyName)
+            }
         }
         // The grant JWKS and the OIDC JWKS never share a key (ADR-0024 §7.5), and no key serves two families.
-        let kids = [grant.kid, statement.kid, es?.kid, rs?.kid].compactMap { $0 }
+        let kids = [grant.kid, statement.kid, es?.kid, rs?.kid, safeAction?.kid].compactMap { $0 }
         guard Set(kids).count == kids.count else { throw AuthorityKeyError.thumbprintMismatch("shared key") }
-        return AuthorityKeyRing(grant: grant, statement: statement, oidcES256: es, oidcRS256: rs)
+        return AuthorityKeyRing(grant: grant, statement: statement, oidcES256: es, oidcRS256: rs, ckeySafeAction: safeAction)
+    }
+
+    /// The Safe Action `key_id` (1 to 32 of `A-Z a-z 0-9 . _ -`): `p256-` and the first 27 characters of the key's RFC 7638 thumbprint, so a
+    /// new key version is a new id and the same key always has the same id.
+    static func safeActionKeyId(_ key: PinnedP256Key) -> String { "p256-" + key.kid.prefix(27) }
+
+    /// What `GET /v1/ckey/keys` serves: the issuer and the public key in compressed SEC 1 hex, `alg: ES256`.
+    func safeActionKeys(config: AuthorityConfig) -> AuthorityCKeyKeySet {
+        guard let key = ckeySafeAction, let issuer = config.ckeySafeActionIssuer else { return AuthorityCKeyKeySet(issuer: nil, keys: []) }
+        return AuthorityCKeyKeySet(issuer: issuer, keys: [CKeySafeActionKeyFile.Key(id: Self.safeActionKeyId(key), alg: CKeySafeAction.PublicKey.es256Name,
+                                                                                     publicKey: CKeySafeAction.PublicKey.es256(key.publicKey).hex)])
     }
 
     /// The public JWKs of the OIDC token keys (what `authority-publish.yml` publishes from the attested inventory, and what the api verifies with).
@@ -187,6 +205,30 @@ private enum KMSJWS {
             throw KMSError.signatureMismatch
         }
         return input + "." + Base64URL.encode(raw)
+    }
+}
+
+/// The CKey Safe Action for a **stored** `oidc_login` challenge (SECURITY.md §2.104 "Safe Actions"; spec "What an issuer must do"): issuer = the
+/// configured link-domain host, app = the Viadere app, `signin.request`, cross-device, `request_id` = the challenge id, no params, issued now and
+/// expiring with the challenge or after 120 s, whichever is sooner. Nothing comes from the caller. ES256 through the KMS over SHA-256 of the
+/// signing input, folded to low-S, assembled, and verified once with the pinned public key before it is returned.
+struct SafeActionBuilder {
+    let kms: any KeyManagementService
+    let keys: AuthorityKeyRing
+    let config: AuthorityConfig
+
+    func sign(_ challenge: AuthorityChallenge, now: Date) async throws -> String? {
+        guard challenge.purpose == AuthorityPurpose.oidcLogin.rawValue, let key = keys.ckeySafeAction, let issuer = config.ckeySafeActionIssuer,
+              let domain = LinkDomain(issuer),
+              let action = ViadereSignInSafeAction.envelope(issuer: domain, keyId: AuthorityKeyRing.safeActionKeyId(key), challengeId: challenge.id!, now: now,
+                                                            notAfter: challenge.expiresAt) else { return nil }
+        let input = try action.signingInput()
+        let raw = try await kms.sign(keyRef: key.keyRef, digest: Data(SHA256.hash(data: input)))
+        let text = try action.assembled(signature: CKeySafeAction.lowS(raw))
+        guard CKeySafeAction.verify(text: text, key: .es256(key.publicKey), now: now, maxLifetime: ViadereSignInSafeAction.lifetimeSeconds) == .ok(action) else {
+            throw KMSError.signatureMismatch
+        }
+        return text
     }
 }
 

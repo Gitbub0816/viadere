@@ -249,7 +249,7 @@ public enum AuthorityAdmin {
     static func pinKeyVersion(_ o: [String: JSONValue], commit: String, db: any Database, now: Date) async throws {
         guard Set(o.keys) == ["name", "version", "thumbprint"] else { throw Failure.invalid("members (name, version, thumbprint)") }
         let name = try string(o, "name", max: 127), version = try string(o, "version", max: 64), thumbprint = try string(o, "thumbprint", max: 43)
-        guard ["grant-signing", "oidc-signing-rs256", "oidc-signing-es256", "device-statement-signing"].contains(name) else { throw Failure.invalid("name") }
+        guard ["grant-signing", "oidc-signing-rs256", "oidc-signing-es256", "device-statement-signing", "ckey-safe-action-signing"].contains(name) else { throw Failure.invalid("name") }
         guard version.count == 32, version.allSatisfy({ $0.isHexDigit }) else { throw Failure.invalid("version") }
         guard Base64URL.isValid(thumbprint, minLength: 43, maxLength: 43) else { throw Failure.invalid("thumbprint") }
         let pin = try await AuthorityKeyPin.find(name, on: db) ?? AuthorityKeyPin()
