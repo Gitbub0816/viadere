@@ -2,8 +2,9 @@ import Foundation
 
 // CKey SVG renderer: a Swift port of `ckey_render_scalable_styled_svg` in the CKey reference core
 // (https://github.com/clearkeysolutions/ckey, tag v0.1.0-build.85, `src/api_render.inc`). For the two certified presets it produces the
-// reference's output byte for byte (`CKeySymbolTests`). Only the presets are offered: an arbitrary style would need the reference's
-// scan-safety checks, which are deliberately not ported.
+// reference's output byte for byte (`CKeySymbolTests`), and for custom styles as well (`CKeyStyleTests`). A style's members stay internal:
+// outside this module a style is one of the presets or comes from `CKeyStyle(validating:)`, which runs the port of the reference's
+// scan-safety check (`CKeyStyleCheck.swift`). The centre logo of the reference is not ported: it spends error correction.
 //
 // Portions Copyright (c) 2026 ClearKey Solutions, LLC, MIT License (see `docs/THIRD-PARTY-NOTICES.md`).
 
@@ -19,6 +20,23 @@ public struct CKeyStyle: Sendable, Equatable {
     let accents: [RGB]
     let accentPercent: UInt32
     let bevel: Double, shadow: Double, texture: Double
+    let modules: CKeyStyleSpec.ModuleShape, rings: CKeyStyleSpec.RingStyle, rays: CKeyStyleSpec.RayCap
+
+    init(background: RGB, backgroundEdge: RGB, ink: RGB, inkShade: RGB, accents: [RGB], accentPercent: UInt32, bevel: Double, shadow: Double,
+         texture: Double, modules: CKeyStyleSpec.ModuleShape = .rounded, rings: CKeyStyleSpec.RingStyle = .joined, rays: CKeyStyleSpec.RayCap = .round) {
+        self.background = background
+        self.backgroundEdge = backgroundEdge
+        self.ink = ink
+        self.inkShade = inkShade
+        self.accents = accents
+        self.accentPercent = accentPercent
+        self.bevel = bevel
+        self.shadow = shadow
+        self.texture = texture
+        self.modules = modules
+        self.rings = rings
+        self.rays = rays
+    }
 
     /// Black on white.
     public static let plain = CKeyStyle(background: RGB(r: 0xFF, g: 0xFF, b: 0xFF), backgroundEdge: RGB(r: 0xFF, g: 0xFF, b: 0xFF),
@@ -48,7 +66,7 @@ extension CKeySymbol {
         let p = L.pitch, dot = L.dot
         let center = CKeyLayout.center, tau = CKeyLayout.tau
         let f = Self.fixed4
-        let dotStroke = f(2 * dot)
+        let dotStroke = f(2 * dot), capStyle = style.rays == .flat ? "butt" : "round"
         let sheen = style.ink != style.inkShade, vignette = style.background != style.backgroundEdge
         let depth = style.bevel > 0 || style.shadow > 0
         let ink = sheen ? "url(#ckey-ink)" : style.ink.hex
@@ -114,18 +132,19 @@ extension CKeySymbol {
         // Calibration keys.
         o += "</g><g class=\"ckey-grid-key\">"
         for r in 0..<2 {
-            for cc in 0..<2 { o += Self.module((Double(L.col0 + cc) + 0.5) * p, (Double(L.row0 + r) + 0.5) * p, p, fill: nil) }
+            for cc in 0..<2 { o += Self.module((Double(L.col0 + cc) + 0.5) * p, (Double(L.row0 + r) + 0.5) * p, p, shape: style.modules, fill: nil) }
         }
         o += "</g><g class=\"ckey-polar-keys\">"
         for (slot, fraction) in [(0, 1.0), (L.rayKeyHalf, 0.5), (L.rayKeyThree, 0.75)] {
             let a = tau * Double(slot) / Double(L.dialSlots), r0 = CKeyLayout.dialInner, r1 = r0 + L.keyRay * fraction
-            o += "<path d=\"M \(f(center + r0 * sin(a))) \(f(center - r0 * cos(a))) L \(f(center + r1 * sin(a))) \(f(center - r1 * cos(a)))\" fill=\"none\" stroke-width=\"\(f(0.44 * p))\" stroke-linecap=\"round\"/>"
+            o += "<path d=\"M \(f(center + r0 * sin(a))) \(f(center - r0 * cos(a))) L \(f(center + r1 * sin(a))) \(f(center - r1 * cos(a)))\" fill=\"none\" stroke-width=\"\(f(0.44 * p))\" stroke-linecap=\"\(capStyle)\"/>"
         }
         let rk = L.ringRadius(L.rings - 1), k = L.ringKeySlot, slots = Double(L.dialSlots)
         for slot in [0, 2, 6] {
             let a = tau * Double(k + slot) / slots
             o += "<circle cx=\"\(f(center + rk * sin(a)))\" cy=\"\(f(center - rk * cos(a)))\" r=\"\(f(dot))\" stroke=\"none\"/>"
         }
+        // The Ring Key keeps its dot, gap and run pattern in every style: it is a key.
         o += Self.ringRun(radius: rk, from: Double(k) + 7.5, to: Double(k) + 15.5, slots: slots, dot: dot, strokeWidth: dotStroke)
 
         // Data: dial rays in placement order, then ring runs, then the Cartesian modules.
@@ -138,10 +157,10 @@ extension CKeySymbol {
             let accent = style.accent(of: n.id)
             switch n.kind {
             case .cartesian:
-                if bit { c += Self.module(n.x, n.y, p, fill: accent.map { style.accents[$0].hex }) }
+                if bit { c += Self.module(n.x, n.y, p, shape: style.modules, fill: accent.map { style.accents[$0].hex }) }
             case .dial:
                 let a = tau * Double(n.slot) / Double(L.dialSlots), r0 = CKeyLayout.dialInner, r1 = r0 + (bit ? L.longRay : L.shortRay)
-                o += "<path d=\"M \(f(center + r0 * sin(a))) \(f(center - r0 * cos(a))) L \(f(center + r1 * sin(a))) \(f(center - r1 * cos(a)))\" fill=\"none\" stroke-width=\"\(f(L.rayWidth))\" stroke-linecap=\"round\"/>"
+                o += "<path d=\"M \(f(center + r0 * sin(a))) \(f(center - r0 * cos(a))) L \(f(center + r1 * sin(a))) \(f(center - r1 * cos(a)))\" fill=\"none\" stroke-width=\"\(f(L.rayWidth))\" stroke-linecap=\"\(capStyle)\"/>"
             case .ring:
                 ringBits[n.ring * stride + n.slot] = bit
                 ringAccent[n.ring * stride + n.slot] = accent
@@ -154,7 +173,7 @@ extension CKeySymbol {
                 let at = ring * stride + slot
                 if !ringBits[at] { slot += 1; continue }
                 var end = slot + 1
-                while end < stride, ringBits[ring * stride + end] { end += 1 }
+                if style.rings == .joined { while end < stride, ringBits[ring * stride + end] { end += 1 } }
                 let colour = ringAccent[at].map { style.accents[$0].hex }
                 if end - slot == 1 {
                     let a = tau * Double(slot) / slots
@@ -172,10 +191,19 @@ extension CKeySymbol {
         return o
     }
 
-    /// A rounded square module centered at (cx, cy).
-    private static func module(_ cx: Double, _ cy: Double, _ p: Double, fill: String?) -> String {
+    /// A data or key module centered at (cx, cy), in the style's shape.
+    private static func module(_ cx: Double, _ cy: Double, _ p: Double, shape: CKeyStyleSpec.ModuleShape, fill: String?) -> String {
         let h = 0.34 * p, f = fixed4
-        return "<rect x=\"\(f(cx - h))\" y=\"\(f(cy - h))\" width=\"\(f(2 * h))\" height=\"\(f(2 * h))\" rx=\"\(f(0.16 * p))\" stroke=\"none\"\(fill.map { " fill=\"\($0)\"" } ?? "")/>"
+        let paint = fill.map { " fill=\"\($0)\"" } ?? ""
+        switch shape {
+        case .circle:
+            return "<circle cx=\"\(f(cx))\" cy=\"\(f(cy))\" r=\"\(f(h))\" stroke=\"none\"\(paint)/>"
+        case .diamond:
+            let d = 0.40 * p  // inscribed radius 0.28p covers the sample support
+            return "<polygon points=\"\(f(cx)),\(f(cy - d)) \(f(cx + d)),\(f(cy)) \(f(cx)),\(f(cy + d)) \(f(cx - d)),\(f(cy))\" stroke=\"none\"\(paint)/>"
+        case .rounded, .square:
+            return "<rect x=\"\(f(cx - h))\" y=\"\(f(cy - h))\" width=\"\(f(2 * h))\" height=\"\(f(2 * h))\" rx=\"\(f(shape == .square ? 0.0 : 0.16 * p))\" stroke=\"none\"\(paint)/>"
+        }
     }
 
     /// A run of adjacent ring sites as one round-capped arc. Caps add a dot diameter, so the centerline is shortened by a dot radius at
