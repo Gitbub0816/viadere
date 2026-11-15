@@ -32,6 +32,11 @@ final class AuthDeliveryRecord: Model, @unchecked Sendable {
     /// `magic_link`: the lowercase host the business signed, and its compact `viadere-destination+jws` (a digest of the URL, not a bearer value).
     @OptionalField(key: "destination_host") var destinationHost: String?
     @OptionalField(key: "destination_statement") var destinationStatement: String?
+    /// Link service (`link_mode: "viadere"`, ADR-0021 §5): the authority challenge this delivery carries, its signed statement (relayed unchanged to the
+    /// device) and the link client. A link-service delivery has **no** URL secret: nothing is handed out by `open`.
+    @OptionalField(key: "link_challenge_id") var linkChallengeId: String?
+    @OptionalField(key: "link_statement") var linkStatement: String?
+    @OptionalField(key: "link_client_id") var linkClientId: String?
     @OptionalField(key: "code_kind") var codeKind: String?
     /// Delivered without an alert push because a per-subject budget was exhausted (the inbox still shows it).
     @Field(key: "silent") var silent: Bool

@@ -27,6 +27,9 @@ enum AuthLinkRedemption {
             switch result.status {
             case 200:
                 guard let grant = result.response else { throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.") }
+                // ADR-0021 §5.4: the delivery becomes `completed`. The authority names it from its own challenge record; it must be this business's own
+                // link-service delivery, and only `opened` (the device's accepted evidence) can complete.
+                try await completeDelivery(grant.deliveryId, businessId: principal.businessId.uuid, req: req)
                 return try req.jsonResponse(grant)
             case 400..<500:
                 // One answer for every refusal (unknown, expired, used, foreign code or wrong verifier); the reason is in the authority's audit.
@@ -35,6 +38,20 @@ enum AuthLinkRedemption {
                 throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
             }
         }
+    }
+}
+
+extension AuthLinkRedemption {
+    /// Marks the redeemed link-service delivery `completed` (business actor). A delivery of another business, or one that is not this challenge's, is left
+    /// untouched; the grant is already the business's (the authority checked the client's business), so nothing else changes.
+    static func completeDelivery(_ wireId: String, businessId: UUID, req: Request) async throws {
+        guard let id = AuthDeliveryID(wireId), let row = try await AuthDeliveryRecord.find(id.uuid, on: req.db), row.businessId == businessId,
+              row.linkChallengeId != nil else {
+            req.logger.warning("auth link redemption: no matching link-service delivery")
+            return
+        }
+        let service = AuthDeliveryService(db: req.db, ctx: req.ctx)
+        _ = try await service.transition(row, to: .completed, by: .business, reason: "link_redeemed")
     }
 }
 

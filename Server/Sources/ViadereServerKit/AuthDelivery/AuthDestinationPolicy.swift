@@ -65,14 +65,22 @@ struct AuthDestinationCheck {
     struct Result: Sendable {
         var host: String
         var statement: String
-        var url: String
+        /// Business mode: the URL (sealed P class). The link service has none.
+        var url: String?
+        /// Link service: the references the authority checks against its own link-client record (ADR-0021 §5.2).
+        var link: LinkService?
+    }
+
+    struct LinkService: Sendable {
+        var clientId: String
+        var returnURL: String
+        var codeChallenge: String
     }
 
     func validate(_ destination: AuthDestinationRequest, request: AuthDeliveryCreateRequest, businessId: BusinessID, expiresAt: Date) async throws -> Result {
         switch destination.linkMode {
         case .viadere:
-            // The link service needs the authority (Stage 6): refused, never approximated.
-            throw APIError.validation("The Viadere link service is not available yet.", details: ["destination.link_mode": "unavailable"])
+            return try validateLinkService(destination, request: request)
         case .business:
             break
         }
@@ -111,6 +119,31 @@ struct AuthDestinationCheck {
             throw Self.signatureRequired("replayed")
         }
         return Result(host: parsed.host, statement: signature, url: url)
+    }
+
+    /// `link_mode: "viadere"` (ADR-0021 §5.2): refused while `AUTH_LINK_SERVICE_ENABLED` is off (the default; refused in production). On, only the
+    /// references are checked here; the authority decides (exact `return_url` of the client, the client's business, the purpose) and builds the display.
+    func validateLinkService(_ destination: AuthDestinationRequest, request: AuthDeliveryCreateRequest) throws -> Result {
+        guard ctx.config.authDelivery.linkServiceEnabled else {
+            throw APIError.validation("The Viadere link service is not available yet.", details: ["destination.link_mode": "unavailable"])
+        }
+        guard destination.url == nil, destination.signature == nil else {
+            throw APIError.validation("Business-mode members are not allowed with the link service.", details: ["destination": "invalid"])
+        }
+        guard let clientId = destination.linkClientId, clientId.hasPrefix("lcl_"), (8...64).contains(clientId.utf8.count) else {
+            throw APIError.validation("destination.link_client_id is required.", details: ["destination.link_client_id": "invalid"])
+        }
+        guard let returnURL = destination.returnUrl, OIDCProfile.isRegistrableRedirectURI(returnURL), let host = URLComponents(string: returnURL)?.host?.lowercased() else {
+            throw APIError.validation("destination.return_url must be a registered https URL.", details: ["destination.return_url": "invalid"])
+        }
+        guard destination.codeChallengeMethod == "S256", let challenge = destination.codeChallenge, OIDCProfile.isValidCodeChallenge(challenge) else {
+            throw APIError.validation("destination.code_challenge (S256) is required.", details: ["destination.code_challenge": "invalid"])
+        }
+        // The authority serves sign-in and step-up only (ADR-0021 §5).
+        guard request.purpose == .signIn || request.purpose == .stepUp else {
+            throw APIError.validation("The link service serves sign_in and step_up only.", details: ["purpose": "invalid"])
+        }
+        return Result(host: host, statement: "", url: nil, link: LinkService(clientId: clientId, returnURL: returnURL, codeChallenge: challenge))
     }
 
     static func signatureRequired(_ reason: String) -> APIError {

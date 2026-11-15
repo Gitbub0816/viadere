@@ -17,6 +17,10 @@ public struct AuthDeliverySettings: Sendable {
     /// `AUTH_LINK_SERVICE_ENABLED` (ADR-0019 §6, ADR-0021 §5), default **off** everywhere: the link-service redemption
     /// `POST /v1/business/auth-links/redeem` answers `404` while off. On, it relays to the authority (`AUTHORITY_URL`) and fails closed (`503`) without one.
     public var linkServiceEnabled = false
+    /// `AUTH_DESTINATION_RECORDS_ENABLED` (ADR-0031 §2), default **off** everywhere: the device route `GET /v1/auth-tenants/{tenantId}/destination-keys`
+    /// answers `404` while off. On, it relays the authority's signed tenant record and revocation list (`AUTHORITY_URL`) and fails closed (`503`)
+    /// without one; the api's own create-time check then also reads the authority record (`AuthorityRecordTenantKeys`).
+    public var destinationRecordsEnabled = false
     /// `AUTH_DESTINATION_SIGNATURE_REQUIRED` (ADR-0031 section 5): business-mode links need a business-signed destination statement. `false` exists only so the
     /// unit tests can exercise both paths; staging and production refuse it.
     public var destinationSignatureRequired = true
@@ -67,9 +71,20 @@ extension ServerConfig {
         default: throw ServerConfigError.invalid("AUTH_NUMBER_MATCHING_REQUIRED (true or false)")
         }
         switch env["AUTH_LINK_SERVICE_ENABLED"]?.lowercased() {
-        case "true": authDelivery.linkServiceEnabled = true
+        case "true":
+            // Staging only until the owner enables it for production by a reviewed change (ADR-0021 §5; the pilot runs on staging), like
+            // `OIDC_PROVIDER_ENABLED`: `ENVIRONMENT=production` refuses to start with it on.
+            guard env["ENVIRONMENT"]?.lowercased() != "production" else {
+                throw ServerConfigError.invalid("AUTH_LINK_SERVICE_ENABLED (refused with ENVIRONMENT=production until the owner enables the link service there)")
+            }
+            authDelivery.linkServiceEnabled = true
         case "false", nil, "": authDelivery.linkServiceEnabled = false
         default: throw ServerConfigError.invalid("AUTH_LINK_SERVICE_ENABLED (true or false)")
+        }
+        switch env["AUTH_DESTINATION_RECORDS_ENABLED"]?.lowercased() {
+        case "true": authDelivery.destinationRecordsEnabled = true
+        case "false", nil, "": authDelivery.destinationRecordsEnabled = false
+        default: throw ServerConfigError.invalid("AUTH_DESTINATION_RECORDS_ENABLED (true or false)")
         }
         switch env["AUTH_DESTINATION_SIGNATURE_REQUIRED"] {
         case "true", nil, "": authDelivery.destinationSignatureRequired = true

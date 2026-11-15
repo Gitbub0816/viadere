@@ -18,7 +18,7 @@ enum AuthDeliveryRoutes {
         routes.api(APIRoutes.businessAuthDeliveryCreate, scope: Scope.authDeliveriesWrite) { req in
             try AuthDeliveryGate.require(req.ctx)
             let key = try BusinessIdempotency.requireKey(req.idempotencyHeader)
-            let result = try await AuthDeliveryService(db: req.db, ctx: req.ctx).create(principal: try req.business, body: req.bodyBytes, key: key)
+            let result = try await AuthDeliveryService(db: req.db, ctx: req.ctx, authority: req.application.authorityTransport).create(principal: try req.business, body: req.bodyBytes, key: key)
             return try req.jsonResponse(result.value, status: result.created ? .created : .ok)
         }
         routes.api(APIRoutes.businessAuthDeliveryGet, scope: Scope.authDeliveriesRead) { req in
@@ -90,6 +90,7 @@ enum AuthDeliveryRoutes {
             return try req.jsonResponse(AuthWebhookTestResponse(eventId: eventId))
         }
         AuthLinkRedemption.register(routes)
+        AuthTenantKeyRelay.register(routes)
 
         // MARK: Devices
         routes.api(APIRoutes.authDeliveries) { req in
@@ -134,6 +135,16 @@ enum AuthDeliveryRoutes {
             let response = try await AuthDeliveryDeviceService(db: req.db, ctx: req.ctx).open(principal: try req.consumer, id: try deliveryId(req))
             let out = try req.jsonResponse(response)
             // The body carries a bearer value: never cache or store it.
+            out.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
+            return out
+        }
+        routes.api(APIRoutes.authDeliveryLinkEvidence) { req in
+            try AuthDeliveryGate.require(req.ctx)
+            guard req.ctx.config.authDelivery.linkServiceEnabled else { throw APIError.notFound }
+            let body: AuthLinkEvidenceRequest
+            do { body = try ViadereJSON.decode(AuthLinkEvidenceRequest.self, from: req.bodyBytes) } catch { throw APIError.validation("factor is required.") }
+            let out = try req.jsonResponse(try await AuthDeliveryDeviceService(db: req.db, ctx: req.ctx).linkEvidence(principal: try req.consumer, id: try deliveryId(req),
+                                                                                                                  body: body, transport: req.application.authorityTransport))
             out.headers.replaceOrAdd(name: .cacheControl, value: "no-store")
             return out
         }

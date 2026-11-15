@@ -32,10 +32,50 @@ struct AuthDeliveryDeviceService {
         let business = try await BusinessRecord.find(row.businessId, on: db)
         let live = !service.effectiveStatus(row).isTerminal
         let variables = live ? await payload(row)?.variables : nil
-        return AuthDeliveryDisplay(id: row.wireId, method: row.methodValue, purpose: row.purposeValue, template: row.template, status: service.effectiveStatus(row),
-                                   businessId: BusinessID(row.businessId), businessName: business?.displayName ?? "", expiresAt: row.expiresAt, createdAt: row.createdAt,
-                                   requestId: row.requestId, destinationHost: row.destinationHost, destinationStatement: live ? row.destinationStatement : nil,
-                                   codeKind: row.codeKind.flatMap(AuthCodeKind.init(rawValue:)), variables: variables, silent: row.silent)
+        var display = AuthDeliveryDisplay(id: row.wireId, method: row.methodValue, purpose: row.purposeValue, template: row.template, status: service.effectiveStatus(row),
+                                          businessId: BusinessID(row.businessId), businessName: business?.displayName ?? "", expiresAt: row.expiresAt, createdAt: row.createdAt,
+                                          requestId: row.requestId, destinationHost: row.destinationHost, destinationStatement: live ? row.destinationStatement : nil,
+                                          codeKind: row.codeKind.flatMap(AuthCodeKind.init(rawValue:)), variables: variables, silent: row.silent)
+        if row.linkChallengeId != nil {
+            // Link service: the authority's signed challenge, relayed unchanged (the device renders exactly its display, ADR-0033 §2).
+            display.linkMode = .viadere
+            display.authorityChallenge = live ? row.linkStatement : nil
+        }
+        return display
+    }
+
+    /// `POST /v1/auth-deliveries/{id}/link-evidence` (ADR-0021 §5.3): relays the device's factor for **this** delivery's own challenge to the authority with
+    /// the device's account. Approve: `opened` (the authority recorded the code hash; the device now opens the signed return URL). Deny: `denied`.
+    /// Every refusal, the authority's or ours, is the same `401 evidence_invalid`.
+    func linkEvidence(principal: ConsumerPrincipal, id: AuthDeliveryID, body: AuthLinkEvidenceRequest, transport: (any AuthorityTransport)?) async throws -> AuthLinkEvidenceResponse {
+        guard ctx.config.authDelivery.linkServiceEnabled else { throw APIError.notFound }
+        let device = try await requireDevice(principal)
+        try await ctx.limiter.enforce("authdl-open", key: device.id!.uuidString.lowercased(), rule: ctx.config.authDelivery.openRate)
+        let row = try await record(id, principal: principal)
+        guard let challengeId = row.linkChallengeId else { throw APIError.notFound }
+        if try await service.expireIfDue(row) { throw APIError.gone("This delivery has expired.") }
+        guard row.statusValue.isOpenable else {
+            throw row.statusValue == .opened || row.statusValue == .completed ? APIError(.conflict, .alreadyOpened, "This was already answered.")
+                : APIError.gone("This delivery is no longer available.")
+        }
+        let invalid = APIError(.unauthorized, .unauthorized, "The answer could not be accepted.", details: ["error": "evidence_invalid"])
+        // The factor must answer this delivery's challenge: a factor for another delivery's challenge is never relayed under this one.
+        guard let parsed = try? FactorAssertion.parse(body.factor), parsed.claims.purpose == .linkOpen, ConstantTime.equals(parsed.claims.challengeId, challengeId) else { throw invalid }
+        guard let transport else { throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.") }
+        let answer: AuthorityEvidenceResponse?
+        do { answer = try await AuthorityClient(transport: transport).submitEvidence(AuthorityEvidenceRequest(factor: body.factor, accountId: principal.consumerId.uuid)) } catch {
+            throw APIError(.serviceUnavailable, .unavailable, "The link service is unavailable right now.")
+        }
+        guard let answer, ConstantTime.equals(answer.challengeId, challengeId), answer.grant == nil, answer.code == nil else { throw invalid }
+        switch answer.decision {
+        case .approve:
+            _ = try await service.transition(row, to: .opened, by: .device)
+        case .deny, .report:
+            _ = try await service.transition(row, to: .denied, by: .device, reason: answer.decision == .report ? "reported" : "denied_by_customer")
+        }
+        _ = try await AuditService(db: db, ctx: ctx).record("auth_delivery.link_evidence", principal: principal, businessId: BusinessID(row.businessId),
+                                                            subjectType: "auth_delivery", subjectId: id.description, metadata: ["decision": answer.decision.rawValue])
+        return AuthLinkEvidenceResponse(decision: answer.decision)
     }
 
     /// The inbox: open deliveries for this device's account.
@@ -66,6 +106,8 @@ struct AuthDeliveryDeviceService {
         let ctx = self.ctx
         // An expiry must commit even though the open is refused, so it runs before (not inside) the transaction that a refusal rolls back.
         let existing = try await record(id, principal: principal)
+        // A link-service delivery holds no URL: it is answered with `link-evidence`, never opened.
+        guard existing.linkChallengeId == nil else { throw APIError.notFound }
         if try await service.expireIfDue(existing) { throw APIError.gone("This delivery has expired.") }
         return try await DB.retryingTransient {
             try await db.transaction { tx in
