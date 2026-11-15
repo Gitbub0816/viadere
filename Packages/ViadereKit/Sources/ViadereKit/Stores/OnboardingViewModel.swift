@@ -64,6 +64,12 @@ public final class OnboardingViewModel {
     public static let skipWarning =
         "If you lose this iPhone and have no other device, your account can't be recovered. Your connections and history would be lost."
 
+    /// "I already use Viadere" (§2.105): add this device to an account by approval from a trusted device of it. On `.added` the session
+    /// and device record are stored; the caller finishes onboarding.
+    public func makeNewDevicePairing() -> NewDevicePairingViewModel {
+        NewDevicePairingViewModel(pairing: services.newDevicePairing, deviceName: deviceName, now: services.clock)
+    }
+
     public init(services: ViadereServices, deviceName: String = "My iPhone", start: OnboardingStep = .welcome) {
         self.services = services
         self.phoneLink = PhoneLinkViewModel(services: services)
