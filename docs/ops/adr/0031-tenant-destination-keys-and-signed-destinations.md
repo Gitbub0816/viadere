@@ -87,6 +87,19 @@ The api still sees the URL during its minutes-long life (R-01, unchanged). Under
 
 ST-ML-10 (any byte of the stored URL rewritten after create → device refuses to open and reports `destination_unverified`), ST-ML-11 (refusal corpus of §4), ST-ML-12 (api-fabricated, stale or lower-`seq` tenant record refused), ST-ML-13 (create without signature → `422` while the flag is on), ST-ML-15 (K, S: a stale record or clock skew leaves the delivery open, makes no server call and shows S-LINK-11/-12; an integrity failure sends `destination_unverified`, alerts at high priority and does not count toward the pause), ST-AUTH-16 (api identity cannot add an `authority_tenant_keys` row; no route, `404`; the admin job refuses a change file without a valid registration PoP, without the thumbprint in the attested evidence for every host, or with `not_after` beyond 13 months; revision 3.1: a reused nonce, an expired or future-dated PoP, a wrong `iss`/`aud`, a `hosts[]` set different from the change file's, and a DNSSEC-bogus answer are refused). ST-ML-15 extended (revision 3.1): a lower `seq` and a stale statement with a correct device clock are integrity failures; a spoofed api `Date` header changes nothing. Each fails if its control is removed.
 
+## Implementation notes (2026-11-15, G4)
+
+Normative wire text: SECURITY §2.110. Where the code made a choice the ADR left open:
+
+- **Key.** No new key: records and lists are signed with `device-statement-signing` as §2 says (declared in `Infra/azure-authority/locals.tf`). The api signs nothing.
+- **Registration nonce delivery.** The admin job's output is never read by CI (only its exit status), so the nonce reaches the tenant through the authority route `POST /v1/tenant-keys/registration-nonce` (api caller). The nonce is not a secret; what counts is the proof by the key, the attested evidence and single use. A business-facing api relay for it is not built yet.
+- **Evidence.** The change file carries the evidence as the reviewer committed it; `authority-admin.yml` re-fetches it live (`destination_key_evidence.py`) and attests it, and the job re-checks the committed copy. The "verified `auth_links` purpose row" of §1.2 lives in the api database and stays a reviewer check.
+- **Per-key hosts.** `authority_tenant_keys.allowed_hosts` is per key, but the §2 record has one tenant-level `allowed_hosts`; the record lists the union of the active keys' hosts. A key registered for host A can therefore sign for host B of another active key of the same tenant (same tenant, both hosts reviewed).
+- **A tenant with no usable key** still gets a record (no keys, the hosts its keys had), so its statements fail as integrity, not as an outage.
+- **`jti`.** "Not seen before" is implemented as "not seen on another delivery": reopening the same delivery's screen is not a replay; the statement replayed on a different delivery is.
+- **Revocation lists.** `device-key-revoke` records the revocation (append-only); the serving authority signs a statement-family list only while it runs on the standby key, so it is never signed by the key it revokes; seal-family lists are signed at once.
+- **Flags.** Authority `AUTHORITY_TENANT_KEYS_ENABLED`, api `AUTH_DESTINATION_RECORDS_ENABLED`, app `AuthDeliveryFlags.destinationVerification`: all off by default.
+
 ## Consequences
 
 - Business-mode tenants must publish a DNS TXT (or well-known) thumbprint and sign a registration with the new key, then pass a reviewed admin change before they can send business links in the pilot; renewal at least every 13 months (OQ-7, informational: decision 2 is kept).

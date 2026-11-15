@@ -6,6 +6,18 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Business-link destinations and the link service (2026-11-15, G4/G11).** The pieces that let the app open a business's sign-in link safely now
+exist, all behind flags that ship off. Core verifies the authority's tenant record (`viadere-tenant-keys+jws`), the pinned-key revocation list and
+the destination-key registration proof, with independent vectors. The authority stores tenant destination keys (admin job only: nonce, proof of
+possession, attested DNS/well-known evidence, 13-month limit; reduce-only revocation with or without the api) and signs records with the existing
+`device-statement-signing` key (`AUTHORITY_TENANT_KEYS_ENABLED`). The api relays records unchanged (`GET /v1/auth-tenants/{id}/destination-keys`,
+`AUTH_DESTINATION_RECORDS_ENABLED`). The app's `AuthorityDestinationVerifier` replaces the fail-closed verifier only with
+`AuthDeliveryFlags.destinationVerification` and pinned keys, and checks the opened URL bytes against `url_sha256`. The link service
+(`link_mode: "viadere"`, `AUTH_LINK_SERVICE_ENABLED`, refused in production) creates deliveries with a business-bound authority challenge,
+relays the device's evidence and completes the delivery on redemption. Normative: [`SECURITY.md`](SECURITY.md) §2.110; owner steps:
+[`ops/AUTHORITY-OWNER-CHECKLIST.md`](ops/AUTHORITY-OWNER-CHECKLIST.md) section E2. Not built: the app's link-service screen, cross-device
+link-service creates, a business-facing relay for the registration nonce. Not verified: the PostgreSQL run, live DNS evidence fetching.
+
 **Console conversations, benefits and RCS rich cards (2026-11-15).** A business without an integration can now read and answer customer messages in
 the console (`Dashboard/ConsoleConversations.swift`: list, thread, reply through `ConversationService.businessSend`, assign, close, reopen; reads
 audited, bodies decrypted only for the owning tenant, customers shown as `subject_ref`), and run its loyalty program, revoke rewards, void Wallet
