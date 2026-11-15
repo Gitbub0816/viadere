@@ -296,9 +296,8 @@ struct AuthDestinationVectorTests {
     @Test func specDisagreements() throws {
         for c in v.at("spec_disagreements").items {
             let (_, result) = try outcome(c)
-            withKnownIssue("Core accepts purpose \(c.at("expectation").at("purpose").text) in a destination statement (ADR-0031 §3)") {
-                #expect(result == c.at("expect").text, "\(c.at("name").text)")
-            }
+            // Was a known issue: Core accepted `account_notice` (ADR-0031 §3 allows sign_in, step_up, verify_contact only).
+            #expect(result == c.at("expect").text, "\(c.at("name").text)")
         }
     }
 }
@@ -378,9 +377,8 @@ struct RecoverySealVectorTests {
         for c in v.at("spec_disagreements").items {
             let result: String
             do { _ = try RecoverySealEnvelope.parse(c.at("envelope")); result = "accept" } catch { result = vectorCode(error) }
-            withKnownIssue("Core accepts padded base64url in a recovery envelope (SECURITY §2.1, ADR-0034 §1)") {
-                #expect(result == c.at("expect").text, "\(c.at("name").text)")
-            }
+            // Was a known issue: Core accepted padded base64url in `enc` and `ct` (SECURITY §2.1, ADR-0034 §1).
+            #expect(result == c.at("expect").text, "\(c.at("name").text)")
         }
     }
 }

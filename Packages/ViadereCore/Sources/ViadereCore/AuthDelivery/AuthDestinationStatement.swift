@@ -75,12 +75,16 @@ public struct AuthDestinationStatement: Sendable, Hashable {
     /// `base64url(SHA-256(url bytes))`.
     public static func digest(of url: String) -> String { Base64URL.encode(Data(SHA256.hash(data: Data(url.utf8)))) }
 
+    /// The purposes a destination statement may carry (ADR-0031 §3). `account_notice` deliveries carry no link, so a statement for one is malformed.
+    public static let allowedPurposes: Set<AuthDeliveryPurpose> = [.signIn, .stepUp, .verifyContact]
+
     /// A fresh `jti`: 128 random bits.
     public static func newJTI() -> String { SecureToken.generate(byteCount: 16) }
 
     /// What the business's SDK calls (`signAuthDestination`): builds the statement for `url` and signs it with the tenant's destination key.
     public static func build(url: String, tenantId: String, subjectRef: SubjectRef, requestId: String, purpose: AuthDeliveryPurpose, kid: String,
                              issuedAt: Date, lifetime: Int64 = 300, jti: String = newJTI()) throws(AuthDestinationError) -> AuthDestinationStatement {
+        guard allowedPurposes.contains(purpose) else { throw .notAllowed }
         let destination = try AuthDestinationValidator.parse(url)
         let iat = Int64(issuedAt.timeIntervalSince1970)
         return AuthDestinationStatement(kid: kid, tenantId: tenantId, subjectRef: subjectRef, requestId: requestId, purpose: purpose, urlSHA256: digest(of: url),
@@ -135,7 +139,7 @@ public struct AuthDestinationStatement: Sendable, Hashable {
               let iss = payload["iss"]?.stringValue, let aud = payload["aud"]?.stringValue, let sub = payload["sub"]?.stringValue.flatMap({ SubjectRef($0) }),
               let brq = payload["brq"]?.stringValue, let purposeRaw = payload["purpose"]?.stringValue, let purpose = AuthDeliveryPurpose(rawValue: purposeRaw),
               let digest = payload["url_sha256"]?.stringValue, let host = payload["host"]?.stringValue, let jti = payload["jti"]?.stringValue else { throw .malformed }
-        guard isTenantId(iss), AuthDeliveryValidation.isValidIdentifier(brq), Base64URL.isValid(digest, minLength: 43, maxLength: 43), Base64URL.decode(digest)?.count == 32,
+        guard allowedPurposes.contains(purpose), isTenantId(iss), AuthDeliveryValidation.isValidIdentifier(brq), Base64URL.isValid(digest, minLength: 43, maxLength: 43), Base64URL.decode(digest)?.count == 32,
               Base64URL.isValid(jti, minLength: 22, maxLength: 22), (try? AuthDestinationValidator.validateHost(host)) != nil else { throw .malformed }
         guard aud == audience else { throw .wrongAudience }
         guard iat > 0, exp > iat, exp - iat <= maxLifetime else { throw .lifetimeTooLong }

@@ -283,8 +283,9 @@ public struct RecoverySealEnvelope: Sendable, Hashable {
     public static func parse(_ value: JSONValue) throws -> RecoverySealEnvelope {
         guard let o = value.objectValue, Set(o.keys) == ["v", "kid", "enc", "ct"], o["v"]?.authorityInteger == 1,
               let kid = o["kid"]?.stringValue, Base64URL.isValid(kid, minLength: 43, maxLength: 43),
-              let encText = o["enc"]?.stringValue, let enc = Base64URL.decode(encText), enc.count == 65,
-              let ctText = o["ct"]?.stringValue, let ct = Base64URL.decode(ctText), (17...3000).contains(ct.count),
+              // Strict unpadded base64url (SECURITY.md §2.1, ADR-0034 §1): one text form per envelope, like `kid`.
+              let encText = o["enc"]?.stringValue, Base64URL.isValid(encText), let enc = Base64URL.decode(encText), enc.count == 65,
+              let ctText = o["ct"]?.stringValue, Base64URL.isValid(ctText), let ct = Base64URL.decode(ctText), (17...3000).contains(ct.count),
               (try? CanonicalJSON.serialize(value))?.count ?? .max <= 4096 else { throw RecoverySealError.malformed("envelope") }
         return RecoverySealEnvelope(kid: kid, enc: enc, ct: ct)
     }
