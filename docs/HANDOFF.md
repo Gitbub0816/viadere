@@ -6,6 +6,21 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Loops Phase 4, in-house parts: connected mode, binding estimate approvals, advanced Studio (2026-11-15; WP-4.1, WP-4.4, WP-4.7).** Everything is
+behind `LOOPS_CONNECTED_ENABLED` (default off; off is exactly Phase 3). A published Loop can be bound (console, `submitLoops` + `manageWebhooks` +
+fresh passkey) to one of the tenant's own verified opaque endpoints; `connected` buttons then send ids-only `loop.action.submitted` events there
+(and `loop.instance.expired` once per connected instance), the business fetches `GET /v1/business/loops/events/{ref}` (`loops:read`, no customer
+identity) and answers `POST …/outcome` (`loops:write`, strict body, idempotent per key); an unbound, paused, pausing or dead-lettered endpoint gives the
+customer `unknown`, never `accepted`. `approve_estimate` binds through a single-use challenge (`POST /v1/loops/instances/{id}/approvals`) built as a
+`high` `authorize` interaction and verified with `DecisionVerifier` (device-bound biometric, context digest from the server's row, replay guard,
+compare-and-swap consumption, D1 device); the app signs only what it rendered (`LoopEstimateApproval.matches`, `LoopApprovalSigner`); nothing is
+charged and no checkout exists. Studio gains a JSON editor held to the form's closed schema and, in Phase 4, the hosted/connected choice per
+button. Migration `LoopsPhase4.v1`; Swift SDK `loopEvent` / `answerLoopEvent` / `loopInstance`, Node SDK `getLoopEvent` / `answerLoopEvent` /
+`getLoopInstance`, OpenAPI operations and schemas. Normative: [`SECURITY.md`](SECURITY.md) §2.115. Not built: Shopify (WP-4.2, 4.5, 4.6) and the AI
+drafting assistant (WP-4.3), both blocked on the owner. Open: businesses get approval facts over the API, not an offline-verifiable signed result
+(install-only customers have no pairwise approval key); the app changes are in ViadereKit only (the generic confirmation panel renders the estimate),
+not built in Xcode; the Postgres suite was not run for this change.
+
 **`auth.delivery.fallback_used` webhook and Kotlin request signing (2026-11-15).** When a delivery that asked for the email fallback had its email
 accepted by the provider, the business now receives `auth.delivery.fallback_used` once (v2 opaque envelope, ids only; never for a suppressed or
 failed email; no address or code in any encoding, tested). Additive in contract v1.x: event schema, test-event enum, Core
