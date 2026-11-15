@@ -19,6 +19,11 @@ exceptions table:
   * Storage: public network access, shared-key access or public blobs are violations in both profiles. One recorded lean exception: the
     Brand Kit asset account (`azurerm_storage_account.brand`, WP-2.1) may keep its public endpoint in lean only when its firewall denies by
     default, bypasses nothing, admits only subnets (no IP rules) and shared keys are off (`ST-BRAND-PUBLIC`); in standard it is a violation.
+    The message-attachment account (`azurerm_storage_account.attachments`, SECURITY.md 2.113) has the same lean exception (`ST-ATTACH-PUBLIC`)
+    and, in both profiles, must not keep deleted images: no blob soft delete, versioning, change feed, point-in-time restore or immutability
+    policy, container soft delete at most 7 days (`ST-ATTACH-RETENTION`). Roles on its container: only the api with Storage Blob Data
+    Contributor and the worker with the delete-only custom role, whose definition grants the blob delete data action and nothing else
+    (`ST-ATTACH-ROLE`).
   * Service Bus: local (SAS) authentication must be disabled (both profiles); public network access is a violation in standard and an
     exception in lean (only with local auth disabled); minimum TLS below 1.2 is a violation.
   * Role assignments: none at subscription or management-group scope; workload identities only at resource scope (never a resource group);
@@ -341,7 +346,16 @@ def check_kv_key(address: str, kty: Any, rep: Report) -> None:
             rep.violate("KV-HSM", address, f"standard profile requires HSM keys (got {kty})")
 
 
-BRAND_STORAGE_NAMES = {"brand"}
+# Storage accounts with a recorded lean public-endpoint exception (CLAUDE.md), by resource name: rule and what the account holds.
+LEAN_PUBLIC_STORAGE = {
+    "brand": ("ST-BRAND-PUBLIC", "brand-asset storage"),
+    "attachments": ("ST-ATTACH-PUBLIC", "message-attachment storage"),
+}
+ATTACHMENT_STORAGE_NAMES = {"attachments"}
+ATTACHMENT_CONTAINER = "azurerm_storage_container.attachments"
+ATTACHMENT_DELETER_DEFINITION = "azurerm_role_definition.attachment_deleter"
+ATTACHMENT_DELETE_ACTION = "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete"
+ATTACHMENT_CONTAINER_SOFT_DELETE_MAX_DAYS = 7
 
 
 def _subnet_only_firewall(r: Resource) -> bool:
@@ -363,16 +377,88 @@ def check_storage(r: Resource, rep: Report) -> None:
     legacy = is_true(r, "public_network_access_enabled")
     disabled = (isinstance(access, str) and access.lower() == "disabled") or (access is None and not access_unknown and legacy is False)
     if not disabled:
-        if (rep.profile == "lean" and r.name in BRAND_STORAGE_NAMES and _subnet_only_firewall(r)
+        exception = LEAN_PUBLIC_STORAGE.get(r.name)
+        if (rep.profile == "lean" and exception and _subnet_only_firewall(r)
                 and is_true(r, "shared_access_key_enabled", default=True) is False
                 and is_true(r, "allow_nested_items_to_be_public", default=True) is False):
-            rep.allow("ST-BRAND-PUBLIC", r.address, "lean: brand-asset storage on its public endpoint, firewalled to the Container Apps subnet, Entra only")
+            rep.allow(exception[0], r.address, f"lean: {exception[1]} on its public endpoint, firewalled to the Container Apps subnet, Entra only")
         else:
-            rep.violate("ST-PUBLIC", r.address, "storage public network access must be disabled (both profiles; lean brand assets need a subnet-only firewall)")
+            rep.violate("ST-PUBLIC", r.address, "storage public network access must be disabled (both profiles; lean brand-asset and attachment "
+                                                "storage need a subnet-only firewall)")
     if is_true(r, "shared_access_key_enabled", default=True) is not False:
         rep.violate("ST-SHARED-KEY", r.address, "storage shared-key access must be disabled (Entra only)")
     if is_true(r, "allow_nested_items_to_be_public", default=True) is not False:
         rep.violate("ST-PUBLIC-BLOBS", r.address, "public blob access must be disabled")
+    if r.name in ATTACHMENT_STORAGE_NAMES:
+        check_attachment_retention(r, rep)
+
+
+def check_attachment_retention(r: Resource, rep: Report) -> None:
+    """SECURITY.md 2.113 item 8: a deleted image must be gone, so nothing may keep a deleted or overwritten blob (both profiles)."""
+    blob = r.block("blob_properties")
+    blob_unknown = r.get("blob_properties")[1]
+    if blob is None and not blob_unknown:
+        # azurerm's default blob_properties leave soft delete to Azure's account default; state it explicitly in the module.
+        rep.violate("ST-ATTACH-RETENTION", r.address, "attachment storage must declare blob_properties (versioning and blob soft delete off)")
+        return
+    blob = blob or {}
+    if blob.get("versioning_enabled") is not False:
+        rep.violate("ST-ATTACH-RETENTION", r.address, "attachment storage must not version blobs (a previous version keeps a deleted image)")
+    if blob.get("change_feed_enabled") is True:
+        rep.violate("ST-ATTACH-RETENTION", r.address, "attachment storage must not keep a change feed")
+    for name, what in (("delete_retention_policy", "blob soft delete"), ("restore_policy", "point-in-time restore")):
+        value, unknown = r.get("blob_properties", 0, name)
+        if unknown or value:
+            rep.violate("ST-ATTACH-RETENTION", r.address, f"attachment storage must not enable {what} (a deleted image would stay recoverable)")
+    container, container_unknown = r.get("blob_properties", 0, "container_delete_retention_policy")
+    if container_unknown:
+        rep.violate("ST-ATTACH-RETENTION", r.address, "attachment container soft delete cannot be determined from the plan")
+    elif container:
+        days = (container[0] or {}).get("days") if isinstance(container, list) else None
+        if not isinstance(days, int) or days > ATTACHMENT_CONTAINER_SOFT_DELETE_MAX_DAYS:
+            rep.violate("ST-ATTACH-RETENTION", r.address,
+                        f"attachment container soft delete must be at most {ATTACHMENT_CONTAINER_SOFT_DELETE_MAX_DAYS} days (got {days})")
+    immutability, immutability_unknown = r.get("immutability_policy")
+    if immutability_unknown or immutability:
+        rep.violate("ST-ATTACH-RETENTION", r.address, "attachment storage must not carry an immutability policy (the sweep must be able to delete)")
+
+
+def _principal(r: Resource) -> str:
+    """`api`, `worker`, another workload key, or "" from the principal_id reference (`azurerm_user_assigned_identity.workload["api"]`)."""
+    for ref in r.references("principal_id"):
+        m = re.match(r'^azurerm_user_assigned_identity\.workload\["([a-z]+)"\]', ref)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def check_attachment_roles(resources: list[Resource], rep: Report) -> None:
+    """ST-ATTACH-ROLE: on the attachment container, only the api (Storage Blob Data Contributor) and the worker (delete-only custom role)."""
+    for r in resources:
+        if r.type == "azurerm_role_definition" and f"{r.type}.{r.name}" == ATTACHMENT_DELETER_DEFINITION:
+            perms = r.block("permissions") or {}
+            data_actions = set(perms.get("data_actions") or [])
+            others = set(perms.get("actions") or []) | set(perms.get("not_actions") or []) | set(perms.get("not_data_actions") or [])
+            if data_actions != {ATTACHMENT_DELETE_ACTION} or others:
+                rep.violate("ST-ATTACH-ROLE", r.address, f"the attachment deleter role may grant only {ATTACHMENT_DELETE_ACTION} "
+                                                         f"(got data actions {sorted(data_actions)}, other {sorted(others)})")
+        if r.type != "azurerm_role_assignment":
+            continue
+        scope_refs = r.references("scope")
+        on_container = any(ref.startswith(ATTACHMENT_CONTAINER) for ref in scope_refs)
+        if not on_container:
+            if any(ref.startswith("azurerm_storage_account.attachments") for ref in scope_refs):
+                rep.violate("ST-ATTACH-ROLE", r.address, "attachment storage roles are granted on the container, never on the whole account")
+            continue
+        principal = _principal(r)
+        role = role_name(r)
+        deleter = any(ref.startswith(ATTACHMENT_DELETER_DEFINITION) for ref in r.references("role_definition_name"))
+        if principal == "api" and role == "storage blob data contributor":
+            continue
+        if principal == "worker" and deleter:
+            continue
+        rep.violate("ST-ATTACH-ROLE", r.address, f"attachment storage roles: only the api (Storage Blob Data Contributor) and the worker (the "
+                                                 f"delete-only role) on the container (got {principal or 'unknown principal'}, {role or 'role by id'})")
 
 
 def check_service_bus(r: Resource, rep: Report) -> None:
@@ -715,6 +801,7 @@ def evaluate(plan: dict, profile: str | None = None) -> Report:
     rep = Report(profile=profile)
     all_resources = load_resources(plan)
     check_cross_tier(all_resources, rep)
+    check_attachment_roles(all_resources, rep)
     if is_authority_plan(plan, all_resources):
         check_authority(all_resources, rep, plan)
     for r in all_resources:

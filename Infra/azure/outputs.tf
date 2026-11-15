@@ -104,3 +104,8 @@ output "key_vault_secret_map" {
   description = "Environment variable -> Key Vault secret, for Infra/azure/kv_tool.py put-env (AZURE-SETUP.md section 7)."
   value       = merge(local.api_secrets, local.worker_secrets, local.migrate_secrets)
 }
+
+output "attachment_deleter_role_id" {
+  description = "GUID of the delete-only custom role on the message-attachment container; add it to the CI apply identity's assignment condition (AZURE-SETUP.md section 4)."
+  value       = azurerm_role_definition.attachment_deleter.role_definition_id
+}

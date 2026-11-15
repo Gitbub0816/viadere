@@ -134,6 +134,18 @@ run "lean_is_the_default_and_has_no_fixed_fee_extras" {
     error_message = "lean brand storage: Entra only, private container, subnet-only firewall, no private endpoint"
   }
   assert {
+    condition     = azurerm_storage_account.attachments.shared_access_key_enabled == false && azurerm_storage_account.attachments.allow_nested_items_to_be_public == false && azurerm_storage_account.attachments.network_rules[0].default_action == "Deny" && length(azurerm_storage_account.attachments.network_rules[0].ip_rules) == 0 && azurerm_storage_container.attachments.container_access_type == "private" && length(azurerm_private_endpoint.attachments_blob) == 0
+    error_message = "lean attachment storage: Entra only, private container, subnet-only firewall, no private endpoint"
+  }
+  assert {
+    condition     = azurerm_storage_account.attachments.blob_properties[0].versioning_enabled == false && length(azurerm_storage_account.attachments.blob_properties[0].delete_retention_policy) == 0 && length(azurerm_storage_account.attachments.blob_properties[0].restore_policy) == 0 && azurerm_storage_account.attachments.blob_properties[0].container_delete_retention_policy[0].days <= 7
+    error_message = "attachment storage keeps no deleted image: no versioning, no blob soft delete, no restore, container soft delete at most 7 days"
+  }
+  assert {
+    condition     = length(azurerm_role_definition.attachment_deleter.permissions[0].data_actions) == 1 && contains(azurerm_role_definition.attachment_deleter.permissions[0].data_actions, "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete") && azurerm_role_assignment.attachments_api.role_definition_name == "Storage Blob Data Contributor"
+    error_message = "attachment roles: the api holds Storage Blob Data Contributor, the worker's role deletes only"
+  }
+  assert {
     condition     = azapi_resource.kv_key["brand-manifest"].body.properties.curveName == "P-256" && azapi_resource.kv_key["brand-manifest"].body.properties.kty == "EC"
     error_message = "the brand-manifest key is EC P-256"
   }
@@ -218,6 +230,10 @@ run "standard_profile" {
   assert {
     condition     = azurerm_storage_account.brand.public_network_access == "Disabled" && azurerm_storage_account.brand.shared_access_key_enabled == false && length(azurerm_private_endpoint.brand_blob) == 1 && azapi_resource.kv_key["brand-manifest"].body.properties.kty == "EC-HSM"
     error_message = "standard brand storage: private endpoint, public access disabled, Entra only; brand-manifest key EC-HSM"
+  }
+  assert {
+    condition     = azurerm_storage_account.attachments.public_network_access == "Disabled" && azurerm_storage_account.attachments.shared_access_key_enabled == false && length(azurerm_private_endpoint.attachments_blob) == 1 && azurerm_storage_account.attachments.blob_properties[0].versioning_enabled == false && length(azurerm_storage_account.attachments.blob_properties[0].delete_retention_policy) == 0
+    error_message = "standard attachment storage: private endpoint, public access disabled, Entra only, no versioning or blob soft delete"
   }
   assert {
     condition     = azurerm_container_registry.this[0].admin_enabled == false && azurerm_container_registry.this[0].public_network_access_enabled == false

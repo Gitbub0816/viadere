@@ -89,6 +89,54 @@
      "mode": "managed",
      "name": "brand_assets_api",
      "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.attachments_api",
+     "expressions": {
+      "principal_id": {
+       "references": [
+        "azurerm_user_assigned_identity.workload[\"api\"].principal_id",
+        "azurerm_user_assigned_identity.workload[\"api\"]",
+        "azurerm_user_assigned_identity.workload"
+       ]
+      },
+      "scope": {
+       "references": [
+        "azurerm_storage_container.attachments.id",
+        "azurerm_storage_container.attachments"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "attachments_api",
+     "type": "azurerm_role_assignment"
+    },
+    {
+     "address": "azurerm_role_assignment.attachments_worker",
+     "expressions": {
+      "principal_id": {
+       "references": [
+        "azurerm_user_assigned_identity.workload[\"worker\"].principal_id",
+        "azurerm_user_assigned_identity.workload[\"worker\"]",
+        "azurerm_user_assigned_identity.workload"
+       ]
+      },
+      "role_definition_name": {
+       "references": [
+        "azurerm_role_definition.attachment_deleter.name",
+        "azurerm_role_definition.attachment_deleter"
+       ]
+      },
+      "scope": {
+       "references": [
+        "azurerm_storage_container.attachments.id",
+        "azurerm_storage_container.attachments"
+       ]
+      }
+     },
+     "mode": "managed",
+     "name": "attachments_worker",
+     "type": "azurerm_role_assignment"
     }
    ]
   }
@@ -1176,6 +1224,174 @@
    },
    "mode": "managed",
    "name": "brand_assets_api",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_storage_account.attachments",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "allow_nested_items_to_be_public": false,
+     "blob_properties": [
+      {
+       "change_feed_enabled": false,
+       "container_delete_retention_policy": [
+        {
+         "days": 7
+        }
+       ],
+       "delete_retention_policy": [],
+       "last_access_time_enabled": false,
+       "restore_policy": [],
+       "versioning_enabled": false
+      }
+     ],
+     "immutability_policy": [],
+     "min_tls_version": "TLS1_2",
+     "name": "stvdrattstgabc1l",
+     "network_rules": [
+      {
+       "bypass": [
+        "None"
+       ],
+       "default_action": "Deny",
+       "ip_rules": []
+      }
+     ],
+     "public_network_access": "Enabled",
+     "shared_access_key_enabled": false
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "network_rules": [
+      {
+       "virtual_network_subnet_ids": true
+      }
+     ],
+     "primary_blob_endpoint": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "attachments",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_storage_account"
+  },
+  {
+   "address": "azurerm_storage_container.attachments",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "container_access_type": "private",
+     "name": "message-attachments"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "storage_account_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "attachments",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_storage_container"
+  },
+  {
+   "address": "azurerm_role_assignment.attachments_api",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:api: create and read message attachment blobs (create-only writes); delete while the api runs the sweep",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Storage Blob Data Contributor"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "attachments_api",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_assignment"
+  },
+  {
+   "address": "azurerm_role_definition.attachment_deleter",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "assignable_scopes": [
+      "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-viadere-stg-data"
+     ],
+     "description": "Delete message attachment blobs (the retention and deletion sweep). No read, write or list.",
+     "name": "Viadere Attachment Deleter (stgl)",
+     "permissions": [
+      {
+       "actions": [],
+       "data_actions": [
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete"
+       ],
+       "not_actions": [],
+       "not_data_actions": []
+      }
+     ],
+     "scope": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-viadere-stg-data"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "role_definition_id": true,
+     "role_definition_resource_id": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "attachment_deleter",
+   "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+   "type": "azurerm_role_definition"
+  },
+  {
+   "address": "azurerm_role_assignment.attachments_worker",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "after": {
+     "description": "workload:worker: delete message attachment blobs marked by retention or deletion (the sweep; no read or write)",
+     "principal_type": "ServicePrincipal",
+     "role_definition_name": "Viadere Attachment Deleter (stgl)"
+    },
+    "after_sensitive": {},
+    "after_unknown": {
+     "id": true,
+     "principal_id": true,
+     "role_definition_id": true,
+     "scope": true
+    },
+    "before": null,
+    "before_sensitive": false
+   },
+   "mode": "managed",
+   "name": "attachments_worker",
    "provider_name": "registry.opentofu.org/hashicorp/azurerm",
    "type": "azurerm_role_assignment"
   }

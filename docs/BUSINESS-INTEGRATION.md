@@ -584,6 +584,31 @@ You can assign a thread to a teammate who can read conversations, close it (the 
 reopen it. Owners, Organization Admins and Messaging Operators reply; Read-only Auditors read; every thread opened is recorded in your audit
 log (who and which thread, never the text).
 
+### Images in a conversation (SECURITY.md §2.113)
+
+Upload each image to the conversation first (raw body, `image/png` or `image/jpeg`, at most 2 MiB), then send a message that names the ids with
+the **same** `sessionId` (1 to 4 images; the text may then be empty). A customer's images arrive in `message.received` as `attachments`
+(ids and metadata: type, size, dimensions, SHA-256); fetch the bytes by id with your key. Viadere re-encodes every image (no EXIF, GPS or other
+metadata survives) and never gives out a URL. An SMS thread never receives an image: the text says one is waiting in the Viadere app.
+
+```swift
+let image = try await client.uploadAttachment(sessionId: session, data: pngData, contentType: "image/png")   // pending, expires in an hour
+_ = try await client.sendMessage(BusinessSendMessageRequest(relationshipId: customer, sessionId: session, body: "Your receipt",
+                                                            idempotencyKey: "receipt-1042", attachmentIds: [image.id]))
+let bytes = try await client.downloadAttachment(receivedAttachment)   // returned only when size and SHA-256 match the reference
+```
+
+```ts
+const image = await client.uploadAttachment(sessionId, pngBytes, "image/png");
+await client.sendMessage({ subjectRef, sessionId, body: "Your receipt", idempotencyKey: "receipt-1042", attachmentIds: [image.id] });
+const bytes = await client.downloadAttachment(event.data.attachments[0]);
+```
+
+Both SDKs check an upload before sending it (empty, over 2 MiB, not PNG or JPEG, or a declared type that does not match the bytes), never retry an
+upload (the route takes no idempotency key, so a repeat would store a second copy; after a lost answer, upload again and send the new id), and
+refuse a download whose size, SHA-256 or type differs from the reference. With request signing the signature's `content-digest` covers the image
+bytes.
+
 ## 6. Errors
 
 Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `requestId` when contacting support.

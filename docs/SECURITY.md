@@ -1727,7 +1727,16 @@ Customers and businesses can send **images** in a conversation ("attachments whe
    images); account deletion marks every image in the person's conversations (both sides); tenant deletion marks every image of the organization.
    Marked rows (`deleting`) and expired pending uploads are removed by the maintenance sweep (`MessageAttachmentService.sweep`, every maintenance run):
    object first (`Delete Blob` with snapshots; a failure is retried next run), then the row. The account export lists images (type, size, digest), not
-   the pictures. Legal holds apply through the retention job as for message bodies.
+   the pictures. Legal holds apply through the retention job as for message bodies. **A deleted image is gone**: the Azure store
+   (`Infra/azure/storage.tf`, `azurerm_storage_account.attachments`) is an account of its own (soft delete and versioning are account-wide; the
+   brand account keeps 30 days of both) with blob soft delete, versioning, change feed, point-in-time restore and immutability off, so neither
+   Viadere nor Azure support can bring a deleted image back; container soft delete (7 days) only undoes deleting the whole container.
+   `policy_check.py` fails a plan that turns any of them on (`ST-ATTACH-RETENTION`, both profiles). Decided for the privacy promise over
+   recoverability: an image deleted by mistake is not recoverable either. Roles (`ST-ATTACH-ROLE`): only `id-viadere-api` (Storage Blob Data
+   Contributor on the container: create, read, and delete while the api runs the job loop) and `id-viadere-worker` (custom role
+   `Viadere Attachment Deleter`: the blob delete data action only, on the container) hold a role there. The account is private (shared keys off,
+   Entra only, no public blobs, Deny-by-default firewall): standard through a private endpoint; lean on its public endpoint admitting only the
+   Container Apps subnet (CLAUDE.md exception, `ST-ATTACH-PUBLIC`).
 9. **Audit.** `message.attachment_uploaded` (side, session, type, size, dimensions; never the image or its digest) and
    `message.attachment_rejected`; `message.business_sent` gains `images` (a count).
 
@@ -1749,4 +1758,7 @@ deletion, tenant deletion and retention remove the stored objects (a bystander's
 says "Image"; no store means `503` while text still works; the store configuration refuses the audit and brand containers and Azure deletes with
 snapshots. `SMSGatewayTests.testABusinessImageNeverReachesAnSMSThreadAndAnInboundMMSIsIgnored`: the SMS text has the notice and no URL, an MMS
 media URL is never fetched. Core `MessageAttachmentTests`, Kit `MessageAttachmentViewModelTests` (checks before upload, states, only uploaded images
-sent, mismatching bytes never shown).
+sent, mismatching bytes never shown). `Infra/azure/tests/test_policy_check.py` `AttachmentStorage`: blob soft delete, versioning, change feed, restore,
+an immutability policy or container soft delete over 7 days fail the plan in both profiles; a public endpoint fails in standard and in lean
+without the subnet-only firewall and Entra-only access; a third identity, a broader api role, a worker with a built-in read/write role, an
+account-wide assignment or a deleter role with any other action fail.

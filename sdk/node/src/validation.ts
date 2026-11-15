@@ -86,6 +86,11 @@ const EXTRA: Readonly<Record<string, (input: Record<string, unknown>, problems: 
       if ((kind === "authenticate" || kind === "authorize") && typeof input.ttlSeconds === "number" && input.ttlSeconds > 900) problems.push({ field: "ttlSeconds", code: "out_of_range" });
     }
   },
+  BusinessSendMessageRequest(input, problems) {
+    // SECURITY.md §2.113 item 5: images are named with the conversation they were uploaded to; `body` may be empty only when there are images.
+    if (input.attachmentIds !== undefined && input.sessionId === undefined) problems.push({ field: "sessionId", code: "required" });
+    if (input.body === "" && input.attachmentIds === undefined) problems.push({ field: "body", code: "required" });
+  },
   BusinessStatusUpdateRequest(input, problems) {
     liveActivity(isRecord(input.status) ? input.status.liveActivity : undefined, "status.liveActivity", problems);
   },

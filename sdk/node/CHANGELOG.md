@@ -2,6 +2,18 @@
 
 ## 0.1.0 (unreleased)
 
+### Message images (SECURITY section 2.113)
+
+- `uploadAttachment(sessionId, bytes, contentType)`, `downloadAttachment(reference)` and `attachmentIds` on `sendMessage`; `MessageAttachment` on
+  messages and on `message.received` (`attachments`). Uploads are checked locally first (`attachmentPrecheck`, the server's precheck codes) and never
+  retried (no idempotency key on the route); downloads are returned only when size, SHA-256 and type match the reference (new `ViadereSdkError` kind
+  `attachment_mismatch`). `body` may be empty only with `attachmentIds`, which need `sessionId`.
+- The HTTP layer sends raw bodies with their own type and reads binary answers; request signing digests the raw bytes. The `fetch` option's type
+  now allows a `Uint8Array` body and an `arrayBuffer()` answer (every real `fetch` has both).
+- `MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES` (2 MiB), `MESSAGE_ATTACHMENT_MAX_PER_MESSAGE`, `MESSAGE_ATTACHMENT_MAX_STORED_BYTES`, the media types and
+  states, with a parity test against ViadereCore's `MessageAttachmentPolicy` and `docs/openapi.yaml`. The parity test's property extraction now reads
+  member names with digits (`sha256`).
+
 ### `push_approval` delivery records (contract v1.x, additive)
 
 - `AuthDeliveryView.method` is now `ViewMethod` (`VIEW_METHODS`: the three creatable methods plus `push_approval`, the read-only record every

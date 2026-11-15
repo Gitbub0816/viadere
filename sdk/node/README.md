@@ -46,7 +46,7 @@ required members of its schema (`invalid_response`).
 |---|---|
 | Capabilities, sandbox | `getCapabilities`, `createSandboxRelationship` |
 | Interactions | `issueInteraction`, `getInteractionOutcome`, `cancelInteraction` |
-| Messages, statuses | `sendMessage`, `updateStatus` |
+| Messages, images, statuses | `sendMessage`, `uploadAttachment`, `downloadAttachment`, `updateStatus` |
 | Rewards, loyalty | `createReward`, `listRewards`, `revokeReward`, `getLoyaltyProgram`, `saveLoyaltyProgram`, `adjustLoyaltyPoints`, `consumeRedemption` |
 | Wallet passes | `issueWalletPass`, `listWalletPasses`, `updateWalletPass`, `voidWalletPass`, `scanWalletPass` |
 | Auth deliveries | `createAuthDelivery`, `getAuthDelivery`, `cancelAuthDelivery`, `completeAuthDelivery`, `redeemAuthLink` |
@@ -66,6 +66,14 @@ required members of its schema (`invalid_response`).
   **only when the request is safe to repeat**: every `GET`, every request with an idempotency key, and calls that are idempotent by nature (cancel, void,
   revoke, settings). `consumeRedemption`, `scanWalletPass`, `updateWalletPass`, `publishKeyEntry`, `redeemAuthLink`, the confirms and the session creates are
   never retried: after a lost response, check before you repeat.
+- **Images** (`docs/SECURITY.md` section 2.113). `uploadAttachment(sessionId, bytes, contentType)` sends the raw image (`image/png` or `image/jpeg`,
+  at most `MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES`, 2 MiB) after the server's own precheck runs locally (`attachmentPrecheck`: `required`, `too_large`,
+  `unsupported_format`, `content_type_mismatch` as a `ViadereValidationError`); the answer is a pending `MessageAttachment`. Name its id in
+  `sendMessage({ sessionId, attachmentIds: [id] })` with the same `sessionId` (1 to 4 ids; `body` may then be empty). An upload is **never retried**:
+  the route takes no idempotency key. `downloadAttachment(reference)` (any `MessageAttachment`: an upload answer, `message.attachments`, or
+  `message.received` `data.attachments`) returns the bytes only when their size, SHA-256 and type match the reference (`attachment_mismatch`
+  otherwise); it is retried like every `GET`. With `requestSigner`, the upload's `content-digest` covers the image bytes and `content-type` is the
+  image type. A custom `fetch` must accept a `Uint8Array` body and return `arrayBuffer()` for downloads.
 - **Errors.** `ViadereApiError` (`status`, `code`, `requestId`, `details`, `retryAfter`, `isRetryable`, `isCapabilityDenied`, `deniedCapability`,
   `isNotDeliverable`). `404 not_deliverable` is one body for an unknown customer, no eligible app, paused and frozen: do not try to tell them apart.
 - **Safety.** `http` is accepted only for loopback hosts; a base URL with credentials, a query or a fragment is refused; the key format is checked

@@ -69,7 +69,8 @@ class Baselines(unittest.TestCase):
         report = policy_check.evaluate(load("lean"))
         self.assertEqual(report.profile, "lean")
         self.assertEqual(report.violations, [])
-        self.assertEqual(exception_rules(report), {"KV-PUBLIC", "SB-PUBLIC", "KV-SOFTWARE-KEYS", "PG-NO-HA", "PG-PASSWORD-AUTH", "ST-BRAND-PUBLIC"})
+        self.assertEqual(exception_rules(report), {"KV-PUBLIC", "SB-PUBLIC", "KV-SOFTWARE-KEYS", "PG-NO-HA", "PG-PASSWORD-AUTH", "ST-BRAND-PUBLIC",
+                                                   "ST-ATTACH-PUBLIC"})
 
     def test_standard_fixture_passes(self):
         report = policy_check.evaluate(load("standard"))
@@ -261,6 +262,109 @@ class BrandStorage(unittest.TestCase):
         plan = load("standard")
         after(plan, 'azapi_resource.kv_key["brand-manifest"]')["body"]["properties"]["kty"] = "EC"
         self.assertIn("KV-HSM", rules(policy_check.evaluate(plan)))
+
+
+ATTACH = "azurerm_storage_account.attachments"
+
+
+def config_entry(plan: dict, address: str) -> dict:
+    return next(c for c in plan["configuration"]["root_module"]["resources"] if c["address"] == address)
+
+
+class AttachmentStorage(unittest.TestCase):
+    """SECURITY.md 2.113: the message-attachment store is private, Entra only, and keeps no deleted image (DATA-INVENTORY.md section 11)."""
+
+    def test_both_fixtures_declare_the_store_with_its_own_account(self):
+        for profile in ("lean", "standard"):
+            plan = load(profile)
+            self.assertEqual(after(plan, "azurerm_storage_container.attachments")["container_access_type"], "private")
+            self.assertNotEqual(after(plan, ATTACH)["name"], after(plan, "azurerm_storage_account.brand")["name"])
+            self.assertFalse(rules(policy_check.evaluate(plan)), profile)
+
+    def test_standard_attachment_storage_is_private(self):
+        plan = load("standard")
+        self.assertEqual(after(plan, ATTACH)["public_network_access"], "Disabled")
+        after(plan, ATTACH)["public_network_access"] = "Enabled"
+        report = policy_check.evaluate(plan)
+        self.assertIn("ST-PUBLIC", rules(report))
+        self.assertNotIn("ST-ATTACH-PUBLIC", exception_rules(report))
+
+    def test_lean_exception_needs_a_subnet_only_firewall_and_entra_only(self):
+        for mutate in (lambda r: r["network_rules"][0].update(default_action="Allow"),
+                       lambda r: r["network_rules"][0].update(bypass=["AzureServices"]),
+                       lambda r: r["network_rules"][0].update(ip_rules=["203.0.113.0/24"]),
+                       lambda r: r.update(shared_access_key_enabled=True),
+                       lambda r: r.update(allow_nested_items_to_be_public=True)):
+            plan = load("lean")
+            mutate(after(plan, ATTACH))
+            report = policy_check.evaluate(plan)
+            self.assertIn("ST-PUBLIC", rules(report))
+            self.assertNotIn("ST-ATTACH-PUBLIC", exception_rules(report))
+
+    def test_blob_soft_delete_is_a_violation_in_both_profiles(self):
+        for profile in ("lean", "standard"):
+            plan = load(profile)
+            after(plan, ATTACH)["blob_properties"][0]["delete_retention_policy"] = [{"days": 1, "permanent_delete_enabled": False}]
+            self.assertIn("ST-ATTACH-RETENTION", rules(policy_check.evaluate(plan)), profile)
+
+    def test_versioning_change_feed_restore_and_immutability_are_violations(self):
+        mutations = (
+            lambda r: r["blob_properties"][0].update(versioning_enabled=True),
+            lambda r: r["blob_properties"][0].pop("versioning_enabled"),
+            lambda r: r["blob_properties"][0].update(change_feed_enabled=True),
+            lambda r: r["blob_properties"][0].update(restore_policy=[{"days": 6}]),
+            lambda r: r.update(immutability_policy=[{"period_since_creation_in_days": 1, "state": "Unlocked"}]),
+            lambda r: r.pop("blob_properties"),
+        )
+        for index, mutate in enumerate(mutations):
+            plan = load("lean")
+            mutate(after(plan, ATTACH))
+            self.assertIn("ST-ATTACH-RETENTION", rules(policy_check.evaluate(plan)), index)
+
+    def test_container_soft_delete_is_capped(self):
+        plan = load("standard")
+        after(plan, ATTACH)["blob_properties"][0]["container_delete_retention_policy"] = [{"days": 30}]
+        self.assertIn("ST-ATTACH-RETENTION", rules(policy_check.evaluate(plan)))
+        after(plan, ATTACH)["blob_properties"][0]["container_delete_retention_policy"] = []
+        self.assertNotIn("ST-ATTACH-RETENTION", rules(policy_check.evaluate(plan)))
+
+    def test_the_brand_account_keeps_its_soft_delete(self):
+        # The retention rule is for the attachment account only; brand assets are public-by-hash images, not personal data.
+        plan = load("lean")
+        after(plan, "azurerm_storage_account.brand")["blob_properties"] = [{"versioning_enabled": True, "delete_retention_policy": [{"days": 30}]}]
+        self.assertNotIn("ST-ATTACH-RETENTION", rules(policy_check.evaluate(plan)))
+
+    def test_the_deleter_role_grants_only_blob_delete(self):
+        for extra in ({"data_actions": [policy_check.ATTACHMENT_DELETE_ACTION,
+                                        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read"]},
+                      {"actions": ["Microsoft.Storage/storageAccounts/listKeys/action"]},
+                      {"data_actions": []}):
+            plan = load("lean")
+            after(plan, "azurerm_role_definition.attachment_deleter")["permissions"][0].update(extra)
+            self.assertIn("ST-ATTACH-ROLE", rules(policy_check.evaluate(plan)), extra)
+
+    def test_only_the_api_and_the_worker_hold_roles_on_the_container(self):
+        # Another workload identity on the container.
+        plan = load("lean")
+        add_resource(plan, "azurerm_role_assignment", "attachments_cloudflared",
+                     {"description": "workload:cloudflared: read", "role_definition_name": "Storage Blob Data Reader"},
+                     refs={"scope": ["azurerm_storage_container.attachments.id", "azurerm_storage_container.attachments"],
+                           "principal_id": ['azurerm_user_assigned_identity.workload["cloudflared"].principal_id']})
+        self.assertIn("ST-ATTACH-ROLE", rules(policy_check.evaluate(plan)))
+        # The worker with read and write (a built-in role) instead of the delete-only role.
+        plan = load("lean")
+        after(plan, "azurerm_role_assignment.attachments_worker")["role_definition_name"] = "Storage Blob Data Contributor"
+        del config_entry(plan, "azurerm_role_assignment.attachments_worker")["expressions"]["role_definition_name"]
+        self.assertIn("ST-ATTACH-ROLE", rules(policy_check.evaluate(plan)))
+        # The api with a broader role than Storage Blob Data Contributor.
+        plan = load("standard")
+        after(plan, "azurerm_role_assignment.attachments_api")["role_definition_name"] = "Storage Blob Data Owner"
+        self.assertIn("ST-ATTACH-ROLE", rules(policy_check.evaluate(plan)))
+        # A role on the whole account instead of the container.
+        plan = load("standard")
+        config_entry(plan, "azurerm_role_assignment.attachments_api")["expressions"]["scope"]["references"] = [
+            "azurerm_storage_account.attachments.id", "azurerm_storage_account.attachments"]
+        self.assertIn("ST-ATTACH-ROLE", rules(policy_check.evaluate(plan)))
 
 
 class ServiceBus(unittest.TestCase):

@@ -186,6 +186,8 @@ az role assignment create --assignee-object-id "$APPLY_PID" --assignee-principal
 
 These two identities are the only subscription-scope assignments; the policy checker refuses any subscription-scope assignment made by the module itself.
 
+**Custom role of the module.** The module defines one custom role, `Viadere Attachment Deleter (<env><profile letter>)` (blob delete only, on the message-attachment container, for the worker identity; section 11). The apply identity cannot create role definitions (Contributor excludes `Microsoft.Authorization` writes, and it must not get `roleDefinitions/write`: it could widen a role it is allowed to assign), so the owner's first apply (section 6) creates it. Its GUID is fixed by the module (`uuidv5` of the environment's unique name): append `tofu output -raw attachment_deleter_role_id` to `ROLES` above and re-run the Role Based Access Control Administrator assignment with the new condition before the first CI apply.
+
 ---
 
 ## 5. GitHub environments and variables
@@ -470,6 +472,7 @@ The module sets these on the processes; the server implements all of them (WP-B2
 | `AZURE_KEY_VAULT_AUDIT_HEAD_KEY` | | `audit-head-signing` | | EC P-256 | signs exported audit heads (required in production for every role but `api`) |
 | `AZURE_KEY_VAULT_BRAND_MANIFEST_KEY` | `brand-manifest` | | | EC P-256 | signs brand manifests only (Brand Kits; replaces `BRAND_MANIFEST_SIGNING_KEY`; must differ from every other signing key; the worker holds a stand-in that refuses to sign) |
 | `AZURE_BRAND_BLOB_ENDPOINT`, `AZURE_BRAND_BLOB_CONTAINER` | `https://stvdrbrand….blob.core.windows.net/`, `brand-assets` | | | | create-only writes and reads of re-encoded brand images (`brand/{business}/{sha256}.png`) with the api's identity |
+| `AZURE_ATTACHMENT_BLOB_ENDPOINT`, `AZURE_ATTACHMENT_BLOB_CONTAINER` | `https://stvdratt….blob.core.windows.net/`, `message-attachments` | same | | | message attachments (SECURITY.md §2.113): the api creates (create-only) and reads sealed images with `id-viadere-api` (**Storage Blob Data Contributor** on the container); the maintenance sweep deletes marked ones, in the api while it runs the job loop, else in the worker or the scheduled jobs with `id-viadere-worker`, which holds only the delete-only custom role on the container. Its own account (not the brand account): no versioning, no blob soft delete, no change feed or restore, container soft delete 7 days (policy check `ST-ATTACH-RETENTION`); lean: public endpoint behind the `snet-cae`-only firewall (`ST-ATTACH-PUBLIC`), standard: private endpoint. Empty = uploads answer `503` |
 | `ASSET_DOMAIN` | via `app_env` | | | the asset host (section 9.1) | the only host that serves `/b/{sha256}.png`; empty = no brand image is served in staging/production |
 | `BRAND_SELECTION_KEY` | Key Vault reference `brand-selection-key` | same | | base64url 32 bytes | per-customer daily kit rotation seed; empty = no rotation |
 | `AZURE_AUDIT_BLOB_ENDPOINT`, `AZURE_AUDIT_BLOB_CONTAINER` | | standard: `https://<account>.blob.core.windows.net/`, `audit-heads`; lean: empty | | | create-only export to the immutable container (`AUDIT_HEAD_EXPORT=azure-blob` is inferred) |
@@ -517,6 +520,7 @@ Prices: Azure Retail Prices API (<https://prices.azure.com/api/retail/prices>, `
 | Log Analytics + App Insights | first 5 GB/month free, then 2.30/GB (2018-02-01); daily cap 0.15 GB keeps it inside the free allowance | 0.00 |
 | State storage account | Hot ZRS ~0.026/GB-month, a few MB | < 0.05 |
 | Brand-asset storage account (LRS, a few MB of PNGs; reads mostly served from the Cloudflare cache) | Hot LRS ~0.02/GB-month plus operations | < 0.10 |
+| Message-attachment storage account (LRS, test images of at most 3 MiB each; no soft delete, so nothing billed after deletion) | Hot LRS ~0.02/GB-month plus operations | < 0.10 |
 | **Total** | | **≈ 27–28 idle; up to ≈ 41 if the api is busy around the clock** |
 
 Ways to stay nearer USD 20: `api_min_replicas = 0` (scale to zero when idle: about −6/month, cold starts, and the in-process job loop pauses while idle), and a **new Azure account's 12-month free services** (750 h of B1ms and 32 GB of storage cover the PostgreSQL line, −16/month). The plan's estimate (USD 20–26, section 5.8a) counted only the api container; the separate cloudflared app adds about USD 4.30–5 at idle, the same as a sidecar would.

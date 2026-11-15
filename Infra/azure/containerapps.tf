@@ -85,6 +85,8 @@ locals {
       AZURE_KEY_VAULT_BRAND_MANIFEST_KEY   = "brand-manifest"
       AZURE_BRAND_BLOB_ENDPOINT            = azurerm_storage_account.brand.primary_blob_endpoint
       AZURE_BRAND_BLOB_CONTAINER           = azurerm_storage_container.brand_assets.name
+      AZURE_ATTACHMENT_BLOB_ENDPOINT       = azurerm_storage_account.attachments.primary_blob_endpoint
+      AZURE_ATTACHMENT_BLOB_CONTAINER      = azurerm_storage_container.attachments.name
     })
     worker = merge(var.app_env, local.base_env, {
       ROLE            = "worker"
@@ -96,6 +98,9 @@ locals {
       AZURE_KEY_VAULT_AUDIT_HEAD_KEY = "audit-head-signing"
       AZURE_AUDIT_BLOB_ENDPOINT      = local.p.audit_storage ? azurerm_storage_account.audit[0].primary_blob_endpoint : ""
       AZURE_AUDIT_BLOB_CONTAINER     = local.p.audit_storage ? "audit-heads" : ""
+      # The attachment sweep (maintenance) deletes marked images; the worker identity can only delete there (storage.tf).
+      AZURE_ATTACHMENT_BLOB_ENDPOINT  = azurerm_storage_account.attachments.primary_blob_endpoint
+      AZURE_ATTACHMENT_BLOB_CONTAINER = azurerm_storage_container.attachments.name
     })
     migrator = merge(var.app_env, local.base_env, {
       ROLE                 = "migrate"

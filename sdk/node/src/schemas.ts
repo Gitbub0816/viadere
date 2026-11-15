@@ -156,12 +156,30 @@ export const SandboxRelationship = define<T.SandboxRelationship>()("SandboxRelat
 export const MessageAttribution = define<T.MessageAttribution>()("MessageAttribution", { required: ["senderType", "displayName"], properties: { senderType: ANY, displayName: ANY, agentName: ANY } });
 export const ConversationMessage = define<T.ConversationMessage>()("ConversationMessage", {
   required: ["id", "sessionId", "businessId", "direction", "attribution", "body", "channel", "createdAt", "deliveryStatus"],
-  properties: { id: ANY, sessionId: ANY, businessId: ANY, direction: ANY, attribution: ANY, body: ANY, channel: ANY, createdAt: ANY, deliveredAt: ANY, readAt: ANY, deliveryStatus: ANY, interactionId: ANY },
+  properties: { id: ANY, sessionId: ANY, businessId: ANY, direction: ANY, attribution: ANY, body: ANY, channel: ANY, createdAt: ANY, deliveredAt: ANY, readAt: ANY, deliveryStatus: ANY, interactionId: ANY, attachments: ANY },
+});
+export const MessageAttachment = define<T.MessageAttachment>()("MessageAttachment", {
+  required: ["id", "sessionId", "mediaType", "byteSize", "width", "height", "sha256", "state"],
+  properties: {
+    id: UUID,
+    sessionId: UUID,
+    mediaType: E(T.MESSAGE_ATTACHMENT_MEDIA_TYPES),
+    byteSize: I(1, T.MESSAGE_ATTACHMENT_MAX_STORED_BYTES),
+    width: I(1, 2048),
+    height: I(1, 2048),
+    sha256: S({ pattern: /^[0-9a-f]{64}$/ }),
+    state: E(T.MESSAGE_ATTACHMENT_STATES),
+    expiresAt: TS,
+  },
 });
 export const BusinessSendMessageRequest = define<T.BusinessSendMessageRequest>()("BusinessSendMessageRequest", {
   required: ["body", "idempotencyKey"],
   oneOfRequired: ["relationshipId", "subjectRef"],
-  properties: { relationshipId: UUID, subjectRef: SUBJECT, sessionId: UUID, body: S({ min: 1, max: 1600 }), agentName: S({ max: 40 }), idempotencyKey: IDEMPOTENCY },
+  // `body` may be empty only with images: `validation.ts` (EXTRA) checks that and that `attachmentIds` comes with `sessionId`.
+  properties: {
+    relationshipId: UUID, subjectRef: SUBJECT, sessionId: UUID, body: S({ max: 1600 }), agentName: S({ max: 40 }), idempotencyKey: IDEMPOTENCY,
+    attachmentIds: A(UUID, { min: 1, max: T.MESSAGE_ATTACHMENT_MAX_PER_MESSAGE, unique: true }),
+  },
 });
 export const BusinessStatusUpdateRequest = define<T.BusinessStatusUpdateRequest>()("BusinessStatusUpdateRequest", {
   required: ["purpose", "status", "activityKey", "idempotencyKey"],
@@ -252,7 +270,8 @@ export const WebhookSecretResponse = define<T.WebhookSecretResponse>()("WebhookS
 export const WebhookEventEnvelope = define<T.WebhookEventEnvelope>()("WebhookEventEnvelope", { required: ["id", "type", "createdAt", "businessId", "apiVersion", "data"], properties: { id: UUID, type: S({ min: 1 }), createdAt: TS, businessId: UUID, apiVersion: S({ min: 1 }), data: ANY } });
 export const MessageReceivedData = define<T.MessageReceivedData>()("MessageReceivedData", {
   required: ["sessionId", "relationshipId", "messageId", "text", "channel", "receivedAt"],
-  properties: { sessionId: UUID, relationshipId: UUID, subjectRef: SUBJECT, messageId: UUID, text: S(), channel: S(), receivedAt: TS },
+  properties: { sessionId: UUID, relationshipId: UUID, subjectRef: SUBJECT, messageId: UUID, text: S(), channel: S(), receivedAt: TS,
+                attachments: A(O(MessageAttachment), { max: T.MESSAGE_ATTACHMENT_MAX_PER_MESSAGE }) },
 });
 export const RelationshipEventData = define<T.RelationshipEventData>()("RelationshipEventData", { required: ["relationshipId", "occurredAt"], properties: { relationshipId: UUID, subjectRef: SUBJECT, publicName: S(), source: S(), occurredAt: TS } });
 export const ConsentUpdatedData = define<T.ConsentUpdatedData>()("ConsentUpdatedData", { required: ["relationshipId", "purpose", "granted", "occurredAt"], properties: { relationshipId: UUID, subjectRef: SUBJECT, purpose: S(), granted: B, occurredAt: TS } });
@@ -398,7 +417,7 @@ export const OpaqueWebhookEnvelope = define<T.OpaqueWebhookEnvelope>()("WebhookE
 export const OPENAPI_SCHEMAS: readonly SchemaDef[] = [
   SignedStatement, BusinessSignedStatement, E2EEEnvelope, TransactionDetails, AuthenticationDetails, MoneyAmount, RiskIndicator, RequestedAction, AuthenticatePayload, AuthorizePayload,
   ConfirmPayload, ChoiceOption, ChoosePayload, AcknowledgePayload, ReplyPayload, LiveActivityStatus, StatusPayload, MessagePayload, RewardPayload, TicketPayload, IssueInteractionRequest,
-  Interaction, InteractionOutcome, DecisionVerification, SandboxRelationship, MessageAttribution, ConversationMessage, BusinessSendMessageRequest, BusinessStatusUpdateRequest, RewardRecurrence,
+  Interaction, InteractionOutcome, DecisionVerification, SandboxRelationship, MessageAttribution, ConversationMessage, MessageAttachment, BusinessSendMessageRequest, BusinessStatusUpdateRequest, RewardRecurrence,
   IssueRewardRequest, Reward, LoyaltyTier, UpsertLoyaltyProgramRequest, AdjustLoyaltyPointsRequest, LoyaltyPointsResult, ConsumeRedemptionRequest, RedemptionReceipt,
   BusinessIssueWalletPassRequest, BusinessWalletPass, UpdateWalletPassRequest, WalletScanRequest, WalletScanResult, BusinessCapabilitiesResponse, CapabilityDefinition, WebhookSubscription,
   WebhookVerificationResult, PauseWebhookRequest, CreateWebhookRequest, WebhookSecretResponse, WebhookEventEnvelope, MessageReceivedData, RelationshipEventData, ConsentUpdatedData,

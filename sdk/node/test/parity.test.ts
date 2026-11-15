@@ -57,7 +57,7 @@ function enumOf(lines: string[]): string[] {
 
 function propertyNames(lines: string[], indent: number): string[] {
   const props = block(lines, /^\s*properties:$/, indent);
-  return props.filter((l) => l.length - l.trimStart().length === indent + 2 && /^\s*[A-Za-z_]+:/.test(l)).map((l) => /^\s*([A-Za-z_]+):/.exec(l)![1]!);
+  return props.filter((l) => l.length - l.trimStart().length === indent + 2 && /^\s*[A-Za-z_][A-Za-z0-9_]*:/.test(l)).map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*):/.exec(l)![1]!);
 }
 
 function required(lines: string[]): string[] {
@@ -167,6 +167,11 @@ import {
   INTERACTION_STATUSES,
   LINKABLE_CAPABILITIES,
   LINK_SESSION_STATUSES,
+  MESSAGE_ATTACHMENT_MAX_PER_MESSAGE,
+  MESSAGE_ATTACHMENT_MAX_STORED_BYTES,
+  MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES,
+  MESSAGE_ATTACHMENT_MEDIA_TYPES,
+  MESSAGE_ATTACHMENT_STATES,
   OPAQUE_ENVELOPE_EVENT_TYPES,
   OPERATIONS_NOT_OFFERED,
   REWARD_KINDS,
@@ -214,6 +219,8 @@ const METHOD_OF: Record<keyof typeof BUSINESS_ROUTES | keyof typeof ROUTES, stri
   getInteractionOutcome: "getInteractionOutcome",
   cancelInteraction: "cancelInteraction",
   sendMessage: "sendMessage",
+  uploadAttachment: "uploadAttachment",
+  getAttachment: "downloadAttachment",
   updateStatus: "updateStatus",
   createSandboxRelationship: "createSandboxRelationship",
   createApprovalEnrollment: "createApprovalEnrollment",
@@ -409,5 +416,42 @@ describe("business API parity: enums", () => {
       assert.ok(core.includes(`WebhookEventType(rawValue: "${type}")`), type);
       assert.ok(!(BUSINESS_WEBHOOK_EVENT_TYPES as readonly string[]).includes(type));
     }
+  });
+});
+
+describe("message attachment limits parity (SECURITY.md 2.113)", () => {
+  const core = readRepoFile("Packages/ViadereCore/Sources/ViadereCore/Models/MessageAttachments.swift");
+  const brand = readRepoFile("Packages/ViadereCore/Sources/ViadereCore/BrandKits/BrandAssetPolicy.swift");
+  /** `a * b * c` or a plain integer, as ViadereCore writes these constants. */
+  const product = (text: string) => text.split("*").map((f) => Number(f.trim())).reduce((a, b) => a * b, 1);
+  const constant = (source: string, name: string) => {
+    const line = source.split("\n").find((l) => l.trim().startsWith(`public static let ${name} = `));
+    assert.ok(line, name);
+    return line.split(" = ").slice(1).join(" = ").trim();
+  };
+  const listOf = (text: string) => text.split(",").map((t) => t.trim());
+
+  it("the upload cap is ViadereCore's MessageAttachmentPolicy.maxUploadBytes and the OpenAPI maxLength of both image bodies", () => {
+    assert.equal(constant(core, "maxUploadBytes"), "BrandAssetPolicy.maxUploadBytes");
+    assert.equal(product(constant(brand, "maxUploadBytes")), MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES);
+    assert.equal(MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES, 2 * 1024 * 1024);
+    const upload = block(api, /^ {2}\/v1\/business\/conversations\/\{sessionId\}\/attachments:$/, 2);
+    const caps = upload.filter((l) => /format: binary, maxLength: /.test(l)).map((l) => Number(/maxLength: (\d+)/.exec(l)![1]));
+    assert.deepEqual(caps, [MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES, MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES]);
+    const types = upload.filter((l) => /^ {10}image\/[a-z]+:$/.test(l)).map((l) => l.trim().slice(0, -1));
+    assert.deepEqual(types, [...MESSAGE_ATTACHMENT_MEDIA_TYPES]);
+    assert.ok(!upload.some((l) => /IdempotencyKey/.test(l)), "the upload takes no idempotency key, so the SDK never retries it");
+  });
+
+  it("per-message count, stored size, types and states match ViadereCore and the schemas", () => {
+    assert.equal(Number(constant(core, "maxPerMessage")), MESSAGE_ATTACHMENT_MAX_PER_MESSAGE);
+    assert.equal(product(constant(core, "maxStoredBytes")), MESSAGE_ATTACHMENT_MAX_STORED_BYTES);
+    assert.deepEqual([...constant(core, "storedMediaTypes: Set<String>").matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...MESSAGE_ATTACHMENT_MEDIA_TYPES]);
+    const attachment = apiSchema("MessageAttachment").join("\n");
+    assert.ok(attachment.includes(`byteSize: { type: integer, minimum: 1, maximum: ${MESSAGE_ATTACHMENT_MAX_STORED_BYTES} }`));
+    assert.deepEqual(listOf(/mediaType: \{ type: string, enum: \[([^\]]*)\]/.exec(attachment)![1]!), [...MESSAGE_ATTACHMENT_MEDIA_TYPES]);
+    assert.deepEqual(listOf(/state: \{ type: string, enum: \[([^\]]*)\]/.exec(attachment)![1]!), [...MESSAGE_ATTACHMENT_STATES]);
+    const send = apiSchema("BusinessSendMessageRequest").join("\n");
+    assert.match(send, new RegExp(`attachmentIds:\\n\\s+type: array\\n\\s+minItems: 1\\n\\s+maxItems: ${MESSAGE_ATTACHMENT_MAX_PER_MESSAGE}\\n\\s+uniqueItems: true`));
   });
 });

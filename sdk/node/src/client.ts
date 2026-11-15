@@ -9,9 +9,9 @@ import {
   type EnrolledApprovalKey,
   type PendingApproval,
 } from "./approval.js";
-import { constantTimeEquals, isKid, type Es256Signer } from "./crypto.js";
+import { constantTimeEquals, isKid, sha256Hex, type Es256Signer } from "./crypto.js";
 import { signRequest, type RequestSigningKey } from "./http-signatures.js";
-import { StatementVerificationError, ViadereApiError, ViadereFlowError, ViadereSdkError } from "./errors.js";
+import { StatementVerificationError, ViadereApiError, ViadereFlowError, ViadereSdkError, ViadereValidationError } from "./errors.js";
 import { deterministicIdempotencyKey, generateIdempotencyKey, isValidIdempotencyKey } from "./idempotency.js";
 import * as schemas from "./schemas.js";
 import {
@@ -47,12 +47,31 @@ import {
   type VerificationSessionResult,
 } from "./statements.js";
 import { RequesterThrottle } from "./throttle.js";
-import { COMPLETE_OUTCOMES, type AuthDeliveryCompleteRequest, type AuthDeliveryCreateRequest, type AuthDeliveryView, type AuthWebhookTestRequest, type AuthWebhookTestResponse, type CompleteOutcome, type UpdateWebhookRequest } from "./types.js";
+import { COMPLETE_OUTCOMES, MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES, MESSAGE_ATTACHMENT_MEDIA_TYPES, type AuthDeliveryCompleteRequest, type AuthDeliveryCreateRequest, type AuthDeliveryView, type AuthWebhookTestRequest, type AuthWebhookTestResponse, type CompleteOutcome, type UpdateWebhookRequest } from "./types.js";
 import type * as T from "./types.js";
 import { assertValidCreateRequest, DELIVERY_ID_PATTERN } from "./validate.js";
-import { assertResponse, assertResponseList, assertValidRequest, pathParameter } from "./validation.js";
+import { assertResponse, assertResponseList, assertValidRequest, pathParameter, validateRequest } from "./validation.js";
 
 export const SDK_VERSION = "0.1.0";
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG_SIGNATURE = [0xff, 0xd8, 0xff];
+
+/**
+ * The upload checks the server makes before it decodes (ViadereCore `MessageAttachmentPolicy.precheck`, same reason codes): size first, then
+ * the declared type against the magic bytes. `undefined` when the upload may be sent.
+ */
+export function attachmentPrecheck(bytes: Uint8Array, declaredContentType: string): { field: string; code: string } | undefined {
+  if (!(bytes instanceof Uint8Array)) return { field: "(body)", code: "invalid_type" };
+  if (bytes.length === 0) return { field: "(body)", code: "required" };
+  if (bytes.length > MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES) return { field: "(body)", code: "too_large" };
+  if (!(MESSAGE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(declaredContentType)) return { field: "contentType", code: "unsupported_format" };
+  const starts = (signature: number[]) => signature.every((b, i) => bytes[i] === b);
+  const detected = starts(PNG_SIGNATURE) ? "image/png" : starts(JPEG_SIGNATURE) ? "image/jpeg" : undefined;
+  if (detected === undefined) return { field: "(body)", code: "unsupported_format" };
+  if (detected !== declaredContentType) return { field: "contentType", code: "content_type_mismatch" };
+  return undefined;
+}
 
 /**
  * Retries for transient failures (network errors, `429`, `5xx`). Only requests that are safe to repeat are retried: every `GET`, every request
@@ -71,7 +90,8 @@ export interface RetryPolicy {
 export const DEFAULT_RETRY: RetryPolicy = { maxAttempts: 3, baseDelaySeconds: 0.5, maxDelaySeconds: 30 };
 export const NO_RETRY: RetryPolicy = { maxAttempts: 1, baseDelaySeconds: 0, maxDelaySeconds: 0 };
 
-type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body?: string; redirect: "manual"; signal: AbortSignal }) => Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string> }>;
+/** The part of `fetch` the client uses. `arrayBuffer` is needed only for `downloadAttachment` (every real `fetch` response has it). */
+type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; redirect: "manual"; signal: AbortSignal }) => Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 export interface ViadereClientOptions {
   /** Your business API key (`vdk_live_...` or `vdk_test_...`). Keep it on your server: never ship it in a browser or an app. */
@@ -271,6 +291,12 @@ export const LINK_STEP_UP_WINDOW_MS = 300_000;
 
 interface SendOptions {
   body?: unknown;
+  /** Raw bytes with their own type instead of a JSON body (an image upload). Signed like a JSON body: `content-digest` covers these bytes. */
+  raw?: { bytes: Uint8Array; contentType: string };
+  /** `Accept` (default `application/json`). */
+  accept?: string;
+  /** Return the 2xx body as bytes (with its `Content-Type`) instead of parsing JSON. */
+  binary?: boolean;
   idempotencyKey?: string;
   /** Safe to repeat although it is not a `GET` and carries no key. */
   naturallyIdempotent?: boolean;
@@ -387,9 +413,57 @@ export class ViadereClient {
     return assertResponse(schemas.InteractionOutcome, result.body);
   }
 
-  /** `POST /v1/business/messages` (scope `messages:write`): into the customer's conversation with you. */
+  /**
+   * `POST /v1/business/messages` (scope `messages:write`): into the customer's conversation with you. To send images, upload each with
+   * `uploadAttachment` and name the ids in `attachmentIds` (1 to 4, unique) with the same `sessionId`; `body` may then be empty.
+   */
   async sendMessage(request: T.BusinessSendMessageRequest): Promise<Created<T.ConversationMessage>> {
     return this.#create(schemas.BusinessSendMessageRequest, schemas.ConversationMessage, "/v1/business/messages", request, (request as { idempotencyKey?: string } | null)?.idempotencyKey);
+  }
+
+  /**
+   * `POST /v1/business/conversations/{sessionId}/attachments` (scope `messages:write`, capability `message.send`): uploads one image to a
+   * conversation of your business. The body is the raw image, `image/png` or `image/jpeg`, at most `MESSAGE_ATTACHMENT_MAX_UPLOAD_BYTES` (2 MiB).
+   *
+   * Checked before anything is sent with the server's first-step rules (ViadereCore `MessageAttachmentPolicy.precheck`): not empty
+   * (`required`), at most 2 MiB (`too_large`), a PNG or JPEG type (`unsupported_format`), and the bytes must be what the type says
+   * (`content_type_mismatch`); a refusal is a `ViadereValidationError`. The server re-encodes the image (no metadata survives) and answers a
+   * **pending** attachment: name its id in `sendMessage({ sessionId, attachmentIds })` within an hour.
+   *
+   * Never retried automatically: the route takes no idempotency key, so a repeat after a lost answer would store a second pending copy. With a
+   * request signer the signature's `content-digest` covers exactly these bytes and `content-type` is the image type.
+   */
+  async uploadAttachment(sessionId: string, bytes: Uint8Array, contentType: string): Promise<T.MessageAttachment> {
+    const id = pathParameter("uuid", "sessionId", sessionId);
+    const declared = typeof contentType === "string" ? (contentType.split(";")[0] ?? "").trim().toLowerCase() : "";
+    const problem = attachmentPrecheck(bytes, declared);
+    if (problem !== undefined) throw new ViadereValidationError([problem]);
+    const result = await this.#send("POST", `/v1/business/conversations/${id}/attachments`, { raw: { bytes, contentType: declared } });
+    const attachment = assertResponse<T.MessageAttachment>(schemas.MessageAttachment, result.body);
+    if (typeof attachment.sessionId !== "string" || attachment.sessionId.toLowerCase() !== id || !(MESSAGE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(attachment.mediaType)) {
+      throw new ViadereSdkError("attachment_mismatch", "The upload answer names another conversation or an image type the API never stores.");
+    }
+    return attachment;
+  }
+
+  /**
+   * `GET /v1/business/conversations/{sessionId}/attachments/{attachmentId}`: the stored image of an attachment reference (from `uploadAttachment`,
+   * a message's `attachments` or a `message.received` webhook). The bytes are returned only when their size and SHA-256 match the reference and
+   * the response type is the reference's `mediaType`; otherwise `ViadereSdkError("attachment_mismatch")` and the bytes are discarded. Retried like
+   * every `GET`.
+   */
+  async downloadAttachment(attachment: Pick<T.MessageAttachment, "id" | "sessionId" | "mediaType" | "byteSize" | "sha256">): Promise<Uint8Array> {
+    const problems = validateRequest(schemas.MessageAttachment, { ...attachment, width: 1, height: 1, state: "attached" });
+    if (problems.length > 0) throw new ViadereValidationError(problems);
+    const session = pathParameter("uuid", "sessionId", attachment.sessionId);
+    const id = pathParameter("uuid", "attachmentId", attachment.id);
+    const result = await this.#send("GET", `/v1/business/conversations/${session}/attachments/${id}`, { accept: "image/png, image/jpeg", binary: true });
+    const bytes = result.bytes ?? new Uint8Array(0);
+    const served = (result.contentType ?? "").split(";")[0]!.trim().toLowerCase();
+    if ((result.contentType != null && served !== attachment.mediaType) || bytes.length !== attachment.byteSize || sha256Hex(bytes) !== attachment.sha256) {
+      throw new ViadereSdkError("attachment_mismatch", "The downloaded image does not match its reference (type, size or SHA-256); it was discarded.");
+    }
+    return bytes;
   }
 
   /** `POST /v1/business/statuses` (scope `statuses:write`): a newer status with the same `activityKey` replaces the earlier one. */
@@ -1049,15 +1123,18 @@ export class ViadereClient {
     return view;
   }
 
-  async #send(method: string, path: string, options: SendOptions = {}): Promise<{ status: number; body: unknown }> {
+  async #send(method: string, path: string, options: SendOptions = {}): Promise<{ status: number; body: unknown; bytes?: Uint8Array; contentType?: string | null }> {
     // The key goes in the Authorization header and nowhere else: never in a URL, an error message or a log line.
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.#apiKey}`,
-      Accept: "application/json",
+      Accept: options.accept ?? "application/json",
       "User-Agent": `viadere-server-node/${SDK_VERSION}`,
     };
-    let payload: string | undefined;
-    if (options.body !== undefined) {
+    let payload: string | Uint8Array | undefined;
+    if (options.raw !== undefined) {
+      payload = options.raw.bytes;
+      headers["Content-Type"] = options.raw.contentType;
+    } else if (options.body !== undefined) {
       payload = JSON.stringify(options.body);
       headers["Content-Type"] = "application/json";
     }
@@ -1088,6 +1165,11 @@ export class ViadereClient {
           continue;
         }
         throw new ViadereSdkError("transport", retryable ? "The request failed locally (network, TLS or timeout) on every attempt." : "The request failed locally (network, TLS or timeout). It was not retried: it is not safe to repeat, and it may have been applied.");
+      }
+      if (options.binary === true && response.status >= 200 && response.status < 300) {
+        if (typeof response.arrayBuffer !== "function") throw new ViadereSdkError("invalid_response", "The fetch implementation cannot return a binary body.");
+        const bytes = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
+        return { status: response.status, body: null, bytes, contentType: response.headers.get("Content-Type") };
       }
       const text = await response.text().catch(() => "");
       if (response.status >= 200 && response.status < 300) {

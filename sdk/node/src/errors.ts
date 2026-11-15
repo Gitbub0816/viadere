@@ -61,7 +61,7 @@ export class ViadereApiError extends Error {
   }
 }
 
-export type SdkErrorKind = "invalid_api_key" | "insecure_base_url" | "invalid_response" | "invalid_path" | "invalid_idempotency_key" | "transport" | "invalid_signing_key" | "signing_failed";
+export type SdkErrorKind = "invalid_api_key" | "insecure_base_url" | "invalid_response" | "invalid_path" | "invalid_idempotency_key" | "transport" | "invalid_signing_key" | "signing_failed" | "attachment_mismatch";
 
 /** A failure that is not an API answer. */
 export class ViadereSdkError extends Error {
