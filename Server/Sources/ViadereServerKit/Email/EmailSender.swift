@@ -9,12 +9,16 @@ public struct EmailMessage: Sendable, Equatable {
     public var text: String
     /// What the message is for (`signup-code`, `invite`, `invite-code`); logged, never the content.
     public var kind: String
+    /// An authentication secret is in the body (the one-time code of an email fallback, ADR-0020 section 7): the development sender never logs the
+    /// body, and the MailerSend shape turns off click, open and content tracking for it (`settings`, MailerSend API v1).
+    public var sensitive: Bool
 
-    public init(to: String, subject: String, text: String, kind: String) {
+    public init(to: String, subject: String, text: String, kind: String, sensitive: Bool = false) {
         self.to = to
         self.subject = subject
         self.text = text
         self.kind = kind
+        self.sensitive = sensitive
     }
 }
 
@@ -57,6 +61,8 @@ public struct HTTPEmailSender: EmailSender {
         var to: [Address]
         var subject: String
         var text: String
+        /// MailerSend v1 `settings` (only `track_clicks`, `track_opens`, `track_content`): all `false` for a sensitive message.
+        var settings: [String: Bool]?
     }
 
     /// Splits `Name <addr>` into its parts; a bare address has no name.
@@ -78,7 +84,8 @@ public struct HTTPEmailSender: EmailSender {
                 case .simple:
                     try request.content.encode(Body(from: config.fromAddress, to: message.to, subject: message.subject, text: message.text), as: .json)
                 case .mailersend:
-                    let body = MailerSendBody(from: Self.address(config.fromAddress), to: [.init(email: message.to)], subject: message.subject, text: message.text)
+                    let body = MailerSendBody(from: Self.address(config.fromAddress), to: [.init(email: message.to)], subject: message.subject, text: message.text,
+                                              settings: message.sensitive ? ["track_clicks": false, "track_opens": false, "track_content": false] : nil)
                     try request.content.encode(body, as: .json)
                 }
             }
@@ -101,7 +108,7 @@ public struct LoggingEmailSender: EmailSender {
     }
 
     public func send(_ message: EmailMessage) async throws {
-        if logBodies {
+        if logBodies, !message.sensitive {
             logger.notice("email (development, not sent)", metadata: ["to": "\(message.to)", "subject": "\(message.subject)", "body": "\(message.text)"])
         } else {
             let domain = message.to.split(separator: "@").last.map(String.init) ?? "?"

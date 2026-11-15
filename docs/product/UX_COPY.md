@@ -170,6 +170,7 @@ Category actions: `viadere.auth.link` → **Open** (foreground, needs unlock), *
 | C-OTP-02 | Expired | This code has expired. Ask {Business} for a new one. |
 | C-OTP-04 | Button before the code is shown (the tap is the one-time `open`; the sheet opens without the code) | Show code |
 | C-OTP-03 | Email fallback footnote (only in Viadere's email template) | {Business} sent this code by email because you asked for it there. Email is easier to intercept than the Viadere app. |
+| C-OTP-05 | Email fallback template as built (G23; plain text, no link; `AuthEmailFallback.message`) | Subject: C-OTP-01 title "Your {Business} code" (never the code). Body: the title, the code on its own line, C-OTP-01 line 1, line 2, "Expires at {HH:MM} UTC on {YYYY-MM-DD}", then C-OTP-03. **A9 to review** the UTC time format (email has no device time zone) |
 | C-TOTP-01 | Partner TOTP code label | Sign-in code for {Business}. Viadere passed it on; {Business} checks it. |
 
 ## 5. Device transfer, recovery, account security and phone linking

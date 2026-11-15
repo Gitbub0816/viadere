@@ -11,6 +11,8 @@ struct AuthSecretPayload: Codable, Sendable {
     /// Cross-device link service (ADR-0021 §6): the authority's 2-digit number, shown to the **business** only (never in the device display), and
     /// deleted with the rest of the secret when the delivery is answered or ends.
     var matchCode: String?
+    /// Email fallback (ADR-0020 section 7): the business-supplied address, until the one send claims it (`AuthEmailFallback.dispatch`).
+    var emailAddress: String?
 }
 
 /// The business side of authentication delivery and the state machine (ADR-0020). The tenant is always the API key's business; every query filters by it.
@@ -99,6 +101,8 @@ struct AuthDeliveryService {
         /// Link service: the delivery id chosen before the authority challenge (which names it), and that challenge.
         var deliveryId: UUID? = nil
         var linkChallenge: AuthorityChallengeCreateResponse? = nil
+        /// Email fallback: the normalized address when the request asked for it, it is allowed and every email budget had room (else `nil`).
+        var emailAddress: String? = nil
     }
 
     func create(principal: BusinessPrincipal, body: Data, key: String) async throws -> (value: AuthDeliveryView, created: Bool) {
@@ -149,11 +153,12 @@ struct AuthDeliveryService {
         let businessId = principal.businessId
         // 1. Input that does not depend on the customer.
         let channels = request.channels ?? [.push, .inbox]
-        // Email fallback stays off in every environment until its gate is met (ADR-0020 section 7); there is no SMS member at all.
-        guard !channels.contains(.email), request.fallback == nil else {
-            throw APIError.validation("Email delivery is not available.", details: [request.fallback == nil ? "channels" : "fallback": "email_unavailable"])
-        }
+        // Email fallback (ADR-0020 section 7): refused while `AUTH_EMAIL_FALLBACK_ENABLED` is off (its gate, ledger L-8), and otherwise only for an
+        // `otp` request that names both the channel and the address, of a tenant whose policy allows it. There is no SMS member at all.
         let lifetime = request.expiresInSeconds ?? AuthDeliveryTemplate.defaultLifetime(for: request.method)
+        let emailAddress = try await AuthEmailFallback.validateRequest(request, channels: channels, lifetime: lifetime, settings: settings) {
+            try await BusinessSecuritySettingsRecord.query(on: db).filter(\.$businessId == businessId.uuid).first()?.allowEmailFallback == true
+        }
         let expiresAt = ctx.now.addingTimeInterval(TimeInterval(lifetime))
         var destination: AuthDestinationCheck.Result?
         if request.method == .magicLink, let requested = request.destination {
@@ -192,6 +197,18 @@ struct AuthDeliveryService {
         if try await reportedDenials(businessId: businessId.uuid, consumerId: relationship.consumerId) >= settings.reportThreshold { silent = true }
         var plan = Plan(relationshipId: relationship.id!, consumerId: relationship.consumerId, sandbox: consumer.isSandbox, silent: silent, lifetime: lifetime,
                         channels: channels, destination: destination, callback: callback)
+        // Email budgets (fail closed). A silent delivery sends no alert of any kind, so no email either; a sandbox customer is never emailed. Either way
+        // the address is not kept, the delivery stays openable in the app, and the business sees no `fallback_used` event.
+        if let address = emailAddress {
+            if !silent, !consumer.isSandbox,
+               await AuthEmailFallback.withinBudget(ctx: ctx, settings: settings, businessId: businessId, consumerId: relationship.consumerId, address: address) {
+                plan.emailAddress = address
+            } else {
+                _ = try? await AuditService(db: db, ctx: ctx).record(AuthEmailFallback.auditSuppressed, outcome: .denied, actor: AuditActor(kind: .system),
+                    consumerId: ConsumerID(relationship.consumerId), businessId: businessId, subjectType: "auth_delivery",
+                    metadata: ["channel": "email", "reason": silent ? "silent" : (consumer.isSandbox ? "sandbox" : "budget")])
+            }
+        }
         // 4. Link service (ADR-0021 §5.2): the authority challenge, only for a customer the delivery will reach. References only; the authority checks
         //    the client, its exact return URL and its business, and builds the display itself.
         if let link = destination?.link {
@@ -272,7 +289,8 @@ struct AuthDeliveryService {
         row.codeKind = request.otp?.codeKind.rawValue
         try await row.create(on: db)
         let payload = AuthSecretPayload(url: plan.destination?.url, code: request.otp?.code, variables: request.variables,
-                                        matchCode: plan.destination?.link?.crossDevice == true ? plan.linkChallenge?.matchCode : nil)
+                                        matchCode: plan.destination?.link?.crossDevice == true ? plan.linkChallenge?.matchCode : nil,
+                                        emailAddress: plan.emailAddress)
         if payload.url != nil || payload.code != nil || payload.matchCode != nil || !(payload.variables ?? [:]).isEmpty {
             let secret = AuthDeliverySecretRecord()
             secret.id = row.id

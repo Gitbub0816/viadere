@@ -6,6 +6,15 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Email fallback for one-time codes (2026-11-15, G23).** A business may ask, per `otp` auth delivery, for the code to be mailed to an address it
+supplies (`channels` with `email` and `fallback.email.address`), only while `AUTH_EMAIL_FALLBACK_ENABLED` is on (default off; **the server refuses it
+in staging and production** until the owner closes ledger L-8: MailerSend's storage location and retention recorded in `docs/ops/DATA-INVENTORY.md`)
+and the tenant turned on Security → Email fallback (`allow_email_fallback`, default off, passkey, audited; migration `AuthEmailFallback.v1`). Fixed
+Viadere template (C-OTP-01 + C-OTP-03, new row C-OTP-05), no link, no code in the subject, MailerSend tracking off, sent at most once (the address
+leaves the sealed secret by compare-and-swap before the send), budgets per tenant, customer and address that suppress the email but never the
+delivery (`authdl-email-*`, fail closed). Normative: [`SECURITY.md`](SECURITY.md) §2.101 "Email fallback"; ADR-0020 implementation note (G23).
+Open: the `auth.delivery.fallback_used` webhook event (contract + SDK change); L-8 (owner); magic links by email are deliberately not built.
+
 **Link service completed: same-device hand-off, cross-device creates, registration-nonce relay (2026-11-15).** A same-device link-service approval
 now finishes: after the authority **accepted** it, the phone opens the authority-signed `return_url` byte for byte with `#vdr_code=<32-byte code>`
 once through the system opener (checked before signing and again before opening; never on deny, report, refusal, timeout or expiry; a failure drops

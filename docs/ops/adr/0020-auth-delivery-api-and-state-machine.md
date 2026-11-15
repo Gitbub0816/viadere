@@ -158,6 +158,16 @@ The RFC 9421 path of §3 is implemented. Where the shipped profile differs from 
 - **Vectors:** `docs/protocol/vectors/http-signatures-v1.json` from an independent Python implementation (deterministic RFC 6979). RFC 9421 Appendix B
   has no request vector with this profile's components; the generator instead checks its serializer against the RFC's §2.5 example signature base.
 
+### Implementation note (2026-11-15, G23; SECURITY §2.101 "Email fallback")
+
+The email fallback of §7 is implemented for `otp` only, behind `AUTH_EMAIL_FALLBACK_ENABLED` (default off; refused in staging and production until the
+gate of §7 is recorded, ledger L-8) and the tenant policy `allow_email_fallback` (column on `business_security_settings`, console Security → Email
+fallback). Differences from the text above, all toward less exposure: a business-mode `magic_link` is **not** sent by email (no link ever leaves by
+email); the request must name both `channels: [..., "email"]` and `fallback.email.address`; the address must be one plain mailbox; email budgets per
+tenant, customer and address (`authdl-email-*`, fail closed) suppress the email, never the delivery; the tenant policy is re-read at send time. The
+webhook event `auth.delivery.fallback_used` is **not** emitted yet (it needs the contract schemas and the SDK event lists to change together); the
+`sent` event carries reason `fallback_used:email` and the audit event `auth_delivery.fallback_used` carries `assurance: email`.
+
 ## Consequences
 
 - Businesses must register a request-signing key before sending live auth deliveries; the Swift, TypeScript and Kotlin backend SDKs implement RFC 9421 signing (ADR-0030).
