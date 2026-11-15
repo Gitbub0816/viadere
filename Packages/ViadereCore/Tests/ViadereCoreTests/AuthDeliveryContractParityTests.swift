@@ -55,6 +55,9 @@ struct AuthDeliveryContractParityTests {
 
     @Test func openAPIEnumsMatchCore() throws {
         #expect(try Self.yamlEnum("Method") == AuthDeliveryMethod.allCases.map(\.rawValue))
+        // The business view also names the `push_approval` record (ADR-0022 §1, ledger S6-09); creatable methods stay three.
+        #expect(try Self.yamlEnum("ViewMethod") == AuthDeliveryViewMethod.allCases.map(\.rawValue))
+        #expect(AuthDeliveryViewMethod.allCases.map(\.rawValue) == AuthDeliveryMethod.allCases.map(\.rawValue) + ["push_approval"])
         #expect(try Self.yamlEnum("Purpose") == AuthDeliveryPurpose.allCases.map(\.rawValue))
         #expect(try Self.yamlEnum("Channel") == AuthDeliveryChannel.allCases.map(\.rawValue))
         #expect(try Self.yamlEnum("Status") == AuthDeliveryStatus.allCases.map(\.rawValue))

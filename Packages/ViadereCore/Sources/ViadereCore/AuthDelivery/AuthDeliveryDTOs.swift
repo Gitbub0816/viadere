@@ -201,8 +201,10 @@ public struct AuthDeliveryCreateRequest: Codable, Sendable, Hashable {
 /// **Never a secret**: no URL, no code, no variables, no destination host.
 public struct AuthDeliveryView: Codable, Sendable, Hashable {
     public var id: AuthDeliveryID
+    /// The business's `request_id`; for a `push_approval` record `push_approval#` followed by the approval's `request_id`.
     public var requestId: String
-    public var method: AuthDeliveryMethod
+    /// `push_approval` for the record of a push approval (read-only here; it is cancelled and decided through `/v1/business/auth-approvals`).
+    public var method: AuthDeliveryViewMethod
     public var purpose: AuthDeliveryPurpose
     public var status: AuthDeliveryStatus
     public var expiresAt: Date
@@ -214,7 +216,7 @@ public struct AuthDeliveryView: Codable, Sendable, Hashable {
     /// Present on `GET`: one entry per transition (state and time only).
     public var events: [AuthDeliveryEventView]?
 
-    public init(id: AuthDeliveryID, requestId: String, method: AuthDeliveryMethod, purpose: AuthDeliveryPurpose, status: AuthDeliveryStatus,
+    public init(id: AuthDeliveryID, requestId: String, method: AuthDeliveryViewMethod, purpose: AuthDeliveryPurpose, status: AuthDeliveryStatus,
                 expiresAt: Date, createdAt: Date, correlationId: String? = nil, clientTransactionRef: String? = nil, reason: String? = nil,
                 events: [AuthDeliveryEventView]? = nil) {
         self.id = id

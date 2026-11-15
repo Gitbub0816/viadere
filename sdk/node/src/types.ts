@@ -7,6 +7,14 @@
 export const METHODS = ["magic_link", "otp", "notice"] as const;
 export type Method = (typeof METHODS)[number];
 
+/**
+ * `method` of a delivery record as you read it (`AuthDeliveryView`, OpenAPI `ViewMethod`): the creatable methods plus `push_approval`, the record every
+ * `createAuthApproval` writes (ADR-0022 section 1). Such a record is read-only through the delivery routes, its `request_id` is `push_approval#` plus
+ * the approval's `request_id`, and it emits the same `auth.delivery.*` webhook events. You never create one.
+ */
+export const VIEW_METHODS = [...METHODS, "push_approval"] as const;
+export type ViewMethod = (typeof VIEW_METHODS)[number];
+
 export const PURPOSES = ["sign_in", "step_up", "verify_contact", "account_notice"] as const;
 export type Purpose = (typeof PURPOSES)[number];
 
@@ -97,8 +105,9 @@ export interface AuthDeliveryEvent {
 
 export interface AuthDeliveryView {
   id: DeliveryId;
+  /** Your `request_id`; for a `push_approval` record `push_approval#` followed by the approval's `request_id`. */
   request_id: string;
-  method: Method;
+  method: ViewMethod;
   purpose: Purpose;
   status: Status;
   expires_at: string;

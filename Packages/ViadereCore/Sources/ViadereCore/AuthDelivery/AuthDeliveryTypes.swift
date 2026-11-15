@@ -49,6 +49,24 @@ public enum AuthDeliveryMethod: String, Codable, Sendable, CaseIterable, Hashabl
     case notice
 }
 
+/// The `method` of a delivery **record** as the business reads it (`AuthDeliveryView`, OpenAPI `ViewMethod`): the three a business can create, plus
+/// `push_approval`, the record every `POST /v1/business/auth-approvals` writes (ADR-0022 §1). Additive in contract v1.x; a business never creates a
+/// `push_approval` delivery (`AuthDeliveryMethod` stays three members, so the create request cannot name it) and never sees one on a device route.
+public enum AuthDeliveryViewMethod: String, Codable, Sendable, CaseIterable, Hashable {
+    case magicLink = "magic_link"
+    case otp
+    case notice
+    case pushApproval = "push_approval"
+
+    public init(_ method: AuthDeliveryMethod) {
+        switch method {
+        case .magicLink: self = .magicLink
+        case .otp: self = .otp
+        case .notice: self = .notice
+        }
+    }
+}
+
 /// Why (selects the allowed templates and the lifetime bounds).
 public enum AuthDeliveryPurpose: String, Codable, Sendable, CaseIterable, Hashable {
     case signIn = "sign_in"

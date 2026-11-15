@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Viadere Authentication Delivery API
-  version: "2026-11-02"
+  version: "2026-11-15"
   summary: Deliver a business's magic link, partner-generated one-time code or security notice to the customer's own Viadere app. Viadere never verifies the result.
   description: |
     Viadere is a **transport** for what a business already decided to send (ADR-0020, `docs/product/AUTH-DELIVERY-SPEC-v2.md` section 6).
@@ -469,6 +469,14 @@ components:
     Method:
       type: string
       enum: [magic_link, otp, notice]
+    ViewMethod:
+      type: string
+      description: >-
+        `method` of a delivery record as the business reads it: the creatable `Method` values plus `push_approval`, the record every
+        `POST /v1/business/auth-approvals` writes (ADR-0022 section 1). Such a record is read-only on the delivery routes (cancel and complete
+        answer `404`; use `/v1/business/auth-approvals`), its `request_id` is `push_approval#` followed by the approval's `request_id`, and it emits the
+        same `auth.delivery.*` webhook events. Additive in contract v1.x: treat an unknown value as "not one of mine to act on".
+      enum: [magic_link, otp, notice, push_approval]
     Purpose:
       type: string
       enum: [sign_in, step_up, verify_contact, account_notice]
@@ -541,7 +549,7 @@ components:
       properties:
         id: { $ref: "#/components/schemas/DeliveryId" }
         request_id: { type: string }
-        method: { $ref: "#/components/schemas/Method" }
+        method: { $ref: "#/components/schemas/ViewMethod" }
         purpose: { $ref: "#/components/schemas/Purpose" }
         status: { $ref: "#/components/schemas/Status" }
         expires_at: { type: string, format: date-time }

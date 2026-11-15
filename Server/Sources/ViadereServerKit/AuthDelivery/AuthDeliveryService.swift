@@ -32,7 +32,7 @@ struct AuthDeliveryService {
             events = try await AuthDeliveryEventRecord.query(on: db).filter(\.$deliveryId == row.id!).sort(\.$at, .ascending).all()
                 .map { AuthDeliveryEventView(status: AuthDeliveryStatus(rawValue: $0.status) ?? .failed, at: $0.at, reason: $0.reason) }
         }
-        return AuthDeliveryView(id: row.wireId, requestId: row.requestId, method: row.methodValue, purpose: row.purposeValue, status: effectiveStatus(row),
+        return AuthDeliveryView(id: row.wireId, requestId: row.requestId, method: row.viewMethod, purpose: row.purposeValue, status: effectiveStatus(row),
                                 expiresAt: row.expiresAt, createdAt: row.createdAt, correlationId: row.correlationId, clientTransactionRef: row.clientTransactionRef,
                                 reason: row.reason, events: events)
     }
@@ -55,9 +55,10 @@ struct AuthDeliveryService {
     }
 
     /// The tenant's own delivery, or `404` (the same body for an unknown and for another tenant's id; the cross-tenant attempt is audited).
-    func record(id: AuthDeliveryID, principal: BusinessPrincipal) async throws -> AuthDeliveryRecord {
-        // A mirrored `push_approval` row is read through `/v1/business/auth-approvals`, never through the delivery routes.
-        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db), !row.isPushApproval else { throw APIError.notFound }
+    /// A mirrored `push_approval` row is visible only to `GET` (`readable: true`, ADR-0022 §1): it is cancelled and decided through
+    /// `/v1/business/auth-approvals`, so every changing delivery route answers `404` for it.
+    func record(id: AuthDeliveryID, principal: BusinessPrincipal, includePushApproval: Bool = false) async throws -> AuthDeliveryRecord {
+        guard let row = try await AuthDeliveryRecord.find(id.uuid, on: db), includePushApproval || !row.isPushApproval else { throw APIError.notFound }
         guard row.businessId == principal.businessId.uuid, row.livemode == principal.livemode else {
             if row.businessId != principal.businessId.uuid {
                 _ = try? await AuditService(db: db, ctx: ctx).record("auth_delivery.cross_tenant_refused", outcome: .denied,

@@ -2,6 +2,11 @@
 
 ## 0.1.0 (unreleased)
 
+### `push_approval` delivery records (contract v1.x, additive)
+
+- `AuthDeliveryView.method` is now `ViewMethod` (`VIEW_METHODS`: the three creatable methods plus `push_approval`, the read-only record every
+  `createAuthApproval` writes); `Method` for create requests is unchanged. `parity.test.ts` checks the new OpenAPI `ViewMethod` enum.
+
 ### RFC 9421 request signatures (SECURITY section 2.112)
 
 - **`requestSigner`** client option (opt-in): signs every attempt with an HTTP Message Signature (`ecdsa-p256-sha256`, raw `r||s`, low S; `@method`,

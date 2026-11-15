@@ -255,6 +255,17 @@ final class AuthApprovalTests: XCTestCase {
     func testEveryAuthApprovalHasAPushApprovalDeliveryRecordThatMirrorsIt() async throws {
         try await withHarness { h in
             let f = try await h.approveFixture()
+            // A v2 endpoint subscribed to the auth delivery events (ledger S6-09: the record emits them like a delivery).
+            let hook = WebhookSubscriptionRecord()
+            hook.id = UUID(); hook.businessId = f.business.id.uuid; hook.url = "https://hooks.example.com/auth"
+            hook.events = ["auth.delivery.created", "auth.delivery.sent", "auth.delivery.completed", "auth.delivery.denied", "auth.delivery.expired"].joined(separator: ",")
+            hook.secretCiphertext = try h.ctx.cipher.seal("whsec_x", context: "webhook_subscriptions.secret", rowId: hook.id!)
+            hook.active = true; hook.createdAt = h.clock.now(); hook.secretVersion = 1; hook.signatureVersion = "v2"; hook.envelopeVersion = WebhookEnvelopeV2.version
+            hook.verifiedAt = h.clock.now()
+            try await hook.create(on: h.db)
+            func hookEvents() async throws -> [String] {
+                try await WebhookDeliveryRecord.query(on: h.db).filter(\.$subscriptionId == hook.id!).sort(\.$createdAt).all().map(\.eventType)
+            }
             func row(_ requestId: String) async throws -> AuthDeliveryRecord {
                 let approval = try unwrap(try await ApproveRequestRecord.query(on: h.db).filter(\.$requestId == requestId).first())
                 return try unwrap(try await AuthDeliveryRecord.find(approval.id!, on: h.db))
@@ -277,9 +288,29 @@ final class AuthApprovalTests: XCTestCase {
             XCTAssertNotNil(record.endedAt)
             aeq(try await events(record), ["created", "sent", "completed"])
 
-            // Internal in this stage: not in the device inbox, not readable or cancellable through the delivery routes, never swept by the delivery expiry.
+            // Exposed read-only (contract v1.x, S6-09): the business reads it with `method: push_approval`; it cannot cancel or complete it through
+            // the delivery routes (it acts through /v1/business/auth-approvals); not in the device inbox; never swept by the delivery expiry.
             let id = AuthDeliveryID(record.id!)
-            aeq(try await h.business(f.business, .GET, "/v1/business/auth-deliveries/\(id)").status, .notFound)
+            let read = try await h.business(f.business, .GET, "/v1/business/auth-deliveries/\(id)")
+            aeq(read.status, .ok)
+            let view = try read.json(AuthDeliveryView.self)
+            aeq(view.method, .pushApproval)
+            aeq(view.requestId, "push_approval#" + approved.requestId)
+            aeq(view.status, .completed)
+            aeq(view.events?.map(\.status), [.created, .sent, .completed])
+            XCTAssertTrue(read.text.contains("\"method\":\"push_approval\""))
+            aeq(try await h.business(f.business, .POST, "/v1/business/auth-deliveries/\(id)/cancel").status, .notFound)
+            let complete = try await h.business(f.business, .POST, "/v1/business/auth-deliveries/\(id)/complete", body: Data(#"{"outcome":"succeeded"}"#.utf8),
+                                                idempotencyKey: UUID().uuidString)
+            aeq(complete.status, .notFound)
+            // Another tenant cannot read it either (the same 404 as an unknown id).
+            let other = try await h.makeBusiness(name: "Other", handle: "otherbiz")
+            aeq(try await h.business(other, .GET, "/v1/business/auth-deliveries/\(id)").status, .notFound)
+            // Each transition emitted the same opaque auth.delivery.* event a delivery emits.
+            aeq(try await hookEvents(), ["auth.delivery.created", "auth.delivery.sent", "auth.delivery.completed"])
+            let service = WebhookService(db: h.db, ctx: h.ctx)
+            let bodies = try await WebhookDeliveryRecord.query(on: h.db).filter(\.$subscriptionId == hook.id!).all().map { String(decoding: service.storedBody($0) ?? Data(), as: UTF8.self) }
+            XCTAssertTrue(bodies.allSatisfy { $0.contains(id.description) && !$0.contains(approved.requestId) }, "ids only, never the business's request id: \(bodies)")
             let inboxResult = try await h.signed(f.phone.consumer, .GET, "/v1/auth-deliveries")
             XCTAssertEqual(inboxResult.status, .ok, inboxResult.text)
             XCTAssertTrue(try inboxResult.json([AuthDeliveryDisplay].self).isEmpty)
@@ -290,11 +321,13 @@ final class AuthApprovalTests: XCTestCase {
             let deniedDevice = try unwrap(try await h.pendingRequests(f.phone.consumer).first { $0.requestId == denied.requestId })
             aeq(try await h.signedPost(f.phone.consumer, "/v1/approve/requests/\(deniedDevice.id.uuidString.lowercased())/deny", ApproveDenyRequest()).status, .ok)
             aeq(try await row(denied.requestId).status, "denied")
+            aeq(try await hookEvents().last, "auth.delivery.denied")
             let expiring = self.body(f, code: "63")
             aeq(try await self.create(h, f, expiring).status, .created)
             h.clock.advance(by: 3600)
             _ = try await ApproveRequestService(db: h.db, ctx: h.ctx).expireDue()
             aeq(try await row(expiring.requestId).status, "expired")
+            aeq(try await hookEvents().last, "auth.delivery.expired")
 
             // A request created through the plain Approve API gets no mirror row.
             aeq(try await AuthDeliveryRecord.query(on: h.db).filter(\.$method == "push_approval").count(), 3)

@@ -9,6 +9,7 @@ import {
   ENVELOPE_VERSION,
   LINK_MODES,
   METHODS,
+  VIEW_METHODS,
   PURPOSES,
   ROUTES,
   STATUSES,
@@ -68,6 +69,7 @@ function required(lines: string[]): string[] {
 describe("contract parity: enums", () => {
   it("Method, Purpose, Channel, Status", () => {
     assert.deepEqual(enumOf(schema("Method")), [...METHODS]);
+    assert.deepEqual(enumOf(schema("ViewMethod")), [...VIEW_METHODS]);
     assert.deepEqual(enumOf(schema("Purpose")), [...PURPOSES]);
     assert.deepEqual(enumOf(schema("Channel")), [...CHANNELS]);
     assert.deepEqual(enumOf(schema("Status")), [...STATUSES]);

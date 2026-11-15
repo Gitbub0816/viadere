@@ -193,7 +193,7 @@ struct ApproveRequestService {
                 let isAutoDenied = denied
                 try await record.create(on: tx)
                 // ADR-0022 §1: the auth-delivery record of method `push_approval` (mirrors this request's state).
-                if isAuthApproval { try await PushApprovalDelivery.create(on: tx, request: record, principal: principal, now: now) }
+                if isAuthApproval { try await PushApprovalDelivery.create(on: tx, ctx: ctx, request: record, principal: principal, now: now) }
                 if !isAutoDenied {
                     for target in targets {
                         let row = ApproveDeliveryRecord()
@@ -312,7 +312,7 @@ struct ApproveRequestService {
                                         newValue: status.rawValue)
         guard swapped else { return false }
         try await AuthMatchGroups(db: db, ctx: ctx).release(refId: record.id!)
-        try await PushApprovalDelivery.mirror(on: db, approvalId: record.id!, status: status, reason: reason, actor: .system, now: ctx.now)
+        try await PushApprovalDelivery.mirror(on: db, ctx: ctx, approvalId: record.id!, status: status, reason: reason, actor: .system, now: ctx.now)
         if let reason { try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$reason, to: reason).update() }
         // The relay keeps nothing it does not need: the displayed details and the nonce go as soon as the request is over.
         try await ApproveRequestRecord.query(on: db).filter(\.$id == record.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil).update()
@@ -557,7 +557,7 @@ struct ApproveRequestService {
             guard swapped else { throw APIError(.conflict, .replayDetected, "This request was already decided.") }
             try await ApproveRequestRecord.query(on: tx).filter(\.$id == request.id!).set(\.$detailsSealed, to: nil).set(\.$challenge, to: nil)
                 .set(\.$denyReason, to: verified.claims.denyReason?.rawValue).set(\.$answerGroup, to: decision == .approve ? nil : body.answerGroup).update()
-            try await PushApprovalDelivery.mirror(on: tx, approvalId: request.id!, status: status, reason: verified.claims.denyReason?.rawValue, actor: .device, now: now)
+            try await PushApprovalDelivery.mirror(on: tx, ctx: ctx, approvalId: request.id!, status: status, reason: verified.claims.denyReason?.rawValue, actor: .device, now: now)
             try await AuthMatchGroups(db: tx, ctx: ctx).release(refId: request.id!)
             guard let decided = try await ApproveRequestRecord.find(request.id!, on: tx) else { throw APIError.internalError }
             if decision == .approve { try await AuthApprovalService(db: tx, ctx: ctx).closeGroup(after: decided) }
