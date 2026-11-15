@@ -33,7 +33,7 @@ resource "azurerm_subnet" "cae" {
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [local.subnets.cae]
 
-  # Lean: Key Vault and the brand-asset storage account keep their public endpoints but their firewalls admit only this subnet (free service
+  # Lean: Key Vault and the brand-asset and message-attachment storage accounts keep their public endpoints but their firewalls admit only this subnet (free service
   # endpoints; Key Vault references and the server's data-plane calls leave through the environment's subnet). Standard uses private endpoints.
   dynamic "service_endpoint" {
     for_each = local.p.private_endpoints ? [] : ["Microsoft.KeyVault", "Microsoft.Storage"]
