@@ -6,7 +6,7 @@
 #   docker build -f Server/Dockerfile -t viadere-server .
 #
 # ---- build ----------------------------------------------------------------
-FROM swift:6.4.1-resolute AS build
+FROM swift:6.4.2-resolute AS build
 WORKDIR /build
 
 RUN apt-get update \

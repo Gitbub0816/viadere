@@ -9,7 +9,7 @@
 # Infra/azure-authority/containerapps.tf runs `/app/ViadereAuthority` (serve), `migrate --yes` and `admin <command> --change-file ...`.
 #
 # ---- build ----------------------------------------------------------------
-FROM swift:6.4.1-resolute AS build
+FROM swift:6.4.2-resolute AS build
 WORKDIR /build
 
 RUN apt-get update \
