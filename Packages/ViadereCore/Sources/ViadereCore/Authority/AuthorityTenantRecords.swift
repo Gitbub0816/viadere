@@ -337,3 +337,16 @@ public struct DestinationKeyRegistration: Sendable, Hashable {
         return DestinationKeyRegistration(tenantId: iss, environment: environment, kid: kid, hosts: signedHosts, nonce: nonce, issuedAt: iat, expiresAt: exp)
     }
 }
+
+// MARK: - Internal authority routes (api → authority)
+
+/// Tenant destination keys at the authority (ADR-0031 §1, §2). `record` and `registration-nonce`: the api caller with `Authority.Evidence.Submit`;
+/// `revocations`: reduce-only, the api and the worker. There is **no** route that adds a key, a host or a name: those are admin-job changes only.
+public enum AuthorityTenantKeyRoute {
+    /// `{tenant_id}` → `{record, revocation_list?}`.
+    public static let record = "/v1/tenant-keys/record"
+    /// `{tenant_id, kid?, host?, reason}` → `{revoked}`: revokes a key or removes a host (exactly one of `kid` and `host`).
+    public static let revocations = "/v1/tenant-keys/revocations"
+    /// `{tenant_id, kid}` → `{nonce, expires_at}`: the pending registration nonce the admin job issued, for the tenant to sign.
+    public static let registrationNonce = "/v1/tenant-keys/registration-nonce"
+}
