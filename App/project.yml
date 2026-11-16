@@ -373,6 +373,16 @@ schemes:
       config: Debug
     archive:
       config: Release
+  # Watch app on its own, onto the paired Apple Watch. Running this once from Xcode registers the watch in the development profile; until
+  # then the iPhone's Watch app shows the install animation and falls back to "Install" without an error.
+  ViadereWatch:
+    build:
+      targets:
+        ViadereWatch: all
+    run:
+      config: Staging
+    archive:
+      config: Staging
   # Staging server + TestFlight: Product > Archive with this scheme. Fill the pins in Configs/Staging.xcconfig first (docs/ops/STAGING-SETUP.md).
   Staging:
     build:
