@@ -46,7 +46,7 @@ struct ScannedCodeTests {
             "HTTPS://viadere.io/o/\(Self.ach)",
             " https://viadere.io/o/\(Self.ach)",
             "https://viadere.io/o/\(Self.ach) ",
-            "https://viadere.cksites.dev/o/\(Self.ach)",  // staging links are not production links
+            "https://staging.viadere.io/o/\(Self.ach)",  // staging links are not production links
             "https://viad\u{0435}re.io/o/\(Self.ach)",   // Cyrillic e
         ] {
             #expect(decide(payload, .ckey) == .rejected(.notViadere), "\(payload)")

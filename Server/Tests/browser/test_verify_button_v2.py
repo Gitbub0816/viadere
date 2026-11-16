@@ -147,12 +147,16 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
         self.assertEqual(ok["styled"], 0, "no inline style attributes")
         self.assertGreaterEqual(ok["height"], 44, "44 px minimum touch target")
         self.assertIn("vdv-filled", ok["cls"])
-        staging = page.evaluate(RENDER_JS, {"link": "https://viadere.cksites.dev/v/ABCDEFGH"})
-        self.assertEqual(staging["href"], "https://viadere.cksites.dev/v/ABCDEFGH")
+        staging = page.evaluate(RENDER_JS, {"link": "https://staging.viadere.io/v/ABCDEFGH"})
+        self.assertEqual(staging["href"], "https://staging.viadere.io/v/ABCDEFGH")
         for bad in ["http://viadere.io/v/ABCDEFGH", "https://evil.test/v/ABCDEFGH", "https://viadere.io.evil.test/v/ABCDEFGH",
                     "https://viadere.io/v/abcdefgh", "https://viadere.io/v/ABCDEFG1", "https://viadere.io/v/ABCDEFGHI",
                     "https://viadere.io/v/ABCDEFGH?x=1", "https://viadere.io/v/ABCDEFGH#x", "javascript:alert(1)//https://viadere.io/v/ABCDEFGH",
-                    "https://viadere.io/k/ABCDEFGH", " https://viadere.io/v/ABCDEFGH", ""]:
+                    "https://viadere.io/k/ABCDEFGH", " https://viadere.io/v/ABCDEFGH", "",
+                    # Staging is a subdomain of production: only these two exact hosts render, no other subdomain or look-alike.
+                    "https://api-staging.viadere.io/v/ABCDEFGH", "https://www.viadere.io/v/ABCDEFGH", "https://evil.staging.viadere.io/v/ABCDEFGH",
+                    "https://staging.viadere.io.evil.test/v/ABCDEFGH", "https://evilstaging.viadere.io/v/ABCDEFGH",
+                    "https://viadere.cksites.dev/v/ABCDEFGH"]:
             self.assertTrue(page.evaluate(RENDER_JS, {"link": bad}).get("empty"), bad)
         self.assert_no_violations(page)
         ctx.close()
@@ -356,7 +360,7 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
             ref.add_data(qrcode.util.QRData(text.encode(), mode=qrcode.util.MODE_8BIT_BYTE))  # byte mode, as the component encodes
             ref.make(fit=True)
             return [[bool(v) for v in row] for row in ref.get_matrix()]
-        for text in [LINK, "https://viadere.cksites.dev/v/ZZZZ9999", "https://viadere.io/v/23456789", "A", "x" * 120]:
+        for text in [LINK, "https://staging.viadere.io/v/ZZZZ9999", "https://viadere.io/v/23456789", "A", "x" * 120]:
             ours = page.evaluate("t => customElements.get('viadere-verify').qr(t)", text)
             matches = [mask for mask in range(8) if reference(text, mask) == ours]
             self.assertEqual(len(matches), 1, f"{text!r}: exactly one reference mask must reproduce the symbol")
@@ -384,8 +388,8 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
         self.assertEqual(link, "https://viadere.io/v/K7QFM2XA")
         self.assertEqual(page.evaluate("t => customElements.get('viadere-verify').ckey(t)", link),
                          {"version": 2, "level": 1, "codeword": named["verify-link"]["codeword"]})
-        self.assertEqual(page.evaluate("t => customElements.get('viadere-verify').ckey(t).version", "https://viadere.cksites.dev/v/ZZZZ9999"), 3,
-                         "the longest session link (38 bytes) is a version 3 symbol")
+        self.assertEqual(page.evaluate("t => customElements.get('viadere-verify').ckey(t).version", "https://staging.viadere.io/v/ZZZZ9999"), 3,
+                         "the longest session link (37 bytes) is a version 3 symbol")
         # Out of range: null, never a wrong symbol.
         for arguments in [["x" * 5000, 3, 0], ["x" * 40, 1, 1], ["x", 4, 0], ["x", 1, 32], [[256], 1, 0]]:
             self.assertIsNone(page.evaluate("a => customElements.get('viadere-verify').ckey(a[0], a[1], a[2])", arguments), arguments)

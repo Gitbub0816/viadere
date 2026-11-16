@@ -46,7 +46,7 @@ struct LinkVectorTests {
     static let businessId = BusinessID(UUID(uuidString: "b0b1b2b3-c4c5-4d6d-8e7e-f8f9fafbfcfd")!)
     static let subject = SubjectRef("sub_" + Base64URL.encode(Data(SHA256.hash(data: Data("viadere-vector-subject".utf8)))))!
     static let issuedAt = Date(timeIntervalSince1970: 1_800_000_000)
-    static let domain = LinkDomain("viadere.cksites.dev")!
+    static let domain = LinkDomain("staging.viadere.io")!
     static let secret = LinkSessionSecret(base64URL: Base64URL.encode(Data(SHA256.hash(data: Data("viadere-vector-es".utf8)))))!
 
     static func vector(_ signed: SignedStatement, domain: String, kid: String, key: DevicePublicKey) -> SignedVector {

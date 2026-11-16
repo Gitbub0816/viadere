@@ -10,7 +10,7 @@ import java.net.URI
  * (`POST /v1/business/verification-sessions`), and your server learns the outcome from Viadere's signed result, never from the app.
  */
 
-/** A verification-session link: `https://{viadere.io | viadere.cksites.dev}/v/{CODE}`, nothing else. */
+/** A verification-session link: `https://{viadere.io | staging.viadere.io}/v/{CODE}`, nothing else. */
 class VerifySession private constructor(
     /** The exact link, used as the App Link and as the QR content. */
     val link: String,
@@ -32,7 +32,7 @@ class VerifySession private constructor(
     override fun toString(): String = "VerifySession($displayCode)"
 
     companion object {
-        val DEFAULT_HOSTS: Set<String> = setOf("viadere.io", "viadere.cksites.dev")
+        val DEFAULT_HOSTS: Set<String> = setOf("viadere.io", "staging.viadere.io")
         /** The code alphabet: no I, O, 0 or 1. */
         private val PATTERN = Regex("^https://([a-z0-9.-]+)/v/([A-HJ-NP-Z2-9]{8})$")
 

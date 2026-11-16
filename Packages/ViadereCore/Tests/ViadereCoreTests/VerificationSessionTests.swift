@@ -11,7 +11,7 @@ struct VerificationSessionTests {
     let session = UUID()
     let subject = SubjectRef.derive(key: SymmetricKey(size: .bits256), businessId: BusinessID(), consumerId: ConsumerID())
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let staging = LinkDomain("viadere.cksites.dev")!
+    let staging = LinkDomain("staging.viadere.io")!
 
     var viadereKid: String { KeyIdentifier.make(try! viadere.publicKey.signingKey()) }
 
@@ -146,13 +146,13 @@ struct VerificationSessionTests {
     @Test func theLinkIsBuiltAndParsedStrictly() throws {
         let code = "ABCDEFGH"
         #expect(VerificationSessionLink.build(code: code, domain: .production) == "https://viadere.io/v/ABCDEFGH")
-        #expect(VerificationSessionLink.build(code: code, domain: staging) == "https://viadere.cksites.dev/v/ABCDEFGH")
+        #expect(VerificationSessionLink.build(code: code, domain: staging) == "https://staging.viadere.io/v/ABCDEFGH")
         #expect(VerificationSessionLink.parse(URL(string: "https://viadere.io/v/ABCDEFGH")!, domain: .production) == code)
-        #expect(VerificationSessionLink.parse(URL(string: "https://viadere.cksites.dev/v/ABCDEFGH")!, domain: staging) == code)
+        #expect(VerificationSessionLink.parse(URL(string: "https://staging.viadere.io/v/ABCDEFGH")!, domain: staging) == code)
         for bad in ["http://viadere.io/v/ABCDEFGH", "https://www.viadere.io/v/ABCDEFGH", "https://viadere.io:443/v/ABCDEFGH",
                     "https://user@viadere.io/v/ABCDEFGH", "https://viadere.io/v/ABCDEFGH?x=1", "https://viadere.io/v/ABCDEFGH#es=x",
                     "https://viadere.io/v/abcdefgh", "https://viadere.io/v/ABCD-EFGH", "https://viadere.io/k/ABCDEFGH", "https://viadere.io/v/ABCDEFGH/x",
-                    "https://viadere.io.evil.test/v/ABCDEFGH", "https://VIADERE.io/v/ABCDEFGH", "https://viadere.cksites.dev/v/ABCDEFGH"] {
+                    "https://viadere.io.evil.test/v/ABCDEFGH", "https://VIADERE.io/v/ABCDEFGH", "https://staging.viadere.io/v/ABCDEFGH"] {
             #expect(VerificationSessionLink.parse(URL(string: bad)!, domain: .production) == nil, "\(bad)")
         }
     }

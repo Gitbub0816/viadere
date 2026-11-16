@@ -136,14 +136,14 @@ final class MailerSendProviderTests: XCTestCase {
     func testTheEmailSenderSpeaksMailerSendWhenConfigured() async throws {
         let app = try await Application.make(.testing)
         let client = HeaderStubClient(eventLoop: app.eventLoopGroup.next(), status: .accepted)
-        var email = EmailConfig(apiURL: URL(string: "https://api.mailersend.com/v1/email")!, apiKey: "mlsn.mail", fromAddress: "Viadere Staging <no-reply@viadere.cksites.dev>")
+        var email = EmailConfig(apiURL: URL(string: "https://api.mailersend.com/v1/email")!, apiKey: "mlsn.mail", fromAddress: "Viadere Staging <no-reply@staging.viadere.io>")
         email.format = .mailersend
         try await HTTPEmailSender(config: email, client: client).send(EmailMessage(to: "a@b.co", subject: "Hi", text: "Body", kind: "x"))
         let sent = try XCTUnwrap(client.requests.withLockedValue { $0.first })
         XCTAssertEqual(sent.headers.first(name: .authorization), "Bearer mlsn.mail")
         var body = try XCTUnwrap(sent.body)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.readBytes(length: body.readableBytes) ?? [])) as? [String: Any])
-        XCTAssertEqual(json["from"] as? [String: String], ["email": "no-reply@viadere.cksites.dev", "name": "Viadere Staging"])
+        XCTAssertEqual(json["from"] as? [String: String], ["email": "no-reply@staging.viadere.io", "name": "Viadere Staging"])
         XCTAssertEqual(json["to"] as? [[String: String]], [["email": "a@b.co"]])
         XCTAssertEqual(json["subject"] as? String, "Hi")
         XCTAssertEqual(json["text"] as? String, "Body")

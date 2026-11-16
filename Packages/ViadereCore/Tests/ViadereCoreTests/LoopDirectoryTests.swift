@@ -51,16 +51,16 @@ struct LoopDirectoryTests {
     }
 
     @Test func installLinksParseStrictly() throws {
-        let domain = try #require(LinkDomain("viadere.cksites.dev"))
+        let domain = try #require(LinkDomain("staging.viadere.io"))
         let id = LoopDefinitionID()
         let url = try #require(LoopInstallLink(loopId: id).url(domain: domain))
-        #expect(url.absoluteString == "https://viadere.cksites.dev/lp/\(id.description)")
+        #expect(url.absoluteString == "https://staging.viadere.io/lp/\(id.description)")
         #expect(LoopInstallLink.parse(url, domain: domain)?.loopId == id)
-        #expect(LoopInstallLink.parse(URL(string: "https://www.viadere.cksites.dev/lp/\(id)/")!, domain: domain)?.loopId == id)
-        for bad in ["http://viadere.cksites.dev/lp/\(id)", "https://evil.example/lp/\(id)", "https://viadere.cksites.dev.evil.example/lp/\(id)",
-                    "https://viadere.cksites.dev/lp/\(id)?x=1", "https://viadere.cksites.dev/lp/\(id)#f", "https://u@viadere.cksites.dev/lp/\(id)",
-                    "https://viadere.cksites.dev:8443/lp/\(id)", "https://viadere.cksites.dev/lp/\(id)/more", "https://viadere.cksites.dev/lp/not-a-uuid",
-                    "https://viadere.cksites.dev/c/\(id)", "https://viadere.cksites.dev/lp/"] {
+        #expect(LoopInstallLink.parse(URL(string: "https://www.staging.viadere.io/lp/\(id)/")!, domain: domain)?.loopId == id)
+        for bad in ["http://staging.viadere.io/lp/\(id)", "https://evil.example/lp/\(id)", "https://staging.viadere.io.evil.example/lp/\(id)",
+                    "https://staging.viadere.io/lp/\(id)?x=1", "https://staging.viadere.io/lp/\(id)#f", "https://u@staging.viadere.io/lp/\(id)",
+                    "https://staging.viadere.io:8443/lp/\(id)", "https://staging.viadere.io/lp/\(id)/more", "https://staging.viadere.io/lp/not-a-uuid",
+                    "https://staging.viadere.io/c/\(id)", "https://staging.viadere.io/lp/"] {
             #expect(LoopInstallLink.parse(URL(string: bad)!, domain: domain) == nil, "\(bad)")
         }
     }
