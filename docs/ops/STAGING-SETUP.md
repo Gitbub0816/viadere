@@ -15,7 +15,7 @@ Everything below is run from the repository root (`cd viadere`) unless a step sa
 | Topic | What this guide does | Why / trade-off |
 |---|---|---|
 | Bundle ID | Staging keeps `com.viadere.app` (and the extensions' IDs). | The server's `APNS_TOPIC`, App Attest app ID (`TEAMID.com.viadere.app`) and the AASA file (`ServerConfig.appBundleID`) are fixed to that ID, so no server change is needed and one App ID in the portal serves both. Cost: a staging build **replaces** a production install on the same phone (same ID), and you cannot have both side by side. A separate `com.viadere.app.staging` would need a server change (the bundle IDs are constants in `ServerConfig.swift`), another App ID, another provisioning set and a second APNs topic, which is not worth it for one product owner. The staging build is labelled "Viadere Staging" on the home screen. |
-| Domains | API `viadere-api.cksites.dev` (`PUBLIC_BASE_URL`); web/RP origin `viadere.cksites.dev` (`RP_ID`, `RP_ORIGIN`). | Passkeys, the dashboard (`/dashboard`), the operator console and `/.well-known/apple-app-site-association` must all be served from the RP origin, so `viadere.cksites.dev` must route to the same Fly app as the API host (step 7). |
+| Domains | API `api-staging.viadere.io` (`PUBLIC_BASE_URL`); web/RP origin `staging.viadere.io` (`RP_ID`, `RP_ORIGIN`). | Passkeys, the dashboard (`/dashboard`), the operator console and `/.well-known/apple-app-site-association` must all be served from the RP origin, so `staging.viadere.io` must route to the same origin as the API host (the Cloudflare Tunnel to `ca-viadere-api`, step 7). Both are subdomains of the production domain (owner decision 2026-11-16; isolation in `docs/SECURITY.md` §2.116). |
 | Push and App Attest environment | Defaults: APNs `sandbox`, App Attest `development` (matches `fly.staging.toml`). Works for builds you run **from Xcode onto a phone**. | **TestFlight builds are production-signed**: their push tokens belong to the production APNs gateway. For a TestFlight round switch both app and server to production (section 12, step 2). The server drops a token registered for the other environment (`APNSwiftSender`). |
 | Links in SMS and QR codes | Known gap: `ViadereCore.domain` is the constant `viadere.io`, and the server builds handoff/account-link URLs and QR enrollment links from it (`APIRoutes.swift`, `ApprovalEnrollmentCode.swift`). | Staging-generated universal links point at `https://viadere.io/...`, not at staging. Passkeys, push, sign-in approvals, the dashboard and API calls are unaffected. Testing SMS handoff links and QR enrollment end to end needs a Core change (make the link host configurable); until then open those flows by hand on the phone. |
 | Optional, left disabled | Verify (`VERIFY_ENABLED=false`), Approve v2 (`APPROVE_V2_ENABLED=false`), RCS, Wallet passes, Apple Messages for Business, the audit-head export. | Each has an external gate or provider; the toml already sets them off. The generator still produces `KEY_DIRECTORY_LOG_KEY` so Approve v2 can be switched on later. |
@@ -56,10 +56,19 @@ You now have: `TEAMID`, `KEYID`, the `.p8` file.
 
 ## 3. Cloudflare account and zone
 
-Staging runs under **`cksites.dev`** until `viadere.io` is registered: the web origin is `viadere.cksites.dev` and the API `viadere-api.cksites.dev`. Both are one level below `cksites.dev`, so the free Universal SSL certificate covers them (a name like `api.viadere.cksites.dev` would need a paid certificate).
+Staging runs on **subdomains of the production zone `viadere.io`** (owner decision 2026-11-16; it ran under `cksites.dev` before):
 
-1. `cksites.dev` must be an **Active** zone in your Cloudflare account. (If you later move to `viadere.io`, add that zone the same way and swap the names in `fly.staging.toml`, `App/Configs/Staging.xcconfig` and this guide.)
-2. The zone holds your other sites too. Everything below uses the `viadere` / `viadere-api` names only, so it cannot touch other records. (`Infra/terraform/cloudflare.tf` is for the managed setup; this guide does the staging pieces by hand in the dashboard.)
+| Host | Role | Server setting |
+|---|---|---|
+| `staging.viadere.io` | web origin, link domain, passkey RP ID, dashboard, operator console, AASA | `RP_ID`, `RP_ORIGIN`, `LINK_DOMAIN` |
+| `api-staging.viadere.io` | API | `PUBLIC_BASE_URL` |
+| `assets-staging.viadere.io` | Brand Kit images only | `ASSET_DOMAIN` |
+| `site-staging.viadere.io` | marketing site Worker (section 13) | none |
+
+All four are one level below `viadere.io`, so the free Universal SSL certificate covers them (a name like `api.staging.viadere.io` would need a paid certificate).
+
+1. `viadere.io` must be an **Active** zone in your Cloudflare account. It is the **production** zone: every staging step touches only the four names above. Never create, edit or delete a record or rule for `viadere.io`, `www.viadere.io` or `api.viadere.io` for staging; the helper scripts refuse to (`Infra/cloudflare/point_staging_to_azure.py`, `add_asset_host.py`), and a staging server refuses those names at start-up (`ServerConfig.refuseProductionHostsInStaging`).
+2. Staging and production share the zone's rulesets, TLS settings and HSTS. Before `Infra/cloudflare` is applied to `viadere.io` for production, read `docs/SECURITY.md` §2.116 (its entry-point rulesets would replace the staging rules).
 
 ## 4. Database (Azure Database for PostgreSQL)
 
@@ -78,44 +87,28 @@ MailerSend keeps its own STOP list (a recipient who texts STOP is suppressed the
 
 ## 6. MailerSend (email)
 
-1. **Domains > Add domain** > `viadere.cksites.dev`. MailerSend shows DNS records (SPF, DKIM, a return-path CNAME). Add each in Cloudflare DNS > Records exactly as shown, **proxy status DNS only**, then **Verify** until it is green. Do not create a record at the bare name `viadere` other than the CNAME in step 7.
+1. **Domains > Add domain** > `staging.viadere.io`. MailerSend shows DNS records (SPF, DKIM, a return-path CNAME). Add each in Cloudflare DNS > Records exactly as shown, **proxy status DNS only**, then **Verify** until it is green. Do not create an A, AAAA or CNAME record at `staging` other than the tunnel CNAME of step 7.
 2. **Integrations > API tokens**: create a token with **Email: full access** limited to that domain (`EMAIL_API_KEY`). Use a different token from the SMS one, so either can be revoked alone.
-3. `fly.staging.toml` already has `EMAIL_API_URL = "https://api.mailersend.com/v1/email"`, `EMAIL_API_FORMAT = "mailersend"` and `EMAIL_FROM_ADDRESS = "Viadere Staging <no-reply@viadere.cksites.dev>"`. The server needs all three of URL, key and sender, or none (`PlatformConfig.swift`).
+3. `fly.staging.toml` already has `EMAIL_API_URL = "https://api.mailersend.com/v1/email"`, `EMAIL_API_FORMAT = "mailersend"` and `EMAIL_FROM_ADDRESS = "Viadere Staging <no-reply@staging.viadere.io>"`. The server needs all three of URL, key and sender, or none (`PlatformConfig.swift`).
 
 The dashboard sign-up emails a 6-digit code through this provider, so email must work before you can create a business (step 10).
 
 ## 7. Cloudflare DNS, TLS and the origin lock
 
-Steps 7.1 to 7.3 can be done now. Step 7.4 needs the Fly app from step 8.2, and step 7.5 needs the `EDGE_TOKEN` from step 9.1; come back here at those points.
+Steps 7.1 and 7.2 can be done now. Step 7.3 needs the Cloudflare Tunnel (`docs/ops/AZURE-SETUP.md` section 9) and the `EDGE_TOKEN` from step 9.1; come back here at that point.
 
-1. **Certificates at the edge:** both staging hostnames (`viadere-api.cksites.dev`, `viadere.cksites.dev`) are one level below `cksites.dev`, so Cloudflare's free Universal SSL certificate covers them; no paid certificate is needed.
-2. **SSL/TLS > Overview > Full (strict)**. Never Flexible or Full.
-3. **DNS records** (Cloudflare > DNS > Records), all **Proxied** (orange cloud):
-
-   | Type | Name | Target |
-   |---|---|---|
-   | CNAME | `viadere-api` | `viadere-server-staging.fly.dev` |
-   | CNAME | `viadere` | `viadere-server-staging.fly.dev` |
-
-   Why two: the API host serves the app's REST calls; the **`viadere` host serves the passkey origin, the dashboard and `/.well-known/apple-app-site-association`** (`RP_ORIGIN`, `Web/WebRoutes.swift`). Apple's CDN fetches the AASA file from `https://viadere.cksites.dev/.well-known/apple-app-site-association` and requires a direct `200` with no redirect, so a redirect or a Worker that rewrites it will break associated domains. (Alternative: a Worker or Redirect Rule is allowed only if it proxies the request, still answers `200` on that exact path and keeps the origin token header; the plain proxied CNAME is simpler and what this guide uses.)
-4. **Fly certificates** (so Cloudflare's Full (strict) validates the origin). Allocate addresses once, then add both names:
+1. **Certificates at the edge:** the staging hostnames are one level below `viadere.io`, so Cloudflare's free Universal SSL certificate covers them; no paid certificate is needed. No origin certificate is needed either: the Cloudflare Tunnel carries the traffic to `ca-viadere-api` (`docs/ops/AZURE-SETUP.md` section 9).
+2. **SSL/TLS > Overview > Full (strict)**. Never Flexible or Full. (It is a zone setting, shared with production.)
+3. **Tunnel hostnames, DNS and the origin lock, in one step** (after the tunnel exists, AZURE-SETUP.md section 9, and after `EDGE_TOKEN` exists, step 9.1):
 
    ```bash
-   fly ips allocate-v4 --shared --app viadere-server-staging
-   fly ips allocate-v6 --app viadere-server-staging
-   fly certs add viadere-api.cksites.dev --app viadere-server-staging
-   fly certs add viadere.cksites.dev     --app viadere-server-staging
-   fly certs show viadere-api.cksites.dev --app viadere-server-staging
-   fly certs show viadere.cksites.dev     --app viadere-server-staging
+   python3 -I Infra/cloudflare/point_staging_to_azure.py   # api-staging + staging; plan first, asks, token input hidden, nothing on disk
+   python3 -I Infra/cloudflare/add_asset_host.py           # assets-staging (Brand Kits), same style
    ```
 
-   Each `show` prints an `_acme-challenge` CNAME target. Add them in Cloudflare as **DNS only** (grey cloud): `_acme-challenge.viadere-api` and `_acme-challenge.viadere` pointing at the printed `...flydns.net` targets. Repeat `fly certs show` until each says **Ready** (`Infra/fly/README.md` steps 3 to 5 describe the same flow for production).
-5. **Edge token header** (the origin lock, `Operations/EdgeLock.swift`): Cloudflare > Rules > **Transform Rules** > **Modify Request Header** > Create rule:
-   * Name `viadere staging edge token`
-   * Custom filter expression: `(http.host eq "viadere-api.cksites.dev") or (http.host eq "viadere.cksites.dev")`
-   * Modify header > **Set static** > Header name `X-Viadere-Edge-Token` > Value = the `EDGE_TOKEN` printed by the generator in step 9.1 (exactly the same text).
-
-   Do this **after** generating the secrets. Without this rule every request through Cloudflare is refused by the server with `421`.
+   They add the tunnel public hostnames (`http://ca-viadere-api`, Host header `ca-viadere-api`), replace the names' records with proxied CNAMEs to `<tunnel id>.cfargotunnel.com` (reference: `Infra/cloudflare/viadere-staging-dns.txt`), and keep one request-header Transform Rule that sets `X-Viadere-Edge-Token` for **exactly** the staging hostnames the tunnel sends to the origin, with the **staging** `EDGE_TOKEN` (never production's value). Production's rules are left alone. Why `staging` and `api-staging` both route to the api: the API host serves the app's REST calls; the **`staging` host serves the passkey origin, the dashboard and `/.well-known/apple-app-site-association`** (`RP_ORIGIN`, `Web/WebRoutes.swift`). Apple's CDN fetches the AASA file from `https://staging.viadere.io/.well-known/apple-app-site-association` and requires a direct `200` with no redirect, so a redirect or a Worker that rewrites it will break associated domains.
+4. By hand instead (dashboard): Zero Trust > Networks > Tunnels > `viadere-staging-azure` > Public hostnames, one per staging host as above; DNS > Records, a proxied CNAME per host; Rules > Transform Rules > Modify Request Header, a rule named `Viadere staging origin edge token` with expression `(http.host in {"api-staging.viadere.io" "staging.viadere.io" "assets-staging.viadere.io"})` that **sets** `X-Viadere-Edge-Token` to the staging `EDGE_TOKEN`. Without it every request is refused by the server with `421`.
+5. **DMARC** for the staging sender: `_dmarc.staging.viadere.io` TXT `v=DMARC1; p=none` (in `viadere-staging-dns.txt`), so production's DMARC policy for subdomains does not decide staging mail.
 6. Keep WAF **Bot Fight Mode / Super Bot Fight Mode** off or add a skip rule for `/.well-known/apple-app-site-association`: a challenge page is not a `200` AASA file and Apple's fetcher cannot solve it.
 7. Optional hardening (production has it through Terraform): minimum TLS 1.2 (SSL/TLS > Edge Certificates > Minimum TLS Version), Always Use HTTPS.
 
@@ -169,9 +162,9 @@ Leave unset: `RCS_*`, `PASS_*`, `DIDIT_*`, `WALLET_*`, the audit-export values, 
 ### 9.5 Verify
 
 ```bash
-curl -i  https://viadere-api.cksites.dev/healthz          # 200 {"status":"ok"}
-curl -i  https://viadere-api.cksites.dev/readyz           # 200 (database answers); 503 = database problem
-curl -si https://viadere.cksites.dev/.well-known/apple-app-site-association | head -20   # 200, application/json, no redirect, body lists TEAMID.com.viadere.app
+curl -i  https://api-staging.viadere.io/healthz          # 200 {"status":"ok"}
+curl -i  https://api-staging.viadere.io/readyz           # 200 (database answers); 503 = database problem
+curl -si https://staging.viadere.io/.well-known/apple-app-site-association | head -20   # 200, application/json, no redirect, body lists TEAMID.com.viadere.app
 curl -si -o /dev/null -w '%{http_code}\n' https://viadere-server-staging.fly.dev/v1/directory/search?q=a   # 421: origin lock works
 ```
 
@@ -183,8 +176,8 @@ Client IP check (`TRUSTED_PROXY_COUNT = "2"`): see `Infra/fly/README.md` step 8.
 
 The server refuses to start without the two secrets, so do this right after creating the app's certificates (the URLs only need to exist when MailerSend first sends to them):
 
-1. **SMS > Inbound routing > Add route**: your number, forward URL `https://viadere-api.cksites.dev/v1/providers/sms/inbound`, no filter, enabled. Copy the route's **secret** into `MAILERSEND_SMS_INBOUND_SECRET`.
-2. **SMS > Webhooks > Add webhook**: URL `https://viadere-api.cksites.dev/v1/providers/sms/status`, events `sms.sent`, `sms.delivered`, `sms.failed`. Copy its **signing secret** into `MAILERSEND_SMS_WEBHOOK_SECRET`.
+1. **SMS > Inbound routing > Add route**: your number, forward URL `https://api-staging.viadere.io/v1/providers/sms/inbound`, no filter, enabled. Copy the route's **secret** into `MAILERSEND_SMS_INBOUND_SECRET`.
+2. **SMS > Webhooks > Add webhook**: URL `https://api-staging.viadere.io/v1/providers/sms/status`, events `sms.sent`, `sms.delivered`, `sms.failed`. Copy its **signing secret** into `MAILERSEND_SMS_WEBHOOK_SECRET`.
 3. ```bash
    fly secrets set --app viadere-server-staging --stage MAILERSEND_SMS_INBOUND_SECRET='...' MAILERSEND_SMS_WEBHOOK_SECRET='...'
    ```
@@ -201,9 +194,9 @@ Every request is checked against its own route's secret (`Signature` = hex HMAC-
    fly ssh console --app viadere-server-staging -C "/app/ViadereServer create-operator --email you@example.com --name 'Your Name' --env production"
    ```
 
-   It prints a one-time link (1 hour) such as `https://viadere-api.cksites.dev/operator/enroll/<token>`. **Replace the host with `https://viadere.cksites.dev`** before opening it: the passkey is bound to `RP_ORIGIN` (`https://viadere.cksites.dev`), and the server checks that origin (`DashboardSessions.swift`). Create the passkey (Touch ID / iCloud Keychain).
-2. **Business sign-up.** Open `https://viadere.cksites.dev/dashboard/signup`, register with an email you control and a passkey, enter the 6-digit code that arrives by email, then sign in at `/dashboard/login`. This creates a pending organisation and application.
-3. **Verify the business.** Open `https://viadere.cksites.dev/operator/login`, sign in, open the application under `/operator`, and verify it (this issues the handle and permanent code).
+   It prints a one-time link (1 hour) such as `https://api-staging.viadere.io/operator/enroll/<token>`. **Replace the host with `https://staging.viadere.io`** before opening it: the passkey is bound to `RP_ORIGIN` (`https://staging.viadere.io`), and the server checks that origin (`DashboardSessions.swift`). Create the passkey (Touch ID / iCloud Keychain).
+2. **Business sign-up.** Open `https://staging.viadere.io/dashboard/signup`, register with an email you control and a passkey, enter the 6-digit code that arrives by email, then sign in at `/dashboard/login`. This creates a pending organisation and application.
+3. **Verify the business.** Open `https://staging.viadere.io/operator/login`, sign in, open the application under `/operator`, and verify it (this issues the handle and permanent code).
 4. **API key.** In the dashboard create an API key (a `vdk_test_...` sandbox key if offered) and a webhook endpoint if needed (webhook ownership verification is `required`: the endpoint must answer the challenge with the HMAC proof, see BUSINESS-INTEGRATION 3a; `ALLOW_INSECURE_WEBHOOKS=false`, so https only).
 5. Connect the phone app to the business with its code or `/c/<code>` page, then send an interaction from the dashboard or with `POST /v1/business/interactions` (`Server/README.md`).
 
@@ -226,13 +219,15 @@ Hardware matters: App Attest, the Secure Enclave and passkeys need a **real iPho
 2. **Pins.** Configs/Staging.xcconfig holds placeholders and the build **fails** until they are real (`App/Scripts/check-release-pins.sh` runs for the `Staging` configuration of the app and the clip, and the app would fail closed at runtime anyway). Compute them once Cloudflare serves the host (step 7 done):
 
    ```bash
-   python3 -I App/Scripts/compute-spki-pins.py viadere-api.cksites.dev
+   python3 -I App/Scripts/compute-spki-pins.py api-staging.viadere.io
    ```
+
+   The committed pins are CA pins taken from the previous staging host (same Cloudflare Universal SSL CAs); re-check them with this command once `api-staging.viadere.io` resolves, and replace them only if its chain shows other CAs.
 
    It prints the SPKI SHA-256 (base64) of every certificate in the chain, using exactly the pipeline `openssl s_client ... | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64`. Cloudflare renews its edge certificate regularly and can switch CA, so pin the **issuing CA (intermediate)**, not the leaf: choose a CA entry (`[1]`) as `VIADERE_PIN_PRIMARY`, and a different key as `VIADERE_PIN_BACKUP`: the other CA Cloudflare may use (for example run the script on another Cloudflare-fronted host, which may be served by a different CA, and take its CA pin), or the root, or the next intermediate. The app accepts any certificate in the (system-validated) chain that matches any pin (`PinEvaluator`). Edit both lines in `App/Configs/Staging.xcconfig` and commit them (pins are public). If a pin contains two consecutive slashes, write one as `$()`.
 
    Why the leaf is risky: if a rotation puts a new leaf key in front of testers who are on an older build, the app cannot connect.
-3. Select the **Staging** scheme (Product > Scheme), target `Viadere`, your iPhone. Signing & Capabilities: choose your Team; Xcode registers the missing IDs and profiles. Run. The app is named "Viadere Staging", uses `https://viadere-api.cksites.dev`, relying party `viadere.cksites.dev`, associated domains `applinks:`, `webcredentials:`, `appclips:viadere.cksites.dev`, APNs sandbox, App Attest `development` (all from `Configs/Staging.xcconfig` and `project.yml`).
+3. Select the **Staging** scheme (Product > Scheme), target `Viadere`, your iPhone. Signing & Capabilities: choose your Team; Xcode registers the missing IDs and profiles. Run. The app is named "Viadere Staging", uses `https://api-staging.viadere.io`, relying party `staging.viadere.io`, associated domains `applinks:`, `webcredentials:`, `appclips:staging.viadere.io`, APNs sandbox, App Attest `development` (all from `Configs/Staging.xcconfig` and `project.yml`).
 4. Associated domains for development-signed builds: iOS fetches the AASA file through Apple's CDN, which caches it (hours). If passkey creation fails with an "application is not associated with domain" error right after the first deploy, wait, or check the file with the `curl` of step 9.5 and reinstall the app once it is correct. (On a development-signed build, Settings > Developer > Associated Domains Development makes the phone fetch the file directly, together with the `?mode=developer` suffix on the entitlement entries.)
 5. First run: create an account (passkey), enrol the device. In `APP_ATTEST_MODE=report`, a failed attestation is recorded as `unattested` but allowed; flip the server to `require` once enrolments show `attested` (`Infra/fly/README.md`, round 4).
 
@@ -262,8 +257,8 @@ The marketing site (`Site/`, ADR-04) deploys to Workers Static Assets. Cloudflar
 1. **Cloudflare API token:** My Profile > API Tokens > Create Token > Custom token > permission **Account > Workers Scripts > Edit**, your account only, nothing else. Copy the token. Copy the **Account ID** from the dashboard home (right column, or the URL).
 2. **GitHub:** the repository > Settings > Environments > **New environment** `site-staging`. In it, add two **environment secrets**: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. (Environment secrets stay out of every other job.)
 3. **Run it:** every push to `claude/inspiring-cannon-t5hxfw` that touches `Site/` deploys staging automatically. To deploy now: Actions > **Site** > open the newest run on that branch > **Re-run all jobs** (a run from before the secrets existed fails at the upload step; re-running fixes it). The build takes about 10 minutes (Swift); the upload creates the Worker `viadere-site-staging`. (The "Run workflow" button with a staging/production choice appears only once this workflow is on `main`: GitHub offers it only for the default branch.)
-4. **Domain:** Cloudflare > Workers & Pages > `viadere-site-staging` > Settings > Domains & Routes > Add > **Custom domain** `viadere-site.cksites.dev`. Cloudflare creates the DNS record and certificate. (Not `viadere.cksites.dev`: that host is the server's web origin.)
-5. **Optional, recommended while it is unpublished:** Zero Trust > Access > Applications > Add > Self-hosted, domain `viadere-site.cksites.dev`, policy "Allow" for your own email only.
+4. **Domain:** Cloudflare > Workers & Pages > `viadere-site-staging` > Settings > Domains & Routes > Add > **Custom domain** `site-staging.viadere.io`. Cloudflare creates the DNS record and certificate. (Not `staging.viadere.io`: that host is the server's web origin.)
+5. **Optional, recommended while it is unpublished:** Zero Trust > Access > Applications > Add > Self-hosted, domain `site-staging.viadere.io`, policy "Allow" for your own email only.
 
 Pushes keep it current. Production (`viadere-site` on `viadere.io`) deploys only from `main`, through the `site-production` environment.
 
@@ -322,19 +317,20 @@ The server prints `Startup failed: <error>` and exits (`Server/Sources/ViadereSe
 | `Missing required configuration: MAILERSEND_SMS_...` | That MailerSend secret is not set (step 9.3 or 9.6). `Invalid configuration: MAILERSEND_SMS_FROM_NUMBER (E.164)`: the toml still has the placeholder. `... (at least 16 characters, different values)`: a secret was pasted wrong. |
 | `Missing required configuration: TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN (or SMS_PROVIDER=mailersend)` | `SMS_PROVIDER` is missing from the toml (it defaults to Twilio). |
 | `Missing required configuration: EMAIL_API_URL / EMAIL_API_KEY / EMAIL_FROM_ADDRESS` | None of the three set. `... (all three or none)`: one is missing (usually `EMAIL_API_KEY`). `Invalid configuration: EMAIL_API_URL (https required)`. |
-| `Invalid configuration: RP_ORIGIN (must be an https origin of RP_ID outside development)` | `RP_ORIGIN` host must equal or be a subdomain of `RP_ID`. Staging: `https://viadere.cksites.dev` and `viadere.cksites.dev`. |
+| `Invalid configuration: RP_ID (staging must not use the production host viadere.io; ...)` (or `LINK_DOMAIN`, `RP_ORIGIN`, `PUBLIC_BASE_URL`, `DASHBOARD_ORIGIN`) | A staging server was given a production name. Use `staging.viadere.io` / `https://api-staging.viadere.io` (`Infra/azure/terraform.tfvars.example`; `docs/SECURITY.md` §2.116). |
+| `Invalid configuration: RP_ORIGIN (must be an https origin of RP_ID outside development)` | `RP_ORIGIN` host must equal or be a subdomain of `RP_ID`. Staging: `https://staging.viadere.io` and `staging.viadere.io`. |
 | `Invalid configuration: PUBLIC_BASE_URL (must be https in production)` | Fix the toml value. |
 | `Invalid configuration: DATABASE_MIGRATION_URL (postgres URL)` | URL must start with `postgres://`. |
 | Refuses to start because the runtime role can change the schema / owns tables | `DATABASE_URL` is not `viadere_app`, or `viadere_app` has too many rights (step 4.2). `docs/ops/RUNBOOKS.md`, "Database role bootstrap". |
 | `Invalid configuration: APP_ATTEST_MODE (off, report or require)` / `APP_ATTEST_ENVIRONMENT (development or production)` | Typo in the toml. |
 | `Missing required configuration: KEY_DIRECTORY_LOG_KEY (...)` | Only when `APPROVE_V2_ENABLED=true`. Set the generated value. `Invalid ... (base64url, 32-byte P-256 private scalar)`: regenerate with the script. |
 | Release command fails (`migrate`) | Open the release log in the `fly deploy` output. Usual causes: wrong migrator password, `sslmode` host mismatch (use the direct host), Neon compute asleep for a moment (retry). |
-| Machine healthy but `https://viadere-api.cksites.dev` returns 421 | Cloudflare rule missing or the token differs from `EDGE_TOKEN` (step 7.5). |
+| Machine healthy but `https://api-staging.viadere.io` returns 421 | Cloudflare rule missing or the token differs from `EDGE_TOKEN` (step 7.5). |
 | `525` / `526` from Cloudflare | Fly certificate not **Ready** (step 7.4), or SSL mode is not Full (strict). |
-| Browser shows a certificate error for `viadere-api.cksites.dev` | Universal SSL isn't active yet for the zone (it can take up to 24 h after the nameserver switch), or the record isn't proxied (orange cloud). |
+| Browser shows a certificate error for `api-staging.viadere.io` | Universal SSL isn't active yet for the zone (it can take up to 24 h after the nameserver switch), or the record isn't proxied (orange cloud). |
 | App: "can't connect" / TLS error immediately | Pins wrong or placeholders (`tls.pin.mismatch` in the device log). Recompute (step 11.2). |
 | Pushes never arrive | Sandbox/production mismatch between the build (TestFlight vs Xcode) and `APNS_ENVIRONMENT` (section 0), wrong `APNS_KEY_ID`, or the phone's token was registered before the toml was fixed. |
-| Passkey: "not associated with domain" | AASA not served by `viadere.cksites.dev` (step 9.5), Apple CDN cache, or the app's team ID differs from `APPLE_TEAM_ID`. |
+| Passkey: "not associated with domain" | AASA not served by `staging.viadere.io` (step 9.5), Apple CDN cache, or the app's team ID differs from `APPLE_TEAM_ID`. |
 
 ## Files this guide touches
 

@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- Example integration of version 1 of the "Verify with Viadere" button (QR code first; docs/VERIFY-BUTTON.md). New pages use version 2:
      verify-button.html, which shows the Viadere code first. Version 1 is frozen (SRI) from before the production domain was chosen: it
-     renders staging links (viadere.cksites.dev) only, so production pages use version 2. Served by YOUR site, with a CSP like:
+     renders only links on the retired staging host viadere.cksites.dev (staging moved to staging.viadere.io on 2026-11-16), so it renders
+     no current link: every page uses version 2. The links below show its accepted form only. Served by YOUR site, with a CSP like:
      Content-Security-Policy: default-src 'none'; script-src https://viadere.io; style-src 'self' https://viadere.io;
                               base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'
      No inline script or style is needed. Your server renders `link` and `expires-at` from the ticket it created a moment ago

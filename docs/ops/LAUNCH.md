@@ -81,7 +81,7 @@ Actions > Azure > Run workflow (`apply = true`).
 ```bash
 gh workflow run azure.yml -f environment=staging -f deploy_digest=sha256:<server digest>
 gh run watch "$(gh run list --workflow azure.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
-curl -fsS https://viadere-api-az.cksites.dev/healthz && curl -fsS https://viadere-api-az.cksites.dev/readyz
+curl -fsS https://api-staging.viadere.io/healthz && curl -fsS https://api-staging.viadere.io/readyz
 ```
 
 The workflow verifies the signature, runs the migrate job, then rolls the api to the same digest. Verification checklist:
@@ -107,7 +107,7 @@ gates of E9 before any authority flag. Publishing discovery and JWKS:
 gh workflow run authority-admin.yml -f command=key-inventory-record -f change_file=Infra/azure-authority/changes/<name>.json
 gh workflow run authority-admin.yml -f command=key-inventory-check -f change_file=Infra/azure-authority/changes/<name>.json
 gh workflow run authority-admin.yml -f command=key-version-pin -f change_file=Infra/azure-authority/changes/<pin>.json   # once per key
-gh workflow run authority-publish.yml -f inventory_run_id=<admin run id> -f issuer=https://id.<staging domain>
+gh workflow run authority-publish.yml -f inventory_run_id=<admin run id> -f issuer=https://id-staging.viadere.io
 ```
 
 ## 5. Website (`STAGING-SETUP.md` section 13)
@@ -121,12 +121,47 @@ gh workflow run site.yml -f target=staging
 ```bash
 cd App
 cp Configs/Local.xcconfig.example Configs/Local.xcconfig      # DEVELOPMENT_TEAM = <TEAMID>
-python3 -I Scripts/compute-spki-pins.py viadere-api.cksites.dev  # put two CA pins into Configs/Staging.xcconfig
+python3 -I Scripts/compute-spki-pins.py api-staging.viadere.io  # put two CA pins into Configs/Staging.xcconfig
 xcodegen
 open Viadere.xcodeproj                                           # scheme Staging, a real iPhone, Run
 ```
 
 TestFlight: Product > Archive with both the app and the server switched to production APNs and App Attest (section 12).
+
+## 6a. Move staging to viadere.io (owner decision 2026-11-16, once)
+
+Staging leaves `cksites.dev` for `staging.viadere.io` (web, links, passkey RP), `api-staging.viadere.io` (API),
+`assets-staging.viadere.io` (Brand Kit assets) and `site-staging.viadere.io` (marketing site). Why it is safe and what stays shared:
+`SECURITY.md` §2.116. In order:
+
+- [ ] **Cloudflare.** With a short-lived API token (Zone: Read, DNS: Edit, Transform Rules: Edit, Cache Rules: Edit on `viadere.io`;
+      optionally Zone: Read and Transform Rules: Read on `cksites.dev` to copy the old edge token; Account > Cloudflare Tunnel: Edit):
+      `python3 -I Infra/cloudflare/point_staging_to_azure.py`, then `python3 -I Infra/cloudflare/add_asset_host.py`. Both print the plan
+      and ask; the token is read without echo; nothing is written to disk; neither touches `viadere.io`, `www.viadere.io` or
+      `api.viadere.io`. Add `_dmarc.staging.viadere.io` (`Infra/cloudflare/viadere-staging-dns.txt`). Delete the token afterwards.
+- [ ] **MailerSend.** Add and verify the sender domain `staging.viadere.io` (`STAGING-SETUP.md` step 6); the inbound and status webhook
+      URLs become `https://api-staging.viadere.io/v1/providers/sms/...` (step 9.6).
+- [ ] **Site.** Workers > `viadere-site-staging` > Domains & Routes: add the custom domain `site-staging.viadere.io` (and its Access
+      application), remove the old one.
+- [ ] **Azure `app_env`.** In your real `Infra/azure/terraform.tfvars` (not the example) set `PUBLIC_BASE_URL = "https://api-staging.viadere.io"`,
+      `RP_ID = "staging.viadere.io"`, `RP_ORIGIN = "https://staging.viadere.io"`, `LINK_DOMAIN = "staging.viadere.io"`,
+      `ASSET_DOMAIN = "assets-staging.viadere.io"`, `EMAIL_FROM_ADDRESS = "Viadere Staging <no-reply@staging.viadere.io>"` (and
+      `OIDC_ISSUER = "https://id-staging.viadere.io"` if the provider is on), and the GitHub `staging` environment variable
+      `AZURE_SMOKE_HOST = api-staging.viadere.io`. GitHub Actions is billing-locked, so apply from Cloud Shell:
+      `bash Infra/azure/cloudshell/apply-staging.sh`. A staging server now refuses to start with a production name in these settings.
+- [ ] **Redeploy** the api (`bash Infra/azure/deploy-staging.sh`, or section 3 when Actions works) and check
+      `curl -fsS https://api-staging.viadere.io/readyz` and
+      `curl -fsS https://staging.viadere.io/.well-known/apple-app-site-association` (200, JSON, no redirect, lists `TEAMID.com.viadere.app`).
+- [ ] **Pins.** `python3 -I App/Scripts/compute-spki-pins.py api-staging.viadere.io` and compare with `App/Configs/Staging.xcconfig`
+      (the committed CA pins came from the old host's Cloudflare chain; change them only if the CAs differ).
+- [ ] **App.** `cd App && xcodegen`, build the Staging scheme, and **delete the app before installing** the new build: staging passkeys were
+      bound to the old RP ID (`viadere.cksites.dev`) and stop working, so testers create a new account or passkey.
+- [ ] **Apple.** No portal change for development builds: the associated domains (`applinks:`, `webcredentials:`, `appclips:`) come from the
+      build setting `VIADERE_WEB_DOMAIN`. The AASA must be served on `staging.viadere.io` (previous step); Apple's CDN may take hours to fetch it.
+- [ ] **Retire `cksites.dev`.** After staging works on the new names, delete the old staging records (`viadere`, `viadere-api`, `viadere-api-az`,
+      `viadere-assets`, their `_acme-challenge` and `_dmarc` records) and the old edge-token, asset-header and cache rules in the `cksites.dev` zone.
+- [ ] **Before `Infra/cloudflare` is ever applied to `viadere.io` for production:** carry the staging rules into it or move staging to its own
+      zone (`SECURITY.md` §2.116, residual risk 2).
 
 ## 7. Features that stay off until their owner step
 

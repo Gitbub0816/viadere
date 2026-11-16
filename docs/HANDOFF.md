@@ -6,7 +6,9 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
-**Production domain is viadere.io (owner decision 2026-11-16, F-2).** The `.com` placeholder is gone from code, config, Infra, Site, SDKs and docs; the CKey, HTTP-signature and QR vectors were regenerated from their reference generators. Open: the frozen verify-button `v1` still matches the placeholder host (its SRI hashes are pinned), so it renders staging links only until the owner rules on it.
+**Production domain is viadere.io (owner decision 2026-11-16, F-2).** The `.com` placeholder is gone from code, config, Infra, Site, SDKs and docs; the CKey, HTTP-signature and QR vectors were regenerated from their reference generators. Open: the frozen verify-button `v1` still matches the placeholder host (its SRI hashes are pinned) and the retired staging host, so it renders no current link until the owner rules on it.
+
+**Staging moved to subdomains of viadere.io (owner decision 2026-11-16, F-7).** `staging.viadere.io` (web, links, passkey RP ID), `api-staging.viadere.io`, `assets-staging.viadere.io`, `site-staging.viadere.io`; the `cksites.dev` names are retired (the frozen verify-button `v1` now renders no current link). Isolation and residual risks: SECURITY.md §2.116 (a staging server refuses production names at start-up; production refuses staging-origin passkey ceremonies; cookies are host-only; link domains never match across). Owner steps: LAUNCH.md "Move staging to viadere.io".
 
 **Authority: passkey cancel, `passkey_added`, App Attest at genesis, JWE seal (2026-11-15, G30).** A pending recovery can be cancelled with a UV
 passkey assertion (`POST /v1/keylog/recovery/passkey-cancel/challenges`, then `/passkey-cancel`): its own WebAuthn challenge bound to the account and

@@ -198,7 +198,7 @@ These two identities are the only subscription-scope assignments; the policy che
 |---|---|---|
 | `azure-plan-staging` | deployment branches: `main` | `AZURE_INFRA_CLIENT_ID` = client id of `id-gh-infra-plan-stg` |
 | `azure-infra-staging` | **required reviewers** (two, not the author), branches: `main` | `AZURE_INFRA_CLIENT_ID` = client id of `id-gh-infra-apply-stg` |
-| `staging` (already exists for Fly) | as today | from `tofu output -json github_deploy` after section 6: `AZURE_CLIENT_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_PROFILE`, `AZURE_ACR_NAME` (empty in lean); plus `AZURE_SMOKE_HOST` (e.g. `viadere-api-az.cksites.dev`) |
+| `staging` (already exists for Fly) | as today | from `tofu output -json github_deploy` after section 6: `AZURE_CLIENT_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_PROFILE`, `AZURE_ACR_NAME` (empty in lean); plus `AZURE_SMOKE_HOST` (e.g. `api-staging.viadere.io`) |
 | `production` | required reviewers + wait timer + tag rule `v*` (as today) | same names, production values (later) |
 
 Repository variables (Settings → Secrets and variables → Actions → Variables): `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_PROFILE` (`lean`), `AZURE_NAME_SUFFIX`, `AZURE_DB_ADMIN_GROUP_ID`, `AZURE_KV_CRYPTO_OFFICERS_GROUP_ID`, `AZURE_BOOTSTRAP_IMAGE` (the digest used in section 6), `AZURE_GHCR_PULL_USERNAME`, `AZURE_APP_ENV_JSON` (the `app_env` map of your tfvars as one JSON object), `AZURE_TFSTATE_RESOURCE_GROUP`, `AZURE_TFSTATE_STORAGE_ACCOUNT`, and finally `AZURE_IAC_ENABLED` = `true` (until then the plan/apply jobs are skipped; `static` always runs). With the same variable names at environment level, production overrides them.
@@ -361,7 +361,7 @@ The connector is `ca-cloudflared` (created in section 6, waiting for its token).
 
 **A. With OpenTofu (zones managed by `Infra/terraform`):** set in that module's tfvars `enable_azure_tunnel = true` and `azure_test_hostname_label = "viadere-api-az"` (phase 1), apply, then read the tunnel id: `tofu output azure_tunnel_id`. Cutover later is `api_origin = "azure"` (rollback: `"fly"`). The module also adds the test host to the edge-token transform rule, the cache bypass and the edge rate limits. The API token needs **Account → Cloudflare Tunnel: Edit** in addition to its zone permissions.
 
-**B. By hand (staging zone `cksites.dev` is hand-configured today):** Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared, name `viadere-staging-azure`; skip the install step; Public hostname: `viadere-api-az.cksites.dev`, service `HTTP` → `ca-viadere-api`, Additional application settings → HTTP Settings → HTTP Host Header `ca-viadere-api`. Then add `viadere-api-az.cksites.dev` to the expression of the existing edge-token transform rule (and to the WAF/rate-limit rules that name the API host).
+**B. By hand (staging lives in the production zone `viadere.io` since 2026-11-16 and is hand-configured; `Infra/cloudflare/point_staging_to_azure.py` does the hostname, DNS and edge-token steps, `docs/ops/STAGING-SETUP.md` step 7.3):** Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared, name `viadere-staging-azure`; skip the install step; Public hostname: `api-staging.viadere.io`, service `HTTP` → `ca-viadere-api`, Additional application settings → HTTP Settings → HTTP Host Header `ca-viadere-api`. Then add `api-staging.viadere.io` to the expression of the existing edge-token transform rule (and to the WAF/rate-limit rules that name the API host).
 
 Then store the tunnel token in Key Vault (never in OpenTofu state):
 
@@ -380,7 +380,9 @@ The tunnel shows **Healthy** in the Zero Trust dashboard within a minute. The ed
 
 ### 9.1 Brand asset host (Brand Kits, WP-2.1, ADR-0017)
 
-Brand images are served by the api as `https://{ASSET_DOMAIN}/b/{sha256}.png` and the asset host answers nothing else (no AASA, no API, no console, never a cookie). It must be a host of its own: not `RP_ID`, `LINK_DOMAIN` or the console host, and not a subdomain of any of them (the server refuses the boot otherwise), for example `assets.viadere-cdn.example` (staging: a host in a separate zone from `cksites.dev`'s API hosts).
+Brand images are served by the api as `https://{ASSET_DOMAIN}/b/{sha256}.png` and the asset host answers nothing else (no AASA, no API, no console, never a cookie). It must be a host of its own: not `RP_ID`, `LINK_DOMAIN` or the console host, and not a subdomain of any of them (the server refuses the boot otherwise), for example `assets.viadere-cdn.example`; staging uses `assets-staging.viadere.io`, a sibling of `staging.viadere.io` and `api-staging.viadere.io`, not a subdomain of either. Every console and session cookie is host-only (`__Host-`), so no cookie of the zone reaches it (`docs/SECURITY.md` §2.116).
+
+`python3 -I Infra/cloudflare/add_asset_host.py` does steps 1 and 2 for staging (plan first, asks, token input hidden, refuses non-staging names).
 
 1. In the same tunnel add a public hostname `ASSET_DOMAIN` → service `HTTP` → `ca-viadere-api` (HTTP Host Header `ca-viadere-api`, as for the API host) and add the host to the edge-token transform rule. Add a request-header transform rule for that hostname only that **sets** `X-Viadere-Asset-Host` to the `ASSET_DOMAIN` value (set, not add, so a client value is overwritten): the server never reads `Host` and recognises asset-host traffic by this header.
 2. Add a Cloudflare cache rule for that host: path starts with `/b/`, eligible for cache, edge TTL "respect origin" (the api sends `Cache-Control: public, max-age=31536000, immutable`; names are content hashes, a replaced image is a new URL). Keep the query string in the cache key: the origin answers any request with a query string `404`, and a rule that ignored it could serve an image for such a URL. Takedowns and the `brand_kits` kill switch make the origin answer `404`; purge the URL (or the host) in Cloudflare after an emergency takedown so the cached copy disappears too.
@@ -408,7 +410,7 @@ Then remove `api_min_replicas = 0` from `terraform.tfvars` and run `tofu apply` 
 
 Verification checklist:
 
-- [ ] `curl -fsS https://viadere-api-az.cksites.dev/healthz` → 200; `/readyz` → 200 (database reachable).
+- [ ] `curl -fsS https://api-staging.viadere.io/healthz` → 200; `/readyz` → 200 (database reachable).
 - [ ] A request that bypasses Cloudflare is impossible: `az containerapp show -n ca-viadere-api -g "$RG_APP" --query properties.configuration.ingress.external` → `false`; the environment has no public IP (`tofu output container_apps_environment`).
 - [ ] Without the edge token the origin refuses: temporarily disable the transform rule for the test host → 421 (re-enable it).
 - [ ] `az postgres flexible-server show -g rg-viadere-stg-data -n <server> --query network.publicNetworkAccess` → `Disabled`.
