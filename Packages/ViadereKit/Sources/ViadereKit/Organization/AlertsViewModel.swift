@@ -223,7 +223,7 @@ public final class AlertsViewModel {
     }
 
     private func note(_ error: any Error) {
-        if let api = error as? APIError, case .transport = api {
+        if let api = error as? APIError, api.isConnectivityFailure {
             isOffline = true
             errorMessage = "You're offline. Showing what was last loaded."
         } else if (error as? URLError) != nil {

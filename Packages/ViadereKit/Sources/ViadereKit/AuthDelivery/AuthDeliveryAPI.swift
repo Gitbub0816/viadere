@@ -341,7 +341,7 @@ public struct LiveAuthDeliveryAPI: AuthDeliveryAPI {
     }
 
     static func map(_ error: APIError) -> AuthDeliveryError {
-        if case .transport = error { return .offline }
+        if error.isConnectivityFailure { return .offline }
         switch error.code {
         case .gone?, .expired?: return .expired
         case .conflict?, .alreadyOpened?, .replayDetected?: return .alreadyUsed

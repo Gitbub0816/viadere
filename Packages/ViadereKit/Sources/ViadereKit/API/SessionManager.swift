@@ -80,9 +80,13 @@ public struct NoCrossProcessLock: CrossProcessLock {
 public struct UnavailableCrossProcessLock: CrossProcessLock {
     public init() {}
     public func withLock<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+        ViadereLog.storage.error("refresh.lock.no-shared-container")
         throw APIError.transport("refresh-lock-unavailable")
     }
-    public func acquireRefreshLease(ttl: TimeInterval) async throws -> RefreshLease? { throw APIError.transport("refresh-lock-unavailable") }
+    public func acquireRefreshLease(ttl: TimeInterval) async throws -> RefreshLease? {
+        ViadereLog.storage.error("refresh.lock.no-shared-container")
+        throw APIError.transport("refresh-lock-unavailable")
+    }
 }
 
 /// `flock(2)` on a file in the shared app-group container, plus a lease file next to it.

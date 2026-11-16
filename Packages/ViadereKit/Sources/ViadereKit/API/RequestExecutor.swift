@@ -87,6 +87,10 @@ public struct RequestExecutor: Sendable {
             return try await transport.send(HTTPRequest(method: endpoint.method, url: url, headers: headers, body: body))
         } catch let error as APIError {
             throw error
+        } catch let error as URLError {
+            // The URLError code only (no URL, no headers): enough to tell no network from a refused TLS or pin check in the console.
+            ViadereLog.api.error("api.transport.urlerror", detail: "\(error.code.rawValue)")
+            throw APIError.transport(APIError.transportReason(for: error))
         } catch {
             throw APIError.transport(String(describing: type(of: error)))
         }

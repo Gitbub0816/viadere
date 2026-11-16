@@ -29,7 +29,7 @@ public enum DevicePairingError: Error, Equatable, Sendable {
     static func from(_ error: any Error) -> DevicePairingError {
         if let error = error as? DevicePairingError { return error }
         guard let error = error as? APIError else { return .offline }
-        if case .transport = error { return .offline }
+        if error.isConnectivityFailure { return .offline }
         switch error.code {
         case .unauthorized?: return .invalidCode
         case .noTrustedDevice?: return .noTrustedDevice

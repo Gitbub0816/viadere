@@ -52,9 +52,43 @@ public enum APIError: Error, Sendable, Equatable {
         return nil
     }
 
+    /// Transport reasons that are **not** a missing network: the request never left this device for another cause (a refused TLS or pin
+    /// check, the shared container that holds the refresh lock, locked credentials). Screens must not call these "offline".
+    public static let localTransportReasons: Set<String> = [
+        TransportReason.secureConnection, "refresh-lock-unavailable", "refresh-lock-timeout", "refresh-busy", "credentials-locked", "non-http",
+    ]
+
+    public enum TransportReason {
+        /// The system refused the server's certificate, or the pin check cancelled the connection.
+        public static let secureConnection = "secure-connection"
+        /// No route to Viadere: no network, DNS, timeout, connection lost.
+        public static let offline = "offline"
+    }
+
+    /// True when the failure means "no network" (the only case a screen may call offline).
+    public var isConnectivityFailure: Bool {
+        if case .transport(let reason) = self { return !Self.localTransportReasons.contains(reason) }
+        return false
+    }
+
+    /// The transport reason for a `URLError`: a refused secure connection (a pin mismatch cancels the challenge), or connectivity.
+    public static func transportReason(for error: URLError) -> String {
+        switch error.code {
+        case .cancelled, .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid, .clientCertificateRejected, .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection:
+            return TransportReason.secureConnection
+        default:
+            return TransportReason.offline
+        }
+    }
+
     /// A short message suitable for UI. Never leaks internals.
     public var userMessage: String {
         switch self {
+        case .transport(TransportReason.secureConnection):
+            "Viadere couldn't make a secure connection, so nothing was sent. If this keeps happening, update the app."
+        case .transport(let reason) where Self.localTransportReasons.contains(reason):
+            "Viadere couldn't finish this on this device. Please try again; if it keeps happening, reinstall the app."
         case .transport: "Can't reach Viadere right now. Check your connection and try again."
         case .server(_, let code, let message):
             switch code {

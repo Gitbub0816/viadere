@@ -177,7 +177,7 @@ public struct LiveLinkServiceDeviceAPI: LinkServiceDeviceAPI {
         do { return try await call() } catch let error as LinkServiceError {
             throw error
         } catch let error as APIError {
-            if case .transport = error { throw LinkServiceError.offline }
+            if error.isConnectivityFailure { throw LinkServiceError.offline }
             switch error.code {
             case .unauthorized?, .forbidden?: throw LinkServiceError.refused
             case .gone?, .expired?: throw LinkServiceError.expired

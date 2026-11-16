@@ -56,7 +56,7 @@ public struct LiveOIDCDeviceAPI: OIDCDeviceAPI {
 
     private func map<T>(_ body: () async throws -> T) async throws -> T {
         do { return try await body() } catch let error as APIError {
-            if case .transport = error { throw OIDCDeviceError.offline }
+            if error.isConnectivityFailure { throw OIDCDeviceError.offline }
             switch error.code {
             case .notFound?: throw OIDCDeviceError.notActive
             case .forbidden?: throw OIDCDeviceError.refused
