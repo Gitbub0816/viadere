@@ -12,15 +12,15 @@ struct LinkDomainTests {
     let production = LinkDomain.production
 
     @Test func onlyPlainDNSNamesAreAccepted() {
-        #expect(LinkDomain("viadere.com")?.host == "viadere.com")
+        #expect(LinkDomain("viadere.io")?.host == "viadere.io")
         #expect(LinkDomain("Viadere.CKSites.dev")?.host == "viadere.cksites.dev")
-        for bad in ["", "viadere", "https://viadere.com", "viadere.com/", "viadere.com:443", "user@viadere.com", "*.viadere.com", "$(VIADERE_LINK_DOMAIN)",
-                    "-viadere.com", "viadere-.com", "viadere..com", ".viadere.com", "viadere.com.", "10.0.0.1", "viadere .com", "viadère.com",
+        for bad in ["", "viadere", "https://viadere.io", "viadere.io/", "viadere.io:443", "user@viadere.io", "*.viadere.io", "$(VIADERE_LINK_DOMAIN)",
+                    "-viadere.io", "viadere-.io", "viadere..io", ".viadere.io", "viadere.io.", "10.0.0.1", "viadere .io", "viadère.io",
                     String(repeating: "a", count: 64) + ".com"] {
             #expect(LinkDomain(bad) == nil, "\(bad)")
         }
         #expect(ViadereCore.configureLinkDomain("not a domain") == false, "an invalid value is refused and changes nothing")
-        #expect(ViadereCore.defaultDomain == "viadere.com")
+        #expect(ViadereCore.defaultDomain == "viadere.io")
     }
 
     @Test func connectLinksUseAndAcceptOnlyTheConfiguredHost() throws {
@@ -29,7 +29,7 @@ struct LinkDomainTests {
         #expect(try ConnectLink.parse("https://viadere.cksites.dev/c/AF2345", domain: staging).host == "viadere.cksites.dev")
         #expect(try ConnectLink.parse("https://www.viadere.cksites.dev/c/AF2345", domain: staging).host == "viadere.cksites.dev")
         // A production link in a staging build, a staging link in a production build, and look-alikes are refused.
-        #expect(throws: ConnectLink.ParseError.disallowedHost) { try ConnectLink.parse("https://viadere.com/c/AF2345", domain: staging) }
+        #expect(throws: ConnectLink.ParseError.disallowedHost) { try ConnectLink.parse("https://viadere.io/c/AF2345", domain: staging) }
         #expect(throws: ConnectLink.ParseError.disallowedHost) { try ConnectLink.parse("https://viadere.cksites.dev/c/AF2345", domain: production) }
         #expect(throws: ConnectLink.ParseError.disallowedHost) { try ConnectLink.parse("https://viadere.cksites.dev.evil.com/c/AF2345", domain: staging) }
         #expect(throws: ConnectLink.ParseError.disallowedHost) { try ConnectLink.parse("https://evil.viadere.cksites.dev/c/AF2345", domain: staging) }
@@ -40,7 +40,7 @@ struct LinkDomainTests {
         #expect(link == "https://viadere.cksites.dev/a/ABCDEFGH")
         #expect(ApprovalEnrollmentCode.parse(link: try #require(URL(string: link)), domain: staging)?.code == "ABCDEFGH")
         #expect(ApprovalEnrollmentCode.parse(link: try #require(URL(string: link)), domain: production) == nil)
-        #expect(ApprovalEnrollmentCode.parse(link: try #require(URL(string: "https://viadere.com/a/ABCDEFGH")), domain: staging) == nil)
+        #expect(ApprovalEnrollmentCode.parse(link: try #require(URL(string: "https://viadere.io/a/ABCDEFGH")), domain: staging) == nil)
         #expect(ApprovalEnrollmentCode.parse(link: try #require(URL(string: "https://www.viadere.cksites.dev/a/ABCDEFGH")), domain: staging) == nil,
                 "no www alias on the strict paths")
     }

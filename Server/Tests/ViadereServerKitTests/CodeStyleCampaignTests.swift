@@ -32,7 +32,7 @@ final class CodeStyleCampaignTests: XCTestCase {
     }
 
     private func signedLink(_ html: String) throws -> String {
-        let regex = try NSRegularExpression(pattern: "https://viadere\\.com/c/[0-9A-Z]{6}\\?ctx=[A-Za-z0-9_-]+&amp;sig=[A-Za-z0-9_-]{43}")
+        let regex = try NSRegularExpression(pattern: "https://viadere\\.io/c/[0-9A-Z]{6}\\?ctx=[A-Za-z0-9_-]+&amp;sig=[A-Za-z0-9_-]{43}")
         let range = try XCTUnwrap(regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html))?.range)
         return String(html[Range(range, in: html)!]).replacingOccurrences(of: "&amp;", with: "&")
     }

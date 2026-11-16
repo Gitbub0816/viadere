@@ -250,7 +250,7 @@ public struct AuthorityConfig: Sendable {
         if let raw = env["CKEY_SAFE_ACTION_ISSUER"], !raw.isEmpty {
             // A DNS name exactly as the envelope carries it (lower case, at least one dot), and the same host the api builds links on.
             guard let domain = LinkDomain(raw), domain.host == raw, CKeySafeAction.isValid(Array(raw.utf8)[...], as: .issuer) else {
-                throw AuthorityConfigError.invalid("CKEY_SAFE_ACTION_ISSUER (the api's LINK_DOMAIN host, for example viadere.com)")
+                throw AuthorityConfigError.invalid("CKEY_SAFE_ACTION_ISSUER (the api's LINK_DOMAIN host, for example viadere.io)")
             }
             guard config.oidcEnabled else { throw AuthorityConfigError.refused("CKEY_SAFE_ACTION_ISSUER needs AUTHORITY_OIDC_ENABLED (Safe Actions exist only for sign-in)") }
             config.ckeySafeActionIssuer = raw

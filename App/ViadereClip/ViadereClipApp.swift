@@ -1,7 +1,7 @@
 import SwiftUI
 import ViadereKit
 
-/// App Clip: quick connect for `https://viadere.com/c/{code}` (QR, NFC, link). It shows the verified business and
+/// App Clip: quick connect for `https://viadere.io/c/{code}` (QR, NFC, link). It shows the verified business and
 /// purpose-scoped consent, creates a passkey account if needed, connects, then offers the full app.
 @main
 struct ViadereClipApp: App {

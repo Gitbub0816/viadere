@@ -2,16 +2,16 @@ import Foundation
 
 /// The web host every Viadere universal link uses (`https://{host}/c/…`, `/a/…`, `/k/…`, `/l/…`, `/h/…`) and the app's associated domain.
 ///
-/// It is **configured, not assumed** (WP-C3): production uses `viadere.com`; staging uses its own host (`viadere.cksites.dev`), so a staging
+/// It is **configured, not assumed** (WP-C3): production uses `viadere.io`; staging uses its own host (`viadere.cksites.dev`), so a staging
 /// QR code never points at production and a production link is never accepted by a staging build. The server reads it from `LINK_DOMAIN`
 /// (`ServerConfig.linkDomain`) and passes it explicitly wherever it builds or parses a link; the app reads it from its build setting
 /// `VIADERE_LINK_DOMAIN` (Info.plist `ViadereLinkDomain`) and installs it once at launch with `ViadereCore.configureLinkDomain`.
 ///
 /// Every strict link parser accepts **only** the configured host (and, for connect links, its `www.` alias); a link for any other host,
-/// including `viadere.com` in a staging build, is refused.
+/// including `viadere.io` in a staging build, is refused.
 public struct LinkDomain: Sendable, Hashable, CustomStringConvertible {
     /// The production host, used when nothing else is configured.
-    public static let production = LinkDomain(validated: "viadere.com")
+    public static let production = LinkDomain(validated: "viadere.io")
 
     /// Lower-case DNS name (no scheme, port, path or trailing dot).
     public let host: String
@@ -63,7 +63,7 @@ public struct LinkDomain: Sendable, Hashable, CustomStringConvertible {
     }
     private static let storage = Storage()
 
-    /// The domain this process uses when a caller does not pass one: `viadere.com` until `ViadereCore.configureLinkDomain` installs another.
+    /// The domain this process uses when a caller does not pass one: `viadere.io` until `ViadereCore.configureLinkDomain` installs another.
     /// The server never relies on it (it passes `ServerConfig.linkDomain`); the app installs the build's value once at launch.
     public static var current: LinkDomain {
         storage.lock.lock()
@@ -82,7 +82,7 @@ extension ViadereCore {
     /// The production web host. `domain` is what this process is configured to use.
     public static let defaultDomain = LinkDomain.production.host
 
-    /// The configured link domain's host (`viadere.com` unless `configureLinkDomain` installed another).
+    /// The configured link domain's host (`viadere.io` unless `configureLinkDomain` installed another).
     public static var domain: String { LinkDomain.current.host }
 
     /// Installs the link domain for this process (the app, at launch, from its build setting). Returns `false` and keeps the current value

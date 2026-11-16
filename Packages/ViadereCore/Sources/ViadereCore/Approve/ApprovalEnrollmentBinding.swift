@@ -7,7 +7,7 @@ import Foundation
 /// can authenticate the device to the business**. The business generates `es` locally and gives it to the customer on a channel the relay
 /// does not see:
 ///
-/// * **Link or QR**: `https://viadere.com/a/{CODE}?rk={root kid}#es={base64url}`. A URL fragment is never sent to a server. The device
+/// * **Link or QR**: `https://viadere.io/a/{CODE}?rk={root kid}#es={base64url}`. A URL fragment is never sent to a server. The device
 ///   returns a **binding tag** `HMAC-SHA256(es, "VIADERE-ENROLL-BIND-V1\n" ‖ statement payload)` with its statement; the business verifies
 ///   it (constant time) before confirming. The relay cannot forge a tag and cannot move one to another statement.
 /// * **Typed code** (no fragment): the business also shows a 40-bit **check code** derived from `es`. The person types it into the app

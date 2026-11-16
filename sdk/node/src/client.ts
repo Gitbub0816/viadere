@@ -96,10 +96,10 @@ type FetchLike = (input: string, init: { method: string; headers: Record<string,
 export interface ViadereClientOptions {
   /** Your business API key (`vdk_live_...` or `vdk_test_...`). Keep it on your server: never ship it in a browser or an app. */
   apiKey: string;
-  /** Default `https://api.viadere.com`. `http` is accepted only for loopback hosts, for local development against a dev server. */
+  /** Default `https://api.viadere.io`. `http` is accepted only for loopback hosts, for local development against a dev server. */
   baseUrl?: string;
   /**
-   * The universal-link host the links you show must use (default `viadere.com`; a staging integration passes the staging host). The SDK builds
+   * The universal-link host the links you show must use (default `viadere.io`; a staging integration passes the staging host). The SDK builds
    * enrollment and link-session links on it and refuses a relay ticket that names any other host.
    */
   linkDomain?: string;
@@ -335,7 +335,7 @@ export class ViadereClient {
     if (typeof options.apiKey !== "string" || !/^vdk_(?:live|test)_[\x21-\x7e]+$/.test(options.apiKey) || options.apiKey.length < 20 || options.apiKey.length > 80) {
       throw new ViadereSdkError("invalid_api_key", "The API key does not look like a Viadere key (vdk_live_... or vdk_test_...).");
     }
-    const base = options.baseUrl ?? "https://api.viadere.com";
+    const base = options.baseUrl ?? "https://api.viadere.io";
     let url: URL;
     try {
       url = new URL(base);
@@ -346,7 +346,7 @@ export class ViadereClient {
       throw new ViadereSdkError("insecure_base_url", "The base URL must be https (http is allowed only for loopback hosts, for local development).");
     }
     if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") throw new ViadereSdkError("insecure_base_url", "The base URL must not carry credentials, a query or a fragment.");
-    const linkDomain = options.linkDomain ?? "viadere.com";
+    const linkDomain = options.linkDomain ?? "viadere.io";
     if (!isValidLinkDomain(linkDomain)) throw new RangeError("linkDomain must be a plain lowercase DNS name");
     this.#apiKey = options.apiKey;
     this.#baseUrl = url.origin + url.pathname.replace(/\/+$/, "");

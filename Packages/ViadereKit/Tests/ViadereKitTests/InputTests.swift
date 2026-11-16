@@ -87,7 +87,7 @@ struct ConnectInputTests {
     }
 
     @Test func links() {
-        #expect(ConnectInputClassifier.evaluate("https://viadere.com/c/AF2345").canSubmit)
+        #expect(ConnectInputClassifier.evaluate("https://viadere.io/c/AF2345").canSubmit)
         if case .invalid = ConnectInputClassifier.evaluate("https://evil.example.com/c/AF2345").validation {} else { Issue.record("expected invalid link") }
     }
 }

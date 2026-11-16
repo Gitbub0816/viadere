@@ -121,7 +121,7 @@ public struct ServerConfig: Sendable {
     public var abuse = AbuseThresholds.standard
     public var billingRates = BillingRates.illustrative
     /// Origin the business dashboard / operator console passkeys are scoped to. `nil` = `relyingPartyOrigin`.
-    /// The RP ID stays `relyingPartyID`, so a sub-domain origin such as `https://business.viadere.com` also works.
+    /// The RP ID stays `relyingPartyID`, so a sub-domain origin such as `https://business.viadere.io` also works.
     public var dashboardOrigin: String?
     /// Wallet pass signing material. `nil` disables pass issuance (the pass endpoints answer `501`).
     public var passes: PassConfig?
@@ -221,8 +221,8 @@ public struct ServerConfig: Sendable {
     public static func testing() -> ServerConfig {
         var config = ServerConfig(
             environment: .testing, databaseURL: nil, bindHost: "127.0.0.1", port: 0,
-            publicBaseURL: "https://viadere.com", relyingPartyID: "viadere.com", relyingPartyName: "Viadere",
-            relyingPartyOrigin: "https://viadere.com", appleTeamID: "TEAMID1234", appStoreID: "1234567890",
+            publicBaseURL: "https://viadere.io", relyingPartyID: "viadere.io", relyingPartyName: "Viadere",
+            relyingPartyOrigin: "https://viadere.io", appleTeamID: "TEAMID1234", appStoreID: "1234567890",
             appBundleID: "com.viadere.app", appClipBundleID: "com.viadere.app.Clip",
             connectLinkKey: SymmetricKey(data: Data(repeating: 0x11, count: 32)),
             pepper: Data(repeating: 0x22, count: 32), dataEncryptionKey: SymmetricKey(data: Data(repeating: 0x33, count: 32)),
@@ -268,7 +268,7 @@ public struct ServerConfig: Sendable {
 
         if production && !hasDatabase { throw ServerConfigError.missing("DATABASE_URL (or DATABASE_AUTH=entra with DATABASE_HOST and DATABASE_USER)") }
 
-        let publicBase = (env["PUBLIC_BASE_URL"] ?? "https://viadere.com").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let publicBase = (env["PUBLIC_BASE_URL"] ?? "https://viadere.io").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let baseURL = URL(string: publicBase), let scheme = baseURL.scheme, baseURL.host != nil else {
             throw ServerConfigError.invalid("PUBLIC_BASE_URL")
         }
@@ -345,7 +345,7 @@ public struct ServerConfig: Sendable {
             allowInsecureWebhookURLs: !production && env["ALLOW_INSECURE_WEBHOOKS"] == "true")
         config.mailerSendSMS = mailerSendSMS
         if let raw = env["LINK_DOMAIN"], !raw.isEmpty {
-            guard let domain = LinkDomain(raw) else { throw ServerConfigError.invalid("LINK_DOMAIN (a DNS name such as viadere.com, no scheme or path)") }
+            guard let domain = LinkDomain(raw) else { throw ServerConfigError.invalid("LINK_DOMAIN (a DNS name such as viadere.io, no scheme or path)") }
             config.linkDomain = domain
         } else if let domain = LinkDomain(relyingPartyID) {
             config.linkDomain = domain

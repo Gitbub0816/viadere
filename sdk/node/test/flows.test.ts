@@ -36,7 +36,7 @@ function client(script: Scripted[], extra: Partial<ConstructorParameters<typeof 
 }
 const flow = (code: string) => (e: unknown) => e instanceof ViadereFlowError && e.code === code;
 const statementError = (code: string) => (e: unknown) => e instanceof StatementVerificationError && e.code === code;
-const paths = (requests: { method: string; url: string }[]) => requests.map((r) => `${r.method} ${r.url.replace("https://api.viadere.com", "")}`);
+const paths = (requests: { method: string; url: string }[]) => requests.map((r) => `${r.method} ${r.url.replace("https://api.viadere.io", "")}`);
 
 const TS = "2027-01-15T08:00:00.000Z";
 const CODE = "K7QFM2XA";
@@ -46,7 +46,7 @@ const viadere = newKey();
 const NOW = new Date("2027-01-15T08:00:10.000Z");
 
 describe("Approve v2 enrollment", () => {
-  const ticket = (over: Record<string, unknown> = {}) => ({ enrollment_id: UUID_1, code: CODE, deep_link: `https://viadere.com/a/${CODE}?rk=${root.kid}`, expires_at: TS, ...over });
+  const ticket = (over: Record<string, unknown> = {}) => ({ enrollment_id: UUID_1, code: CODE, deep_link: `https://viadere.io/a/${CODE}?rk=${root.kid}`, expires_at: TS, ...over });
   const view = (over: Record<string, unknown> = {}) => ({ enrollment_id: UUID_1, subject_ref: SUBJECT_REF, capability: "auth.challenge", status: "device_completed", expires_at: TS, created_at: TS, ...over });
   const request = { subject_ref: SUBJECT_REF, capability: "auth.challenge" as const };
 
@@ -64,7 +64,7 @@ describe("Approve v2 enrollment", () => {
   it("builds the link itself: your root key id, a fresh secret in the fragment, nothing from the relay", async () => {
     const { c, requests } = client([{ status: 201, body: ticket() }]);
     const inv = await c.createApprovalEnrollment(request, { rootKid: root.kid });
-    assert.equal(inv.link, `https://viadere.com/a/${CODE}?rk=${root.kid}#es=${inv.secret.base64url}`);
+    assert.equal(inv.link, `https://viadere.io/a/${CODE}?rk=${root.kid}#es=${inv.secret.base64url}`);
     assert.equal(inv.displayCode, "K7QF-M2XA");
     assert.match(inv.checkCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     assert.deepEqual(JSON.parse(requests[0]!.body!), request, "the secret is never sent to Viadere");
@@ -75,11 +75,11 @@ describe("Approve v2 enrollment", () => {
   it("refuses a ticket that names another root, another host, a secret or a malformed code, and cancels the enrollment", async () => {
     const other = newKey().kid;
     for (const bad of [
-      ticket({ deep_link: `https://viadere.com/a/${CODE}?rk=${other}` }),
-      ticket({ deep_link: `https://viadere.com/a/${CODE}` }),
+      ticket({ deep_link: `https://viadere.io/a/${CODE}?rk=${other}` }),
+      ticket({ deep_link: `https://viadere.io/a/${CODE}` }),
       ticket({ deep_link: `https://evil.example/a/${CODE}?rk=${root.kid}` }),
-      ticket({ deep_link: `https://viadere.com/a/${CODE}?rk=${root.kid}#es=${"A".repeat(43)}` }),
-      ticket({ deep_link: `https://viadere.com/a/ABCDEFGH?rk=${root.kid}` }),
+      ticket({ deep_link: `https://viadere.io/a/${CODE}?rk=${root.kid}#es=${"A".repeat(43)}` }),
+      ticket({ deep_link: `https://viadere.io/a/ABCDEFGH?rk=${root.kid}` }),
       ticket({ code: "k7qfm2xa" }),
     ]) {
       const { c, requests } = client([{ status: 201, body: bad }, { status: 200, body: view({ status: "cancelled" }) }]);
@@ -157,7 +157,7 @@ describe("Approve v2 enrollment", () => {
 
 describe("link sessions", () => {
   const request = { customer_ref: "cust-1042", capabilities: ["transaction.approve", "message.send"] as ("transaction.approve" | "message.send")[] };
-  const ticket = (over: Record<string, unknown> = {}) => ({ session_id: UUID_1, code: CODE, link: `https://viadere.com/k/${CODE}`, root_kid: root.kid, expires_at: TS, ...over });
+  const ticket = (over: Record<string, unknown> = {}) => ({ session_id: UUID_1, code: CODE, link: `https://viadere.io/k/${CODE}`, root_kid: root.kid, expires_at: TS, ...over });
   const fresh = { rootKid: root.kid, customerAuthenticatedAt: new Date(NOW.getTime() - 60_000), now: NOW };
 
   it("needs a step-up within five minutes, before anything is sent", async () => {
@@ -172,13 +172,13 @@ describe("link sessions", () => {
   it("builds the link with its own secret and refuses a ticket for another root or host", async () => {
     const { c, requests } = client([{ status: 201, body: ticket() }]);
     const inv = await c.createLinkSession(request, fresh);
-    assert.equal(inv.link, `https://viadere.com/k/${CODE}#es=${inv.secret.base64url}`);
+    assert.equal(inv.link, `https://viadere.io/k/${CODE}#es=${inv.secret.base64url}`);
     assert.deepEqual(inv.capabilities, ["message.send", "transaction.approve"], "canonical order");
     assert.deepEqual(JSON.parse(requests[0]!.body!), request);
-    for (const bad of [ticket({ root_kid: newKey().kid }), ticket({ link: `https://evil.example/k/${CODE}` }), ticket({ link: `https://viadere.com/k/${CODE}#es=${"A".repeat(43)}` }), ticket({ link: `https://viadere.com/k/ABCDEFGH` })]) {
+    for (const bad of [ticket({ root_kid: newKey().kid }), ticket({ link: `https://evil.example/k/${CODE}` }), ticket({ link: `https://viadere.io/k/${CODE}#es=${"A".repeat(43)}` }), ticket({ link: `https://viadere.io/k/ABCDEFGH` })]) {
       const r = client([{ status: 201, body: bad }, { status: 200, body: { session_id: UUID_1, status: "cancelled", capabilities: [], created_at: TS, expires_at: TS } }]);
       await assert.rejects(r.c.createLinkSession(request, fresh), flow("ticket_mismatch"));
-      assert.equal(r.requests[1]!.url, `https://api.viadere.com/v1/business/link-sessions/${UUID_1}/cancel`);
+      assert.equal(r.requests[1]!.url, `https://api.viadere.io/v1/business/link-sessions/${UUID_1}/cancel`);
     }
   });
 
@@ -232,7 +232,7 @@ describe("link sessions", () => {
     await assert.rejects(a.c.confirmLinkSession(review, { sasCheck: "compared_by_customer", signer: confirmer.signer }), flow("typed_sas_required"));
     assert.equal(a.requests.length, 1);
     await assert.rejects(a.c.confirmLinkSession(review, { sasCheck: { typed: review.sas === "111111" ? "222222" : "111111" }, signer: confirmer.signer }), flow("sas_mismatch"));
-    assert.equal(a.requests[1]!.url, `https://api.viadere.com/v1/business/link-sessions/${UUID_1}/cancel`);
+    assert.equal(a.requests[1]!.url, `https://api.viadere.io/v1/business/link-sessions/${UUID_1}/cancel`);
     const b = client([{ status: 200, body: { ...typedPath, status: "confirmed" } }]);
     const confirmed = await b.c.confirmLinkSession(review, { sasCheck: { typed: review.sas }, signer: confirmer.signer });
     assert.equal(confirmed.approval, undefined);
@@ -273,7 +273,7 @@ describe("link sessions", () => {
 
 describe("verification sessions", () => {
   const request = { capability: "age.minimum" as const, parameters: { years: 21 }, purpose_code: "age_restricted_purchase", origin: "https://shop.northwind.example", return_url: "https://shop.northwind.example/checkout?step=2" };
-  const ticket = (over: Record<string, unknown> = {}) => ({ session_id: UUID_1, code: CODE, link: `https://viadere.com/v/${CODE}`, expires_at: TS, ...over });
+  const ticket = (over: Record<string, unknown> = {}) => ({ session_id: UUID_1, code: CODE, link: `https://viadere.io/v/${CODE}`, expires_at: TS, ...over });
   const resultRef = "res_" + "R".repeat(43);
   const view = (over: Record<string, unknown> = {}) => ({ session_id: UUID_1, status: "completed", capability: "age.minimum", purpose_code: "age_restricted_purchase", origin: request.origin, created_at: TS, expires_at: TS, ...over });
   const signedResult = (over: Record<string, JsonValue> = {}, signer = viadere) =>
@@ -282,13 +282,13 @@ describe("verification sessions", () => {
 
   it("creates a session and checks the relay's link before anything shows it", async () => {
     const { c, requests } = client([{ status: 201, body: ticket() }]);
-    assert.equal((await c.createVerificationSession(request)).link, `https://viadere.com/v/${CODE}`);
+    assert.equal((await c.createVerificationSession(request)).link, `https://viadere.io/v/${CODE}`);
     assert.deepEqual(JSON.parse(requests[0]!.body!), request);
     assert.equal(requests[0]!.headers["Idempotency-Key"], undefined);
-    for (const bad of [ticket({ link: `https://evil.example/v/${CODE}` }), ticket({ link: `https://viadere.com/v/${CODE}?next=https://evil.example` }), ticket({ link: `https://viadere.com/k/${CODE}` }), ticket({ code: "ABCD-EFGH" })]) {
+    for (const bad of [ticket({ link: `https://evil.example/v/${CODE}` }), ticket({ link: `https://viadere.io/v/${CODE}?next=https://evil.example` }), ticket({ link: `https://viadere.io/k/${CODE}` }), ticket({ code: "ABCD-EFGH" })]) {
       const r = client([{ status: 201, body: bad }, { status: 200, body: view({ status: "cancelled" }) }]);
       await assert.rejects(r.c.createVerificationSession(request), flow("ticket_mismatch"));
-      assert.equal(r.requests[1]!.url, `https://api.viadere.com/v1/business/verification-sessions/${UUID_1}/cancel`);
+      assert.equal(r.requests[1]!.url, `https://api.viadere.io/v1/business/verification-sessions/${UUID_1}/cancel`);
     }
   });
 

@@ -3,7 +3,7 @@ import Foundation
 public struct SiteConfig: Sendable {
     public var name = "Viadere"
     public var tagline = "A trusted way to connect."
-    public var baseURL = "https://viadere.com"
+    public var baseURL = "https://viadere.io"
     /// Hosts that may appear in `<a href>` (never in resource attributes).
     public var allowedLinkHosts: [String] = ["www.rfc-editor.org"]
     public var openapiPath = "../docs/openapi.yaml"
@@ -19,8 +19,8 @@ public struct SiteConfig: Sendable {
     public var references: [Reference] = []
     public var securityContact = "mailto:[SECURITY-CONTACT-PLACEHOLDER]"
     public var securityExpires = "[EXPIRES-PLACEHOLDER: RFC 3339 date-time within 12 months]"
-    public var securityPolicyURL = "https://viadere.com/legal/vulnerability-disclosure-policy/"
-    public var securityCanonical = "https://viadere.com/.well-known/security.txt"
+    public var securityPolicyURL = "https://viadere.io/legal/vulnerability-disclosure-policy/"
+    public var securityCanonical = "https://viadere.io/.well-known/security.txt"
     public var nav: [(title: String, path: String)] = [
         ("Products", "/products/"), ("Businesses", "/businesses/"), ("Consumers", "/consumers/"),
         ("Developers", "/developers/"), ("Security & Trust", "/security/"), ("Privacy", "/privacy/"),

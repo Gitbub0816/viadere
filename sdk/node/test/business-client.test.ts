@@ -144,7 +144,7 @@ describe("every operation: method, path, headers, body, idempotency, retries", (
       await row.call(c);
       const r = requests[0]!;
       assert.equal(r.method, route.method);
-      assert.equal(r.url, `https://api.viadere.com${row.path}${row.query ?? ""}`);
+      assert.equal(r.url, `https://api.viadere.io${row.path}${row.query ?? ""}`);
       // The route template and the concrete path agree segment by segment.
       const template = route.path.split("/");
       const actual = row.path.split("/");
@@ -238,12 +238,12 @@ describe("construction", () => {
     }
   });
   it("refuses a non-HTTPS base URL exactly as before, and a bad link domain", () => {
-    for (const bad of ["http://api.viadere.com", "http://10.0.0.5:8080", "ftp://api.viadere.com", "https://user:pw@api.viadere.com", "https://api.viadere.com/?x=1", "not a url"]) {
+    for (const bad of ["http://api.viadere.io", "http://10.0.0.5:8080", "ftp://api.viadere.io", "https://user:pw@api.viadere.io", "https://api.viadere.io/?x=1", "not a url"]) {
       assert.throws(() => make(API_KEY, bad), (e: unknown) => e instanceof ViadereSdkError && e.kind === "insecure_base_url", bad);
     }
     make(API_KEY, "http://localhost:8080");
     make(API_KEY, "http://127.0.0.1:8080/");
-    assert.throws(() => new ViadereClient({ apiKey: API_KEY, linkDomain: "Viadere.com" }), RangeError);
+    assert.throws(() => new ViadereClient({ apiKey: API_KEY, linkDomain: "Viadere.io" }), RangeError);
     assert.throws(() => new ViadereClient({ apiKey: API_KEY, linkDomain: "10.0.0.1" }), RangeError);
   });
   it("a base URL with a path prefix is kept", async () => {

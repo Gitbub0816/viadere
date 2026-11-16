@@ -84,7 +84,7 @@ import Testing
     #endif
 
     @Test func styleNeverChangesThePayloadOrWhereMarksSit() throws {
-        let link = "https://viadere.com/c/AF2345"
+        let link = "https://viadere.io/c/AF2345"
         let symbol = try CKeySymbol.encode(link)
         // The codeword is made before any style exists; a flat custom style draws the plain geometry in other colours.
         let forest = try BusinessCodeStyle(custom: CKeyStyleSpec(background: Self.color("#FFF5D6"), ink: Self.color("#1D3B33")))

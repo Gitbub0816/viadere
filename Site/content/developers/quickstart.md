@@ -15,7 +15,7 @@ Add a webhook endpoint and [verify it](/developers/webhooks/#endpoint-verificati
 A test key can only address sandbox relationships, never a real customer.
 
 ```bash
-curl -X POST https://viadere.com/v1/business/sandbox/relationships \
+curl -X POST https://viadere.io/v1/business/sandbox/relationships \
   -H "Authorization: Bearer $VIADERE_TEST_KEY" \
   -H "Idempotency-Key: sandbox-rel-1"
 ```
@@ -23,7 +23,7 @@ curl -X POST https://viadere.com/v1/business/sandbox/relationships \
 ## 3. Issue a request
 
 ```bash
-curl -X POST https://viadere.com/v1/business/interactions \
+curl -X POST https://viadere.io/v1/business/interactions \
   -H "Authorization: Bearer $VIADERE_TEST_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: order-1042-confirm" \

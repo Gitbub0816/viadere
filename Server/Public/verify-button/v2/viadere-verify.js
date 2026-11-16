@@ -1,11 +1,11 @@
-/*! Verify with Viadere v2 — https://viadere.com — dependency-free web component, docs/VERIFY-BUTTON.md.
+/*! Verify with Viadere v2 — https://viadere.io — dependency-free web component, docs/VERIFY-BUTTON.md.
  *  No network requests, no cookies, no storage, no analytics, no iframes, no inline styles, no innerHTML (works under a strict CSP and
- *  Trusted Types). It renders a link to a verification session your SERVER created (https://viadere.com/v/{CODE}) and, where the phone
+ *  Trusted Types). It renders a link to a verification session your SERVER created (https://viadere.io/v/{CODE}) and, where the phone
  *  cannot be handed the link directly (a computer), a panel with the Viadere code (a CKey, read by the Viadere app) first, the same
  *  link as a QR code for the phone's camera one control away, and other options. It never sees a result: your server reads the
  *  session with its API key and verifies Viadere's signed result.
  *  Usage: <link rel="stylesheet" href=".../viadere-verify.css"> <script src=".../viadere-verify.js" defer></script>
- *         <viadere-verify link="https://viadere.com/v/ABCDEFGH"></viadere-verify>
+ *         <viadere-verify link="https://viadere.io/v/ABCDEFGH"></viadere-verify>
  *  Attributes: link (required), variant="filled|ivory|outline", size="sm|md|lg", display="label|icon", theme="auto|light|dark",
  *  expires-at (ISO 8601, optional), send-to-phone (boolean, only when your server can reach this visitor's phone; see the docs). */
 /*! The CKey encoder and renderer in this file are a port of the CKey reference core (github.com/clearkeysolutions/ckey, v0.1.0-build.85).
@@ -23,7 +23,7 @@
 
   var SVG_NS = 'http://www.w3.org/2000/svg';
   // A session link: https, a Viadere link domain, /v/ and eight characters of the code alphabet (no I, O, 0, 1). Nothing else is rendered.
-  var LINK = /^https:\/\/(viadere\.com|viadere\.cksites\.dev)\/v\/([A-HJ-NP-Z2-9]{8})$/;
+  var LINK = /^https:\/\/(viadere\.io|viadere\.cksites\.dev)\/v\/([A-HJ-NP-Z2-9]{8})$/;
   // Labels per flow. Only "verify" exists today; a sign-in flow adds its own entry and copy here.
   var FLOWS = {
     verify: {
@@ -42,7 +42,7 @@
   ];
 
   // ---------------------------------------------------------------------------------------------------------------------------------
-  // QR code (ISO/IEC 18004): byte mode, error correction level M, versions 1 to 10, best of the eight masks. A session link is 30 to 38
+  // QR code (ISO/IEC 18004): byte mode, error correction level M, versions 1 to 10, best of the eight masks. A session link is 29 to 38
   // bytes, so it always fits in version 3 or 4.
   var ECC_PER_BLOCK = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
   var ECC_BLOCKS = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
@@ -258,7 +258,7 @@
   // A line-for-line port of ViadereCore/OpticalCode/CKeySymbol.swift and CKeySVG.swift, themselves a verified port of the CKey reference
   // core (clearkeysolutions/ckey v0.1.0-build.85: src/core_internal.inc, src/api_codec.inc, src/api_render.inc). The browser test
   // reproduces every vector of docs/protocol/vectors/ckey-profile0-v1.json: the codeword bit for bit and the SVG byte for byte.
-  // A session link is 30 to 38 bytes: a version 2 or 3 symbol at level M.
+  // A session link is 29 to 38 bytes: a version 2 or 3 symbol at level M.
   var CK_GRID = [29, 31, 33, 36, 38, 41, 44, 47, 50, 54, 58, 62, 67, 71, 77, 82, 88, 94, 101, 108, 116, 124, 133, 143, 153, 164, 176, 188, 202, 216, 232];
   var CK_SLOTS = [72, 80, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 168, 176, 192, 200, 216, 232, 248, 272, 288, 304, 328, 352, 376, 408, 440, 464, 504, 536, 576];
   var CK_RINGS = [3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 23, 25, 27, 29, 32, 34, 37];

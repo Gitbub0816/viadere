@@ -27,7 +27,7 @@ final class AttachmentSDKTests: XCTestCase {
         XCTAssertEqual(attachment, stored)
         let request = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(request.method, "POST")
-        XCTAssertEqual(request.url.absoluteString, "https://viadere.com/v1/business/conversations/\(Self.session.description)/attachments")
+        XCTAssertEqual(request.url.absoluteString, "https://viadere.io/v1/business/conversations/\(Self.session.description)/attachments")
         XCTAssertEqual(request.body, Self.png, "the bytes travel as they are: no JSON, no base64")
         XCTAssertEqual(request.headers["Content-Type"], "image/png")
         XCTAssertEqual(request.headers["Authorization"], "Bearer \(Fixtures.key)")
@@ -97,21 +97,21 @@ final class AttachmentSDKTests: XCTestCase {
         let now = Date(timeIntervalSince1970: TimeInterval(RequestSigningSDKTests.vectors.now))
         let transport = MockTransport()
         try transport.enqueue(status: 201, json: Self.reference(for: Self.png))
-        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://viadere.com")!, transport: transport, retry: .none,
+        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://viadere.io")!, transport: transport, retry: .none,
                                                sleep: { _ in }, requestSigner: key, now: { now })
         _ = try await client.uploadAttachment(sessionId: Self.session, data: Self.png, contentType: "image/png")
         let request = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(request.headers["Content-Digest"], HTTPSignatureProfile.contentDigest(Self.png))
         XCTAssertEqual(request.headers["Content-Type"], "image/png", "the signer keeps the image type (never application/json)")
         XCTAssertTrue(request.headers["Signature-Input"]!.contains("\"content-digest\" \"content-type\""))
-        let target = String(request.url.absoluteString.dropFirst("https://viadere.com".count))
+        let target = String(request.url.absoluteString.dropFirst("https://viadere.io".count))
         func verify(body: Data, type: String) async throws {
             var fields = request.headers
             fields["Content-Type"] = type
             let parsed = try HTTPSignatureVerifier.parse(HTTPSignatureRequest(method: "POST", target: target, fields: fields.map { (name: $0.key, value: $0.value) }, body: body),
                                                          now: now)
             _ = try await HTTPSignatureVerifier.verify(parsed, key: .init(publicKey: key.publicKey, businessId: "b", apiKeyIds: ["k"], revoked: false), businessId: "b",
-                                                       apiKeyId: "k", authorities: ["viadere.com"], replayGuard: InMemoryReplayGuard(), now: now)
+                                                       apiKeyId: "k", authorities: ["viadere.io"], replayGuard: InMemoryReplayGuard(), now: now)
         }
         try await verify(body: Self.png, type: "image/png")
         // A swapped image, or the same bytes relabelled, no longer verifies.
@@ -132,7 +132,7 @@ final class AttachmentSDKTests: XCTestCase {
         XCTAssertEqual(data, Self.png)
         let request = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(request.method, "GET")
-        XCTAssertEqual(request.url.absoluteString, "https://viadere.com/v1/business/conversations/\(Self.session.description)/attachments/\(reference.id.description)")
+        XCTAssertEqual(request.url.absoluteString, "https://viadere.io/v1/business/conversations/\(Self.session.description)/attachments/\(reference.id.description)")
         XCTAssertEqual(request.headers["Accept"], "image/png, image/jpeg")
         XCTAssertNil(request.body)
     }

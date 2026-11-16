@@ -5,7 +5,7 @@ import ViadereCore
 // viadere-key-monitor: audits the transparency-log entries of your business.
 //
 //   VIADERE_API_KEY=vdk_live_... viadere-key-monitor --business <uuid> --log-key <base64url P-256 public key> \
-//       --state monitor-state.json [--base-url https://viadere.com] [--log-id viadere.key-directory.v1]
+//       --state monitor-state.json [--base-url https://viadere.io] [--log-id viadere.key-directory.v1]
 //
 // It verifies the signed tree head, the consistency with the head it saw last time, every inclusion proof and the replayed key history,
 // then lists new entries. `--state` is a JSON file holding the last head, the indexes already reviewed and the leaf hashes of the entries you
@@ -34,7 +34,7 @@ guard let apiKey = ProcessInfo.processInfo.environment["VIADERE_API_KEY"], let b
       let logKeyText = option("--log-key"), let logKey = try? DevicePublicKey(base64URL: logKeyText) else {
     fail("usage: VIADERE_API_KEY=... viadere-key-monitor --business <uuid> --log-key <base64url> --state <file> [--base-url URL] [--log-id ID] [--expect <leaf hash>]...", code: 64)
 }
-let baseURL = URL(string: option("--base-url") ?? "https://viadere.com")!
+let baseURL = URL(string: option("--base-url") ?? "https://viadere.io")!
 let logId = option("--log-id") ?? TransparencyLog.defaultLogId
 let statePath = option("--state")
 

@@ -48,7 +48,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
     private let transport: any BusinessTransport
     public let retry: RetryPolicy
     private let sleep: @Sendable (TimeInterval) async -> Void
-    /// The universal-link host the links you show must use (`viadere.com`; your staging integration passes the staging host). The SDK builds
+    /// The universal-link host the links you show must use (`viadere.io`; your staging integration passes the staging host). The SDK builds
     /// Approve and link-session links on it and refuses a relay ticket that names any other host.
     public let linkDomain: LinkDomain
     /// The RFC 9421 request-signing key (registered under Security > Request signing), or `nil` for unsigned requests.
@@ -56,7 +56,7 @@ public struct ViadereBusinessClient: Sendable, CustomStringConvertible, CustomDe
 
     /// - Parameters:
     ///   - apiKey: `vdk_live_…` or `vdk_test_…`.
-    ///   - baseURL: defaults to `https://viadere.com`. Must be https (plain http only for loopback development).
+    ///   - baseURL: defaults to `https://viadere.io`. Must be https (plain http only for loopback development).
     ///   - requestSigner: opt-in RFC 9421 signing (`HTTPRequestSigningKey`: a `SoftwareHTTPRequestSigningKey`, or your own type that asks a KMS or
     ///     HSM to sign). The key id is the `vsk_…` the console showed when you registered the public key.
     public init(apiKey: String, baseURL: URL = URL(string: "https://\(ViadereCore.defaultDomain)")!, transport: any BusinessTransport = URLSessionTransport(),

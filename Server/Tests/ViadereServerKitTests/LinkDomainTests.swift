@@ -14,7 +14,7 @@ final class LinkDomainServerTests: XCTestCase {
         XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["RP_ID": "viadere.cksites.dev", "RP_ORIGIN": "https://viadere.cksites.dev"]) { $1 }).linkDomain.host,
                        "viadere.cksites.dev", "the web domain (RP_ID) is the default")
         XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["LINK_DOMAIN": "Viadere.CKSites.dev"]) { $1 }).linkDomain.host, "viadere.cksites.dev")
-        for bad in ["https://viadere.com", "viadere.com/c", "viadere", "*.viadere.com", "viadere.com:8443"] {
+        for bad in ["https://viadere.io", "viadere.io/c", "viadere", "*.viadere.io", "viadere.io:8443"] {
             XCTAssertThrowsError(try ServerConfig.fromEnvironment(base.merging(["LINK_DOMAIN": bad]) { $1 }), bad)
         }
     }
@@ -27,12 +27,12 @@ final class LinkDomainServerTests: XCTestCase {
             let ok = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.cksites.dev/c/\(code.canonical)"))
             XCTAssertEqual(ok.status, .ok, ok.text)
             XCTAssertEqual(try ok.json(DirectoryResolveResponse.self).method, .link)
-            let foreign = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.com/c/\(code.canonical)"))
+            let foreign = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.io/c/\(code.canonical)"))
             if foreign.status == .ok { XCTAssertNotEqual(try foreign.json(DirectoryResolveResponse.self).method, .link) }
             // Connecting with a link of another host is refused.
             let consumer = try await h.readyConsumer()
             let refused = try await h.signedPost(consumer, APIRoutes.relationshipConnect.template,
-                                                 ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.com/c/\(code.canonical)"))
+                                                 ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.io/c/\(code.canonical)"))
             XCTAssertEqual(refused.status, .unprocessableEntity, refused.text)
             let accepted = try await h.signedPost(consumer, APIRoutes.relationshipConnect.template,
                                                   ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.cksites.dev/c/\(code.canonical)"))

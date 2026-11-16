@@ -25,7 +25,7 @@ final class ApproveEnrollmentTests: XCTestCase {
             XCTAssertEqual(created.status, .created, created.text)
             let ticket = try created.json(ApprovalEnrollmentTicket.self)
             XCTAssertEqual(ticket.code.count, 8)
-            XCTAssertTrue(ticket.deepLink.hasPrefix("https://viadere.com/a/\(ticket.code)?rk=\(keys.rootKid)"), "the link carries the business root key id out of band")
+            XCTAssertTrue(ticket.deepLink.hasPrefix("https://viadere.io/a/\(ticket.code)?rk=\(keys.rootKid)"), "the link carries the business root key id out of band")
             let parsed = try XCTUnwrap(ApprovalEnrollmentCode.parse(link: URL(string: ticket.deepLink)!))
             XCTAssertEqual(parsed.code, ticket.code)
             XCTAssertEqual(parsed.rootKid, keys.rootKid)

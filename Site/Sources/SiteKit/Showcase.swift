@@ -221,7 +221,7 @@ public enum Showcase {
     """
 
     static let curlSample = """
-    curl -X POST https://viadere.com/v1/business/interactions \\
+    curl -X POST https://viadere.io/v1/business/interactions \\
       -H "Authorization: Bearer $VIADERE_TEST_KEY" \\
       -H "Idempotency-Key: order-1042-confirm" \\
       -H "Content-Type: application/json" \\

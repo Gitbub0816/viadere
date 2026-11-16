@@ -73,7 +73,7 @@ info:
     name: Proprietary
     identifier: LicenseRef-Viadere
 servers:
-  - url: https://viadere.com
+  - url: https://viadere.io
     description: Production
 security:
   - apiKey: []
@@ -1921,7 +1921,7 @@ components:
       properties:
         enrollment_id: { $ref: "#/components/schemas/Uuid" }
         code: { type: string, description: "Eight characters, no separator." }
-        deep_link: { type: string, description: "The relay's suggestion (https://viadere.com/a/{CODE}?rk={root key id}). Do not show it: it carries no enrollment secret and its rk is not authenticated. The SDK builds the link you show, with your own root key id and the secret in the fragment (#es=)." }
+        deep_link: { type: string, description: "The relay's suggestion (https://viadere.io/a/{CODE}?rk={root key id}). Do not show it: it carries no enrollment secret and its rk is not authenticated. The SDK builds the link you show, with your own root key id and the secret in the fragment (#es=)." }
         expires_at: { type: string, format: date-time }
     ApprovalEnrollmentView:
       type: object

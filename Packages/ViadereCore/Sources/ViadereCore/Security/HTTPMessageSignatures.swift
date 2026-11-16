@@ -56,7 +56,7 @@ public enum HTTPSignatureProfile {
         return "\(h):\(port)"
     }
 
-    /// `@authority` of a base URL such as `https://viadere.com`.
+    /// `@authority` of a base URL such as `https://viadere.io`.
     public static func authority(of url: URL) -> String? {
         guard let host = url.host, !host.isEmpty, let scheme = url.scheme?.lowercased() else { return nil }
         return authority(host: host, port: url.port, scheme: scheme)

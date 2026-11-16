@@ -296,7 +296,7 @@ final class SMSGatewayTests: XCTestCase {
             let linkPrompt = try await say(h, "1")
             // Nothing is texted to link the number: only a pointer at the app and the static page (decision 9).
             XCTAssertTrue(linkPrompt.joined().contains("link this number in the Viadere app"), linkPrompt.joined())
-            XCTAssertTrue(linkPrompt.joined().contains("https://viadere.com/get"), linkPrompt.joined())
+            XCTAssertTrue(linkPrompt.joined().contains("https://viadere.io/get"), linkPrompt.joined())
             XCTAssertFalse(linkPrompt.joined().contains("/l/"))
             XCTAssertTrue(try forwarded(h, to: airline).isEmpty, "nothing is routed before linking")
             try await eq(try await LinkTokenRecord.query(on: h.db).count(), 0, "no token is minted for the text")

@@ -190,7 +190,7 @@ final class PlatformGateOpsTests: XCTestCase {
             "DATA_ENCRYPTION_KEY": SecureToken.generate(), "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG",
             "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(), "EDGE_TOKEN": SecureToken.generate(),
             "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111", "APPLE_TEAM_ID": "TEAM123456",
-            "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.com",
+            "EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "no-reply@viadere.io",
             "AZURE_AUDIT_BLOB_ENDPOINT": "https://stviaderetestaudit.blob.core.windows.net/", "AZURE_AUDIT_BLOB_CONTAINER": "audit-heads",
             "AZURE_KEY_VAULT_URL": "https://kv-vdr-test.vault.azure.net/", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY": "audit-head-signing",
             "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001", "IDENTITY_ENDPOINT": "http://localhost:42356/msi/token", "IDENTITY_HEADER": "test-identity-header",

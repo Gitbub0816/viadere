@@ -20,7 +20,7 @@ Dependency direction: `Server` → `ViadereCore`, `ViadereBusinessSDK` → `Viad
 
 | Area | Key types | Responsibility |
 |---|---|---|
-| Identifiers | `BusinessCode`, `BusinessHandle`, `TypedID<Tag>` (`BusinessID`, `ConsumerID`, …), `ConnectLink`, `PhoneNumber` | Normalization and validation of codes and handles, typed UUIDs, strict `https://viadere.com/c/{CODE}` parsing with an HMAC-signed context |
+| Identifiers | `BusinessCode`, `BusinessHandle`, `TypedID<Tag>` (`BusinessID`, `ConsumerID`, …), `ConnectLink`, `PhoneNumber` | Normalization and validation of codes and handles, typed UUIDs, strict `https://viadere.io/c/{CODE}` parsing with an HMAC-signed context |
 | Interaction protocol | `Interaction`, `InteractionPayload`, `InteractionKind`, `InteractionValidation`, `MoneyAmount` | Versioned envelope (schema v1), typed payloads per kind, and an unknown-kind fallback |
 | Assurance | `AssurancePolicy`, `RequiredAssurance`, `ProvidedAssurance`, `DecisionAssurance` | Pure rules for which channel and evidence can satisfy an interaction |
 | Rendering | `ChannelRenderer`, `SMSEncoding` | Interaction → SMS (numbered, GSM-7 aware), RCS suggestions, and native notification categories. Sensitive interactions get an "Open the Viadere app" notice instead (no link, no code) |

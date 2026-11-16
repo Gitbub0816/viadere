@@ -23,8 +23,8 @@ struct ScannedCodeTests {
     }
 
     @Test func everyPrintedLinkKindOpensItsReviewScreen() {
-        #expect(decide("https://viadere.com/v/K7QFM2XA") == .open(.verificationSession(code: "K7QFM2XA")))
-        guard case .open(.connect(let code, let link)) = decide("https://viadere.com/c/AF2345", .qr) else { Issue.record("expected connect"); return }
+        #expect(decide("https://viadere.io/v/K7QFM2XA") == .open(.verificationSession(code: "K7QFM2XA")))
+        guard case .open(.connect(let code, let link)) = decide("https://viadere.io/c/AF2345", .qr) else { Issue.record("expected connect"); return }
         #expect(code.canonical == "AF2345")
         #expect(link != nil)
     }
@@ -32,22 +32,22 @@ struct ScannedCodeTests {
     @Test func otherWebsitesAndLookalikesOpenNothing() {
         for payload in [
             "https://evil.example/o/\(Self.ach)",
-            "https://viadere.com.evil.example/o/\(Self.ach)",
-            "https://viadere.com@evil.example/o/\(Self.ach)",
-            "https://evil.example@viadere.com/o/\(Self.ach)",
-            "https://viadere.com:8443/o/\(Self.ach)",
-            "https://viadere.com/o/\(Self.ach)?next=https://evil.example",
-            "https://viadere.com/o/\(Self.ach)#x",
-            "https://viadere.com/o/\(Self.ach)/extra",
-            "https://viadere.com/o/ach_short",
-            "https://viadere.com/",
-            "https://viadere.com/unknown/\(Self.ach)",
-            "http://viadere.com/o/\(Self.ach)",
-            "HTTPS://viadere.com/o/\(Self.ach)",
-            " https://viadere.com/o/\(Self.ach)",
-            "https://viadere.com/o/\(Self.ach) ",
+            "https://viadere.io.evil.example/o/\(Self.ach)",
+            "https://viadere.io@evil.example/o/\(Self.ach)",
+            "https://evil.example@viadere.io/o/\(Self.ach)",
+            "https://viadere.io:8443/o/\(Self.ach)",
+            "https://viadere.io/o/\(Self.ach)?next=https://evil.example",
+            "https://viadere.io/o/\(Self.ach)#x",
+            "https://viadere.io/o/\(Self.ach)/extra",
+            "https://viadere.io/o/ach_short",
+            "https://viadere.io/",
+            "https://viadere.io/unknown/\(Self.ach)",
+            "http://viadere.io/o/\(Self.ach)",
+            "HTTPS://viadere.io/o/\(Self.ach)",
+            " https://viadere.io/o/\(Self.ach)",
+            "https://viadere.io/o/\(Self.ach) ",
             "https://viadere.cksites.dev/o/\(Self.ach)",  // staging links are not production links
-            "https://viad\u{0435}re.com/o/\(Self.ach)",   // Cyrillic e
+            "https://viad\u{0435}re.io/o/\(Self.ach)",   // Cyrillic e
         ] {
             #expect(decide(payload, .ckey) == .rejected(.notViadere), "\(payload)")
             #expect(decide(payload, .qr) == .rejected(.notViadere), "\(payload)")
@@ -86,18 +86,18 @@ struct ScannedCodeTests {
     }
 
     @Test func theByteCapIsRaisedOnlyForASafeActionAndOnlyToASignInEnvelopesSize() throws {
-        // viadere.com: 264 bytes covers the longest sign-in envelope (a 32-character key id) and nothing longer.
-        #expect(ScannedCodePolicy.maxSafeActionBytes(domain: .production) == 264)
+        // viadere.io: 262 bytes covers the longest sign-in envelope (a 32-character key id) and nothing longer.
+        #expect(ScannedCodePolicy.maxSafeActionBytes(domain: .production) == 262)
         let world = SafeActionWorld()
-        let longest = try CKeySafeAction(scope: .crossDevice, issuer: "viadere.com", app: "com.viadere.app", action: "signin.request", keyId: String(repeating: "k", count: 32),
+        let longest = try CKeySafeAction(scope: .crossDevice, issuer: "viadere.io", app: "com.viadere.app", action: "signin.request", keyId: String(repeating: "k", count: 32),
                                          requestId: SafeActionWorld.ach, issuedAt: 1_794_000_000, expiresAt: 1_794_000_120).signed(with: world.issuerKey)
-        #expect(longest.utf8.count == 264)
+        #expect(longest.utf8.count == 262)
         #expect(decide(longest) == .safeAction(longest))
         // A well-formed, correctly signed envelope that is larger than any sign-in (it carries parameters) is refused before the reader.
-        let padded = try CKeySafeAction(scope: .crossDevice, issuer: "viadere.com", app: "com.viadere.app", action: "signin.request", keyId: "2026-11",
+        let padded = try CKeySafeAction(scope: .crossDevice, issuer: "viadere.io", app: "com.viadere.app", action: "signin.request", keyId: "2026-11",
                                         requestId: SafeActionWorld.ach, issuedAt: 1_794_000_000, expiresAt: 1_794_000_120, params: Data(repeating: 0x20, count: 40))
             .signed(with: world.issuerKey)
-        #expect(padded.utf8.count > 264 && padded.utf8.count <= 512)
+        #expect(padded.utf8.count > 262 && padded.utf8.count <= 512)
         #expect(decide(padded) == .rejected(.unverifiedAction))
         // A long link domain raises the cap for its own Safe Actions only; links and everything else stay at 512.
         let long = try #require(LinkDomain(String(repeating: "a", count: 63) + "." + String(repeating: "b", count: 63) + "." + String(repeating: "c", count: 63) + ".example"))
@@ -113,16 +113,16 @@ struct ScannedCodeTests {
 
     @Test func retiredTextLinksAreNamedAndNeverRedeemed() {
         let token = String(repeating: "A", count: 43)
-        #expect(decide("https://viadere.com/l/\(token)") == .rejected(.retired))
-        #expect(decide("https://viadere.com/h/\(token)", .qr) == .rejected(.retired))
+        #expect(decide("https://viadere.io/l/\(token)") == .rejected(.retired))
+        #expect(decide("https://viadere.io/h/\(token)", .qr) == .rejected(.retired))
     }
 
     @Test func oversizedEmptyAndControlCharacterPayloadsStopBeforeAnyParser() {
         #expect(decide("") == .rejected(.malformed))
-        #expect(decide("https://viadere.com/o/" + String(repeating: "A", count: 600)) == .rejected(.malformed))
+        #expect(decide("https://viadere.io/o/" + String(repeating: "A", count: 600)) == .rejected(.malformed))
         #expect(decide(String(repeating: "é", count: 257)) == .rejected(.malformed))  // 514 bytes
         for scalar in ["\u{0}", "\n", "\r", "\t", "\u{1B}", "\u{7F}", "\u{85}"] {
-            #expect(decide("https://viadere.com/o/\(Self.ach)\(scalar)") == .rejected(.malformed))
+            #expect(decide("https://viadere.io/o/\(Self.ach)\(scalar)") == .rejected(.malformed))
             #expect(decide("\(scalar)@northwind", .qr) == .rejected(.malformed))
         }
     }

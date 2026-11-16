@@ -15,7 +15,7 @@ public enum PasskeyError: Error, Equatable, Sendable {
     }
 }
 
-/// Platform passkeys (WebAuthn, relying party `viadere.com`).
+/// Platform passkeys (WebAuthn, relying party `viadere.io`).
 /// iOS: `ASAuthorizationPlatformPublicKeyCredentialProvider` (`ApplePasskeyService`). Previews/tests: `MockPasskeyService`.
 public protocol PasskeyService: Sendable {
     func register(options: PasskeyRegistrationOptions) async throws -> PasskeyRegistrationCredential

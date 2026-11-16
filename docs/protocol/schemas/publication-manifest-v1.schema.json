@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/schemas/publication-manifest-v1.schema.json",
+  "$id": "https://viadere.io/schemas/publication-manifest-v1.schema.json",
   "title": "Viadere Loop publication manifest payload, version 1",
   "description": "Payload of the compact JWS with header exactly {\"alg\":\"ES256\",\"kid\":…,\"typ\":\"viadere-loop-publication+jws\"} (SECURITY.md 2.92). Canonical JSON byte for byte. Signed only with the KMS key loop-publication after review approved exactly definition_hash. Vectors: docs/protocol/vectors/loop-publication-manifest-v1.json.",
   "type": "object",

@@ -54,7 +54,7 @@ public struct ConnectContext: Codable, Sendable, Hashable {
 }
 
 /// A `https://{link domain}/c/{CODE}` connect link (QR codes, NFC, buttons, App Clip invocations). The host is the configured
-/// `LinkDomain` (`viadere.com` in production).
+/// `LinkDomain` (`viadere.io` in production).
 ///
 /// Optional signed context: `?ctx={base64url canonical JSON}&sig={base64url HMAC}` where
 /// `sig = HMAC-SHA256(key, "VIADERE-CTX-V1\n" + canonicalCode + "\n" + ctx)`.

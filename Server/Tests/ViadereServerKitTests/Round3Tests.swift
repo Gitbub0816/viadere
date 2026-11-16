@@ -89,7 +89,7 @@ final class Round3Tests: XCTestCase {
             _ = try await say(h, "Hi", from: attackerPhone)
             _ = try await say(h, "Northwind", from: attackerPhone)
             let reply = try await say(h, "1", from: attackerPhone)
-            XCTAssertTrue(reply.joined().contains("https://viadere.com/get") || reply.joined().contains("link this number"), reply.joined())
+            XCTAssertTrue(reply.joined().contains("https://viadere.io/get") || reply.joined().contains("link this number"), reply.joined())
             _ = try await say(h, "hello", from: attackerPhone)
             try await eq(try await ConversationSessionRecord.query(on: h.db).count(), 0)
             try await eq(try await ConversationMessageRecord.query(on: h.db).count(), 0)

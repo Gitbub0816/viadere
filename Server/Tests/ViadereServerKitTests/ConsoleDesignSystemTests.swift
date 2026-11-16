@@ -127,16 +127,16 @@ final class ConsoleDesignSystemTests: XCTestCase {
     // MARK: Navigation
 
     func testGoBackLinksNeverLeaveTheConsole() {
-        let origins: Set<String> = ["https://console.viadere.com"]
-        XCTAssertEqual(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboard/api-keys?x=1", allowedOrigins: origins, prefix: "/dashboard"), "/dashboard/api-keys?x=1")
+        let origins: Set<String> = ["https://console.viadere.io"]
+        XCTAssertEqual(ConsoleUI.backPath(referer: "https://console.viadere.io/dashboard/api-keys?x=1", allowedOrigins: origins, prefix: "/dashboard"), "/dashboard/api-keys?x=1")
         XCTAssertEqual(ConsoleUI.backPath(referer: "/dashboard/compliance", allowedOrigins: origins, prefix: "/dashboard"), "/dashboard/compliance")
         XCTAssertNil(ConsoleUI.backPath(referer: "https://evil.example/dashboard/api-keys", allowedOrigins: origins, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "http://console.viadere.com/dashboard/api-keys", allowedOrigins: origins, prefix: "/dashboard"), "scheme must match")
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com:8443/dashboard", allowedOrigins: origins, prefix: "/dashboard"), "port must match")
+        XCTAssertNil(ConsoleUI.backPath(referer: "http://console.viadere.io/dashboard/api-keys", allowedOrigins: origins, prefix: "/dashboard"), "scheme must match")
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.io:8443/dashboard", allowedOrigins: origins, prefix: "/dashboard"), "port must match")
         XCTAssertNil(ConsoleUI.backPath(referer: "//evil.example/dashboard", allowedOrigins: origins, prefix: "/dashboard"))
         XCTAssertNil(ConsoleUI.backPath(referer: "javascript:alert(1)", allowedOrigins: origins, prefix: "/dashboard"))
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/operator/policy", allowedOrigins: origins, prefix: "/dashboard"), "the other realm is not offered")
-        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.com/dashboardx", allowedOrigins: origins, prefix: "/dashboard"))
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.io/operator/policy", allowedOrigins: origins, prefix: "/dashboard"), "the other realm is not offered")
+        XCTAssertNil(ConsoleUI.backPath(referer: "https://console.viadere.io/dashboardx", allowedOrigins: origins, prefix: "/dashboard"))
         XCTAssertNil(ConsoleUI.backPath(referer: nil, allowedOrigins: origins, prefix: "/dashboard"))
     }
 

@@ -494,11 +494,11 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
 
     func testSafeActionsAreOffWithoutTheAuthorityKeyAndThePageDrawsThePlainLink() async throws {
         // (issuer configured, pinned key) is the test above; here every other combination, and an authority naming another issuer.
-        let cases: [(issuer: String?, pin: Bool)] = [(nil, true), ("viadere.com", false), ("other.example", true)]
+        let cases: [(issuer: String?, pin: Bool)] = [(nil, true), ("viadere.io", false), ("other.example", true)]
         for (issuer, pin) in cases {
             let box = Box<Authority>()
             try await withHarness(overrides: { _ in }, { $0.oidc.enabled = true; $0.oidc.issuer = Self.issuer }) { h in
-                XCTAssertEqual(h.ctx.config.linkDomain.host, "viadere.com")
+                XCTAssertEqual(h.ctx.config.linkDomain.host, "viadere.io")
                 let authority = try await self.makeAuthority(accounts: [UUID()], business: nil, subjectRefKey: h.ctx.config.subjectRefKey,
                                                              safeActionIssuer: issuer, safeActionPin: pin)
                 box.value = authority
@@ -555,17 +555,17 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
         }
         XCTAssertNil(try config([:]).ckeySafeActionIssuer)
         XCTAssertEqual(try config([:]).ckeySafeActionKeyName, "ckey-safe-action-signing")
-        XCTAssertEqual(try config(["CKEY_SAFE_ACTION_ISSUER": "viadere.com"]).ckeySafeActionIssuer, "viadere.com")
+        XCTAssertEqual(try config(["CKEY_SAFE_ACTION_ISSUER": "viadere.io"]).ckeySafeActionIssuer, "viadere.io")
         XCTAssertEqual(try config(["AUTHORITY_KEY_CKEY_SAFE_ACTION": "ckey-2"]).ckeySafeActionKeyName, "ckey-2")
-        for bad in [["CKEY_SAFE_ACTION_ISSUER": "Viadere.com"], ["CKEY_SAFE_ACTION_ISSUER": "https://viadere.com"], ["CKEY_SAFE_ACTION_ISSUER": "viadere"],
-                    ["CKEY_SAFE_ACTION_ISSUER": "viadere.com/x"], ["AUTHORITY_KEY_CKEY_SAFE_ACTION": "ckey-safe-action-signing/0123"]] {
+        for bad in [["CKEY_SAFE_ACTION_ISSUER": "Viadere.io"], ["CKEY_SAFE_ACTION_ISSUER": "https://viadere.io"], ["CKEY_SAFE_ACTION_ISSUER": "viadere"],
+                    ["CKEY_SAFE_ACTION_ISSUER": "viadere.io/x"], ["AUTHORITY_KEY_CKEY_SAFE_ACTION": "ckey-safe-action-signing/0123"]] {
             XCTAssertThrowsError(try config(bad), "\(bad)")
         }
-        XCTAssertThrowsError(try config(["CKEY_SAFE_ACTION_ISSUER": "viadere.com"], ["ENVIRONMENT": "development"]), "needs the OIDC provider")
+        XCTAssertThrowsError(try config(["CKEY_SAFE_ACTION_ISSUER": "viadere.io"], ["ENVIRONMENT": "development"]), "needs the OIDC provider")
 
         // The envelope never outlives the challenge; `GET /v1/ckey/keys` serves the issuer and the public key only.
         let account = UUID()
-        let short = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.com",
+        let short = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.io",
                                             challengeLifetime: 45)
         let transport = InProcessAuthorityTransport(app: short.app)
         func challenge(_ transport: InProcessAuthorityTransport) async throws -> AuthorityChallengeCreateResponse {
@@ -581,12 +581,12 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
         XCTAssertEqual(Int64(action.expiresAt), created.expiresAt)
         XCTAssertEqual(action.requestId, created.challengeId)
         let keys = try ViadereJSON.decode(AuthorityCKeyKeySet.self, from: try await transport.send(method: .GET, path: AuthorityRoute.ckeySafeActionKeys, contentType: nil, body: nil).body)
-        XCTAssertEqual(keys, AuthorityCKeyKeySet(issuer: "viadere.com", keys: [.init(id: action.keyId, alg: "ES256", publicKey: CKeySafeAction.PublicKey.es256(try XCTUnwrap(short.safeActionKey)).hex)]))
+        XCTAssertEqual(keys, AuthorityCKeyKeySet(issuer: "viadere.io", keys: [.init(id: action.keyId, alg: "ES256", publicKey: CKeySafeAction.PublicKey.es256(try XCTUnwrap(short.safeActionKey)).hex)]))
         XCTAssertLessThanOrEqual(action.keyId.count, 32)
         try await short.app.asyncShutdown()
 
         // A key service answering with the high-S twin: the authority folds it, so the published envelope still has one valid signature value.
-        let highS = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.com",
+        let highS = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.io",
                                             kms: { SafeActionKMS(base: $0, mode: .highS) })
         let foldedResponse = try await challenge(InProcessAuthorityTransport(app: highS.app))
         let folded = try XCTUnwrap(foldedResponse.safeAction)
@@ -595,7 +595,7 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
         }
         try await highS.app.asyncShutdown()
         // A signature that does not verify: no Safe Action (verify before publishing), and the sign-in challenge itself is unaffected.
-        let broken = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.com",
+        let broken = try await makeAuthority(accounts: [account], business: nil, subjectRefKey: SymmetricKey(size: .bits256), safeActionIssuer: "viadere.io",
                                              kms: { SafeActionKMS(base: $0, mode: .garbage) })
         let plain = try await challenge(InProcessAuthorityTransport(app: broken.app))
         XCTAssertNil(plain.safeAction)

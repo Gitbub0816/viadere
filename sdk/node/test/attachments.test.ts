@@ -43,7 +43,7 @@ describe("message attachments: upload", () => {
     assert.deepEqual(await c.uploadAttachment(SESSION.toUpperCase(), PNG, "image/png"), stored);
     const r = requests[0]!;
     assert.equal(r.method, "POST");
-    assert.equal(r.url, `https://api.viadere.com/v1/business/conversations/${SESSION}/attachments`);
+    assert.equal(r.url, `https://api.viadere.io/v1/business/conversations/${SESSION}/attachments`);
     assert.deepEqual(r.bytes, PNG, "the bytes travel as they are");
     assert.equal(r.body, undefined);
     assert.equal(r.headers["Content-Type"], "image/png");
@@ -109,7 +109,7 @@ describe("message attachments: upload", () => {
     const url = new URL(r.url);
     const verify = (body: Uint8Array, type: string) => verifyHttpSignature(
       { method: "POST", target: url.pathname, headers: Object.entries({ ...r.headers, "Content-Type": type }), body },
-      { now: vectors.now, authorities: ["api.viadere.com"], businessId: "b", apiKeyId: "k",
+      { now: vectors.now, authorities: ["api.viadere.io"], businessId: "b", apiKeyId: "k",
         resolveKey: () => ({ publicKey: p256PublicKeyOf(privateKey).base64url, businessId: "b", apiKeyId: "k", revoked: false }), registerNonce: () => true });
     assert.equal(await verify(PNG, "image/png"), "vsk_0123456789abcdef");
     const tampered = new Uint8Array(PNG);
@@ -126,7 +126,7 @@ describe("message attachments: download", () => {
     assert.deepEqual(await c.downloadAttachment(ref), PNG);
     const r = requests[0]!;
     assert.equal(r.method, "GET");
-    assert.equal(r.url, `https://api.viadere.com/v1/business/conversations/${SESSION}/attachments/${UUID_1}`);
+    assert.equal(r.url, `https://api.viadere.io/v1/business/conversations/${SESSION}/attachments/${UUID_1}`);
     assert.equal(r.headers.Accept, "image/png, image/jpeg");
     assert.equal(r.bytes, undefined);
     assert.equal(r.body, undefined);

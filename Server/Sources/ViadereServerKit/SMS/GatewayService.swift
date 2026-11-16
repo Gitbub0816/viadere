@@ -32,7 +32,7 @@ struct GatewayService {
     static let maxConflictRetries = 6
 
     var configuration: GatewayConfiguration {
-        GatewayConfiguration(getAppURL: APIRoutes.Web.getAppURL(domain: ctx.config.linkDomain)?.absoluteString ?? "https://viadere.com/get",
+        GatewayConfiguration(getAppURL: APIRoutes.Web.getAppURL(domain: ctx.config.linkDomain)?.absoluteString ?? "https://viadere.io/get",
                              menuRaceWindow: ctx.config.smsMenuRaceWindow)
     }
 

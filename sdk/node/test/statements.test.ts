@@ -158,10 +158,10 @@ describe("link sessions against docs/protocol/vectors/link-session-v1.json", () 
       vector.link.replace(vector.linkDomain, vector.linkDomain.toUpperCase()),
     ]) assert.equal(parseLinkSessionLink(bad, vector.linkDomain), undefined, bad);
     const kid = vector.statement.kid;
-    assert.deepEqual(parseApprovalEnrollmentLink(`https://viadere.com/a/${vector.code}?rk=${kid}`, "viadere.com"), { code: vector.code, rootKid: kid });
-    assert.equal(parseApprovalEnrollmentLink(`https://viadere.com/a/${vector.code}?rk=short`, "viadere.com"), undefined);
-    assert.equal(parseVerificationSessionLink(`https://viadere.com/v/${vector.code}`, "viadere.com"), vector.code);
-    assert.equal(parseVerificationSessionLink(`https://viadere.com/v/${vector.code}#es=${vector.secret}`, "viadere.com"), undefined);
+    assert.deepEqual(parseApprovalEnrollmentLink(`https://viadere.io/a/${vector.code}?rk=${kid}`, "viadere.io"), { code: vector.code, rootKid: kid });
+    assert.equal(parseApprovalEnrollmentLink(`https://viadere.io/a/${vector.code}?rk=short`, "viadere.io"), undefined);
+    assert.equal(parseVerificationSessionLink(`https://viadere.io/v/${vector.code}`, "viadere.io"), vector.code);
+    assert.equal(parseVerificationSessionLink(`https://viadere.io/v/${vector.code}#es=${vector.secret}`, "viadere.io"), undefined);
     assert.equal(canonicalCode("k7qf-m2xa"), vector.code);
     assert.equal(canonicalCode("K7QF-M2X0"), undefined, "0 is not in the alphabet");
     assert.equal(displayCode(vector.code), "K7QF-M2XA");

@@ -483,7 +483,7 @@ final class DashboardPagesTests: XCTestCase {
             let (owner, _, aId) = try await h.verifiedOwner()
             let result = try await h.formPost("/dashboard/campaigns", owner, [("campaign", "spring-flyer"), ("action", "enroll_rewards"), ("days", "30")])
             XCTAssertEqual(result.status, .ok, result.text)
-            let regex = try NSRegularExpression(pattern: "https://viadere\\.com/c/[0-9A-Z]{6}\\?ctx=[A-Za-z0-9_-]+&amp;sig=[A-Za-z0-9_-]{43}")
+            let regex = try NSRegularExpression(pattern: "https://viadere\\.io/c/[0-9A-Z]{6}\\?ctx=[A-Za-z0-9_-]+&amp;sig=[A-Za-z0-9_-]{43}")
             let range = try XCTUnwrap(regex.firstMatch(in: result.text, range: NSRange(result.text.startIndex..., in: result.text))?.range)
             let urlString = String(result.text[Range(range, in: result.text)!]).replacingOccurrences(of: "&amp;", with: "&")
             let link = try ConnectLink.parse(urlString)

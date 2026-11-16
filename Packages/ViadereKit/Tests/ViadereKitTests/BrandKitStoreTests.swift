@@ -44,7 +44,7 @@ enum BK {
     }
 
     static func store(api: (any BrandKitAPI)?, assets: (any BrandAssetFetcher)? = nil, cache: any BrandKitCache = InMemoryBrandKitCache(),
-                      keys: [PinnedManifestKey] = BK.keys, clock: Clock = Clock(), apiHost: String? = "api.viadere.com",
+                      keys: [PinnedManifestKey] = BK.keys, clock: Clock = Clock(), apiHost: String? = "api.viadere.io",
                       timeout: Duration = .seconds(5)) -> BrandKitStore {
         BrandKitStore(api: api, assets: assets, cache: cache, keys: keys, apiHost: apiHost, clock: { clock.now }, fetchTimeout: timeout)
     }
@@ -256,8 +256,8 @@ struct BrandKitAssetTests {
     }
 
     @Test func assetsAreNeverFetchedFromTheAPIHost() async throws {
-        let api = try await BK.served(assetHost: "api.viadere.com")
-        let store = BK.store(api: api, assets: api, apiHost: "api.viadere.com")
+        let api = try await BK.served(assetHost: "api.viadere.io")
+        let store = BK.store(api: api, assets: api, apiHost: "api.viadere.io")
         #expect(await store.refresh(BK.business).isBranded)
         #expect(await api.assetCalls == 0)
     }

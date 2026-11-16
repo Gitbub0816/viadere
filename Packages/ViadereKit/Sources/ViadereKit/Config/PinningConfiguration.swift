@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Compute a pin:
 /// ```
-/// openssl s_client -connect api.viadere.com:443 -servername api.viadere.com </dev/null 2>/dev/null \
+/// openssl s_client -connect api.viadere.io:443 -servername api.viadere.io </dev/null 2>/dev/null \
 ///   | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
 ///   | openssl dgst -sha256 -binary | openssl enc -base64
 /// ```

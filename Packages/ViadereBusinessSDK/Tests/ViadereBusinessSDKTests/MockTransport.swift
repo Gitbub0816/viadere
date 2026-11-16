@@ -52,7 +52,7 @@ enum Fixtures {
     static let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     static func client(_ transport: MockTransport, retry: RetryPolicy = RetryPolicy(maxAttempts: 3, baseDelay: 0.5, maxDelay: 30),
-                       sleeps: RecordedSleeps = RecordedSleeps(), baseURL: URL = URL(string: "https://viadere.com")!) throws -> ViadereBusinessClient {
+                       sleeps: RecordedSleeps = RecordedSleeps(), baseURL: URL = URL(string: "https://viadere.io")!) throws -> ViadereBusinessClient {
         try ViadereBusinessClient(apiKey: key, baseURL: baseURL, transport: transport, retry: retry, sleep: { sleeps.record($0) })
     }
 

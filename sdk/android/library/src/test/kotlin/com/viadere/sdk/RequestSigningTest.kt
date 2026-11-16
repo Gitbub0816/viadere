@@ -100,7 +100,7 @@ class RequestSigningVectorsTest {
             val created = c["created"] as Long
             val params = RequestSigning.signatureParams(components, created, created + 300, c["keyid"] as String, c["nonce"] as String)
             assertEquals(c["name"] as String, c["signature_input"], "sig1=$params")
-            val base = RequestSigning.signatureBase(request["method"] as String, "viadere.com", request["path_and_query"] as String, digest,
+            val base = RequestSigning.signatureBase(request["method"] as String, "viadere.io", request["path_and_query"] as String, digest,
                                                     header(c, "Content-Type"), components, params)
             assertEquals(c["name"] as String, c["signature_base"], base)
         }
@@ -117,7 +117,7 @@ class RequestSigningVectorsTest {
             // Raw low S as given, DER low S, and DER high S (what a KMS may return): all fold to the vector's signature.
             for (returned in listOf(rawSig, der(r, s), der(r, order.subtract(s)))) {
                 val body = (request["body"] as String).takeIf { it.isNotEmpty() }?.toByteArray(Charsets.UTF_8)
-                val headers = RequestSigning.sign(FixedKey(pub, returned), request["method"] as String, "https://viadere.com" + request["path_and_query"],
+                val headers = RequestSigning.sign(FixedKey(pub, returned), request["method"] as String, "https://viadere.io" + request["path_and_query"],
                                                   body, header(c, "Content-Type"), created = c["created"] as Long, nonce = c["nonce"] as String)
                 val name = c["name"] as String
                 assertEquals(name, c["signature_input"], headers["Signature-Input"])
@@ -153,7 +153,7 @@ class RequestSigningTest {
         val now = vectors["now"] as Long
         repeat(32) {
             // ECDSA in the JDK is randomized: 32 signatures make a high S (folded by the SDK) all but certain.
-            val headers = RequestSigning.sign(vectorSigner, "post", "https://viadere.com/v1/business/auth-deliveries", body, created = now)
+            val headers = RequestSigning.sign(vectorSigner, "post", "https://viadere.io/v1/business/auth-deliveries", body, created = now)
             val input = headers["Signature-Input"]!!
             assertTrue(input, Regex("""^sig1=\("@method" "@authority" "@path" "@query" "content-digest" "content-type"\);created=$now;expires=${now + 300};keyid="vsk_0123456789abcdef";nonce="[A-Za-z0-9_-]{22}";tag="viadere-api-v1"$""").matches(input))
             assertEquals("application/json", headers["Content-Type"])
@@ -163,26 +163,26 @@ class RequestSigningTest {
             val raw = Base64.getDecoder().decode(sig.removePrefix("sig1=:").removeSuffix(":"))
             assertEquals(64, raw.size)
             assertTrue("low S", BigInteger(1, raw.copyOfRange(32, 64)) <= order.shiftRight(1))
-            val base = "\"@method\": POST\n\"@authority\": viadere.com\n\"@path\": /v1/business/auth-deliveries\n\"@query\": ?\n" +
+            val base = "\"@method\": POST\n\"@authority\": viadere.io\n\"@path\": /v1/business/auth-deliveries\n\"@query\": ?\n" +
                 "\"content-digest\": ${headers["Content-Digest"]}\n\"content-type\": application/json\n\"@signature-params\": ${input.removePrefix("sig1=")}"
             assertTrue(verifiesRaw(vectorPub, base.toByteArray(Charsets.US_ASCII), raw))
         }
     }
 
     @Test fun aBodilessRequestSignsFourComponentsAndKeepsTheRawQuery() {
-        val headers = RequestSigning.sign(vectorSigner, "GET", "https://Viadere.com:443/v1/business/interactions?limit=20&cursor=a%2Fb", created = 1_800_000_000,
+        val headers = RequestSigning.sign(vectorSigner, "GET", "https://Viadere.io:443/v1/business/interactions?limit=20&cursor=a%2Fb", created = 1_800_000_000,
                                           nonce = "cXdlcnR5dWlvcGFzZGZnaA")
         assertNull(headers["Content-Digest"])
         assertNull(headers["Content-Type"])
         val raw = Base64.getDecoder().decode(headers["Signature"]!!.removePrefix("sig1=:").removeSuffix(":"))
         val params = "(\"@method\" \"@authority\" \"@path\" \"@query\");created=1800000000;expires=1800000300;keyid=\"vsk_0123456789abcdef\";nonce=\"cXdlcnR5dWlvcGFzZGZnaA\";tag=\"viadere-api-v1\""
         assertEquals("sig1=$params", headers["Signature-Input"])
-        val base = "\"@method\": GET\n\"@authority\": viadere.com\n\"@path\": /v1/business/interactions\n\"@query\": ?limit=20&cursor=a%2Fb\n\"@signature-params\": $params"
+        val base = "\"@method\": GET\n\"@authority\": viadere.io\n\"@path\": /v1/business/interactions\n\"@query\": ?limit=20&cursor=a%2Fb\n\"@signature-params\": $params"
         assertTrue(verifiesRaw(vectorPub, base.toByteArray(Charsets.US_ASCII), raw))
         assertEquals("api.example.com:8443" to "/x?", RequestSigning.authorityAndTarget("https://API.example.com:8443/x?"))
-        assertEquals("viadere.com" to "/", RequestSigning.authorityAndTarget("https://viadere.com"))
+        assertEquals("viadere.io" to "/", RequestSigning.authorityAndTarget("https://viadere.io"))
         // An empty body is a bodiless request (no Content-Digest is allowed then).
-        val empty = RequestSigning.sign(vectorSigner, "POST", "https://viadere.com/v1/business/auth-deliveries/adl_AAAAAAAAAAAAAAAAAAAAAA/cancel", ByteArray(0))
+        val empty = RequestSigning.sign(vectorSigner, "POST", "https://viadere.io/v1/business/auth-deliveries/adl_AAAAAAAAAAAAAAAAAAAAAA/cancel", ByteArray(0))
         assertFalse(empty.containsKey("Content-Digest"))
         assertTrue(empty["Signature-Input"]!!.startsWith("sig1=(\"@method\" \"@authority\" \"@path\" \"@query\");"))
     }
@@ -193,7 +193,7 @@ class RequestSigningTest {
                                    Signature.getInstance("SHA256withECDSA").run { initSign(other.private); update("x".toByteArray()); sign() })
         for (bytes in brokenOutputs) {
             try {
-                RequestSigning.sign(FixedKey(vectorPub, bytes), "GET", "https://viadere.com/v1/business/auth-deliveries")
+                RequestSigning.sign(FixedKey(vectorPub, bytes), "GET", "https://viadere.io/v1/business/auth-deliveries")
                 fail("accepted a broken signer")
             } catch (_: RequestSigningException) {
             }
@@ -201,7 +201,7 @@ class RequestSigningTest {
         // A real key whose registered public key is another one.
         val mismatched = JcaRequestSigningKey("vsk_0123456789abcdef", other.private, vectorPub)
         try {
-            RequestSigning.sign(mismatched, "GET", "https://viadere.com/v1/business/auth-deliveries")
+            RequestSigning.sign(mismatched, "GET", "https://viadere.io/v1/business/auth-deliveries")
             fail("accepted a signature by another key")
         } catch (_: RequestSigningException) {
         }
@@ -226,15 +226,15 @@ class RequestSigningTest {
             override fun sign(message: ByteArray): ByteArray { calls[0]++; return ByteArray(64) }
         }
         val cases: List<() -> Unit> = listOf(
-            { RequestSigning.sign(FixedKey(vectorPub, ByteArray(64), keyId = "mine"), "GET", "https://viadere.com/x") },
-            { RequestSigning.sign(counting, "GET", "https://viadere.com/x", nonce = "short") },
-            { RequestSigning.sign(counting, "GET", "https://viadere.com/x", lifetimeSeconds = 301) },
-            { RequestSigning.sign(counting, "GET", "https://viadere.com/x", lifetimeSeconds = 0) },
-            { RequestSigning.sign(counting, "GET", "ftp://viadere.com/x") },
-            { RequestSigning.sign(counting, "GET", "https://viadere.com/x#frag") },
-            { RequestSigning.sign(counting, "GET", "https://user@viadere.com/x") },
-            { RequestSigning.sign(counting, "GE T", "https://viadere.com/x") },
-            { RequestSigning.sign(counting, "POST", "https://viadere.com/x", "é".toByteArray(), contentType = "application/jsön") },
+            { RequestSigning.sign(FixedKey(vectorPub, ByteArray(64), keyId = "mine"), "GET", "https://viadere.io/x") },
+            { RequestSigning.sign(counting, "GET", "https://viadere.io/x", nonce = "short") },
+            { RequestSigning.sign(counting, "GET", "https://viadere.io/x", lifetimeSeconds = 301) },
+            { RequestSigning.sign(counting, "GET", "https://viadere.io/x", lifetimeSeconds = 0) },
+            { RequestSigning.sign(counting, "GET", "ftp://viadere.io/x") },
+            { RequestSigning.sign(counting, "GET", "https://viadere.io/x#frag") },
+            { RequestSigning.sign(counting, "GET", "https://user@viadere.io/x") },
+            { RequestSigning.sign(counting, "GE T", "https://viadere.io/x") },
+            { RequestSigning.sign(counting, "POST", "https://viadere.io/x", "é".toByteArray(), contentType = "application/jsön") },
             { JcaRequestSigningKey("vsk_short", vectorPrivateKey(), vectorPub) },
         )
         for (case in cases) {

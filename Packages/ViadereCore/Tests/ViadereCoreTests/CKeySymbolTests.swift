@@ -79,7 +79,7 @@ import Testing
     }
 
     @Test func theAccessibleNameIsEscapedAndNothingElseIsCallerControlled() throws {
-        let symbol = try CKeySymbol.encode("https://viadere.com/v/K7QFM2XA")
+        let symbol = try CKeySymbol.encode("https://viadere.io/v/K7QFM2XA")
         let svg = symbol.svg(label: "Sign in \"<script>&'\u{0}\u{7}")
         #expect(svg.contains("aria-label=\"Sign in &quot;&lt;script&gt;&amp;&#39;\""))
         #expect(!svg.contains("<script"))

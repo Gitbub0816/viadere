@@ -16,11 +16,11 @@ change_summary: "Second draft: complete statement with goal, scope, measures tak
 
 ## 1. Our goal
 
-We aim for the viadere.com website and the Viadere apps (iPhone, Apple Watch and App Clip) to conform to the Web Content Accessibility Guidelines (WCAG) 2.2 at level AA, and for the apps to follow Apple's accessibility guidance. We have not claimed that we conform. [COUNSEL: whether and how to state a conformance claim, and whether to use the EN 301 549 and Section 508 formats.]
+We aim for the viadere.io website and the Viadere apps (iPhone, Apple Watch and App Clip) to conform to the Web Content Accessibility Guidelines (WCAG) 2.2 at level AA, and for the apps to follow Apple's accessibility guidance. We have not claimed that we conform. [COUNSEL: whether and how to state a conformance claim, and whether to use the EN 301 549 and Section 508 formats.]
 
 ## 2. Scope
 
-This statement covers: the public website at viadere.com, including the developer portal and legal pages; the Viadere app, App Clip and watchOS app; and the business dashboard. It does not cover third-party sites that we link to, the third-party services that we use (such as Apple's system screens, Wallet or the operating system's passkey prompts) or content that businesses send through Viadere.
+This statement covers: the public website at viadere.io, including the developer portal and legal pages; the Viadere app, App Clip and watchOS app; and the business dashboard. It does not cover third-party sites that we link to, the third-party services that we use (such as Apple's system screens, Wallet or the operating system's passkey prompts) or content that businesses send through Viadere.
 
 ## 3. What we have done on the website
 

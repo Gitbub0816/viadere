@@ -106,7 +106,7 @@ an unset secret is an error, because an ephemeral secret would make stored data 
 | `SUBJECT_REF_KEY` | base64url ≥ 32 B; HMAC key of the pairwise `subject_ref` derivation (`sub_…`). **Required in staging/production and whenever `DATABASE_URL` is set; must differ from every other secret** (startup refuses reuse). Rotating it changes every `subject_ref` businesses hold |
 | `AUDIT_CHAIN_LEGACY_THROUGH_SEQ` | set once when upgrading an existing deployment to the last pre-upgrade audit `seq` (default 0 = every event must be keyed) |
 | `PUBLIC_BASE_URL` | public origin (https in production). Used for links and for Twilio signature URLs — never the Host header |
-| `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.com`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
+| `RP_ID`, `RP_NAME`, `RP_ORIGIN` | WebAuthn relying party (default `viadere.io`). Outside development `RP_ORIGIN` must be an https origin of `RP_ID` |
 | `APP_ATTEST_MODE` | `off` \| `report` \| `require`: what to do with an enrollment without a valid Apple App Attest attestation. Default `require` in production/staging (an unattested app **or** App Clip device is refused, `403 attestation_required`), `off` elsewhere. `report` accepts and flags it with a 72 h cool-down |
 | `APP_ATTEST_ENVIRONMENT` | `development` \| `production`: the App Attest AAGUID the app's builds attest with (default `production` in production, `development` elsewhere). TestFlight and App Store builds attest as `production` |
 | `PHONE_LINK_ALLOWED_COUNTRIES` (formerly `OTP_ALLOWED_COUNTRIES`, still read) | ISO regions whose numbers can be linked by a customer-originated text (default `US,CA`; Caribbean +1 regions such as `JM`, `DO` are separate) |
@@ -178,7 +178,7 @@ consumer, not revoked) · **API key** business `Authorization: Bearer vdk_live_�
 
 | Method & path | Auth | Notes |
 |---|---|---|
-| `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.com`, UV required); returns session + refresh token **and, once, the account's 10 recovery codes with its recovery ID** (`recoveryCodes`) |
+| `POST /v1/auth/register/begin` · `/finish` | none | passkey registration (RP `viadere.io`, UV required); returns session + refresh token **and, once, the account's 10 recovery codes with its recovery ID** (`recoveryCodes`) |
 | `POST /v1/auth/login/begin` · `/finish` | none | passkey login (discoverable credentials) |
 | `POST /v1/auth/refresh` | none (+ device signature) | refresh-token rotation; reuse revokes the whole family. **A session bound to a device must be refreshed with that device's `VIADERE-SIG-V1` headers** (grace replay included); unbound sessions refresh without |
 | `POST /v1/recovery/begin` · `/finish` · `/complete` | none | account recovery with a recovery code (SECURITY.md §2.26): spend one code, register a NEW passkey, wait **72 h** (every device is notified, any trusted device can cancel), then activate. Rate-limited per IP, per recovery ID and globally (malformed input never touches the shared budgets), 5 wrong codes lock the account for 24 h, every failure is the same `401`; at most one open recovery per account (partial unique index); activation ends household grants and re-cools phone links |
@@ -405,7 +405,7 @@ re-acceptance, catalog vs. Site), `WP6RolesTests` (matrix = document, separation
 ### "Connect with Viadere" button
 
 `Public/connect-button/v1/` holds a dependency-free web component (`<viadere-connect code="AF2345">`) and a plain CSS variant, brand-styled
-for light and dark, with the mark inlined. They render a link to `https://viadere.com/c/{CODE}` (optionally with a signed `ctx`/`sig`) and make
+for light and dark, with the mark inlined. They render a link to `https://viadere.io/c/{CODE}` (optionally with a signed `ctx`/`sig`) and make
 no requests, set no cookies, use no storage and no iframe. Files are served with `Cache-Control: public, max-age=31536000, immutable` under a
 versioned path, with `Access-Control-Allow-Origin: *` (no credentials) so `integrity=` works cross-origin; a change ships as `/v2/`. The SRI hashes
 are in [`docs/BUSINESS-INTEGRATION.md`](../docs/BUSINESS-INTEGRATION.md) (a test fails if they drift) and at `/connect-button/v1/integrity.json`.

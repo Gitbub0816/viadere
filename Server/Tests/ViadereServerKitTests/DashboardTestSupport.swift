@@ -39,7 +39,7 @@ func formBody(_ pairs: [(String, String)]) -> Data {
 }
 
 extension TestHarness {
-    var origin: String { "https://viadere.com" }
+    var origin: String { "https://viadere.io" }
 
     func csrf(_ session: DashSession) -> String { DashboardSessionStore.csrfToken(sessionToken: session.token, hasher: ctx.hasher) }
 

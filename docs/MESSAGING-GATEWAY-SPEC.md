@@ -25,7 +25,7 @@ Viadere ("A trusted way to connect") is a verified, low-friction business–cons
 ## Business identity and discovery
 - Verified directory with immutable internal business IDs, business verification and authorization status, and searchable public handles (e.g. @starbucks).
 - Permanent, non-reassigned, six-character alphanumeric business codes (e.g. AF2345). Case-insensitive normalization; I and 1 equivalent, O and 0 equivalent, L distinct. Reject collisions under canonical normalization.
-- QR codes and links (e.g. viadere.com/c/AF2345) encode a business code plus optional signed context, not a separate identity scheme.
+- QR codes and links (e.g. viadere.io/c/AF2345) encode a business code plus optional signed context, not a separate identity scheme.
 - "Connect with Viadere" buttons may link to the native app, eligible App Clip, or secure web fallback.
 - Recent businesses and discovery results must only include actual verified participating organizations; sample brand names in this spec are illustrative, not claims of integration.
 

@@ -62,5 +62,5 @@ The spec's gates (§17) are enforced as release flags in configuration: Verify, 
 
 - Apple: in-app identity presentment entitlement (per bundle ID), Wallet merchant ID and encryption certificate; App Attest; push and Wallet pass certificates.
 - Didit: account, workflow IDs, webhook secret, White Label theme, shortest retention setting.
-- Fly.io, Cloudflare, Neon and Google Cloud accounts; DNS for `viadere.com`.
+- Fly.io, Cloudflare, Neon and Google Cloud accounts; DNS for `viadere.io`.
 - Counsel: every [LEGAL] item and all draft legal pages.

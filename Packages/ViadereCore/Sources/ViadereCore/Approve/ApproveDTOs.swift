@@ -83,7 +83,7 @@ public struct ApprovalEnrollmentTicket: Codable, Sendable, Hashable {
     public var enrollmentId: UUID
     /// Eight characters of the unambiguous alphabet, single use, shown as `ABCD-EFGH`.
     public var code: String
-    /// The relay's suggestion, `https://viadere.com/a/{CODE}?rk={root kid}`. **Do not show it**: it comes from the relay, carries no enrollment
+    /// The relay's suggestion, `https://viadere.io/a/{CODE}?rk={root kid}`. **Do not show it**: it comes from the relay, carries no enrollment
     /// secret and its `rk` is not authenticated. The business SDK builds the link it shows (`ApprovalEnrollmentInvitation.link`) with its own
     /// root key id and the secret in the fragment, and refuses a ticket whose `rk` is not its own.
     public var deepLink: String

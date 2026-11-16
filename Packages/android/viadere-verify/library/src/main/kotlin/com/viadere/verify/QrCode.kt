@@ -5,7 +5,7 @@ package com.viadere.verify
  *
  * A line-for-line port of the encoder in the web component (`Server/Public/verify-button/v1/viadere-verify.js`), which the browser test checks
  * module for module against the `qrcode` reference library. The unit tests here compare against vectors produced and cross-checked that way.
- * A session link is 30 to 38 bytes, so it always fits in version 3 or 4. No dependency: nothing to update, nothing to audit but this file.
+ * A session link is 29 to 38 bytes, so it always fits in version 3 or 4. No dependency: nothing to update, nothing to audit but this file.
  */
 object QrCode {
     private val ECC_PER_BLOCK = intArrayOf(0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26)

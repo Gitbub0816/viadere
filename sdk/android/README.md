@@ -24,7 +24,7 @@ fields to add to **each attempt** (a fresh nonce every time), in order `Content-
 ```kotlin
 val key = JcaRequestSigningKey("vsk_0123456789abcdef", privateKey, publicKey)   // java.security EC P-256 (software or the Android Keystore)
 val proof = RequestSigning.signingKeyProof(challenge, key)                       // console, Security > Request signing
-val fields = RequestSigning.sign(key, "POST", "https://viadere.com/v1/business/auth-deliveries", bodyBytes)
+val fields = RequestSigning.sign(key, "POST", "https://viadere.io/v1/business/auth-deliveries", bodyBytes)
 ```
 
 A KMS or HSM implements `RequestSigningKey` (`keyId`, `publicKey`, `sign(message)`) and may return DER or raw `r||s` with either `s`: the SDK converts

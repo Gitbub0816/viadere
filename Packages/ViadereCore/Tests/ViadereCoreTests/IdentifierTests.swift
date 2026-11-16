@@ -138,10 +138,10 @@ struct ConnectLinkTests {
 
     @Test func plainRoundTrip() throws {
         let link = ConnectLink(code: try BusinessCode("AF2345"))
-        #expect(link.urlString == "https://viadere.com/c/AF2345")
+        #expect(link.urlString == "https://viadere.io/c/AF2345")
         #expect(try ConnectLink.parse(link.urlString) == link)
-        #expect(try ConnectLink.parse("https://www.viadere.com/c/af2345/").code.canonical == "AF2345")
-        #expect(try ConnectLink.parse("HTTPS://VIADERE.COM/c/io3456").code.canonical == "103456")
+        #expect(try ConnectLink.parse("https://www.viadere.io/c/af2345/").code.canonical == "AF2345")
+        #expect(try ConnectLink.parse("HTTPS://VIADERE.IO/c/io3456").code.canonical == "103456")
     }
 
     @Test func signedContext() throws {
@@ -163,34 +163,34 @@ struct ConnectLinkTests {
         let ctx = ConnectContext(campaign: "a", issuedAt: now)
         let link = try ConnectLink(code: try BusinessCode("AF2345"), context: ctx, key: key)
         let otherCtx = Base64URL.encode(try ConnectContext(campaign: "b", issuedAt: now).canonicalJSON())
-        let tampered = "https://viadere.com/c/AF2345?ctx=\(otherCtx)&sig=\(link.signature ?? "")"
+        let tampered = "https://viadere.io/c/AF2345?ctx=\(otherCtx)&sig=\(link.signature ?? "")"
         #expect(throws: ConnectLink.ContextError.badSignature) { try ConnectLink.parse(tampered).verifiedContext(key: key, now: now) }
     }
 
     @Test("Hostile links are rejected", arguments: [
-        "http://viadere.com/c/AF2345",
-        "javascript:alert(1)//viadere.com/c/AF2345",
-        "https://viadere.com.evil.com/c/AF2345",
+        "http://viadere.io/c/AF2345",
+        "javascript:alert(1)//viadere.io/c/AF2345",
+        "https://viadere.io.evil.com/c/AF2345",
         "https://evil.com/c/AF2345",
-        "https://evilviadere.com/c/AF2345",
-        "https://viadere.com@evil.com/c/AF2345",
-        "https://user:pw@viadere.com/c/AF2345",
-        "https://viadere.com:8443/c/AF2345",
-        "https://viadere.com/c/AF2345#https://evil.com",
-        "https://viadere.com/c/AF2345?next=https://evil.com",
-        "https://viadere.com/c/AF2345?redirect=//evil.com",
-        "https://viadere.com/c/AF2345?ctx=a&ctx=b&sig=c",
-        "https://viadere.com/c/AF2345?ctx=abc",
-        "https://viadere.com/c/AF2345/extra",
-        "https://viadere.com/c/AF%2F2345",
-        "https://viadere.com/c/../c/AF2345",
-        "https://viadere.com//evil.com/c/AF2345",
-        "https://viadere.com\\@evil.com/c/AF2345",
-        "https://viadere.com/c/AF 2345",
-        "https://viadere.com/x/AF2345",
-        "https://viadere.com/c/AF234",
-        "https://viadere.com/c/AF*345",
-        "https://vіadere.com/c/AF2345",
+        "https://evilviadere.io/c/AF2345",
+        "https://viadere.io@evil.com/c/AF2345",
+        "https://user:pw@viadere.io/c/AF2345",
+        "https://viadere.io:8443/c/AF2345",
+        "https://viadere.io/c/AF2345#https://evil.com",
+        "https://viadere.io/c/AF2345?next=https://evil.com",
+        "https://viadere.io/c/AF2345?redirect=//evil.com",
+        "https://viadere.io/c/AF2345?ctx=a&ctx=b&sig=c",
+        "https://viadere.io/c/AF2345?ctx=abc",
+        "https://viadere.io/c/AF2345/extra",
+        "https://viadere.io/c/AF%2F2345",
+        "https://viadere.io/c/../c/AF2345",
+        "https://viadere.io//evil.com/c/AF2345",
+        "https://viadere.io\\@evil.com/c/AF2345",
+        "https://viadere.io/c/AF 2345",
+        "https://viadere.io/x/AF2345",
+        "https://viadere.io/c/AF234",
+        "https://viadere.io/c/AF*345",
+        "https://vіadere.io/c/AF2345",
         "",
     ])
     func hostile(input: String) {

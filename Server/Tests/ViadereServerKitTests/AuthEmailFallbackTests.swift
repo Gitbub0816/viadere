@@ -152,7 +152,7 @@ final class AuthEmailFallbackTests: AuthDeliveryTestBase {
             XCTAssertTrue(mail.text.contains("Use it only on Northwind."))
             XCTAssertTrue(mail.text.contains("Northwind sent this code by email because you asked for it there. Email is easier to intercept than the Viadere app."))
             XCTAssertTrue(mail.text.contains("Expires at "))
-            for forbidden in ["http", "://", "www.", "href", "<", ">", "@", "viadere.com", s.host] {
+            for forbidden in ["http", "://", "www.", "href", "<", ">", "@", "viadere.io", s.host] {
                 XCTAssertFalse(mail.text.lowercased().contains(forbidden.lowercased()), "no link in the email: \(forbidden)")
             }
             XCTAssertFalse(mail.subject.contains("482913"), "the code is never in the subject")
@@ -321,7 +321,7 @@ final class AuthEmailFallbackTests: AuthDeliveryTestBase {
     func testMailerSendTurnsTrackingOffForTheFallbackEmail() async throws {
         let app = try await Application.make(.testing)
         let client = PlatformRound4Tests.RecordingClient(eventLoop: app.eventLoopGroup.next())
-        var config = EmailConfig(apiURL: URL(string: "https://api.mailersend.com/v1/email")!, apiKey: "mlsn.mail", fromAddress: "Viadere <no-reply@viadere.com>")
+        var config = EmailConfig(apiURL: URL(string: "https://api.mailersend.com/v1/email")!, apiKey: "mlsn.mail", fromAddress: "Viadere <no-reply@viadere.io>")
         config.format = .mailersend
         let sender = HTTPEmailSender(config: config, client: client)
         try await sender.send(AuthEmailFallback.message(to: address, business: "Northwind", code: "482913", expiresAt: Date()))

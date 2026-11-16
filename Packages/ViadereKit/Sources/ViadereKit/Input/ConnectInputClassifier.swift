@@ -42,7 +42,7 @@ public enum ConnectInputClassifier {
             }
             let looksComplete = trimmed.lowercased().hasPrefix("https://") && trimmed.count > 12
             return ConnectInputState(kind: .link, text: trimmed,
-                                     validation: looksComplete ? .invalid("That isn't a Viadere link.") : .incomplete("Paste a viadere.com link"),
+                                     validation: looksComplete ? .invalid("That isn't a Viadere link.") : .incomplete("Paste a viadere.io link"),
                                      alsoCode: nil)
         }
 

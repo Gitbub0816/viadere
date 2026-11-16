@@ -111,7 +111,7 @@ Never priority, never consent.
 ## Base URL
 
 ```
-https://viadere.com
+https://viadere.io
 ```
 
 Service health is on the [status page](/status/). Migration guides will appear under [changelog](/developers/changelog/) when a breaking version exists.

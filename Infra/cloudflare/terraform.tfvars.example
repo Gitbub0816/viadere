@@ -2,6 +2,6 @@
 environment           = "staging"
 cloudflare_account_id = "REPLACE"
 cloudflare_zone_id    = "REPLACE"
-apex_domain           = "viadere.com"
+apex_domain           = "viadere.io"
 api_hostname_label    = "api"
 min_tls_version       = "1.2"

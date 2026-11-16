@@ -261,7 +261,7 @@ final class PKPassFormatTests: XCTestCase {
         XCTAssertEqual(manifest, ["pass.json": Hex.encode(Insecure.SHA1.hash(data: files[0].data)), "icon.png": Hex.encode(Insecure.SHA1.hash(data: files[1].data))])
         XCTAssertEqual(Hex.encode(Insecure.SHA1.hash(data: Data("abc".utf8))), "a9993e364706816aba3e25717850c26c9cd0d89d", "SHA-1 test vector")
         var descriptor = PassDescriptor(kind: .coupon, passTypeIdentifier: "pass.x", teamIdentifier: "T", serialNumber: "S", authenticationToken: "tokentokentokentoken",
-                                        webServiceURL: "https://viadere.com/wallet", organizationName: "Org", description: "Desc")
+                                        webServiceURL: "https://viadere.io/wallet", organizationName: "Org", description: "Desc")
         descriptor.primary = [.init(key: "offer", label: "OFFER", value: .text("Free coffee"))]
         let json = try descriptor.json()
         XCTAssertEqual(try descriptor.json(), json, "stable bytes")
@@ -341,7 +341,7 @@ final class WalletFlowTests: XCTestCase {
             XCTAssertEqual(pass.passJSON["teamIdentifier"] as? String, "TEAMID1234")
             XCTAssertEqual(pass.passJSON["formatVersion"] as? Int, 1)
             XCTAssertEqual(pass.passJSON["organizationName"] as? String, "Juniper Coffee")
-            XCTAssertEqual(pass.passJSON["webServiceURL"] as? String, "https://viadere.com/wallet")
+            XCTAssertEqual(pass.passJSON["webServiceURL"] as? String, "https://viadere.io/wallet")
             XCTAssertGreaterThanOrEqual((pass.passJSON["authenticationToken"] as? String)?.count ?? 0, 16)
             XCTAssertNil(pass.passJSON["voided"])
             let card = try XCTUnwrap(pass.passJSON["storeCard"] as? [String: Any])

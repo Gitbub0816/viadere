@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/schemas/brand-manifest-v1.schema.json",
+  "$id": "https://viadere.io/schemas/brand-manifest-v1.schema.json",
   "title": "Viadere brand manifest payload, version 1",
   "description": "Payload of the compact JWS with typ viadere-brand-manifest+jws, signed with the KMS key brand-manifest (SECURITY.md 2.93, ADR-0017). Canonical JSON; ETag = sha256 of the canonical payload. Publish-time rules beyond structure (overlap of equal-priority windows, kit and frame references, content rules on names, asset slot bounds, lifetime) are in ViadereCore BrandManifest.validationIssues. Vectors: docs/protocol/vectors/brand-manifest-v1.json.",
   "type": "object",

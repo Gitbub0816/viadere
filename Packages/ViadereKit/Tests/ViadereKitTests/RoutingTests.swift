@@ -8,36 +8,36 @@ struct DeepLinkTests {
     let token = String(repeating: "A", count: 43)
 
     @Test func connectUniversalLink() {
-        guard case .connect(let code, let link)? = DeepLinkRouter.route("https://viadere.com/c/af-2345".replacingOccurrences(of: "-", with: "")) else {
+        guard case .connect(let code, let link)? = DeepLinkRouter.route("https://viadere.io/c/af-2345".replacingOccurrences(of: "-", with: "")) else {
             Issue.record("expected connect"); return
         }
         #expect(code.canonical == "AF2345")
         #expect(link != nil)
-        #expect(DeepLinkRouter.route("https://www.viadere.com/c/AF2345") != nil)
+        #expect(DeepLinkRouter.route("https://www.viadere.io/c/AF2345") != nil)
     }
 
     @Test func connectLinkIsStrict() {
-        #expect(DeepLinkRouter.route("https://viadere.com.evil.com/c/AF2345") == nil)
-        #expect(DeepLinkRouter.route("http://viadere.com/c/AF2345") == nil)
-        #expect(DeepLinkRouter.route("https://user@viadere.com/c/AF2345") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/c/AF2345?redirect=evil") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/c/AF234") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com:8443/c/AF2345") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io.evil.com/c/AF2345") == nil)
+        #expect(DeepLinkRouter.route("http://viadere.io/c/AF2345") == nil)
+        #expect(DeepLinkRouter.route("https://user@viadere.io/c/AF2345") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/c/AF2345?redirect=evil") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/c/AF234") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io:8443/c/AF2345") == nil)
     }
 
     @Test func retiredAccountLinkAndHandoffOnlyOpenTheNoLongerUsedNotice() {
         // ADR-0027: old text links carry no token into the app. They route to one case that redeems and reads nothing.
-        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token)") == .retiredLink)
-        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)") == .retiredLink)
+        #expect(DeepLinkRouter.route("https://viadere.io/l/\(token)") == .retiredLink)
+        #expect(DeepLinkRouter.route("https://viadere.io/h/\(token)") == .retiredLink)
         #expect(DeepLinkRouter.route("viadere://h/\(token)") == nil)
         #expect(DeepLinkRouter.route("viadere://l/\(token)") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/h/short") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)?next=https://evil.com") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)#frag") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/h/\(token)/extra") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/h/short") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/h/\(token)?next=https://evil.com") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/h/\(token)#frag") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/h/\(token)/extra") == nil)
         #expect(DeepLinkRouter.route("https://evil.com/h/\(token)") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/x/\(token)") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/l/\(token.dropLast())+") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/x/\(token)") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/l/\(token.dropLast())+") == nil)
     }
 
     @Test func customScheme() {
@@ -53,7 +53,7 @@ struct DeepLinkTests {
         #expect(DeepLinkRouter.route("viadere://i/not-a-uuid") == nil)
         #expect(DeepLinkRouter.route("viadere://unknown/x") == nil)
         #expect(DeepLinkRouter.route("viadere://c/AF2345/extra") == nil)
-        #expect(DeepLinkRouter.route("ftp://viadere.com/c/AF2345") == nil)
+        #expect(DeepLinkRouter.route("ftp://viadere.io/c/AF2345") == nil)
     }
 
     @Test func notificationUserInfo() {
@@ -70,20 +70,20 @@ struct PinningTests {
     static let pinA = Data(repeating: 1, count: 32).base64EncodedString()
     static let pinB = Data(repeating: 2, count: 32).base64EncodedString()
     static let pinC = Data(repeating: 3, count: 32).base64EncodedString()
-    let configured = PinningConfiguration(host: "api.viadere.com", pins: [pinA, pinB])
+    let configured = PinningConfiguration(host: "api.viadere.io", pins: [pinA, pinB])
 
     @Test func pinMatchAllowsAndMismatchDenies() {
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [Self.pinC, Self.pinA], configuration: configured, failClosed: true) == .allow)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [Self.pinC, Self.pinA], configuration: configured, failClosed: true) == .allow)
         // backup pin also allows
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [Self.pinB], configuration: configured, failClosed: true) == .allow)
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [Self.pinC], configuration: configured, failClosed: true) == .deny)
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [], configuration: configured, failClosed: true) == .deny)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [Self.pinB], configuration: configured, failClosed: true) == .allow)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [Self.pinC], configuration: configured, failClosed: true) == .deny)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [], configuration: configured, failClosed: true) == .deny)
     }
 
     @Test func hostScoping() {
-        #expect(configured.applies(to: "API.viadere.com"))
-        #expect(configured.applies(to: "x.api.viadere.com"))
-        #expect(!configured.applies(to: "evilapi.viadere.com"))
+        #expect(configured.applies(to: "API.viadere.io"))
+        #expect(configured.applies(to: "x.api.viadere.io"))
+        #expect(!configured.applies(to: "evilapi.viadere.io"))
         #expect(PinEvaluator.evaluate(host: "example.org", chainSPKIHashes: [], configuration: configured, failClosed: true) == .useDefaultEvaluation)
     }
 
@@ -91,13 +91,13 @@ struct PinningTests {
         let placeholder = ViadereConfiguration.productionPinning
         #expect(placeholder.isPlaceholder)
         #expect(!placeholder.isConfigured)
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [Self.pinA], configuration: placeholder, failClosed: true) == .deny)
-        #expect(PinEvaluator.evaluate(host: "api.viadere.com", chainSPKIHashes: [Self.pinA], configuration: placeholder, failClosed: false) == .useDefaultEvaluation)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [Self.pinA], configuration: placeholder, failClosed: true) == .deny)
+        #expect(PinEvaluator.evaluate(host: "api.viadere.io", chainSPKIHashes: [Self.pinA], configuration: placeholder, failClosed: false) == .useDefaultEvaluation)
     }
 
     @Test func requiresBackupPin() {
-        #expect(!PinningConfiguration(host: "api.viadere.com", pins: [Self.pinA]).isConfigured)
-        #expect(!PinningConfiguration(host: "api.viadere.com", pins: [Self.pinA, "not-a-pin"]).isConfigured)
+        #expect(!PinningConfiguration(host: "api.viadere.io", pins: [Self.pinA]).isConfigured)
+        #expect(!PinningConfiguration(host: "api.viadere.io", pins: [Self.pinA, "not-a-pin"]).isConfigured)
         #expect(configured.isConfigured)
     }
 }
@@ -119,10 +119,10 @@ struct ConfigurationTests {
     }
 
     @Test func rejectsOddURLs() {
-        #expect(ViadereConfiguration.sanitizedBaseURL("https://user:pw@api.viadere.com", allowLocalHTTP: false) == nil)
-        #expect(ViadereConfiguration.sanitizedBaseURL("https://api.viadere.com/v1", allowLocalHTTP: false) == nil)
-        #expect(ViadereConfiguration.sanitizedBaseURL("ftp://api.viadere.com", allowLocalHTTP: true) == nil)
-        #expect(ViadereConfiguration.sanitizedBaseURL("https://api.viadere.com", allowLocalHTTP: false)?.absoluteString == "https://api.viadere.com")
+        #expect(ViadereConfiguration.sanitizedBaseURL("https://user:pw@api.viadere.io", allowLocalHTTP: false) == nil)
+        #expect(ViadereConfiguration.sanitizedBaseURL("https://api.viadere.io/v1", allowLocalHTTP: false) == nil)
+        #expect(ViadereConfiguration.sanitizedBaseURL("ftp://api.viadere.io", allowLocalHTTP: true) == nil)
+        #expect(ViadereConfiguration.sanitizedBaseURL("https://api.viadere.io", allowLocalHTTP: false)?.absoluteString == "https://api.viadere.io")
     }
 
     @Test func keychainGroupMustBeSubstituted() {
@@ -141,7 +141,7 @@ struct LinkDomainRoutingTests {
 
     @Test func everyUniversalLinkForAnotherHostIsRefused() {
         // Built for staging: production links (and look-alikes) are not ours.
-        for link in ["https://viadere.com/c/AF2345", "https://viadere.com/l/\(token)", "https://viadere.com/h/\(token)", "https://viadere.com/a/ABCDEFGH",
+        for link in ["https://viadere.io/c/AF2345", "https://viadere.io/l/\(token)", "https://viadere.io/h/\(token)", "https://viadere.io/a/ABCDEFGH",
                      "https://viadere.cksites.dev.evil.com/c/AF2345", "https://www.viadere.cksites.dev/l/\(token)", "https://www.viadere.cksites.dev/h/\(token)"] {
             #expect(DeepLinkRouter.route(link, domain: staging) == nil, "\(link)")
         }
@@ -161,7 +161,7 @@ struct LinkDomainRoutingTests {
         let unexpanded = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "$(VIADERE_LINK_DOMAIN)"],
                                                       allowLocalHTTP: false)
         #expect(unexpanded.linkDomain == .production)
-        let production = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api.viadere.com", "ViadereLinkDomain": "evil.example.com"], allowLocalHTTP: false)
+        let production = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api.viadere.io", "ViadereLinkDomain": "evil.example.com"], allowLocalHTTP: false)
         #expect(production.linkDomain == .production, "the production API never takes its link domain from the plist")
     }
 }

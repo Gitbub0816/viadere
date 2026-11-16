@@ -180,7 +180,7 @@ final class PlatformRound4Tests: XCTestCase {
             "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(), "EDGE_TOKEN": SecureToken.generate(), "APNS_TEAM_ID": "TEAM123456", "TWILIO_ACCOUNT_SID": "AC1", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM_NUMBER": "+15550001111",
             "APPLE_TEAM_ID": "TEAM123456",
         ]
-        let email = ["EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "Viadere <no-reply@viadere.com>"]
+        let email = ["EMAIL_API_URL": "https://mail.example.com/v1/send", "EMAIL_API_KEY": "key_123", "EMAIL_FROM_ADDRESS": "Viadere <no-reply@viadere.io>"]
         let production = base.merging(email) { $1 }
         let config = try ServerConfig.fromEnvironment(production)
         XCTAssertEqual(config.rateLimitStore, .database, "production defaults to the shared store")
@@ -256,7 +256,7 @@ final class PlatformRound4Tests: XCTestCase {
         try await withHarness { h in
             let loop = h.app.eventLoopGroup.next()
             let client = RecordingClient(eventLoop: loop)
-            let config = EmailConfig(apiURL: URL(string: "https://mail.example.com/v1/send")!, apiKey: "key_123", fromAddress: "Viadere <no-reply@viadere.com>")
+            let config = EmailConfig(apiURL: URL(string: "https://mail.example.com/v1/send")!, apiKey: "key_123", fromAddress: "Viadere <no-reply@viadere.io>")
             try await HTTPEmailSender(config: config, client: client).send(EmailMessage(to: "a@b.co", subject: "Hi", text: "Body", kind: "x"))
             let request = try XCTUnwrap(client.requests.withLockedValue { $0.first })
             XCTAssertEqual(request.method, .POST)
@@ -264,7 +264,7 @@ final class PlatformRound4Tests: XCTestCase {
             XCTAssertEqual(request.headers.first(name: "Authorization"), "Bearer key_123")
             var body = try XCTUnwrap(request.body)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.readBytes(length: body.readableBytes) ?? [])) as? [String: String])
-            XCTAssertEqual(json, ["from": "Viadere <no-reply@viadere.com>", "to": "a@b.co", "subject": "Hi", "text": "Body"])
+            XCTAssertEqual(json, ["from": "Viadere <no-reply@viadere.io>", "to": "a@b.co", "subject": "Hi", "text": "Body"])
             // A bare key in a custom header.
             var custom = config
             custom.authHeader = "X-Api-Key"
@@ -535,7 +535,7 @@ final class PlatformRound4Tests: XCTestCase {
             XCTAssertFalse(sent.text.contains(token))
             XCTAssertFalse(sent.text.contains("/dashboard/invite/"))
             let message = try XCTUnwrap(h.emails.messages(to: "alice@acme.test").last)
-            XCTAssertTrue(message.text.contains("https://viadere.com/dashboard/invite/\(token)"))
+            XCTAssertTrue(message.text.contains("https://viadere.io/dashboard/invite/\(token)"))
             XCTAssertFalse(message.text.contains(try XCTUnwrap(h.emails.lastCode(to: "alice@acme.test") ?? "no-code-sent-yet")), "the invitation carries no code")
             // The provider is down: the invitation is not left behind, and the answer says so without detail.
             h.emails.setFailing(true)

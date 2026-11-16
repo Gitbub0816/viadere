@@ -24,7 +24,7 @@ final class DirectoryTests: XCTestCase {
             let key = h.config.connectLinkKey
             let context = ConnectContext(campaign: "summer-print", action: "connect", issuedAt: h.clock.now(), expiresAt: h.clock.now().addingTimeInterval(3600))
             let signedLink = try ConnectLink(code: code, context: context, key: key).urlString
-            let inputs = [signedLink, "https://viadere.com/c/\(code.canonical)", "@northwindair", code.display, code.canonical.lowercased(), "Northwind"]
+            let inputs = [signedLink, "https://viadere.io/c/\(code.canonical)", "@northwindair", code.display, code.canonical.lowercased(), "Northwind"]
             for input in inputs {
                 let response = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: input))
                 XCTAssertEqual(response.status, .ok, "\(input) \(response.text)")
@@ -44,7 +44,7 @@ final class DirectoryTests: XCTestCase {
             XCTAssertNil(expired.context)
             XCTAssertEqual(expired.matches.map(\.id), [b.id])
             // Lookalike hosts and schemes never resolve as links.
-            let evil = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.com.evil.io/c/\(code.canonical)"))
+            let evil = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.io.evil.io/c/\(code.canonical)"))
             XCTAssertEqual(try evil.json(DirectoryResolveResponse.self).method, .name)
             // Search.
             let search = try await h.request(.GET, "/v1/directory/search?q=north&limit=5").json(Page<BusinessSummary>.self)

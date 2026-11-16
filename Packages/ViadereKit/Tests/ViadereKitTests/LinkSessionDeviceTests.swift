@@ -202,9 +202,9 @@ struct ApproveAPIWireTests {
 struct LinkSessionRoutingTests {
     @Test func theLinkSessionURLIsRoutedStrictly() throws {
         let secret = LinkSessionSecret()
-        #expect(DeepLinkRouter.route("https://viadere.com/k/K7QFM2XA#es=\(secret.base64URL)") == .linkSession(code: "K7QFM2XA", secret: secret))
-        #expect(DeepLinkRouter.route("https://viadere.com/k/K7QFM2XA") == .linkSession(code: "K7QFM2XA", secret: nil))
-        for bad in ["https://viadere.com/k/K7QFM2XA?x=1", "https://www.viadere.com/k/K7QFM2XA", "https://viadere.com/k/k7qfm2xa", "https://viadere.com/k/K7QFM2XA#es=x",
+        #expect(DeepLinkRouter.route("https://viadere.io/k/K7QFM2XA#es=\(secret.base64URL)") == .linkSession(code: "K7QFM2XA", secret: secret))
+        #expect(DeepLinkRouter.route("https://viadere.io/k/K7QFM2XA") == .linkSession(code: "K7QFM2XA", secret: nil))
+        for bad in ["https://viadere.io/k/K7QFM2XA?x=1", "https://www.viadere.io/k/K7QFM2XA", "https://viadere.io/k/k7qfm2xa", "https://viadere.io/k/K7QFM2XA#es=x",
                     "https://evil.example/k/K7QFM2XA", "viadere://k/K7QFM2XA"] {
             #expect(DeepLinkRouter.route(bad) == nil, "\(bad)")
         }

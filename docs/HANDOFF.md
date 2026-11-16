@@ -6,6 +6,8 @@ Read [`../CLAUDE.md`](../CLAUDE.md) first (versioning policy, no Node/PHP, worki
 
 ## Where things stand
 
+**Production domain is viadere.io (owner decision 2026-11-16, F-2).** The `.com` placeholder is gone from code, config, Infra, Site, SDKs and docs; the CKey, HTTP-signature and QR vectors were regenerated from their reference generators. Open: the frozen verify-button `v1` still matches the placeholder host (its SRI hashes are pinned), so it renders staging links only until the owner rules on it.
+
 **Authority: passkey cancel, `passkey_added`, App Attest at genesis, JWE seal (2026-11-15, G30).** A pending recovery can be cancelled with a UV
 passkey assertion (`POST /v1/keylog/recovery/passkey-cancel/challenges`, then `/passkey-cancel`): its own WebAuthn challenge bound to the account and
 the recovery, origins = issuer and `https://<RP_ID>`, the passkey must belong to that account, logged as `recovery_cancel` (`key_purpose: passkey`).
@@ -229,7 +231,7 @@ The previous session ran out of its disk allowance (the container restarted five
 
 ## Needs the product owner / real infrastructure
 
-- **Staging:** follow [`ops/STAGING-SETUP.md`](ops/STAGING-SETUP.md) (accounts: Apple Developer, Cloudflare, Neon, Twilio, Resend, Fly.io). Staging API: `api-staging.viadere.com`.
+- **Staging:** follow [`ops/STAGING-SETUP.md`](ops/STAGING-SETUP.md) (accounts: Apple Developer, Cloudflare, Neon, Twilio, Resend, Fly.io). Staging API: `api-staging.viadere.io`.
 - **First Xcode build** of the app (never compiled — Linux only); real-device testing (Secure Enclave, App Attest, passkeys, Wallet IDs, credential provider).
 - **Apple:** in-app identity presentment entitlement, merchant ID + encryption certificate, APNs key, App Attest.
 - **Didit:** account, workflow (document + liveness + face match), webhook secret, White Label theme, shortest retention.

@@ -251,7 +251,7 @@ public struct GatewayConfiguration: Sendable, Hashable {
     /// (the menu is shown again). `0` disables the guard.
     public var menuRaceWindow: TimeInterval
 
-    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, getAppURL: String = "https://viadere.com/get",
+    public init(menuTTL: TimeInterval = 10 * 60, sessionIdleTTL: TimeInterval = 24 * 3600, getAppURL: String = "https://viadere.io/get",
                 requireLinkForRouting: Bool = true, dedupMemory: Int = 50, maxForwardLength: Int = 1600,
                 menuRaceWindow: TimeInterval = 0) {
         self.menuRaceWindow = menuRaceWindow
