@@ -1,4 +1,5 @@
 import SwiftUI
+import ViadereCore
 import ViadereKit
 
 /// "Apps you've signed in to with Viadere" (UX_COPY OIDC-09, OIDC-10; ADR-0024 §8). Each row names the client and its website; "Stop {Client}
