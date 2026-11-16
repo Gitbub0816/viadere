@@ -81,7 +81,6 @@ struct CodeScannerScreen: View {
         ZStack {
             ScannerMask(side: windowSide, radius: 32)
                 .fill(.black.opacity(0.55), style: FillStyle(eoFill: true))
-                .ignoresSafeArea()
             ScannerBrackets(radius: 32, arm: found ? 132 : 30)
                 .stroke(found ? ViadereBrand.champagne : .white.opacity(0.92), style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .frame(width: windowSide, height: windowSide)
@@ -99,6 +98,9 @@ struct CodeScannerScreen: View {
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
+        // One coordinate space for the hole, the brackets, the sweep and the check: all full screen. (With only the mask ignoring the safe
+        // area, its hole was centred on the screen and the brackets on the safe area, so they sat apart.)
+        .ignoresSafeArea()
         .accessibilityHidden(true)
     }
 
@@ -265,7 +267,8 @@ private final class SessionBox: @unchecked Sendable {
 ///
 /// The decoder is C++ working on camera pixels, so its reach is kept small: it sees only the luma of frames this app's own camera session
 /// produced, at most `maxFramesPerSecond`, one frame at a time (late frames are dropped by AVFoundation), and only while the scanner is on
-/// screen. What it returns is treated as hostile text: Profile 0 in the standard layout only, valid UTF-8 text only, at most `ScannedCodePolicy.maxPayloadBytes`,
+/// screen. What it returns is treated as hostile text: Profile 0 in any layout the pinned decoder verifies (Reed-Solomon and CRC-32C decide;
+/// the layout is only how the modules are drawn), valid UTF-8 text only, at most `ScannedCodePolicy.maxPayloadBytes`,
 /// and a payload refused once is not offered again for `repeatInterval`, so a hostile code in view cannot flood the main thread.
 private final class CKeyFrameReader: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     static let maxFramesPerSecond = 12.0
@@ -291,7 +294,7 @@ private final class CKeyFrameReader: NSObject, AVCaptureVideoDataOutputSampleBuf
         let now = CACurrentMediaTime()
         guard now - lastFrame >= 1.0 / Self.maxFramesPerSecond, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastFrame = now
-        guard let result = CKeyDecoder.decode(pixelBuffer: pixels), result.profile == .scalable, result.layout == .standard, let text = result.text,
+        guard let result = CKeyDecoder.decode(pixelBuffer: pixels), result.profile == .scalable, let text = result.text,
               !text.isEmpty, text.utf8.count <= ScannedCodePolicy.maxPayloadBytes else { return }
         if text == lastPayload, now - lastPayloadTime < Self.repeatInterval { return }
         lastPayload = text
