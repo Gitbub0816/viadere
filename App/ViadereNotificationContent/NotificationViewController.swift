@@ -35,7 +35,7 @@ final class NotificationViewController: UIViewController {
     }
 }
 
-extension NotificationViewController: @preconcurrency UNNotificationContentExtension {
+extension NotificationViewController: UNNotificationContentExtension {
     func didReceive(_ notification: UNNotification) {
         // Draw the person's current theme (the app may have changed it since this process last read the app group).
         ViadereThemeRuntime.shared.reloadFromStore()

@@ -54,10 +54,10 @@ public final class ApplePasskeyService: PasskeyService, @unchecked Sendable {
 }
 
 /// Bridges the delegate-based `ASAuthorizationController` to async/await. Main-actor only (it presents UI).
-/// `@preconcurrency` conformances keep this correct whether or not the SDK annotates the protocols `@MainActor`.
+/// The current SDK annotates both protocols `@MainActor`, so the conformances are plain.
 @MainActor
-private final class PasskeyCoordinator: NSObject, @preconcurrency ASAuthorizationControllerDelegate,
-                                        @preconcurrency ASAuthorizationControllerPresentationContextProviding {
+private final class PasskeyCoordinator: NSObject, ASAuthorizationControllerDelegate,
+                                        ASAuthorizationControllerPresentationContextProviding {
     private var continuation: CheckedContinuation<ASAuthorization, any Error>?
     private var controller: ASAuthorizationController?
     private let anchorProvider: @MainActor @Sendable () -> UIWindow?

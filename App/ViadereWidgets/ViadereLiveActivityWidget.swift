@@ -179,6 +179,7 @@ struct LockScreenActivityView: View {
 // MARK: - Decision activities
 
 /// Dynamic Island for a pending decision: the mark and "Decide" when compact; the question and its answers when expanded.
+@MainActor
 enum DecisionIsland {
     static func make(interactionId: String, presentation: LiveDecisionPresentation, accent: Color = ViadereColor.accent) -> DynamicIsland {
         DynamicIsland {

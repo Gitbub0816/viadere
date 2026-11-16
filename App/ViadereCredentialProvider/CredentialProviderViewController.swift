@@ -128,7 +128,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         do {
             let engine = try await unlockedEngine()
             let assertion = try await engine.assertPasskey(credentialId: credentialId, rpId: rpId, clientDataHash: clientDataHash, userVerified: true)
-            await finish(assertion, rpId: rpId, clientDataHash: clientDataHash)
+            finish(assertion, rpId: rpId, clientDataHash: clientDataHash)
         } catch VaultEngineError.itemNotFound {
             fail(ProviderError.notFound)
         } catch {
@@ -149,7 +149,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let clientDataHash = requestParameters.clientDataHash
         let allowed = Set(requestParameters.allowedCredentials)
         flow.step = .working("Confirm it's you")
-        task = Task {
+        task = Task { [self] in
             do {
                 let engine = try await unlockedEngine()
                 let matches = try await engine.passkeys(for: rpId).filter { allowed.isEmpty || allowed.contains($0.credentialId) }
@@ -215,7 +215,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     @available(iOS 18.0, *)
     override func prepareOneTimeCodeCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
         flow.step = .working("Confirm it's you")
-        task = Task {
+        task = Task { [self] in
             do {
                 let engine = try await unlockedEngine()
                 // Only codes that belong to the site that asked: a page must not be able to make the picker list every account.
@@ -223,7 +223,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                     switch identifier.type {
                     case .domain: identifier.identifier
                     case .URL: URL(string: identifier.identifier)?.host
-                    @unknown default: nil
+                    // Newer SDKs add identifier kinds (apps): none of them names a website, so none matches a code.
+                    default: nil
                     }
                 }
                 let identities = try await engine.oneTimeCodeIdentities(matching: domains)
