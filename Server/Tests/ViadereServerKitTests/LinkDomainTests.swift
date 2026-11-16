@@ -6,14 +6,14 @@ import XCTest
 
 /// WP-C3: `LINK_DOMAIN` decides the host of every link the server builds, and the only host it accepts in a link a client sends.
 final class LinkDomainServerTests: XCTestCase {
-    let staging = LinkDomain("viadere.cksites.dev")!
+    let staging = LinkDomain("staging.viadere.io")!
 
     func testLinkDomainIsConfiguredValidatedAndDefaultsToTheRelyingParty() throws {
         let base = ["ENVIRONMENT": "development"]
         XCTAssertEqual(try ServerConfig.fromEnvironment(base).linkDomain, .production)
-        XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["RP_ID": "viadere.cksites.dev", "RP_ORIGIN": "https://viadere.cksites.dev"]) { $1 }).linkDomain.host,
-                       "viadere.cksites.dev", "the web domain (RP_ID) is the default")
-        XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["LINK_DOMAIN": "Viadere.CKSites.dev"]) { $1 }).linkDomain.host, "viadere.cksites.dev")
+        XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["RP_ID": "staging.viadere.io", "RP_ORIGIN": "https://staging.viadere.io"]) { $1 }).linkDomain.host,
+                       "staging.viadere.io", "the web domain (RP_ID) is the default")
+        XCTAssertEqual(try ServerConfig.fromEnvironment(base.merging(["LINK_DOMAIN": "Staging.Viadere.IO"]) { $1 }).linkDomain.host, "staging.viadere.io")
         for bad in ["https://viadere.io", "viadere.io/c", "viadere", "*.viadere.io", "viadere.io:8443"] {
             XCTAssertThrowsError(try ServerConfig.fromEnvironment(base.merging(["LINK_DOMAIN": bad]) { $1 }), bad)
         }
@@ -24,7 +24,7 @@ final class LinkDomainServerTests: XCTestCase {
             let b = try await h.makeBusiness(name: "Northwind Air", handle: "northwindair")
             let code = b.summary.code
             // Directory resolution: only a link on the configured host is a link; a production link in staging is not resolved as one.
-            let ok = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.cksites.dev/c/\(code.canonical)"))
+            let ok = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://staging.viadere.io/c/\(code.canonical)"))
             XCTAssertEqual(ok.status, .ok, ok.text)
             XCTAssertEqual(try ok.json(DirectoryResolveResponse.self).method, .link)
             let foreign = try await h.post("/v1/directory/resolve", DirectoryResolveRequest(input: "https://viadere.io/c/\(code.canonical)"))
@@ -35,11 +35,11 @@ final class LinkDomainServerTests: XCTestCase {
                                                  ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.io/c/\(code.canonical)"))
             XCTAssertEqual(refused.status, .unprocessableEntity, refused.text)
             let accepted = try await h.signedPost(consumer, APIRoutes.relationshipConnect.template,
-                                                  ConnectRequest(businessId: b.id, source: .qr, link: "https://viadere.cksites.dev/c/\(code.canonical)"))
+                                                  ConnectRequest(businessId: b.id, source: .qr, link: "https://staging.viadere.io/c/\(code.canonical)"))
             XCTAssertTrue([.ok, .created].contains(accepted.status), accepted.text)
             // The on-ramp page named in texts is on the link domain, not at the API host, and carries no token.
-            XCTAssertEqual(h.ctx.config.linkDomain.host, "viadere.cksites.dev")
-            XCTAssertEqual(GatewayService(db: h.db, ctx: h.ctx).configuration.getAppURL, "https://viadere.cksites.dev/get")
+            XCTAssertEqual(h.ctx.config.linkDomain.host, "staging.viadere.io")
+            XCTAssertEqual(GatewayService(db: h.db, ctx: h.ctx).configuration.getAppURL, "https://staging.viadere.io/get")
         }
     }
 }

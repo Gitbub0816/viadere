@@ -136,29 +136,46 @@ struct ConfigurationTests {
 /// WP-C3: the app's link domain comes from the build (`VIADERE_LINK_DOMAIN`), and the router accepts only that host.
 @Suite("Link domain")
 struct LinkDomainRoutingTests {
-    let staging = LinkDomain("viadere.cksites.dev")!
+    let staging = LinkDomain("staging.viadere.io")!
     let token = String(repeating: "A", count: 43)
 
     @Test func everyUniversalLinkForAnotherHostIsRefused() {
         // Built for staging: production links (and look-alikes) are not ours.
         for link in ["https://viadere.io/c/AF2345", "https://viadere.io/l/\(token)", "https://viadere.io/h/\(token)", "https://viadere.io/a/ABCDEFGH",
-                     "https://viadere.cksites.dev.evil.com/c/AF2345", "https://www.viadere.cksites.dev/l/\(token)", "https://www.viadere.cksites.dev/h/\(token)"] {
+                     "https://staging.viadere.io.evil.com/c/AF2345", "https://www.staging.viadere.io/l/\(token)", "https://www.staging.viadere.io/h/\(token)"] {
             #expect(DeepLinkRouter.route(link, domain: staging) == nil, "\(link)")
         }
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: staging) != nil)
-        #expect(DeepLinkRouter.route("https://www.viadere.cksites.dev/c/AF2345", domain: staging) != nil)
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/l/\(token)", domain: staging) == .retiredLink)
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/h/\(token)", domain: staging) == .retiredLink)
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/a/ABCDEFGH", domain: staging) == .approveEnrollment(code: "ABCDEFGH", rootKid: nil, secret: nil))
-        // And a production build refuses staging links.
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/c/AF2345", domain: .production) == nil)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/c/AF2345", domain: staging) != nil)
+        #expect(DeepLinkRouter.route("https://www.staging.viadere.io/c/AF2345", domain: staging) != nil)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/l/\(token)", domain: staging) == .retiredLink)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/h/\(token)", domain: staging) == .retiredLink)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/a/ABCDEFGH", domain: staging) == .approveEnrollment(code: "ABCDEFGH", rootKid: nil, secret: nil))
+        // And a production build refuses staging links, although staging.viadere.io is a subdomain of viadere.io (SECURITY.md §2.116).
+        for link in ["https://staging.viadere.io/c/AF2345", "https://www.staging.viadere.io/c/AF2345", "https://staging.viadere.io/a/ABCDEFGH",
+                     "https://staging.viadere.io/l/\(token)", "https://api-staging.viadere.io/c/AF2345"] {
+            #expect(DeepLinkRouter.route(link, domain: .production) == nil, "\(link)")
+        }
+    }
+
+    /// Production pins `api.viadere.io` with its subdomains; the staging API `api-staging.viadere.io` is a sibling label, not a subdomain, so
+    /// production pins never apply to it, and a staging build's pins never apply to the production API (SECURITY.md §2.116).
+    @Test func productionAndStagingPinsNeverCoverEachOther() {
+        let production = ViadereConfiguration.productionPinning
+        #expect(production.includeSubdomains && production.applies(to: "api.viadere.io"))
+        for host in ["api-staging.viadere.io", "staging.viadere.io", "viadere.io", "assets-staging.viadere.io"] {
+            #expect(!production.applies(to: host), "\(host)")
+        }
+        let stagingBuild = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api-staging.viadere.io"], allowLocalHTTP: false)
+        #expect(stagingBuild.pinning.host == "api-staging.viadere.io")
+        #expect(!stagingBuild.pinning.applies(to: "api.viadere.io") && !stagingBuild.pinning.applies(to: "viadere.io"))
+        #expect(PinEvaluator.evaluate(host: "api-staging.viadere.io", chainSPKIHashes: [], configuration: production, failClosed: true) == .useDefaultEvaluation)
     }
 
     @Test func theBuildSettingSetsTheLinkDomainForNonProductionHostsOnly() {
-        let stagingBuild = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "viadere.cksites.dev"],
+        let stagingBuild = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api-staging.viadere.io", "ViadereLinkDomain": "staging.viadere.io"],
                                                         allowLocalHTTP: false)
-        #expect(stagingBuild.linkDomain.host == "viadere.cksites.dev")
-        let unexpanded = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "$(VIADERE_LINK_DOMAIN)"],
+        #expect(stagingBuild.linkDomain.host == "staging.viadere.io")
+        let unexpanded = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api-staging.viadere.io", "ViadereLinkDomain": "$(VIADERE_LINK_DOMAIN)"],
                                                       allowLocalHTTP: false)
         #expect(unexpanded.linkDomain == .production)
         let production = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api.viadere.io", "ViadereLinkDomain": "evil.example.com"], allowLocalHTTP: false)

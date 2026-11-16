@@ -12,7 +12,7 @@ import ViadereCore
 /// The session the button opens: a Viadere session link (`https://viadere.io/v/{CODE}`) checked against the allowed link domains.
 public struct VerifyButtonSession: Sendable, Hashable {
     /// Production and the staging web domain.
-    public static let defaultDomains: [LinkDomain] = [.production, LinkDomain("viadere.cksites.dev")!]
+    public static let defaultDomains: [LinkDomain] = [.production, LinkDomain("staging.viadere.io")!]
 
     public let link: URL
     /// Canonical code (eight characters).

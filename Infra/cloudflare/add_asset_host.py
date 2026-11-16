@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """Add the Brand Kit asset host to the Azure staging tunnel (Python standard library only; run from any machine).
 
-    python3 -I Infra/cloudflare/add_asset_host.py                       # host viadere-assets.cksites.dev, shows the plan, asks first
-    python3 -I Infra/cloudflare/add_asset_host.py other-host.cksites.dev
+    python3 -I Infra/cloudflare/add_asset_host.py                       # host assets-staging.viadere.io, shows the plan, asks first
+    python3 -I Infra/cloudflare/add_asset_host.py other-staging.viadere.io
 
-AZURE-SETUP.md section 9.1, for zone cksites.dev and tunnel viadere-staging-azure:
+AZURE-SETUP.md section 9.1, for zone viadere.io and tunnel viadere-staging-azure. The host must be a staging name one label below the zone
+(staging.viadere.io or <label>-staging.viadere.io); the production names (viadere.io, www.viadere.io, api.viadere.io) are refused, and a
+Transform or cache rule that names any non-staging host is never edited:
   1. Tunnel: public hostname {host} -> http://ca-viadere-api (Host header ca-viadere-api), before the catch-all rule.
   2. DNS: a proxied CNAME {host} -> <tunnel id>.cfargotunnel.com (replacing other A/AAAA/CNAME records of that name).
-  3. Origin lock: adds {host} to the existing request-header Transform Rule that sets X-Viadere-Edge-Token (its value is kept, never printed).
+  3. Origin lock: adds {host} to the staging request-header Transform Rule that sets X-Viadere-Edge-Token (the one point_staging_to_azure.py
+     made, covering api-staging.viadere.io; its value is kept, never printed).
   4. Asset header: a request-header Transform Rule for {host} only that SETS X-Viadere-Asset-Host to {host} (a client value is overwritten;
      the server never reads Host and recognises asset traffic by this header).
   5. Cache: a cache rule for {host} and paths starting with /b/: eligible for cache, edge TTL respects the origin (immutable, one year).
      The query string stays in the cache key (the origin answers any query string 404).
 
 The API token is read without echo. It needs: Zone > Zone: Read, Zone > DNS: Edit, Zone > Transform Rules: Edit, Zone > Cache Rules: Edit
-(zone cksites.dev) and Account > Cloudflare Tunnel: Edit. Delete the token afterwards. Nothing is written to disk. Re-running is safe.
+(zone viadere.io) and Account > Cloudflare Tunnel: Edit. Delete the token afterwards. Nothing is written to disk. Re-running is safe.
 """
 import getpass
 import json
@@ -24,17 +27,34 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
-ZONE = "cksites.dev"
+ZONE = "viadere.io"
 TUNNEL_NAME = "viadere-staging-azure"
-ANCHOR_HOST = "viadere-api.cksites.dev"  # the edge-token rule already covers this host
+ANCHOR_HOST = "api-staging.viadere.io"  # the staging edge-token rule already covers this host
+DEFAULT_HOST = "assets-staging.viadere.io"
+PRODUCTION_HOSTS = {"viadere.io", "www.viadere.io", "api.viadere.io"}
+STAGING_NAME = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-)?staging\.viadere\.io")
 ORIGIN = "http://ca-viadere-api"
 HOST_HEADER = "ca-viadere-api"
 EDGE_HEADER = "X-Viadere-Edge-Token"
 ASSET_HEADER = "X-Viadere-Asset-Host"
 TRANSFORM_PHASE = "http_request_late_transform"
 CACHE_PHASE = "http_request_cache_settings"
-ASSET_RULE_DESC = "Viadere asset host header"
-CACHE_RULE_DESC = "Viadere brand assets cache"
+ASSET_RULE_DESC = "Viadere staging asset host header"
+CACHE_RULE_DESC = "Viadere staging brand assets cache"
+
+
+def is_staging(host):
+    """staging.viadere.io or <label>-staging.viadere.io: one label below the zone, never a production name."""
+    return bool(STAGING_NAME.fullmatch(host)) and host not in PRODUCTION_HOSTS
+
+
+def named_hosts(expression):
+    return re.findall(r'"([A-Za-z0-9.-]+)"', expression or "")
+
+
+def staging_only(rule):
+    hosts = named_hosts(rule.get("expression"))
+    return bool(hosts) and all(is_staging(h) for h in hosts)
 
 
 class CF:
@@ -70,9 +90,9 @@ def sets_header(rule, name):
 
 
 def main():
-    host = (sys.argv[1] if len(sys.argv) > 1 else "viadere-assets." + ZONE).lower()
-    if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\." + re.escape(ZONE), host):
-        raise SystemExit(f"{host}: must be a single label under {ZONE}")
+    host = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_HOST).lower()
+    if not is_staging(host) or host in (ANCHOR_HOST, "staging." + ZONE):
+        raise SystemExit(f"{host}: must be its own staging name under {ZONE} (<label>-staging.{ZONE}), never a production, API or web host")
     token = getpass.getpass("Cloudflare API token (input hidden): ").strip()
     if not token:
         raise SystemExit("no token")
@@ -91,7 +111,10 @@ def main():
     # 1. tunnel ingress
     config = (cf.call("GET", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations") or {}).get("config") or {}
     ingress = list(config.get("ingress") or [])
-    add_ingress = host not in {r.get("hostname") for r in ingress}
+    present = {r.get("hostname") for r in ingress if r.get("hostname")}
+    if present & PRODUCTION_HOSTS:
+        raise SystemExit(f"the staging tunnel routes a production name ({', '.join(sorted(present & PRODUCTION_HOSTS))}); fix it by hand first")
+    add_ingress = host not in present
     named = [r for r in ingress if r.get("hostname")]
     catch_all = [r for r in ingress if not r.get("hostname")] or [{"service": "http_status:404"}]
     new_ingress = named + ([{"hostname": host, "service": ORIGIN, "originRequest": {"httpHostHeader": HOST_HEADER}}] if add_ingress else []) + catch_all
@@ -106,15 +129,20 @@ def main():
     if not ruleset:
         raise SystemExit("no request-header Transform Rules exist: run point_staging_to_azure.py first (it sets up the edge-token rule)")
     rules = ruleset.get("rules") or []
-    edge = [r for r in rules if sets_header(r, EDGE_HEADER) and ANCHOR_HOST in r.get("expression", "")]
+    edge = [r for r in rules if sets_header(r, EDGE_HEADER) and ANCHOR_HOST in named_hosts(r.get("expression"))]
     if len(edge) != 1:
-        raise SystemExit(f"expected exactly one edge-token rule covering {ANCHOR_HOST}, found {len(edge)}; fix it in the dashboard")
+        raise SystemExit(f"expected exactly one edge-token rule covering {ANCHOR_HOST}, found {len(edge)}; run point_staging_to_azure.py first")
     edge_rule = edge[0]
-    hosts = re.findall(r'"([a-z0-9.-]+)"', edge_rule.get("expression", ""))
+    if not staging_only(edge_rule):
+        raise SystemExit(f"the edge-token rule covering {ANCHOR_HOST} also names non-staging hosts; fix it in the dashboard first")
+    hosts = named_hosts(edge_rule.get("expression"))
     edge_needs_host = host not in hosts
     edge_expression = "(http.host in {" + " ".join(f'"{h}"' for h in hosts + ([host] if edge_needs_host else [])) + "})"
     asset_expression = f'(http.host eq "{host}")'
-    asset_rule = next((r for r in rules if sets_header(r, ASSET_HEADER)), None)
+    asset_rules = [r for r in rules if sets_header(r, ASSET_HEADER) and (r.get("description") == ASSET_RULE_DESC or host in named_hosts(r.get("expression")))]
+    if any(not staging_only(r) for r in asset_rules) or len(asset_rules) > 1:
+        raise SystemExit(f"the asset-header rules for {host} are not a single staging-only rule; fix them in the dashboard first")
+    asset_rule = asset_rules[0] if asset_rules else None
     asset_ok = bool(asset_rule) and asset_rule.get("expression") == asset_expression and \
         ((asset_rule.get("action_parameters") or {}).get("headers") or {}).get(ASSET_HEADER, {}).get("value") == host
     asset_body = {"action": "rewrite", "expression": asset_expression, "description": ASSET_RULE_DESC, "enabled": True,
@@ -124,6 +152,8 @@ def main():
     cache_rs = cf.call("GET", f"/zones/{zone_id}/rulesets/phases/{CACHE_PHASE}/entrypoint", allow_404=True)
     cache_expression = f'(http.host eq "{host}" and starts_with(http.request.uri.path, "/b/"))'
     cache_rule = next((r for r in (cache_rs or {}).get("rules") or [] if r.get("description") == CACHE_RULE_DESC), None)
+    if cache_rule and not staging_only(cache_rule):
+        raise SystemExit(f"the cache rule '{CACHE_RULE_DESC}' names non-staging hosts; fix it in the dashboard first")
     cache_body = {"action": "set_cache_settings", "expression": cache_expression, "description": CACHE_RULE_DESC, "enabled": True,
                   "action_parameters": {"cache": True, "edge_ttl": {"mode": "respect_origin"}}}
     cache_ok = bool(cache_rule) and cache_rule.get("expression") == cache_expression

@@ -75,10 +75,10 @@ struct LinkSessionSDKTests {
             #expect(transport.requests.last?.url.path.hasSuffix("/cancel") == true)
         }
         // A staging client accepts only its own host.
-        let staging = try ViadereBusinessClient(apiKey: Fixtures.key, transport: transport, linkDomain: LinkDomain("viadere.cksites.dev")!)
-        try transport.enqueue(status: 201, json: ticket(link: "https://viadere.cksites.dev/k/K7QFM2XA"))
+        let staging = try ViadereBusinessClient(apiKey: Fixtures.key, transport: transport, linkDomain: LinkDomain("staging.viadere.io")!)
+        try transport.enqueue(status: 201, json: ticket(link: "https://staging.viadere.io/k/K7QFM2XA"))
         let stagingInvitation = try await staging.createLinkSession(customerRef: "c", capabilities: [.messageSend], rootKid: root, customerAuthenticatedAt: Self.now, now: Self.now)
-        #expect(stagingInvitation.link.hasPrefix("https://viadere.cksites.dev/k/"))
+        #expect(stagingInvitation.link.hasPrefix("https://staging.viadere.io/k/"))
     }
 
     @Test func aRelaySubstitutedStatementFailsTheBindingTagAndTheSessionIsCancelled() async throws {

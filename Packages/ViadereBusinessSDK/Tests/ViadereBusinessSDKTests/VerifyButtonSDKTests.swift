@@ -27,12 +27,14 @@ struct VerifyButtonSDKTests {
         #expect(session.qrPayload == "https://viadere.io/v/K7QFM2XA")
         #expect(session.isExpired(at: Self.now))
         #expect(!session.isExpired(at: Self.now.addingTimeInterval(-1)))
-        #expect(VerifyButtonSession(link: "https://viadere.cksites.dev/v/K7QFM2XA") != nil, "staging")
+        #expect(VerifyButtonSession(link: "https://staging.viadere.io/v/K7QFM2XA") != nil, "staging")
         for bad in ["https://evil.test/v/K7QFM2XA", "http://viadere.io/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA?next=evil", "https://viadere.io/v/K7QFM2XA#x",
-                    "https://viadere.io/k/K7QFM2XA", "https://viadere.io/v/k7qfm2xa", "https://www.viadere.io/v/K7QFM2XA", "viadere://v/K7QFM2XA", ""] {
+                    "https://viadere.io/k/K7QFM2XA", "https://viadere.io/v/k7qfm2xa", "https://www.viadere.io/v/K7QFM2XA", "viadere://v/K7QFM2XA", "",
+                    // Staging is a subdomain of production: exact hosts only, never another subdomain or look-alike.
+                    "https://api-staging.viadere.io/v/K7QFM2XA", "https://evil.staging.viadere.io/v/K7QFM2XA", "https://staging.viadere.io.evil.test/v/K7QFM2XA"] {
             #expect(VerifyButtonSession(link: bad) == nil, "\(bad)")
         }
-        #expect(VerifyButtonSession(link: "https://viadere.cksites.dev/v/K7QFM2XA", allowedDomains: [.production]) == nil, "the integrator can narrow the domains")
+        #expect(VerifyButtonSession(link: "https://staging.viadere.io/v/K7QFM2XA", allowedDomains: [.production]) == nil, "the integrator can narrow the domains")
         let ticket = VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now)
         #expect(VerifyButtonSession(ticket: ticket)?.expiresAt == Self.now)
         let lying = VerificationSessionTicket(sessionId: sessionId, code: "AAAAAAAA", link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now)

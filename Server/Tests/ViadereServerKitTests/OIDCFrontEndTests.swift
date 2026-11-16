@@ -128,6 +128,10 @@ final class OIDCFrontEndTests: XCTestCase {
             let cookie = try XCTUnwrap(Self.cookie(page))
             XCTAssertTrue(cookie.hasPrefix(OIDCFrontEnd.cookieName + "="))
             XCTAssertTrue(page.headers[.setCookie].first?.contains("HttpOnly") == true)
+            // Host-only (SECURITY.md §2.116): a `__Host-` cookie is Secure, Path=/ and has no Domain, so it never reaches staging.viadere.io.
+            let attributes = try XCTUnwrap(page.headers[.setCookie].first).split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            XCTAssertTrue(OIDCFrontEnd.cookieName.hasPrefix("__Host-") && attributes.contains("secure") && attributes.contains("path=/"))
+            XCTAssertFalse(attributes.contains { $0.hasPrefix("domain=") })
             let id = try XCTUnwrap(Self.hidden("id", in: page.text)), csrf = try XCTUnwrap(Self.hidden("csrf", in: page.text))
             let challengesBefore = try await AuthorityChallengeCount.count(authority.app.db)
             XCTAssertEqual(challengesBefore, 0) // ST-OIDC-17

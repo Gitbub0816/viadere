@@ -11,7 +11,7 @@ struct LinkSessionTests {
     let session = UUID()
     let subject = SubjectRef.derive(key: SymmetricKey(size: .bits256), businessId: BusinessID(), consumerId: ConsumerID())
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let staging = LinkDomain("viadere.cksites.dev")!
+    let staging = LinkDomain("staging.viadere.io")!
 
     var viadereKid: String { KeyIdentifier.make(try! viadere.publicKey.signingKey()) }
 
@@ -175,17 +175,17 @@ struct LinkSessionTests {
     @Test func theLinkIsBuiltAndParsedStrictly() throws {
         let es = LinkSessionSecret()
         let link = LinkSessionLink.build(code: "ABCDEFGH", secret: es, domain: staging)
-        #expect(link == "https://viadere.cksites.dev/k/ABCDEFGH#es=\(es.base64URL)")
+        #expect(link == "https://staging.viadere.io/k/ABCDEFGH#es=\(es.base64URL)")
         let url = try #require(URL(string: link))
         let parsed = try #require(LinkSessionLink.parse(url, domain: staging))
         #expect(parsed.code == "ABCDEFGH")
         #expect(parsed.secret == es)
-        #expect(LinkSessionLink.parse(try #require(URL(string: "https://viadere.cksites.dev/k/ABCDEFGH")), domain: staging)?.secret == nil)
-        for bad in ["https://viadere.io/k/ABCDEFGH", "https://www.viadere.cksites.dev/k/ABCDEFGH", "http://viadere.cksites.dev/k/ABCDEFGH",
-                    "https://viadere.cksites.dev:8443/k/ABCDEFGH", "https://u@viadere.cksites.dev/k/ABCDEFGH", "https://viadere.cksites.dev/k/ABCDEFGH?x=1",
-                    "https://viadere.cksites.dev/k/ABCD-EFGH", "https://viadere.cksites.dev/k/abcdefgh", "https://viadere.cksites.dev/k/ABCDEFGH/x",
-                    "https://viadere.cksites.dev/k/ABCDEFGH#es=short", "https://viadere.cksites.dev/k/ABCDEFGH#rk=\(es.base64URL)",
-                    "https://viadere.cksites.dev/a/ABCDEFGH"] {
+        #expect(LinkSessionLink.parse(try #require(URL(string: "https://staging.viadere.io/k/ABCDEFGH")), domain: staging)?.secret == nil)
+        for bad in ["https://viadere.io/k/ABCDEFGH", "https://www.staging.viadere.io/k/ABCDEFGH", "http://staging.viadere.io/k/ABCDEFGH",
+                    "https://staging.viadere.io:8443/k/ABCDEFGH", "https://u@staging.viadere.io/k/ABCDEFGH", "https://staging.viadere.io/k/ABCDEFGH?x=1",
+                    "https://staging.viadere.io/k/ABCD-EFGH", "https://staging.viadere.io/k/abcdefgh", "https://staging.viadere.io/k/ABCDEFGH/x",
+                    "https://staging.viadere.io/k/ABCDEFGH#es=short", "https://staging.viadere.io/k/ABCDEFGH#rk=\(es.base64URL)",
+                    "https://staging.viadere.io/a/ABCDEFGH"] {
             #expect(LinkSessionLink.parse(try #require(URL(string: bad)), domain: staging) == nil, "\(bad)")
         }
     }

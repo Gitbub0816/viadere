@@ -148,13 +148,13 @@ struct LoopDirectoryDeviceTests {
     }
 
     @Test func installLinksRouteToTheInstallSheetOnly() throws {
-        let domain = try #require(LinkDomain("viadere.cksites.dev"))
+        let domain = try #require(LinkDomain("staging.viadere.io"))
         let id = LoopDefinitionID()
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/lp/\(id)", domain: domain) == .loopInstall(id))
-        #expect(DeepLinkRouter.route("https://www.viadere.cksites.dev/lp/\(id)", domain: domain) == .loopInstall(id))
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/lp/\(id)", domain: domain) == .loopInstall(id))
+        #expect(DeepLinkRouter.route("https://www.staging.viadere.io/lp/\(id)", domain: domain) == .loopInstall(id))
         #expect(DeepLinkRouter.route("viadere://lp/\(id)", domain: domain) == .loopInstall(id))
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/lp/\(id)?auto=install", domain: domain) == nil)
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/lp/\(id)#install", domain: domain) == nil)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/lp/\(id)?auto=install", domain: domain) == nil)
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/lp/\(id)#install", domain: domain) == nil)
         #expect(DeepLinkRouter.route("https://evil.example/lp/\(id)", domain: domain) == nil)
         #expect(DeepLinkRouter.route("viadere://lp/\(id)/extra", domain: domain) == nil)
         #expect(DeepLinkRouter.route("viadere://lp/nope", domain: domain) == nil)

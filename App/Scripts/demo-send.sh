@@ -4,9 +4,9 @@
 #
 #   export VIADERE_DEMO_KEY=vdk_live_...        # from: ViadereServer staging-demo --issue-key (or the script asks, input hidden)
 #   export VIADERE_SUBJECT=sub_...               # from: ViadereServer staging-demo (connected customers)
-#   App/Scripts/demo-send.sh message|signin|payment|confirm|choose|status [--api https://viadere-api.cksites.dev]
+#   App/Scripts/demo-send.sh message|signin|payment|confirm|choose|status [--api https://api-staging.viadere.io]
 set -uo pipefail
-KIND="${1:-}"; API="https://viadere-api.cksites.dev"
+KIND="${1:-}"; API="https://api-staging.viadere.io"
 [ "${2:-}" = "--api" ] && API="${3:?--api needs a URL}"
 case "$KIND" in message|signin|payment|confirm|choose|status) ;; *)
   echo "usage: $0 message|signin|payment|confirm|choose|status"; exit 1;; esac

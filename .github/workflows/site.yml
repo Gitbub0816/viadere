@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'site-staging' || 'site-production' }}
-      url: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'https://viadere-site.cksites.dev' || 'https://viadere.io' }}
+      url: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'https://site-staging.viadere.io' || 'https://viadere.io' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

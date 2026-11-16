@@ -98,9 +98,10 @@ done
 
 step "6/6 Cloudflare"
 if [ -n "${EDGE_TOKEN_VALUE:-}" ]; then
-  echo "Edge token: in Cloudflare, Rules > Transform Rules > Modify Request Header, create a rule for hostname viadere-api-az.cksites.dev"
-  echo "that SETS header X-Viadere-Edge-Token to this value (shown once, not stored anywhere else):"
+  echo "Edge token: python3 -I Infra/cloudflare/point_staging_to_azure.py sets the Transform Rule for staging.viadere.io and api-staging.viadere.io"
+  echo "(add_asset_host.py adds assets-staging.viadere.io); by hand: Rules > Transform Rules > Modify Request Header, a rule for exactly those"
+  echo "hostnames that SETS header X-Viadere-Edge-Token to this value (shown once, not stored anywhere else):"
   echo; echo "    $EDGE_TOKEN_VALUE"; echo
 fi
-echo "Then: curl -fsS https://viadere-api-az.cksites.dev/healthz"
+echo "Then: curl -fsS https://api-staging.viadere.io/healthz"
 echo "DONE"

@@ -10,8 +10,13 @@ and the Fly origin; ADR-0029) and starts with a **fresh state** in the Azure sta
 | `cloudflare_tunnel.tf` | the remotely managed Cloudflare Tunnel to `ca-viadere-api` (the only origin) |
 | `versions.tf`, `backend.tf` | provider pin (`cloudflare/cloudflare` 5.28.1), Azure Storage backend |
 
-`add_asset_host.py` and `point_staging_to_azure.py` are the owner-run helpers that were used for the staging cutover; they stay as a
-record and do not need Terraform.
+`point_staging_to_azure.py` and `add_asset_host.py` are the owner-run helpers for the hand-configured staging hostnames
+(`staging.viadere.io`, `api-staging.viadere.io`, `assets-staging.viadere.io`, records in `viadere-staging-dns.txt`); they do not need
+Terraform. Since 2026-11-16 staging shares the production zone `viadere.io`, so they refuse to touch `viadere.io`, `www.viadere.io` and
+`api.viadere.io` and never edit a rule that names a non-staging host. **Before this module is applied to `viadere.io` for production**
+read `docs/SECURITY.md` §2.116: the zone's phase entry-point rulesets (`cloudflare_ruleset`, one per zone and phase) would replace the
+staging rules the helpers added, so the staging edge-token, asset-header and cache rules must first be carried into the production
+workspace (with the staging edge token as its own value) or staging must move to a zone of its own.
 
 ## The authority has no Cloudflare route
 
@@ -37,7 +42,8 @@ the rulesets). Run `tofu plan` again until it shows no creation of something tha
 Transform Rule is read from Cloudflare by `point_staging_to_azure.py` and never printed; set `TF_VAR_edge_token` to the same value (or
 rotate it with the `EDGE_TOKEN` / `EDGE_TOKEN_PREVIOUS` overlap, `docs/ops/KEY-ROTATION.md`).
 
-Staging and production are separate states with their own tfvars, their own zone or child zone and their own tunnel.
+Staging and production are separate states with their own tfvars and their own tunnel. Staging's hostnames currently live in the
+production zone and are configured by the helpers above, not by a staging workspace of this module (`docs/SECURITY.md` §2.116).
 
 ## Notes
 

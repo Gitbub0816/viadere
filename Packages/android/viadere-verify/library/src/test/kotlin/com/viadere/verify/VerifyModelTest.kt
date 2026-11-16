@@ -19,13 +19,15 @@ class VerifyModelTest {
         assertEquals("K 7 Q F M 2 X A", session.spokenCode)
         assertTrue(session.isExpired(1_000))
         assertFalse(session.isExpired(999))
-        assertNotNull(VerifySession.parse("https://viadere.cksites.dev/v/K7QFM2XA"))
+        assertNotNull(VerifySession.parse("https://staging.viadere.io/v/K7QFM2XA"))
         listOf(
             "http://viadere.io/v/K7QFM2XA", "https://evil.test/v/K7QFM2XA", "https://viadere.io.evil.test/v/K7QFM2XA", "https://viadere.io:443/v/K7QFM2XA",
             "https://user@viadere.io/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA?next=x", "https://viadere.io/v/K7QFM2XA#x", "https://viadere.io/v/k7qfm2xa",
             "https://viadere.io/v/K7QFM2X1", "https://viadere.io/k/K7QFM2XA", "https://www.viadere.io/v/K7QFM2XA", "intent://v/K7QFM2XA", "",
+            // Staging is a subdomain of production: exact hosts only, never another subdomain or look-alike.
+            "https://api-staging.viadere.io/v/K7QFM2XA", "https://evil.staging.viadere.io/v/K7QFM2XA", "https://staging.viadere.io.evil.test/v/K7QFM2XA",
         ).forEach { assertNull(it, VerifySession.parse(it)) }
-        assertNull(VerifySession.parse("https://viadere.cksites.dev/v/K7QFM2XA", allowedHosts = setOf("viadere.io")))
+        assertNull(VerifySession.parse("https://staging.viadere.io/v/K7QFM2XA", allowedHosts = setOf("viadere.io")))
     }
 
     @Test

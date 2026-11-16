@@ -35,7 +35,7 @@ struct AtlasBrandKitDeviceTests {
 
     static func store(_ server: AtlasFixtureServer, cache: any BrandKitCache = InMemoryBrandKitCache()) -> BrandKitStore {
         let keys = ManifestKeyPins.parse(AtlasBrandFixture.pin)
-        return BrandKitStore(api: server, assets: server, cache: cache, keys: keys, apiHost: "viadere-api.cksites.dev",
+        return BrandKitStore(api: server, assets: server, cache: cache, keys: keys, apiHost: "api-staging.viadere.io",
                              clock: { AtlasBrandFixture.now.addingTimeInterval(60) })
     }
 

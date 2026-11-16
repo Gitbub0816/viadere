@@ -298,8 +298,8 @@ struct SafeActionReaderTests {
         #expect(SafeActionKeyPins.parse("2026-11:ES256:\(uncompressed)", issuer: "viadere.io") == [PinnedSafeActionKey(issuer: "viadere.io", keyId: "2026-11", publicKey: key)])
         #expect(SafeActionKeyPins.parse("ed:Ed25519:\(edHex)", issuer: "viadere.io") == [PinnedSafeActionKey(issuer: "viadere.io", keyId: "ed", publicKey: .ed25519(ed))])
         let other = "Ed25519:" + edHex.uppercased()
-        #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").map(\.keyId) == ["2026-11", "2027-11"])
-        #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").allSatisfy { $0.issuer == "viadere.cksites.dev" })
+        #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "staging.viadere.io").map(\.keyId) == ["2026-11", "2027-11"])
+        #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "staging.viadere.io").allSatisfy { $0.issuer == "staging.viadere.io" })
         var offCurve = p256.x963Representation
         offCurve[64] ^= 1
         for bad in [nil, "", "   ", "$(VIADERE_CKEY_SAFE_ACTION_KEYS)", hex, compressed, "2026-11:", ":\(hex)", "2026-11:\(compressed)", "2026-11:\(edHex)",
@@ -314,19 +314,19 @@ struct SafeActionReaderTests {
         #expect(SafeActionKeyPins.parse("a:\(hex)", issuer: "localhost").isEmpty)
 
         // From the Info.plist, for the build's link domain (staging), and empty when the setting is missing.
-        let staging = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://viadere-api.cksites.dev", "ViadereLinkDomain": "viadere.cksites.dev",
+        let staging = ViadereConfiguration.resolve(info: ["ViadereAPIBaseURL": "https://api-staging.viadere.io", "ViadereLinkDomain": "staging.viadere.io",
                                                           "ViadereCKeySafeActionKeys": "stg-1:\(hex)"], allowLocalHTTP: false)
-        #expect(staging.safeActionKeys == [PinnedSafeActionKey(issuer: "viadere.cksites.dev", keyId: "stg-1", publicKey: key)])
+        #expect(staging.safeActionKeys == [PinnedSafeActionKey(issuer: "staging.viadere.io", keyId: "stg-1", publicKey: key)])
         let production = ViadereConfiguration.resolve(info: ["ViadereLinkDomain": "evil.example", "ViadereCKeySafeActionKeys": "p:\(hex)"], allowLocalHTTP: false)
         #expect(production.safeActionKeys.map(\.issuer) == ["viadere.io"], "production keeps viadere.io whatever the plist says")
         #expect(ViadereConfiguration.resolve(info: [:], allowLocalHTTP: false).safeActionKeys.isEmpty)
         #expect(ViadereConfiguration.production.safeActionKeys.isEmpty)
         // The reader built from a configuration uses its bundle id, link domain and pins.
-        let world = SafeActionWorld(issuer: "viadere.cksites.dev")
+        let world = SafeActionWorld(issuer: "staging.viadere.io")
         var configuration = staging
         configuration.safeActionKeys = [world.pin]
         let reader = SafeActionReader(configuration: configuration, replay: world.replay, transport: world.transport, clock: { SafeActionWorld.now })
-        #expect(reader.appId == "com.viadere.app" && reader.issuer == "viadere.cksites.dev" && reader.keys == [world.pin])
+        #expect(reader.appId == "com.viadere.app" && reader.issuer == "staging.viadere.io" && reader.keys == [world.pin])
     }
 
     @Test func aReaderIgnoresPinsForAnotherIssuer() async throws {

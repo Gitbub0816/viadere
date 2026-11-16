@@ -185,7 +185,11 @@ final class PlatformGateOpsTests: XCTestCase {
 
     /// A complete production environment (everything the server requires there, including the audit-head export and its HSM key).
     static func productionEnvironment(_ environment: String = "production") -> [String: String] {
-        [
+        // Staging may not use the production hosts (SECURITY.md §2.116): it gets its own names, as in Infra/azure/terraform.tfvars.example.
+        let staging = DeploymentEnvironment.parse(environment) == .staging
+            ? ["PUBLIC_BASE_URL": "https://api-staging.viadere.io", "RP_ID": "staging.viadere.io", "RP_ORIGIN": "https://staging.viadere.io",
+               "LINK_DOMAIN": "staging.viadere.io"] : [:]
+        return staging.merging([
             "ENVIRONMENT": environment, "DATABASE_URL": "postgres://u:p@db/viadere", "CONNECT_LINK_SIGNING_KEY": SecureToken.generate(), "SERVER_PEPPER": SecureToken.generate(),
             "DATA_ENCRYPTION_KEY": SecureToken.generate(), "APNS_KEY_P8": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "APNS_KEY_ID": "ABC123DEFG",
             "AUDIT_CHAIN_KEY": SecureToken.generate(), "SUBJECT_REF_KEY": SecureToken.generate(), "KEY_DIRECTORY_LOG_KEY": SecureToken.generate(), "EDGE_TOKEN": SecureToken.generate(),
@@ -194,7 +198,7 @@ final class PlatformGateOpsTests: XCTestCase {
             "AZURE_AUDIT_BLOB_ENDPOINT": "https://stviaderetestaudit.blob.core.windows.net/", "AZURE_AUDIT_BLOB_CONTAINER": "audit-heads",
             "AZURE_KEY_VAULT_URL": "https://kv-vdr-test.vault.azure.net/", "AZURE_KEY_VAULT_AUDIT_HEAD_KEY": "audit-head-signing",
             "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001", "IDENTITY_ENDPOINT": "http://localhost:42356/msi/token", "IDENTITY_HEADER": "test-identity-header",
-        ]
+        ]) { $1 }
     }
 
     /// Platform gate C2: production without an HSM-signed audit head (a database-and-chain-key compromise could then forge heads that nobody can

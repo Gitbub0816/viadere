@@ -91,8 +91,8 @@ describe("Approve v2 enrollment", () => {
     await assert.rejects(none.c.createApprovalEnrollment({ ...request, tenant_id: "t" } as never, { rootKid: root.kid }), ViadereValidationError);
     assert.equal(none.requests.length, 0);
     // The staging link domain is honoured, and only it.
-    const staging = client([{ status: 201, body: ticket({ deep_link: `https://viadere.cksites.dev/a/${CODE}?rk=${root.kid}` }) }], { linkDomain: "viadere.cksites.dev" });
-    assert.match((await staging.c.createApprovalEnrollment(request, { rootKid: root.kid })).link, /^https:\/\/viadere\.cksites\.dev\/a\//);
+    const staging = client([{ status: 201, body: ticket({ deep_link: `https://staging.viadere.io/a/${CODE}?rk=${root.kid}` }) }], { linkDomain: "staging.viadere.io" });
+    assert.match((await staging.c.createApprovalEnrollment(request, { rootKid: root.kid })).link, /^https:\/\/staging\.viadere\.io\/a\//);
   });
 
   it("confirms with the binding tag: verifies the statement, signs the confirmation, returns the key to store", async () => {

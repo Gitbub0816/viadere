@@ -4,7 +4,7 @@ import Testing
 
 /// Core contract of the Stage 6 OIDC methods (ADR-0023 §3a, ADR-0024 §4, §5, §8).
 struct AuthorityOIDCMethodsTests {
-    let domain = LinkDomain("viadere.cksites.dev")!
+    let domain = LinkDomain("staging.viadere.io")!
 
     @Test func passkeyAMRNeverImpliesHardwareAndOnlyOIDCLoginHasAPasskeyOrigin() {
         #expect(OIDCProfile.passkeyAMR(hardwareBound: true) == ["hwk", "user", "mfa"])
@@ -19,10 +19,10 @@ struct AuthorityOIDCMethodsTests {
     @Test func challengeLinkCarriesOnlyTheChallengeId() throws {
         let ach = AuthorityChallengeID.generate()
         let link = OIDCChallengeLink.build(challengeId: ach, domain: domain)
-        #expect(link == "https://viadere.cksites.dev/o/\(ach)")
+        #expect(link == "https://staging.viadere.io/o/\(ach)")
         #expect(OIDCChallengeLink.parse(try #require(URL(string: link)), domain: domain) == ach)
-        for bad in ["https://viadere.cksites.dev/o/\(ach)?n=42", "https://viadere.cksites.dev/o/\(ach)#x", "https://www.viadere.cksites.dev/o/\(ach)",
-                    "https://u@viadere.cksites.dev/o/\(ach)", "https://viadere.cksites.dev/o/ach_x", "https://viadere.cksites.dev/v/\(ach)"] {
+        for bad in ["https://staging.viadere.io/o/\(ach)?n=42", "https://staging.viadere.io/o/\(ach)#x", "https://www.staging.viadere.io/o/\(ach)",
+                    "https://u@staging.viadere.io/o/\(ach)", "https://staging.viadere.io/o/ach_x", "https://staging.viadere.io/v/\(ach)"] {
             #expect(OIDCChallengeLink.parse(try #require(URL(string: bad)), domain: domain) == nil, "\(bad)")
         }
     }

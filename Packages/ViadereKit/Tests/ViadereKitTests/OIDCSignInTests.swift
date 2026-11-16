@@ -259,11 +259,11 @@ struct OIDCSignInTests {
     // MARK: Routing and pins
 
     @Test func theQRUniversalLinkAndThePushOpenTheConfirmScreenOnly() async throws {
-        let domain = LinkDomain("viadere.cksites.dev")!
-        #expect(DeepLinkRouter.route("https://viadere.cksites.dev/o/\(ach)", domain: domain) == .oidcSignIn(challengeId: ach))
-        for bad in ["https://viadere.cksites.dev/o/\(ach)?x=1", "https://viadere.cksites.dev/o/\(ach)#n=42", "https://evil.example/o/\(ach)",
-                    "https://viadere.cksites.dev/o/ach_short", "https://viadere.cksites.dev/o/\(ach)/more", "http://viadere.cksites.dev/o/\(ach)",
-                    "https://viadere.cksites.dev:8443/o/\(ach)", "viadere://o/\(ach)"] {
+        let domain = LinkDomain("staging.viadere.io")!
+        #expect(DeepLinkRouter.route("https://staging.viadere.io/o/\(ach)", domain: domain) == .oidcSignIn(challengeId: ach))
+        for bad in ["https://staging.viadere.io/o/\(ach)?x=1", "https://staging.viadere.io/o/\(ach)#n=42", "https://evil.example/o/\(ach)",
+                    "https://staging.viadere.io/o/ach_short", "https://staging.viadere.io/o/\(ach)/more", "http://staging.viadere.io/o/\(ach)",
+                    "https://staging.viadere.io:8443/o/\(ach)", "viadere://o/\(ach)"] {
             #expect(DeepLinkRouter.route(bad, domain: domain) == nil, "\(bad)")
         }
         #expect(PushPayload.target(category: "viadere.oidc", userInfo: ["ach": ach]) == .oidcSignIn(ach))

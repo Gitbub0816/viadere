@@ -537,7 +537,7 @@ final class OIDCMethodsFrontEndTests: XCTestCase {
         let good = try text()
         XCTAssertEqual(CKeySafeActionText.accepted(good, challengeId: ach, linkDomain: domain), good)
         XCTAssertNil(CKeySafeActionText.accepted(good, challengeId: AuthorityChallengeID.generate(), linkDomain: domain))
-        XCTAssertNil(CKeySafeActionText.accepted(good, challengeId: ach, linkDomain: LinkDomain("viadere.cksites.dev")!))
+        XCTAssertNil(CKeySafeActionText.accepted(good, challengeId: ach, linkDomain: LinkDomain("staging.viadere.io")!))
         XCTAssertNil(CKeySafeActionText.accepted(nil, challengeId: ach, linkDomain: domain))
         XCTAssertNil(CKeySafeActionText.accepted("ckey-action:1:AAAA", challengeId: ach, linkDomain: domain))
         XCTAssertNil(CKeySafeActionText.accepted(OIDCChallengeLink.build(challengeId: ach, domain: domain), challengeId: ach, linkDomain: domain))

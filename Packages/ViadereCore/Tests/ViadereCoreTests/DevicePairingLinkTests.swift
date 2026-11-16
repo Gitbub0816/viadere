@@ -41,6 +41,6 @@ struct DevicePairingLinkTests {
         #expect(DevicePairingLink.build(code: "ab12-cd34-ef56", domain: domain) == nil)
         #expect(DevicePairingLink.build(code: "AB12CD34EF56", domain: domain) == nil)
         // Another build's link domain is refused.
-        #expect(DevicePairingLink.parse(good, domain: LinkDomain("viadere.cksites.dev")!) == nil)
+        #expect(DevicePairingLink.parse(good, domain: LinkDomain("staging.viadere.io")!) == nil)
     }
 }

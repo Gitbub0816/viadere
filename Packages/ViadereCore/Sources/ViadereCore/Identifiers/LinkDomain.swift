@@ -2,7 +2,7 @@ import Foundation
 
 /// The web host every Viadere universal link uses (`https://{host}/c/…`, `/a/…`, `/k/…`, `/l/…`, `/h/…`) and the app's associated domain.
 ///
-/// It is **configured, not assumed** (WP-C3): production uses `viadere.io`; staging uses its own host (`viadere.cksites.dev`), so a staging
+/// It is **configured, not assumed** (WP-C3): production uses `viadere.io`; staging uses its own host (`staging.viadere.io`), so a staging
 /// QR code never points at production and a production link is never accepted by a staging build. The server reads it from `LINK_DOMAIN`
 /// (`ServerConfig.linkDomain`) and passes it explicitly wherever it builds or parses a link; the app reads it from its build setting
 /// `VIADERE_LINK_DOMAIN` (Info.plist `ViadereLinkDomain`) and installs it once at launch with `ViadereCore.configureLinkDomain`.

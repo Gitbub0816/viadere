@@ -23,7 +23,7 @@
 
   var SVG_NS = 'http://www.w3.org/2000/svg';
   // A session link: https, a Viadere link domain, /v/ and eight characters of the code alphabet (no I, O, 0, 1). Nothing else is rendered.
-  var LINK = /^https:\/\/(viadere\.io|viadere\.cksites\.dev)\/v\/([A-HJ-NP-Z2-9]{8})$/;
+  var LINK = /^https:\/\/(viadere\.io|staging\.viadere\.io)\/v\/([A-HJ-NP-Z2-9]{8})$/;
   // Labels per flow. Only "verify" exists today; a sign-in flow adds its own entry and copy here.
   var FLOWS = {
     verify: {
@@ -42,7 +42,7 @@
   ];
 
   // ---------------------------------------------------------------------------------------------------------------------------------
-  // QR code (ISO/IEC 18004): byte mode, error correction level M, versions 1 to 10, best of the eight masks. A session link is 29 to 38
+  // QR code (ISO/IEC 18004): byte mode, error correction level M, versions 1 to 10, best of the eight masks. A session link is 29 to 37
   // bytes, so it always fits in version 3 or 4.
   var ECC_PER_BLOCK = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
   var ECC_BLOCKS = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
@@ -258,7 +258,7 @@
   // A line-for-line port of ViadereCore/OpticalCode/CKeySymbol.swift and CKeySVG.swift, themselves a verified port of the CKey reference
   // core (clearkeysolutions/ckey v0.1.0-build.85: src/core_internal.inc, src/api_codec.inc, src/api_render.inc). The browser test
   // reproduces every vector of docs/protocol/vectors/ckey-profile0-v1.json: the codeword bit for bit and the SVG byte for byte.
-  // A session link is 29 to 38 bytes: a version 2 or 3 symbol at level M.
+  // A session link is 29 to 37 bytes: a version 2 or 3 symbol at level M.
   var CK_GRID = [29, 31, 33, 36, 38, 41, 44, 47, 50, 54, 58, 62, 67, 71, 77, 82, 88, 94, 101, 108, 116, 124, 133, 143, 153, 164, 176, 188, 202, 216, 232];
   var CK_SLOTS = [72, 80, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 168, 176, 192, 200, 216, 232, 248, 272, 288, 304, 328, 352, 376, 408, 440, 464, 504, 536, 576];
   var CK_RINGS = [3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 23, 25, 27, 29, 32, 34, 37];
