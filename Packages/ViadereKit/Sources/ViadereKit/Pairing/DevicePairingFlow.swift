@@ -440,9 +440,11 @@ public final class PairingApprovalViewModel {
         self.api = api
         self.signer = signer
         self.timeText = timeText
-        remaining = max(0, request.attemptsRemaining)
+        // Locals only: with @Observable, reading a tracked property here would use `self` before `phase` is initialized.
+        let attemptsLeft = max(0, request.attemptsRemaining)
+        remaining = attemptsLeft
         // Only this account's request, only when its digests follow from its own keys, and only while it is live.
-        if request.accountId != ownAccountId || !request.isConsistent || request.expiresAt <= now || remaining == 0 { phase = .refused }
+        if request.accountId != ownAccountId || !request.isConsistent || request.expiresAt <= now || attemptsLeft == 0 { phase = .refused }
         else { phase = .entering }
     }
 
