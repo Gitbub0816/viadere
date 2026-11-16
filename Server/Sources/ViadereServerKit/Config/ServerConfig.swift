@@ -402,7 +402,28 @@ public struct ServerConfig: Sendable {
         try config.applyAttachmentEnvironment(env, production: production)
         try config.applyAndroidEnvironment(env)
         try config.applyTelemetryEnvironment(env, strict: production)
+        if environment == .staging { try config.refuseProductionHostsInStaging() }
         return config
+    }
+
+    /// The production web, API and `www.` hosts. Staging lives on subdomains of the production domain (`staging.viadere.io`,
+    /// `api-staging.viadere.io`; SECURITY.md §2.116), so a staging server must never be configured with one of these names.
+    public static let productionHosts: Set<String> = {
+        let apex = LinkDomain.production.host
+        return [apex, "www." + apex, "api." + apex]
+    }()
+
+    /// Staging with a production name as its passkey RP ID, link domain, API base or dashboard origin would register passkeys for the
+    /// production RP ID, print links that open a production build, or send production URLs in staging mail; refused at start-up.
+    func refuseProductionHostsInStaging() throws {
+        let named: [(String, String?)] = [("RP_ID", relyingPartyID), ("LINK_DOMAIN", linkDomain.host),
+                                          ("RP_ORIGIN", URL(string: relyingPartyOrigin)?.host), ("PUBLIC_BASE_URL", URL(string: publicBaseURL)?.host),
+                                          ("DASHBOARD_ORIGIN", dashboardOrigin.flatMap { URL(string: $0)?.host })]
+        for (name, host) in named {
+            if let host, Self.productionHosts.contains(host.lowercased()) {
+                throw ServerConfigError.invalid("\(name) (staging must not use the production host \(host.lowercased()); use staging.viadere.io / api-staging.viadere.io)")
+            }
+        }
     }
 
     private static func readFile(_ path: String?) -> String? {

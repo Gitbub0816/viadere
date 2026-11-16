@@ -23,7 +23,12 @@ final class OperatorTests: XCTestCase {
             let cred = h.registrationCredential(for: options, credentialId: "op-cred", publicKey: SecureToken.generate(byteCount: 32))
             let finish = try await h.jsonPost("/operator/auth/enroll/finish", PasskeyRegistrationFinishRequest(ceremonyId: options.ceremonyId, credential: cred))
             XCTAssertEqual(finish.status, .ok, finish.text)
-            XCTAssertEqual(h.sessionCookie(finish, realm: .operator)?.name, "__Host-vd_operator")
+            let operatorCookie = try XCTUnwrap(h.sessionCookie(finish, realm: .operator))
+            XCTAssertEqual(operatorCookie.name, "__Host-vd_operator")
+            // Host-only (SECURITY.md §2.116): staging.viadere.io is a subdomain of viadere.io, so no Domain attribute, Secure, Path=/.
+            XCTAssertNil(operatorCookie.value(of: "Domain"))
+            XCTAssertTrue(operatorCookie.has("Secure") && operatorCookie.has("HttpOnly"))
+            XCTAssertEqual(operatorCookie.value(of: "Path"), "/")
             // The token is dead afterwards.
             try await eq(try await h.page("/operator/enroll/\(token)", nil).status, .gone)
             try await eq(try await h.jsonPost("/operator/auth/enroll/begin", EnrollBeginBody(token: token)).status, .unprocessableEntity)
