@@ -21,7 +21,7 @@ TAG = "viadere-api-v1"
 BODY_COMPONENTS = ["@method", "@authority", "@path", "@query", "content-digest", "content-type"]
 BODILESS_COMPONENTS = ["@method", "@authority", "@path", "@query"]
 NOW = 1_800_000_000
-AUTHORITY = "viadere.com"
+AUTHORITY = "viadere.io"
 
 
 def b64u(b: bytes) -> str:
@@ -294,7 +294,7 @@ def main():
 
     # Message binding
     neg.append(negative("other_authority", "Signed for another authority (Host).", "bad_signature", base_req(sign_authority="evil.example")))
-    neg.append(negative("authority_with_port", "Signed for the authority with an explicit port.", "bad_signature", base_req(sign_authority="viadere.com:443")))
+    neg.append(negative("authority_with_port", "Signed for the authority with an explicit port.", "bad_signature", base_req(sign_authority="viadere.io:443")))
     neg.append(negative("other_path", "Signed for another path.", "bad_signature", base_req(sign_target="/v1/business/auth-approvals")))
     neg.append(negative("other_query", "Signed for another query.", "bad_signature",
                         base_req(method="GET", target="/v1/business/interactions?limit=20", sign_target="/v1/business/interactions?limit=21", body=b"")))

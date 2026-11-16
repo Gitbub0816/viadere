@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/contracts/schemas/auth-delivery-display-v1.schema.json",
+  "$id": "https://viadere.io/contracts/schemas/auth-delivery-display-v1.schema.json",
   "title": "Auth delivery display object",
   "description": "GET /v1/auth-deliveries and /{id} (device-signed). Display data only: the URL and the code are never in it; they come once from POST /open.",
   "type": "object",

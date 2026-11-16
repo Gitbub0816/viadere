@@ -107,7 +107,7 @@ final class LinkSessionTests: XCTestCase {
             let (created, invitation) = try await h.createLinkSession(b)
             XCTAssertEqual(created.status, .created, created.text)
             let ticket = try XCTUnwrap(invitation).ticket
-            XCTAssertEqual(ticket.link, "https://viadere.com/k/\(ticket.code)", "the relay's suggestion carries no secret")
+            XCTAssertEqual(ticket.link, "https://viadere.io/k/\(ticket.code)", "the relay's suggestion carries no secret")
             XCTAssertEqual(ticket.rootKid, keys.rootKid)
             // The device's descriptor is signed by Viadere's link-descriptor key and names the business, the account and the capabilities.
             let (completed, phone) = try await h.completeLink(consumer, try XCTUnwrap(invitation))

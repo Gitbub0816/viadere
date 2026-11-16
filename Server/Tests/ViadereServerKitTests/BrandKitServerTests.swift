@@ -254,11 +254,11 @@ final class BrandKitServerTests: XCTestCase {
 
     func testAssetDomainMustBeAHostOfItsOwn() throws {
         var config = ServerConfig.testing()
-        for bad in ["viadere.com"] {
+        for bad in ["viadere.io"] {
             XCTAssertThrowsError(try config.validateAssetDomain(LinkDomain(bad), strict: false), bad)
         }
-        XCTAssertThrowsError(try config.validateAssetDomain(LinkDomain("assets.viadere.com"), strict: true))
-        XCTAssertNoThrow(try config.validateAssetDomain(LinkDomain("assets.viadere.com"), strict: false))
+        XCTAssertThrowsError(try config.validateAssetDomain(LinkDomain("assets.viadere.io"), strict: true))
+        XCTAssertNoThrow(try config.validateAssetDomain(LinkDomain("assets.viadere.io"), strict: false))
         XCTAssertNoThrow(try config.validateAssetDomain(LinkDomain("assets.viadere-cdn.example"), strict: true))
         XCTAssertThrowsError(try config.applyBrandKitEnvironment(["ASSET_DOMAIN": "https://assets.example.com/x"], production: false))
         XCTAssertThrowsError(try config.applyBrandKitEnvironment(["BRAND_MANIFEST_SIGNING_KEY": "not-a-key"], production: false))

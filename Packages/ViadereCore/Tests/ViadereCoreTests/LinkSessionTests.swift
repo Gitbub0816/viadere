@@ -181,7 +181,7 @@ struct LinkSessionTests {
         #expect(parsed.code == "ABCDEFGH")
         #expect(parsed.secret == es)
         #expect(LinkSessionLink.parse(try #require(URL(string: "https://viadere.cksites.dev/k/ABCDEFGH")), domain: staging)?.secret == nil)
-        for bad in ["https://viadere.com/k/ABCDEFGH", "https://www.viadere.cksites.dev/k/ABCDEFGH", "http://viadere.cksites.dev/k/ABCDEFGH",
+        for bad in ["https://viadere.io/k/ABCDEFGH", "https://www.viadere.cksites.dev/k/ABCDEFGH", "http://viadere.cksites.dev/k/ABCDEFGH",
                     "https://viadere.cksites.dev:8443/k/ABCDEFGH", "https://u@viadere.cksites.dev/k/ABCDEFGH", "https://viadere.cksites.dev/k/ABCDEFGH?x=1",
                     "https://viadere.cksites.dev/k/ABCD-EFGH", "https://viadere.cksites.dev/k/abcdefgh", "https://viadere.cksites.dev/k/ABCDEFGH/x",
                     "https://viadere.cksites.dev/k/ABCDEFGH#es=short", "https://viadere.cksites.dev/k/ABCDEFGH#rk=\(es.base64URL)",

@@ -129,7 +129,7 @@ struct ConnectViewModelTests {
 
     @Test func scannedQRCodes() async throws {
         let (model, _) = await make()
-        await model.handleScanned("https://viadere.com/c/NM4P82")
+        await model.handleScanned("https://viadere.io/c/NM4P82")
         guard case .review(let profile) = model.phase else { Issue.record("expected review"); return }
         #expect(profile.displayName == "Northfield Market")
         model.reset()
@@ -157,7 +157,7 @@ struct ConnectViewModelTests {
     func campaignLink(_ code: BusinessCode, action: String) throws -> ConnectLink {
         let json = #"{"act":"\#(action)","cmp":"spring","iat":"2026-11-14T10:00:00.000Z"}"#
         let ctx = Data(json.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        return try ConnectLink.parse("https://viadere.com/c/\(code.canonical)?ctx=\(ctx)&sig=\(String(repeating: "A", count: 43))")
+        return try ConnectLink.parse("https://viadere.io/c/\(code.canonical)?ctx=\(ctx)&sig=\(String(repeating: "A", count: 43))")
     }
 
     @Test func aVerifiedActionIsOfferedOnlyAfterTheUnchangedConsentReviewAndConnecting() async throws {

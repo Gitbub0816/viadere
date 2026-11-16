@@ -29,7 +29,7 @@ describe("ViadereClient requests", () => {
     assert.equal(created, true);
     assert.equal(delivery.id, DELIVERY_ID);
     const r = requests[0]!;
-    assert.equal(r.url, "https://api.viadere.com/v1/business/auth-deliveries");
+    assert.equal(r.url, "https://api.viadere.io/v1/business/auth-deliveries");
     assert.equal(r.method, "POST");
     assert.equal(r.headers.Authorization, `Bearer ${API_KEY}`);
     assert.match(r.headers["Idempotency-Key"]!, /^authdl-[0-9a-f]{40}$/);
@@ -51,7 +51,7 @@ describe("ViadereClient requests", () => {
     assert.equal((await c.getAuthDelivery(DELIVERY_ID)).status, "opened");
     assert.equal((await c.cancelAuthDelivery(DELIVERY_ID)).status, "cancelled");
     assert.equal((await c.completeAuthDelivery(DELIVERY_ID, "succeeded")).status, "completed");
-    assert.deepEqual(requests.map((r) => `${r.method} ${r.url.replace("https://api.viadere.com", "")}`), [
+    assert.deepEqual(requests.map((r) => `${r.method} ${r.url.replace("https://api.viadere.io", "")}`), [
       `GET /v1/business/auth-deliveries/${DELIVERY_ID}`,
       `POST /v1/business/auth-deliveries/${DELIVERY_ID}/cancel`,
       `POST /v1/business/auth-deliveries/${DELIVERY_ID}/complete`,

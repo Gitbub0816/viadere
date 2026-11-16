@@ -19,7 +19,7 @@ public enum GatewayCopy {
         return s
     }
 
-    public static let help = "Viadere: Text a business name, @handle, or code to connect. Reply MENU for options, STOP to opt out. Msg & data rates may apply. viadere.com/help"
+    public static let help = "Viadere: Text a business name, @handle, or code to connect. Reply MENU for options, STOP to opt out. Msg & data rates may apply. viadere.io/help"
     public static let optOutConfirmation = "Viadere: You're unsubscribed and won't get more messages. Reply START to resubscribe."
     public static let resubscribed = "Viadere: You're resubscribed."
     public static let welcome = "Viadere: A trusted way to connect with verified businesses."
@@ -29,7 +29,7 @@ public enum GatewayCopy {
     public static let notConnected = "Viadere: You're not connected to a business. Text a name, @handle, or code."
     public static let directoryUnavailable = "Viadere: Sorry, we couldn't look that up right now. Please try again shortly."
     public static let howItWorks = "Viadere: Pick a verified business, then text normally. Each business sees only its own conversation. Reply MENU anytime."
-    public static let privacy = "Viadere: Businesses see only their own conversation with you. Reply STOP anytime to opt out. viadere.com/privacy"
+    public static let privacy = "Viadere: Businesses see only their own conversation with you. Reply STOP anytime to opt out. viadere.io/privacy"
     public static let staleReply = "Viadere: That reply was for an earlier menu."
     public static let expiredMenu = "Viadere: That menu expired."
     public static let invalidChoice = "Viadere: Please reply with one of these numbers."

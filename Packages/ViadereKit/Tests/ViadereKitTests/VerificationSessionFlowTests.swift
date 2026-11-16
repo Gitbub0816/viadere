@@ -58,9 +58,9 @@ struct VerificationSessionFlowTests {
 
     @Test func theLinkRoutesStrictly() {
         let domain = LinkDomain.production
-        #expect(DeepLinkRouter.route("https://viadere.com/v/K7QFM2XA", domain: domain) == .verificationSession(code: "K7QFM2XA"))
-        for bad in ["https://viadere.com/v/K7QFM2XA?return=https://evil.test", "https://viadere.com/v/K7QFM2XA#x", "https://viadere.com/v/k7qfm2xa",
-                    "https://evil.test/v/K7QFM2XA", "https://viadere.com/v/K7QFM2XA/more", "viadere://v/K7QFM2XA"] {
+        #expect(DeepLinkRouter.route("https://viadere.io/v/K7QFM2XA", domain: domain) == .verificationSession(code: "K7QFM2XA"))
+        for bad in ["https://viadere.io/v/K7QFM2XA?return=https://evil.test", "https://viadere.io/v/K7QFM2XA#x", "https://viadere.io/v/k7qfm2xa",
+                    "https://evil.test/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA/more", "viadere://v/K7QFM2XA"] {
             #expect(DeepLinkRouter.route(bad, domain: domain) == nil, "\(bad)")
         }
     }

@@ -31,7 +31,7 @@ import Testing
     static let publicKey = hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
     static let now = Date(timeIntervalSince1970: 1_794_000_000)
 
-    static func action(scope: CKeySafeAction.Scope = .crossDevice, issuer: String = "viadere.com", app: String = "com.viadere.app", action: String = "signin.request",
+    static func action(scope: CKeySafeAction.Scope = .crossDevice, issuer: String = "viadere.io", app: String = "com.viadere.app", action: String = "signin.request",
                        keyId: String = "2026-11", requestId: String = "ach_AAECAwQFBgcICQoLDA0ODw", issuedAt: UInt64 = 1_794_000_000,
                        expiresAt: UInt64 = 1_794_000_120, params: Data = Data()) -> CKeySafeAction {
         CKeySafeAction(scope: scope, issuer: issuer, app: app, action: action, keyId: keyId, requestId: requestId, issuedAt: issuedAt, expiresAt: expiresAt, params: params)
@@ -191,8 +191,8 @@ import Testing
             #expect(CKeySafeAction.verify(text: text, publicKey: Self.publicKey, now: Self.now) == .ok(action), "\(note)")
         }
         // issuer: a lower-case DNS name with a dot, 1 to 253 bytes.
-        for bad in ["", "localhost", "Viadere.com", "viadere.com.", ".viadere.com", "viadere..com", "viadere_x.com", "viadere.com/x", "viadere.com:443",
-                    "viad\u{0435}re.com", "viadere com", "*.viadere.com", String(repeating: "a", count: 250) + ".com"] {
+        for bad in ["", "localhost", "Viadere.io", "viadere.io.", ".viadere.io", "viadere..io", "viadere_x.io", "viadere.io/x", "viadere.io:443",
+                    "viad\u{0435}re.io", "viadere com", "*.viadere.io", String(repeating: "a", count: 250) + ".com"] {
             refused(Self.action(issuer: bad), .issuer, "issuer \(bad.prefix(20))")
         }
         try accepted(Self.action(issuer: String(repeating: "a", count: 249) + ".com"), "253-byte issuer")

@@ -145,14 +145,14 @@ struct VerificationSessionTests {
 
     @Test func theLinkIsBuiltAndParsedStrictly() throws {
         let code = "ABCDEFGH"
-        #expect(VerificationSessionLink.build(code: code, domain: .production) == "https://viadere.com/v/ABCDEFGH")
+        #expect(VerificationSessionLink.build(code: code, domain: .production) == "https://viadere.io/v/ABCDEFGH")
         #expect(VerificationSessionLink.build(code: code, domain: staging) == "https://viadere.cksites.dev/v/ABCDEFGH")
-        #expect(VerificationSessionLink.parse(URL(string: "https://viadere.com/v/ABCDEFGH")!, domain: .production) == code)
+        #expect(VerificationSessionLink.parse(URL(string: "https://viadere.io/v/ABCDEFGH")!, domain: .production) == code)
         #expect(VerificationSessionLink.parse(URL(string: "https://viadere.cksites.dev/v/ABCDEFGH")!, domain: staging) == code)
-        for bad in ["http://viadere.com/v/ABCDEFGH", "https://www.viadere.com/v/ABCDEFGH", "https://viadere.com:443/v/ABCDEFGH",
-                    "https://user@viadere.com/v/ABCDEFGH", "https://viadere.com/v/ABCDEFGH?x=1", "https://viadere.com/v/ABCDEFGH#es=x",
-                    "https://viadere.com/v/abcdefgh", "https://viadere.com/v/ABCD-EFGH", "https://viadere.com/k/ABCDEFGH", "https://viadere.com/v/ABCDEFGH/x",
-                    "https://viadere.com.evil.test/v/ABCDEFGH", "https://VIADERE.com/v/ABCDEFGH", "https://viadere.cksites.dev/v/ABCDEFGH"] {
+        for bad in ["http://viadere.io/v/ABCDEFGH", "https://www.viadere.io/v/ABCDEFGH", "https://viadere.io:443/v/ABCDEFGH",
+                    "https://user@viadere.io/v/ABCDEFGH", "https://viadere.io/v/ABCDEFGH?x=1", "https://viadere.io/v/ABCDEFGH#es=x",
+                    "https://viadere.io/v/abcdefgh", "https://viadere.io/v/ABCD-EFGH", "https://viadere.io/k/ABCDEFGH", "https://viadere.io/v/ABCDEFGH/x",
+                    "https://viadere.io.evil.test/v/ABCDEFGH", "https://VIADERE.io/v/ABCDEFGH", "https://viadere.cksites.dev/v/ABCDEFGH"] {
             #expect(VerificationSessionLink.parse(URL(string: bad)!, domain: .production) == nil, "\(bad)")
         }
     }
@@ -198,7 +198,7 @@ struct VerificationSessionTests {
         let json = String(decoding: try ViadereJSON.encode(request), as: UTF8.self)
         for key in ["\"purpose_code\"", "\"return_url\"", "\"expires_in_seconds\"", "\"origin\""] { #expect(json.contains(key), "\(key)") }
         #expect(try ViadereJSON.decode(CreateVerificationSessionRequest.self, from: Data(json.utf8)) == request)
-        let ticket = VerificationSessionTicket(sessionId: session, code: "ABCDEFGH", link: "https://viadere.com/v/ABCDEFGH", expiresAt: now)
+        let ticket = VerificationSessionTicket(sessionId: session, code: "ABCDEFGH", link: "https://viadere.io/v/ABCDEFGH", expiresAt: now)
         #expect(ticket.displayCode == "ABCD-EFGH")
         #expect(try ViadereJSON.decode(VerificationSessionTicket.self, from: try ViadereJSON.encode(ticket)) == ticket)
         #expect(try ViadereJSON.decode(VerificationSessionStatus.self, from: Data("\"future_state\"".utf8)) == .unknown)

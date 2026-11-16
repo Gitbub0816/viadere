@@ -461,7 +461,7 @@ final class PlatformSeamsTests: XCTestCase {
         let recorder = SpanRecorder(enabled: true)
         recorder.record(name: "GET /v1/devices/:deviceId", start: Date(), end: Date(), attributes: [
             "http.request.method": .string("GET"), "http.route": .string("/v1/devices/:deviceId"), "http.response.status_code": .int(200),
-            "url.full": .string("https://api.viadere.com/v1/devices/3f2c"), "http.request.body": .string("{\"code\":\"123456\"}"),
+            "url.full": .string("https://api.viadere.io/v1/devices/3f2c"), "http.request.body": .string("{\"code\":\"123456\"}"),
             "enduser.id": .string("sub_abc"), "client.address": .string("203.0.113.7"), "http.request.header.authorization": .string("Bearer vda_x"),
         ], failed: false)
         // An allowed key with a value shaped like personal data is dropped too, and so is a span name that carries one.

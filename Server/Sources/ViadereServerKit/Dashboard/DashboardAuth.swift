@@ -53,8 +53,8 @@ struct EnrollBeginBody: Codable {
 }
 
 /// WebAuthn ceremonies for the dashboard and operator console. Credentials, users and sessions are separate from
-/// consumers'. The relying party ID is shared with the consumer app (`viadere.com`); the verifier used here may
-/// be bound to a different *origin* (`DASHBOARD_ORIGIN`, e.g. `https://business.viadere.com`) so a dashboard on a
+/// consumers'. The relying party ID is shared with the consumer app (`viadere.io`); the verifier used here may
+/// be bound to a different *origin* (`DASHBOARD_ORIGIN`, e.g. `https://business.viadere.io`) so a dashboard on a
 /// sub-domain still verifies, and a business passkey can never mint a consumer session or vice versa (different
 /// credential tables, different session realms).
 struct DashboardAuthService {

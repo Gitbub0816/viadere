@@ -69,7 +69,7 @@ final class ConnectButtonTests: XCTestCase {
         let text = try String(contentsOf: docs, encoding: .utf8)
         XCTAssertTrue(text.contains(try sri("viadere-connect.js")), "docs/BUSINESS-INTEGRATION.md must contain the current viadere-connect.js SRI hash — update it when the file changes (and ship a new /vN/ path)")
         XCTAssertTrue(text.contains(try sri("viadere-connect.css")), "…and the current viadere-connect.css hash")
-        XCTAssertTrue(text.contains("https://viadere.com/connect-button/v1/viadere-connect.js"))
+        XCTAssertTrue(text.contains("https://viadere.io/connect-button/v1/viadere-connect.js"))
         XCTAssertTrue(text.contains("class=\"vd-connect\""))
     }
 
@@ -92,7 +92,7 @@ final class ConnectButtonTests: XCTestCase {
         // The only URLs it may contain: the connect origin, and the SVG namespace.
         let urls = js.matches(of: /https?:\/\/[^\s'"<>)]+/).map { String($0.output) }
         XCTAssertFalse(urls.isEmpty)
-        XCTAssertTrue(urls.allSatisfy { $0 == "https://viadere.com/c/" || $0 == "http://www.w3.org/2000/svg" }, "\(urls)")
+        XCTAssertTrue(urls.allSatisfy { $0 == "https://viadere.io/c/" || $0 == "http://www.w3.org/2000/svg" }, "\(urls)")
         XCTAssertLessThan(try Data(contentsOf: publicDir.appendingPathComponent("viadere-connect.js")).count, 6 * 1024, "tiny")
         XCTAssertTrue(js.contains("referrerpolicy"))
         XCTAssertTrue(js.contains("noopener noreferrer"))

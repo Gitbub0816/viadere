@@ -1,5 +1,5 @@
-/* Connect with Viadere v1 — plain HTML + CSS variant (no JavaScript). https://viadere.com
-   <a class="vd-connect" href="https://viadere.com/c/AF2345" rel="noopener noreferrer" referrerpolicy="no-referrer">
+/* Connect with Viadere v1 — plain HTML + CSS variant (no JavaScript). https://viadere.io
+   <a class="vd-connect" href="https://viadere.io/c/AF2345" rel="noopener noreferrer" referrerpolicy="no-referrer">
      <svg class="vd-mark" …/><span>Connect with Viadere</span></a>
    Add data-theme="light" or data-theme="dark" to force a theme; otherwise it follows the visitor's preference. */
 .vd-connect{display:inline-flex;align-items:center;gap:.6em;box-sizing:border-box;min-height:44px;padding:.6em 1.25em;border-radius:999px;font:600 15px/1.2 -apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;letter-spacing:-.005em;text-decoration:none;background:#1F1E1C;color:#F5F2EC;border:1px solid #1F1E1C}

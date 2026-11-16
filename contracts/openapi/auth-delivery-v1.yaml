@@ -63,7 +63,7 @@ info:
     name: Proprietary
     identifier: LicenseRef-Proprietary
 servers:
-  - url: https://api.viadere.com
+  - url: https://api.viadere.io
 tags:
   - name: Business
   - name: Device

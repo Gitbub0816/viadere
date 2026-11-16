@@ -21,7 +21,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "apex_domain" {
-  description = "Apex domain, e.g. viadere.com."
+  description = "Apex domain, e.g. viadere.io."
   type        = string
 }
 

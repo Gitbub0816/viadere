@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/contracts/schemas/auth-delivery-event-v1.schema.json",
+  "$id": "https://viadere.io/contracts/schemas/auth-delivery-event-v1.schema.json",
   "title": "Auth delivery event (opaque webhook envelope, version 2026-10-27)",
   "description": "What a business receives for an auth.delivery.* event. Opaque by design (ADR-0025 section 5): ids, type, version, tenant and time. Never a magic link, code, TOTP seed, token, subject reference, variable or personal data. The business fetches the state with GET /v1/business/auth-deliveries/{request_id}. Signed with Viadere-Signature v2 only (never a v1= entry).",
   "type": "object",

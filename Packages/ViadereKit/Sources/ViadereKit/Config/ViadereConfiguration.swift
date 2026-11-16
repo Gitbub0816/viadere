@@ -30,7 +30,7 @@ public struct ViadereConfiguration: Sendable {
     public var keyDirectoryLogKeys: [String] = []
     public var keyDirectoryLogId: String = TransparencyLog.defaultLogId
     /// The universal-link host (`VIADERE_LINK_DOMAIN`, Info.plist `ViadereLinkDomain`; defaults to the web domain). Every link parser in the app
-    /// accepts only this host; `installLinkDomain()` makes it the process-wide `ViadereCore.domain`. The production API always uses `viadere.com`.
+    /// accepts only this host; `installLinkDomain()` makes it the process-wide `ViadereCore.domain`. The production API always uses `viadere.io`.
     public var linkDomain: LinkDomain = .production
     /// Base64url X9.63 public keys of Viadere's `link-descriptor` signing key (more than one during a rotation; Info.plist
     /// `ViadereLinkDescriptorKeys`). **Pinned in the build**: the app accepts a link-session descriptor only if one of these signed it.
@@ -53,7 +53,7 @@ public struct ViadereConfiguration: Sendable {
     /// sign-in link and the QR code still work.
     public var safeActionKeys: [PinnedSafeActionKey] = []
 
-    public static let productionHost = "api.viadere.com"
+    public static let productionHost = "api.viadere.io"
 
     /// TODO(release): replace with the real SPKI SHA-256 pins (current key + backup). See `PinningConfiguration`.
     public static let productionPinning = PinningConfiguration(
@@ -111,7 +111,7 @@ public struct ViadereConfiguration: Sendable {
                         config.apnsEnvironment = env
                     }
                     if let rp = info["ViadereRelyingPartyID"] as? String, isDomainName(rp) { config.relyingPartyID = rp.lowercased() }
-                    // Staging links point at the staging web host (WP-C3); production keeps viadere.com whatever the plist says.
+                    // Staging links point at the staging web host (WP-C3); production keeps viadere.io whatever the plist says.
                     if let raw = info["ViadereLinkDomain"] as? String, let domain = LinkDomain(raw) { config.linkDomain = domain }
                 }
             }

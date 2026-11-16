@@ -13,7 +13,7 @@ final class AuthTests: XCTestCase {
             // Registration options are bound to the relying party.
             let begin = try await h.post(APIRoutes.registerBegin.template, PasskeyRegistrationBeginRequest(displayName: "Ana"))
             let options = try begin.json(PasskeyRegistrationOptions.self)
-            XCTAssertEqual(options.relyingPartyId, "viadere.com")
+            XCTAssertEqual(options.relyingPartyId, "viadere.io")
             XCTAssertEqual(options.userVerification, "required")
             XCTAssertGreaterThanOrEqual(Base64URL.decode(options.challenge)?.count ?? 0, 32)
 

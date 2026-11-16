@@ -808,7 +808,7 @@ final class HardeningTests: XCTestCase {
                 XCTAssertThrowsError(try ServerConfig.fromEnvironment(broken), "\(key) is mandatory in \(name)")
             }
             var http = env
-            http["PUBLIC_BASE_URL"] = "http://staging.viadere.com"
+            http["PUBLIC_BASE_URL"] = "http://staging.viadere.io"
             XCTAssertThrowsError(try ServerConfig.fromEnvironment(http))
         }
         XCTAssertTrue(try ServerConfig.fromEnvironment(strictEnvironment("staging")).isStrict)
@@ -827,11 +827,11 @@ final class HardeningTests: XCTestCase {
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(reused))
         // The passkey origin must be https and belong to the RP outside local development.
         var origin = strictEnvironment("production")
-        origin["RP_ORIGIN"] = "http://viadere.com"
+        origin["RP_ORIGIN"] = "http://viadere.io"
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(origin))
         origin["RP_ORIGIN"] = "https://evil.example"
         XCTAssertThrowsError(try ServerConfig.fromEnvironment(origin))
-        origin["RP_ORIGIN"] = "https://app.viadere.com"
+        origin["RP_ORIGIN"] = "https://app.viadere.io"
         XCTAssertNoThrow(try ServerConfig.fromEnvironment(origin))
         withSecrets["ENVIRONMENT"] = "test"
         withSecrets["RP_ORIGIN"] = "http://localhost:8080"

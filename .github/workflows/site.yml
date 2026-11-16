@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'site-staging' || 'site-production' }}
-      url: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'https://viadere-site.cksites.dev' || 'https://viadere.com' }}
+      url: ${{ (inputs.target == 'staging' || (github.event_name == 'push' && github.ref != 'refs/heads/main')) && 'https://viadere-site.cksites.dev' || 'https://viadere.io' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,4 +87,4 @@ jobs:
       - name: Smoke test
         # Staging is reachable only once its custom domain is attached (docs/ops/STAGING-SETUP.md section 13), so only production is probed.
         if: github.ref == 'refs/heads/main' && inputs.target != 'staging'
-        run: curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 5 --retry-all-errors https://viadere.com/ | head -n 1
+        run: curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 5 --retry-all-errors https://viadere.io/ | head -n 1

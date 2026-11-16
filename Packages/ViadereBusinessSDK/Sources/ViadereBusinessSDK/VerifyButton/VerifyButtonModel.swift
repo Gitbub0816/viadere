@@ -9,7 +9,7 @@ import ViadereCore
 // The button runs in your app; it never holds an API key. Your app gets the session's `link` from **your** server (which created it with
 // `createVerificationSession`), and your server learns the outcome from Viadere's signed result, never from the app.
 
-/// The session the button opens: a Viadere session link (`https://viadere.com/v/{CODE}`) checked against the allowed link domains.
+/// The session the button opens: a Viadere session link (`https://viadere.io/v/{CODE}`) checked against the allowed link domains.
 public struct VerifyButtonSession: Sendable, Hashable {
     /// Production and the staging web domain.
     public static let defaultDomains: [LinkDomain] = [.production, LinkDomain("viadere.cksites.dev")!]

@@ -16,7 +16,7 @@ disclosures: [business_verification, encryption, device_custody]
 
 **Effective date:** [EFFECTIVE DATE, set only after counsel approval]. **Version:** 0.3.0.
 
-These Consumer Terms of Service (the "**Terms**") are a binding agreement between you and [COUNSEL: LEGAL ENTITY NAME], a [STATE] [corporation], with its registered office at [ADDRESS] ("**Viadere**", "**we**", "**us**" or "**our**"). They govern your access to and use of the Viadere app for iPhone, Apple Watch and App Clip, the Viadere text-messaging number, the viadere.com website and any other consumer product we offer that links to these Terms (together, the "**Services**").
+These Consumer Terms of Service (the "**Terms**") are a binding agreement between you and [COUNSEL: LEGAL ENTITY NAME], a [STATE] [corporation], with its registered office at [ADDRESS] ("**Viadere**", "**we**", "**us**" or "**our**"). They govern your access to and use of the Viadere app for iPhone, Apple Watch and App Clip, the Viadere text-messaging number, the viadere.io website and any other consumer product we offer that links to these Terms (together, the "**Services**").
 
 **Please read these Terms carefully. They include an agreement to resolve most disputes through individual arbitration and a waiver of class actions (section 24), which affects your legal rights. You can opt out of arbitration within 30 days (section 24.8).**
 

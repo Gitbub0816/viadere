@@ -1,11 +1,11 @@
-/*! Connect with Viadere v1 — https://viadere.com — dependency-free web component.
+/*! Connect with Viadere v1 — https://viadere.io — dependency-free web component.
  *  No network requests, no cookies, no storage, no analytics, no iframes. It renders a link to
- *  https://viadere.com/c/{CODE} (optionally with a signed ctx/sig from your dashboard) and nothing else.
+ *  https://viadere.io/c/{CODE} (optionally with a signed ctx/sig from your dashboard) and nothing else.
  *  Usage: <viadere-connect code="AF2345"></viadere-connect>
  *  Attributes: code (required), ctx + sig (optional, both or neither), theme="auto|light|dark", label. */
 (function () {
   'use strict';
-  var ORIGIN = 'https://viadere.com/c/';
+  var ORIGIN = 'https://viadere.io/c/';
   var MARK = '<svg class="m" viewBox="0 0 321.71 146" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">' +
     '<path d="M0 46C31.34 46 52.61 53.08 58.62 61.38L88.74 102.99L115.22 66.49C130.87 44.9 156.4 45.68 170.7 68.18L189.31 97.44L215.59 61.52C231.34 40 256.71 40.99 270.74 63.66L321.71 146C290.37 146 271.7 141.91 268.73 137.12L240.79 91.98L213.57 129.17C198.67 149.53 174.45 148.74 160.91 127.45L141.09 96.28L116.14 130.69C101.32 151.11 76.1 151.1 61.31 130.67L0 46Z" fill="currentColor" opacity="0.62"/>' +
     '<path d="M0 46C31.34 46 52.61 53.08 58.62 61.38L88.74 102.99C101.18 120.16 102.65 139.14 118.23 127.81L116.14 130.69C101.32 151.11 76.1 151.1 61.31 130.67L0 46Z" fill="currentColor"/>' +

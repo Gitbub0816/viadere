@@ -26,7 +26,7 @@ public protocol PasskeyVerifier: Sendable {
         -> VerifiedPasskeyAssertion
 }
 
-/// Production verifier built on webauthn-swift (RP ID `viadere.com`, user verification required).
+/// Production verifier built on webauthn-swift (RP ID `viadere.io`, user verification required).
 public struct WebAuthnPasskeyVerifier: PasskeyVerifier {
     private let manager: WebAuthnManager
 

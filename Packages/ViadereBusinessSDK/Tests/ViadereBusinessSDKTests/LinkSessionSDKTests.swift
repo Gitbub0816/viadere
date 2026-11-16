@@ -16,7 +16,7 @@ struct LinkSessionSDKTests {
     let sessionId = UUID()
 
     func ticket(root: String? = nil, link: String? = nil) -> LinkSessionTicket {
-        LinkSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: link ?? "https://viadere.com/k/K7QFM2XA", rootKid: root ?? self.root,
+        LinkSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: link ?? "https://viadere.io/k/K7QFM2XA", rootKid: root ?? self.root,
                           expiresAt: Self.now.addingTimeInterval(300))
     }
 
@@ -63,7 +63,7 @@ struct LinkSessionSDKTests {
         let client = try Fixtures.client(transport)
         try transport.enqueue(status: 201, json: ticket())
         let invitation = try await client.createLinkSession(customerRef: "cust_1", capabilities: [.messageSend], rootKid: root, customerAuthenticatedAt: Self.now, now: Self.now)
-        #expect(invitation.link == "https://viadere.com/k/K7QFM2XA#es=\(invitation.secret.base64URL)")
+        #expect(invitation.link == "https://viadere.io/k/K7QFM2XA#es=\(invitation.secret.base64URL)")
         #expect(invitation.checkCode.count == 9)
         // Another root, or a link on another host: refused and cancelled.
         for bad in [ticket(root: KeyIdentifier.make(try SoftwareP256SigningKey().publicKey.signingKey())), ticket(link: "https://viadere.evil/k/K7QFM2XA")] {

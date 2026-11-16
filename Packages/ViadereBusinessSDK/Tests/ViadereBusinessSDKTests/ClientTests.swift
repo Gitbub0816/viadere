@@ -15,7 +15,7 @@ struct ClientTests {
         #expect(issued.interaction.kind == .confirm)
         let sent = try #require(transport.requests.first)
         #expect(sent.method == "POST")
-        #expect(sent.url.absoluteString == "https://viadere.com/v1/business/interactions")
+        #expect(sent.url.absoluteString == "https://viadere.io/v1/business/interactions")
         #expect(sent.headers["Authorization"] == "Bearer \(Fixtures.key)")
         #expect(sent.headers["Idempotency-Key"] == "order-1042-confirm")
         #expect(sent.headers["Content-Type"] == "application/json")
@@ -245,10 +245,10 @@ struct ClientTests {
     }
 
     @Test func onlyHTTPSBaseURLsAreAcceptedExceptLoopbackForDevelopment() throws {
-        for bad in ["http://viadere.com", "ftp://viadere.com", "https://user:pw@viadere.com", "viadere.com", "http://example.com"] {
+        for bad in ["http://viadere.io", "ftp://viadere.io", "https://user:pw@viadere.io", "viadere.io", "http://example.com"] {
             #expect(throws: ViadereSDKError.insecureBaseURL, "\(bad)") { try Fixtures.client(MockTransport(), baseURL: URL(string: bad)!) }
         }
-        #expect(throws: Never.self) { try Fixtures.client(MockTransport(), baseURL: URL(string: "https://sandbox.viadere.com")!) }
+        #expect(throws: Never.self) { try Fixtures.client(MockTransport(), baseURL: URL(string: "https://sandbox.viadere.io")!) }
         #expect(throws: Never.self) { try Fixtures.client(MockTransport(), baseURL: URL(string: "http://localhost:8080")!) }
     }
 

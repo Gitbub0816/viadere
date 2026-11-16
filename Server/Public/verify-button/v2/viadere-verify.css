@@ -1,6 +1,6 @@
-/* Verify with Viadere v2 — https://viadere.com — styles for <viadere-verify> (docs/VERIFY-BUTTON.md). No external resources.
+/* Verify with Viadere v2 — https://viadere.io — styles for <viadere-verify> (docs/VERIFY-BUTTON.md). No external resources.
    Without JavaScript the same classes style a plain link to your session:
-   <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.com/v/ABCDEFGH" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
+   <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.io/v/ABCDEFGH" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
    (add data-vdv-theme="dark" to that link on a dark page; inside <viadere-verify> the theme attribute and the visitor's preference apply).
    Brand palette only (Design/README.md): charcoal, graphite, silver, ivory, champagne accent. */
 viadere-verify{display:inline-block;vertical-align:middle;line-height:normal}

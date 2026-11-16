@@ -89,14 +89,14 @@ final class VerifyButtonTests: XCTestCase {
         for version in versions {
             XCTAssertTrue(guide.contains(try sri(version, "viadere-verify.js")), "docs/VERIFY-BUTTON.md must pin the \(version) viadere-verify.js hash (a change ships under a new version)")
             XCTAssertTrue(guide.contains(try sri(version, "viadere-verify.css")), "…and the \(version) viadere-verify.css hash")
-            XCTAssertTrue(guide.contains("https://viadere.com/verify-button/\(version)/viadere-verify.js"))
-            XCTAssertTrue(guide.contains("https://viadere.com/verify-button/\(version)/viadere-verify.css"))
+            XCTAssertTrue(guide.contains("https://viadere.io/verify-button/\(version)/viadere-verify.js"))
+            XCTAssertTrue(guide.contains("https://viadere.io/verify-button/\(version)/viadere-verify.css"))
         }
         // One complete example page per version, each pinning that version's files and nothing else.
         for (version, page) in [("v2", "docs/examples/verify-button.html"), ("v1", "docs/examples/verify-button-v1.html")] {
             let example = try String(contentsOf: repo.appendingPathComponent(page), encoding: .utf8)
             for (file, _) in files {
-                XCTAssertTrue(example.contains("https://viadere.com/verify-button/\(version)/\(file)\""), "\(page) loads \(version)/\(file)")
+                XCTAssertTrue(example.contains("https://viadere.io/verify-button/\(version)/\(file)\""), "\(page) loads \(version)/\(file)")
                 XCTAssertTrue(example.contains("integrity=\"\(try sri(version, file))\""), "\(page) pins the \(version) hash of \(file)")
             }
             let other = version == "v1" ? "v2" : "v1"
@@ -135,7 +135,9 @@ final class VerifyButtonTests: XCTestCase {
             // The only absolute URL in code is the SVG namespace; session links are matched by a strict pattern of the two Viadere link domains.
             let urls = js.matches(of: /https?:\/\/[^\s'"<>)]+/).map { String($0.output) }
             XCTAssertEqual(Set(urls), ["http://www.w3.org/2000/svg"], "\(version): \(urls)")
-            XCTAssertTrue(js.contains(#"var LINK = /^https:\/\/(viadere\.com|viadere\.cksites\.dev)\/v\/([A-HJ-NP-Z2-9]{8})$/;"#))
+            // v1 is frozen with the placeholder production host it was published with (testVersion1IsFrozen); v2 matches viadere.io.
+            let production = version == "v1" ? #"viadere\.com"# : #"viadere\.io"#
+            XCTAssertTrue(js.contains(#"var LINK = /^https:\/\/("# + production + #"|viadere\.cksites\.dev)\/v\/([A-HJ-NP-Z2-9]{8})$/;"#), version)
             XCTAssertTrue(js.contains("noopener noreferrer"))
             XCTAssertTrue(js.contains("referrerpolicy"))
             XCTAssertLessThan(try Data(contentsOf: publicDir(version).appendingPathComponent("viadere-verify.js")).count, try XCTUnwrap(caps[version]), version)

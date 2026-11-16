@@ -117,7 +117,7 @@ struct ModelTests {
     @Test func directoryInputClassification() {
         #expect(DirectoryInput(parsing: "@Amazon") == .handle(BusinessHandle(parsing: "amazon")!))
         #expect(DirectoryInput(parsing: "io-3456") == .code(BusinessCode(parsing: "103456")!))
-        #expect(DirectoryInput(parsing: "https://viadere.com/c/AF2345") == .link(ConnectLink(code: BusinessCode(parsing: "AF2345")!)))
+        #expect(DirectoryInput(parsing: "https://viadere.io/c/AF2345") == .link(ConnectLink(code: BusinessCode(parsing: "AF2345")!)))
         #expect(DirectoryInput(parsing: "Amazon") == .name("Amazon"))
         #expect(DirectoryInput(parsing: "https://evil.com/c/AF2345") == .name("https://evil.com/c/AF2345"))
     }

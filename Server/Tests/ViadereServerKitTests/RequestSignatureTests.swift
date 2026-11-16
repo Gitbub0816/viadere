@@ -213,7 +213,7 @@ final class RequestSignatureTests: AuthDeliveryTestBase {
         return SoftwareHTTPRequestSigningKey(keyId: record.keyid, privateKey: privateKey)
     }
 
-    func signedCreate(_ h: TestHarness, apiKey: String, body: Data, key: (any HTTPRequestSigningKey)?, authority: String = "viadere.com",
+    func signedCreate(_ h: TestHarness, apiKey: String, body: Data, key: (any HTTPRequestSigningKey)?, authority: String = "viadere.io",
                       extra: [String: String] = [:]) async throws -> HTTPResult {
         var headers = ["Authorization": "Bearer \(apiKey)", "Idempotency-Key": UUID().uuidString]
         if let key {
@@ -242,7 +242,7 @@ final class RequestSignatureTests: AuthDeliveryTestBase {
             // The same signature over a body changed in flight: the digest no longer matches.
             let body = otpBody(s, id: "tampered")
             var headers = ["Authorization": "Bearer \(apiKey.key)", "Idempotency-Key": UUID().uuidString]
-            for f in try await HTTPRequestSigner(key: key).sign(method: "POST", authority: "viadere.com", target: "/v1/business/auth-deliveries", body: body,
+            for f in try await HTTPRequestSigner(key: key).sign(method: "POST", authority: "viadere.io", target: "/v1/business/auth-deliveries", body: body,
                                                                 contentType: "application/json", now: h.clock.now()) { headers[f.name] = f.value }
             let tampered = try await h.request(.POST, "/v1/business/auth-deliveries", headers: headers, body: otpBody(s, id: "tampered-2"))
             XCTAssertEqual(tampered.status, .unauthorized); XCTAssertEqual(tampered.errorDetails?["reason"], "digest_mismatch")
@@ -252,7 +252,7 @@ final class RequestSignatureTests: AuthDeliveryTestBase {
             let borrowed = try await signedCreate(h, apiKey: other.key, body: otpBody(s), key: key)
             XCTAssertEqual(borrowed.status, .unauthorized); XCTAssertEqual(borrowed.errorCode, .signatureInvalid)
             // A signature for another authority (an attacker's host relaying the request) is refused.
-            let elsewhere = try await signedCreate(h, apiKey: apiKey.key, body: otpBody(s), key: key, authority: "viadere.com.evil.example")
+            let elsewhere = try await signedCreate(h, apiKey: apiKey.key, body: otpBody(s), key: key, authority: "viadere.io.evil.example")
             XCTAssertEqual(elsewhere.status, .unauthorized)
             // Revoked: refused at once.
             let record = try await BusinessRequestSigningKeyRecord.query(on: h.db).filter(\.$keyid == key.keyId).first()!
@@ -396,21 +396,21 @@ final class RequestSignatureTests: AuthDeliveryTestBase {
         try c.applyAuthDeliveryEnvironment(["AUTH_LIVE_KEY_ASSURANCE": "mtls"], production: true)
         XCTAssertEqual(c.authDelivery.liveKeyAssurance, .mtls)
         XCTAssertThrowsError(try { var x = ServerConfig.testing(); try x.applyAuthDeliveryEnvironment(["AUTH_LIVE_KEY_ASSURANCE": "none"], production: true) }())
-        XCTAssertEqual(ServerConfig.testing().requestSignatureAuthorities, ["viadere.com"])
-        try c.applyAuthDeliveryEnvironment(["REQUEST_SIGNATURE_AUTHORITIES": "api.viadere.com, viadere.com"], production: true)
-        XCTAssertEqual(c.requestSignatureAuthorities, ["api.viadere.com", "viadere.com"])
-        for bad in ["API.viadere.com", "viadere.com:443", "https://viadere.com", "a b", "x:0"] {
+        XCTAssertEqual(ServerConfig.testing().requestSignatureAuthorities, ["viadere.io"])
+        try c.applyAuthDeliveryEnvironment(["REQUEST_SIGNATURE_AUTHORITIES": "api.viadere.io, viadere.io"], production: true)
+        XCTAssertEqual(c.requestSignatureAuthorities, ["api.viadere.io", "viadere.io"])
+        for bad in ["API.viadere.io", "viadere.io:443", "https://viadere.io", "a b", "x:0"] {
             XCTAssertThrowsError(try RequestSignatureSettings.parse(bad), bad)
         }
     }
 
     func testAConfiguredSecondAuthorityIsAccepted() async throws {
-        try await harness({ $0.authDelivery.liveKeyAssurance = .mtlsOrSignature; $0.requestSignatures.authorities = ["api.viadere.com", "viadere.com"] }) { h in
+        try await harness({ $0.authDelivery.liveKeyAssurance = .mtlsOrSignature; $0.requestSignatures.authorities = ["api.viadere.io", "viadere.io"] }) { h in
             let s = try await scene(h)
             let apiKey = try await BusinessAPIKeys.issue(businessId: s.b.id.uuid, name: "live", live: true, scopes: BusinessAPIKeys.Scope.all,
                                                          capabilities: Capability.operational, now: h.clock.now(), on: h.db)
             let key = try await register(h, s.b, apiKey: apiKey.record, key: signer())
-            let r = try await signedCreate(h, apiKey: apiKey.key, body: otpBody(s), key: key, authority: "api.viadere.com")
+            let r = try await signedCreate(h, apiKey: apiKey.key, body: otpBody(s), key: key, authority: "api.viadere.io")
             XCTAssertEqual(r.status, .created, r.text)
         }
     }

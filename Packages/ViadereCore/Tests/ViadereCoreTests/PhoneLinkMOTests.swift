@@ -78,10 +78,10 @@ struct PhoneLinkMOTests {
         #expect(!bodies.isEmpty)
         for body in bodies {
             // The only URLs are the static on-ramp page and the two public help pages; none has a path segment after them.
-            let urls = body.split(whereSeparator: { $0 == " " || $0 == "\n" }).filter { $0.contains("://") || $0.hasPrefix("viadere.com") }
+            let urls = body.split(whereSeparator: { $0 == " " || $0 == "\n" }).filter { $0.contains("://") || $0.hasPrefix("viadere.io") }
             for url in urls {
                 let cleaned = url.trimmingCharacters(in: CharacterSet(charactersIn: ".,"))
-                #expect(cleaned == getURL || cleaned == "viadere.com/help" || cleaned == "viadere.com/privacy", "\(cleaned) in \(body)")
+                #expect(cleaned == getURL || cleaned == "viadere.io/help" || cleaned == "viadere.io/privacy", "\(cleaned) in \(body)")
             }
             #expect(!body.contains("/l/") && !body.contains("/h/"), "\(body)")
             #expect(body.range(of: #"\b\d{6}\b"#, options: .regularExpression) == nil, "no six-digit code: \(body)")
@@ -151,7 +151,7 @@ struct PhoneLinkMOTests {
     @Test func theNoticesUseTheApprovedWording() {
         #expect(GatewayCopy.phoneLinkedNotice == "Viadere: Someone linked this number to a Viadere app using a text sent from this phone. If that wasn't you, reply UNLINK. Reply STOP to stop messages.")
         #expect(GatewayCopy.unlinkDone == "Viadere: Done. Viadere will not use this number for messages or approvals. The Viadere account that holds it can remove it in the app.")
-        #expect(GatewayCopy.getViadere(url: "https://viadere.com/get") == "Get the Viadere app to connect with businesses: https://viadere.com/get")
+        #expect(GatewayCopy.getViadere(url: "https://viadere.io/get") == "Get the Viadere app to connect with businesses: https://viadere.io/get")
         #expect(GatewayCopy.secureRequestNotice(business: GatewayHarness.airline) == "Viadere: Sky Air sent you something that needs the Viadere app. Open Viadere to respond.")
         for text in [GatewayCopy.phoneLinkedNotice, GatewayCopy.unlinkDone, GatewayCopy.secureRequestNotice(business: GatewayHarness.airline)] {
             #expect(SMSEncoding.analyze(text).kind == .gsm7, "\(text)")

@@ -142,7 +142,7 @@ final class PhoneLinkMOTests: XCTestCase {
                 XCTAssertNil(body.range(of: #"[A-Za-z0-9_-]{24,}"#, options: .regularExpression), "no bearer-looking token: \(body)")
                 XCTAssertFalse(body.contains("/l/") || body.contains("/h/"), body)
                 for url in body.split(separator: " ").filter({ $0.contains("://") }) {
-                    XCTAssertTrue(["https://viadere.com/get", "https://viadere.com/get."].contains(String(url)), "\(url) in \(body)")
+                    XCTAssertTrue(["https://viadere.io/get", "https://viadere.io/get."].contains(String(url)), "\(url) in \(body)")
                 }
                 for phrase in ["verification code", "your code", "approve", "285.28"] { XCTAssertFalse(body.lowercased().contains(phrase), "\(phrase) in \(body)") }
             }

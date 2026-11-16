@@ -12,7 +12,7 @@ rules: `Design/embeds/index.html`.
 
 ```
 your server ──POST /v1/business/verification-sessions──▶ Viadere      (capability, purpose, origin; live API key, server side only)
-your server ◀──── {session_id, code, link, expires_at} ─────────────── (link = https://viadere.com/v/{CODE}, valid ≤ 5 min, single use)
+your server ◀──── {session_id, code, link, expires_at} ─────────────── (link = https://viadere.io/v/{CODE}, valid ≤ 5 min, single use)
 your page/app ── shows the button with `link` ──▶ customer taps it
    phone:     the OS hands the link to the Viadere app (universal link / App Link)
    computer:  panel → the Viadere code first, "Scan with the Viadere app"  [Use your phone's camera instead: the same link as a QR code]
@@ -76,24 +76,24 @@ Two static files, no dependencies, no build step, served immutable with CORS for
 no cookies or storage, no `innerHTML`, no inline styles and no `eval`, so they work under a strict Content Security Policy with Trusted Types.
 
 ```html
-<link rel="stylesheet" href="https://viadere.com/verify-button/v2/viadere-verify.css"
-      integrity="sha384-BteUm7aQSLF2Ek2xJ+BYvB/ivROSiKgRcugzSitw9y3qqInXs/tlBjwzCi616sG1" crossorigin="anonymous">
-<script src="https://viadere.com/verify-button/v2/viadere-verify.js" defer
-        integrity="sha384-Qy17uaPnono8d8OebBf88ECPi3+skAq2tUBR+bFa6D3/k5d7IjWWUclkc77LkmTk" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://viadere.io/verify-button/v2/viadere-verify.css"
+      integrity="sha384-XtMMnzTRtL0QFL0OME+vtc3hVosP+uUo7CMRClSuFFDGRBXn+BIlxoyVfzcPmZMX" crossorigin="anonymous">
+<script src="https://viadere.io/verify-button/v2/viadere-verify.js" defer
+        integrity="sha384-1snVSX58QUk08gZdXba+tzoxB2kIhZQpQySx4SSQJ4DSS04KCMN9CWow+8WIO7lM" crossorigin="anonymous"></script>
 
-<viadere-verify link="https://viadere.com/v/K7QFM2XA" expires-at="2026-11-02T10:05:00Z">
+<viadere-verify link="https://viadere.io/v/K7QFM2XA" expires-at="2026-11-02T10:05:00Z">
   <!-- Fallback without JavaScript: the same link, styled by the stylesheet. -->
-  <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.com/v/K7QFM2XA" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
+  <a class="vdv-btn vdv-filled vdv-md" href="https://viadere.io/v/K7QFM2XA" rel="noopener noreferrer" referrerpolicy="no-referrer">Verify with Viadere</a>
 </viadere-verify>
 ```
 
-`GET https://viadere.com/verify-button/v2/integrity.json` publishes the hashes; a published file never changes in place, a change ships
+`GET https://viadere.io/verify-button/v2/integrity.json` publishes the hashes; a published file never changes in place, a change ships
 under a new version path (see "Versions" below). You may also self-host the two files (pin them by hash in your build). CSP for the page: `script-src` and `style-src` must allow the files'
-origin (`https://viadere.com`, or `'self'` when self-hosted); nothing else is needed (`connect-src`, `frame-src`, `img-src` stay closed).
+origin (`https://viadere.io`, or `'self'` when self-hosted); nothing else is needed (`connect-src`, `frame-src`, `img-src` stay closed).
 
 | Attribute | Values |
 |---|---|
-| `link` | **Required.** The ticket's `link`. Anything that is not exactly `https://viadere.com/v/{CODE}` (or the staging `https://viadere.cksites.dev/v/{CODE}`) renders nothing |
+| `link` | **Required.** The ticket's `link`. Anything that is not exactly `https://viadere.io/v/{CODE}` (or the staging `https://viadere.cksites.dev/v/{CODE}`) renders nothing |
 | `variant` | `filled` (default: charcoal, ivory in dark mode), `ivory` (dark or photographic backgrounds), `outline` |
 | `size` | `sm` (36 px), `md` (44 px, default), `lg` (52 px) |
 | `display` | `label` (default) or `icon` (mark only; the accessible name stays "Verify with Viadere") |
@@ -140,14 +140,14 @@ reference core, MIT licence, notice in the file and in `docs/THIRD-PARTY-NOTICES
 
 **Migrating from v1.** Change the two URLs from `/v1/` to `/v2/` and replace both `integrity` values; nothing in your markup, your CSP or your
 server changes. **v1 keeps working and stays QR-only**: its files are immutable and stay served at the same URLs with the same hashes, so a
-page that pinned v1 is unaffected until you choose to move. Do not mix the versions on one page (they define the same element).
+page that pinned v1 is unaffected until you choose to move. v1 was frozen before the production domain was chosen and still matches the placeholder host it was published with, so on viadere.io it renders only staging links: production pages use v2 (an owner decision on v1 is pending). Do not mix the versions on one page (they define the same element).
 
-v1, for reference ([example page](examples/verify-button-v1.html); hashes at `GET https://viadere.com/verify-button/v1/integrity.json`):
+v1, for reference ([example page](examples/verify-button-v1.html); hashes at `GET https://viadere.io/verify-button/v1/integrity.json`):
 
 ```html
-<link rel="stylesheet" href="https://viadere.com/verify-button/v1/viadere-verify.css"
+<link rel="stylesheet" href="https://viadere.io/verify-button/v1/viadere-verify.css"
       integrity="sha384-7B8nwhugpRQh8Dv3bHED/l1CVZzyssS+AABdibXE3TEPHKXRjPLLq4v2VxPDYhDP" crossorigin="anonymous">
-<script src="https://viadere.com/verify-button/v1/viadere-verify.js" defer
+<script src="https://viadere.io/verify-button/v1/viadere-verify.js" defer
         integrity="sha384-vT7Sg9sIvngk1wVF56Jez/Zj9uoaJRKxrxbv76xNd8qG7oQqjvm/blG5iyeezM+Y" crossorigin="anonymous"></script>
 ```
 

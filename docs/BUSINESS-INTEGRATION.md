@@ -9,7 +9,7 @@ get the customer's decision back, exchange messages, and let customers connect w
 
 ## 1. Get access
 
-1. **Apply.** Create an organization at `https://viadere.com/dashboard/signup` (you sign in with a passkey; there are no passwords).
+1. **Apply.** Create an organization at `https://viadere.io/dashboard/signup` (you sign in with a passkey; there are no passwords).
    The organization starts `pending`. Follow the checklist under *Organization* (section 1a): **prove you control a domain**, have your **legal entity reviewed**, and wait for a Viadere reviewer to approve the application.
    **Your handle and permanent code are issued only on approval.** Sandbox work (test keys, a webhook endpoint, a test customer) opens as soon as your domain is verified; **live keys** need the approved application and the go-live review.
 2. **Create an API key** in the dashboard (*Developers > API keys*). Creating one asks you to confirm with your passkey. Give each key only the
@@ -493,7 +493,7 @@ await keyStore.add(enrolled)                   // YOUR store: this is what every
 
 **A statement that verifies proves nothing about who sent it.** Viadere (the relay) creates the code, stores the customer's statement and hands it to you, and it knows every id in it: a compromised relay could make a key of its own, sign a perfectly valid statement and give it to you. `confirmApprovalEnrollment` therefore refuses to sign a confirmation until the statement is authenticated with the secret only you and the customer's app hold:
 
-* **Link or QR** (`https://viadere.com/a/CODE?rk=<your root key id>#es=<secret>`): the app returns a *binding tag* (an HMAC of its statement under the secret). The SDK verifies it in constant time. The secret sits in the URL **fragment**, which is never sent to Viadere; do not put it anywhere a server could read it (no redirect through your own tracking page, no logging of the full URL, no analytics on the QR image).
+* **Link or QR** (`https://viadere.io/a/CODE?rk=<your root key id>#es=<secret>`): the app returns a *binding tag* (an HMAC of its statement under the secret). The SDK verifies it in constant time. The secret sits in the URL **fragment**, which is never sent to Viadere; do not put it anywhere a server could read it (no redirect through your own tracking page, no logging of the full URL, no analytics on the QR image).
 * **Typed code**: the customer enters the code *and* the check code in the app; the app shows six digits; you type them into `sas`. The check code never goes to Viadere, so Viadere cannot compute those digits for a forged statement.
 * A forged or swapped statement, a wrong tag or a wrong SAS throws `bindingTagInvalid` / `sasMismatch`, **cancels the enrollment** and revokes the pending key: start a new one (one SAS guess per enrollment). `verificationRequired` means no proof arrived yet; nothing was changed.
 * The SDK also refuses a ticket whose root key id is not yours (`rootKeyMismatch`): the `rk` the customer's phone treats as "verified out of band" is your own, not the relay's.
@@ -671,7 +671,7 @@ Every error is `{"error":{"code","message","requestId","details?"}}`. Quote `req
 
 Let customers connect from your site, email or print.
 
-* **Campaign links and codes** (dashboard → *Campaigns*): creates a stored campaign and its link `https://viadere.com/c/{CODE}?ctx=…&sig=…` with a signed
+* **Campaign links and codes** (dashboard → *Campaigns*): creates a stored campaign and its link `https://viadere.io/c/{CODE}?ctx=…&sig=…` with a signed
   campaign context, and draws your code and a plain QR code beside it as SVG on the server (nothing is sent to a third party); both download as SVG.
   The context is optional; if it is missing, expired or invalid, the plain code still resolves.
   * The list shows each campaign's status (active, expired, archived) and how many customers connected through it. A connection is counted only when
@@ -687,8 +687,8 @@ Let customers connect from your site, email or print.
 * **Web component** (no dependencies, no network calls, no tracking, no iframe):
 
 ```html
-<script src="https://viadere.com/connect-button/v1/viadere-connect.js"
-        integrity="sha384-mo265OibvlyjMxjQpT8kkeB3CZlw+XQ25zW9fHSjXaXr7UobQKxViVEpd/WpFr3O"
+<script src="https://viadere.io/connect-button/v1/viadere-connect.js"
+        integrity="sha384-UyKeiWis65qqG27dEtaYPXPgLQpt08Bp19/hDAA9J2KzZIL7IrCgwggyoZqQp3kH"
         crossorigin="anonymous" defer></script>
 <viadere-connect code="AF2345"></viadere-connect>
 <!-- optional: signed campaign context from the dashboard, theme="light|dark|auto", label="…" -->
@@ -698,21 +698,21 @@ Let customers connect from your site, email or print.
 * **Plain HTML and CSS** (no JavaScript):
 
 ```html
-<link rel="stylesheet" href="https://viadere.com/connect-button/v1/viadere-connect.css"
-      integrity="sha384-BA8G+Du8p1Om60MoJlpXAmqMqTEE6JwyaVQjA5hTEyyo8X2ImKqqIEIz/KEUyFmC" crossorigin="anonymous">
-<a class="vd-connect" href="https://viadere.com/c/AF2345" rel="noopener noreferrer" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://viadere.io/connect-button/v1/viadere-connect.css"
+      integrity="sha384-V/74l7y1dRHltXyctJB14ICdQmEBT/gXbM6SMTKL5j4oCDYZYnAxcqTtJTdwLVUx" crossorigin="anonymous">
+<a class="vd-connect" href="https://viadere.io/c/AF2345" rel="noopener noreferrer" referrerpolicy="no-referrer">
   <svg class="vd-mark" viewBox="0 0 321.71 146" aria-hidden="true" focusable="false"><!-- mark: Design/svg/viadere-mark-mono-dark.svg, fill="currentColor" --></svg>
   <span>Connect with Viadere</span>
 </a>
 ```
 
 The files are versioned and immutable (`Cache-Control: public, max-age=31536000, immutable`); a change ships under a new path (`/v2/`), so a pinned SRI hash never goes stale.
-`GET /connect-button/v1/integrity.json` publishes the current `sha384` of each file. The button only renders a link to `viadere.com/c/{CODE}`: no cookies, storage, analytics or third-party requests.
+`GET /connect-button/v1/integrity.json` publishes the current `sha384` of each file. The button only renders a link to `viadere.io/c/{CODE}`: no cookies, storage, analytics or third-party requests.
 
 ## 8a. Enterprise connectivity (Tier E): mutual TLS
 
 Optional, for organizations granted Tier E. API semantics are identical on every transport: private connectivity never bypasses authorization (the API key and its scopes, capabilities and entitlements still decide).
-Point your integration at the enterprise hostname (`https://api-mtls.viadere.com`, shown under *Security > Certificates*), present a client certificate issued by the CA you gave us, and bind that certificate (its SHA-256 fingerprint, or the CA)
+Point your integration at the enterprise hostname (`https://api-mtls.viadere.io`, shown under *Security > Certificates*), present a client certificate issued by the CA you gave us, and bind that certificate (its SHA-256 fingerprint, or the CA)
 under *Security > Certificates*. Then create keys with **Require a bound client certificate**; a key can be bound to one certificate, and a certificate belongs to exactly one organization. Cloudflare verifies the certificate at the edge and tells us what it verified;
 the server believes that only on a request that carries our edge token, so a header you send yourself changes nothing. You can also require a certificate for **every** key of the organization. Remove a certificate and its keys stop working at once.
 A VPN, a private endpoint or dedicated connectivity can be arranged for Tier E through Viadere; they end at the same API layer. Ordinary businesses do not need any of this.
@@ -753,7 +753,7 @@ const client = new ViadereClient({ apiKey: process.env.VIADERE_API_KEY!, request
 ```kotlin
 // com.viadere.sdk (no HTTP client of its own): add the returned fields to each attempt, with exactly these values and the same body bytes.
 val key = JcaRequestSigningKey("vsk_0123456789abcdef", privateKey, publicKey)   // or your own RequestSigningKey over a KMS / the Android Keystore
-val fields = RequestSigning.sign(key, "POST", "https://viadere.com/v1/business/auth-deliveries", body)   // Content-Type, Content-Digest, Signature-Input, Signature
+val fields = RequestSigning.sign(key, "POST", "https://viadere.io/v1/business/auth-deliveries", body)   // Content-Type, Content-Digest, Signature-Input, Signature
 ```
 
 The SDKs sign every attempt (retries get a fresh nonce) and check each signature against your public key before sending. Without an SDK, send:
@@ -765,7 +765,7 @@ Signature:       sig1=:<base64 of raw r||s (64 bytes), s <= n/2>:
 ```
 
 Without a body, cover exactly `"@method" "@authority" "@path" "@query"` and send no `Content-Digest`. `@authority` is the API host you call
-(`viadere.com`, or the host Viadere gives you), `@path` and `@query` exactly as on your request line (`@query` is `?` when there is none). Every nonce
+(`viadere.io`, or the host Viadere gives you), `@path` and `@query` exactly as on your request line (`@query` is `?` when there is none). Every nonce
 is single use; keep your clock within 300 s. Refusals are `401 signature_invalid` (a structural problem is named in `details.reason`),
 `401 clock_skew`, `401 replay_detected`, and `401 signature_required` when a live key on an auth route has neither a signature nor mutual TLS.
 Check your implementation against `docs/protocol/vectors/http-signatures-v1.json` (positive cases byte for byte, every refusal with its code).

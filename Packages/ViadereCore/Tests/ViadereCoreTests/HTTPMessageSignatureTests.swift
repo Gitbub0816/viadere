@@ -96,7 +96,7 @@ struct HTTPMessageSignatureTests {
             let body = Data(v.request.body.utf8)
             let type = v.request.headers.first { $0[0] == "Content-Type" }?[1]
             let fixed = Fixed(keyId: v.keyid, publicKey: Self.signer.publicKey, raw: Base64URL.decode(v.signatureRaw)!)
-            let fields = try await HTTPRequestSigner(key: fixed).sign(method: v.request.method, authority: "viadere.com", target: v.request.pathAndQuery,
+            let fields = try await HTTPRequestSigner(key: fixed).sign(method: v.request.method, authority: "viadere.io", target: v.request.pathAndQuery,
                                                                      body: body.isEmpty ? nil : body, contentType: type,
                                                                      now: Date(timeIntervalSince1970: TimeInterval(v.created)), nonce: v.nonce)
             let byName = Dictionary(uniqueKeysWithValues: fields.map { ($0.name, $0.value) })
@@ -104,7 +104,7 @@ struct HTTPMessageSignatureTests {
             #expect(byName["Signature"] == v.signature, "\(v.name)")
             #expect(byName["Content-Digest"] == v.contentDigest, "\(v.name)")
             // And a real (randomized) software signature verifies through the whole profile.
-            let real = try await HTTPRequestSigner(key: Self.signer).sign(method: v.request.method, authority: "viadere.com", target: v.request.pathAndQuery,
+            let real = try await HTTPRequestSigner(key: Self.signer).sign(method: v.request.method, authority: "viadere.io", target: v.request.pathAndQuery,
                                                                          body: body.isEmpty ? nil : body, contentType: type,
                                                                          now: Date(timeIntervalSince1970: TimeInterval(Self.vectors.now)))
             var r = v.request
@@ -131,10 +131,10 @@ struct HTTPMessageSignatureTests {
         let parsed = try HTTPSignatureVerifier.parse(Self.request(v.request), now: now)
         let key = try Self.registered(parsed.keyId)
         _ = try await HTTPSignatureVerifier.verify(parsed, key: key, businessId: v.presenter.businessId, apiKeyId: v.presenter.apiKeyId,
-                                                   authorities: ["viadere.com"], replayGuard: store, now: now)
+                                                   authorities: ["viadere.io"], replayGuard: store, now: now)
         await #expect(throws: HTTPSignatureError.replayed) {
             _ = try await HTTPSignatureVerifier.verify(parsed, key: key, businessId: v.presenter.businessId, apiKeyId: v.presenter.apiKeyId,
-                                                       authorities: ["viadere.com"], replayGuard: store, now: now)
+                                                       authorities: ["viadere.io"], replayGuard: store, now: now)
         }
     }
 
@@ -171,7 +171,7 @@ struct HTTPMessageSignatureTests {
                 return try P256.Signing.ECDSASignature(rawRepresentation: Data(low[0..<32]) + Data(s)).derRepresentation
             }
         }
-        let fields = try await HTTPRequestSigner(key: KMS(inner: Self.signer)).sign(method: "GET", authority: "viadere.com", target: "/v1/business/capabilities",
+        let fields = try await HTTPRequestSigner(key: KMS(inner: Self.signer)).sign(method: "GET", authority: "viadere.io", target: "/v1/business/capabilities",
                                                                                    body: nil, contentType: nil, now: Date(timeIntervalSince1970: TimeInterval(Self.vectors.now)))
         let r = Request(method: "GET", pathAndQuery: "/v1/business/capabilities", headers: fields.map { [$0.name, $0.value] }, body: "")
         try await Self.run(r, presenter: Self.vectors.positive[0].presenter)
@@ -184,7 +184,7 @@ struct HTTPMessageSignatureTests {
             func sign(_ message: Data) async throws -> Data { try P256.Signing.PrivateKey().signature(for: message).rawRepresentation }
         }
         await #expect(throws: HTTPSignatureSigningError.signatureDoesNotVerify) {
-            _ = try await HTTPRequestSigner(key: Wrong()).sign(method: "GET", authority: "viadere.com", target: "/x", body: nil, contentType: nil)
+            _ = try await HTTPRequestSigner(key: Wrong()).sign(method: "GET", authority: "viadere.io", target: "/x", body: nil, contentType: nil)
         }
     }
 
@@ -196,8 +196,8 @@ struct HTTPMessageSignatureTests {
     }
 
     @Test func authorityNormalization() {
-        #expect(HTTPSignatureProfile.authority(of: URL(string: "https://Viadere.COM:443")!) == "viadere.com")
-        #expect(HTTPSignatureProfile.authority(of: URL(string: "https://api.viadere.com:8443/")!) == "api.viadere.com:8443")
+        #expect(HTTPSignatureProfile.authority(of: URL(string: "https://Viadere.IO:443")!) == "viadere.io")
+        #expect(HTTPSignatureProfile.authority(of: URL(string: "https://api.viadere.io:8443/")!) == "api.viadere.io:8443")
         #expect(HTTPSignatureProfile.authority(of: URL(string: "http://localhost:80")!) == "localhost")
         #expect(HTTPSignatureProfile.pathAndQuery("/a?b=c?d") == ("/a", "?b=c?d"))
         #expect(HTTPSignatureProfile.pathAndQuery("/a") == ("/a", "?"))

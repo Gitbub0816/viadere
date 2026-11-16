@@ -470,13 +470,13 @@ struct ApproveRequestDeviceTests {
 struct ApproveControllerTests {
     @Test func enrollmentLinksRouteWithTheRootKeyId() {
         let kid = KeyIdentifier.make(try! SoftwareP256SigningKey().publicKey.signingKey())
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)") == .approveEnrollment(code: "ABCD2345", rootKid: kid, secret: nil))
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345") == .approveEnrollment(code: "ABCD2345", rootKid: nil, secret: nil))
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345?rk=\(kid)") == .approveEnrollment(code: "ABCD2345", rootKid: kid, secret: nil))
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345") == .approveEnrollment(code: "ABCD2345", rootKid: nil, secret: nil))
         // Anything else on that path is refused: extra segments, a fragment, odd query items, another host.
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345/x") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345?rk=\(kid)&x=1") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345/x") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345?rk=\(kid)&x=1") == nil)
         #expect(DeepLinkRouter.route("https://evil.example/a/ABCD2345") == nil)
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345#f") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345#f") == nil)
     }
 
     @MainActor
@@ -575,9 +575,9 @@ struct ApproveGateDeviceTests {
 
     @Test func theDeepLinkCarriesTheSecretFromTheFragment() throws {
         let secret = ApprovalEnrollmentSecret()
-        let link = "https://viadere.com/a/ABCD2345#es=\(secret.base64URL)"
+        let link = "https://viadere.io/a/ABCD2345#es=\(secret.base64URL)"
         #expect(DeepLinkRouter.route(link) == .approveEnrollment(code: "ABCD2345", rootKid: nil, secret: secret))
-        #expect(DeepLinkRouter.route("https://viadere.com/a/ABCD2345#es=short") == nil)
+        #expect(DeepLinkRouter.route("https://viadere.io/a/ABCD2345#es=short") == nil)
     }
 
     // MARK: F4

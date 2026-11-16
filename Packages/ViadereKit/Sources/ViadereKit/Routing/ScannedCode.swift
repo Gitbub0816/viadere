@@ -74,7 +74,7 @@ public enum ScannedCodePolicy {
     static let safeActionPrefix = "ckey-action:"
 
     /// The byte cap for a Safe Action only: the longest sign-in envelope this link domain's issuer can sign (`ViadereSignInSafeAction`;
-    /// 264 for `viadere.com`, above 512 only for a link domain of 198 characters or more). Everything else keeps `maxPayloadBytes`.
+    /// 262 for `viadere.io`, above 512 only for a link domain of 198 characters or more). Everything else keeps `maxPayloadBytes`.
     public static func maxSafeActionBytes(domain: LinkDomain) -> Int { ViadereSignInSafeAction.maxTextBytes(issuer: domain.host) }
 
     public static func evaluate(_ payload: String, symbology: ScannedSymbology, domain: LinkDomain = .current, context: ScanContext = .app) -> ScannedCodeDecision {

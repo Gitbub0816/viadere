@@ -20,29 +20,29 @@ struct VerifyButtonSDKTests {
     // MARK: Session link
 
     @Test func onlyAViadereSessionLinkMakesAButtonSession() throws {
-        let session = try #require(VerifyButtonSession(link: "https://viadere.com/v/K7QFM2XA", expiresAt: Self.now))
+        let session = try #require(VerifyButtonSession(link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now))
         #expect(session.code == "K7QFM2XA")
         #expect(session.displayCode == "K7QF-M2XA")
         #expect(session.spokenCode == "K 7 Q F M 2 X A")
-        #expect(session.qrPayload == "https://viadere.com/v/K7QFM2XA")
+        #expect(session.qrPayload == "https://viadere.io/v/K7QFM2XA")
         #expect(session.isExpired(at: Self.now))
         #expect(!session.isExpired(at: Self.now.addingTimeInterval(-1)))
         #expect(VerifyButtonSession(link: "https://viadere.cksites.dev/v/K7QFM2XA") != nil, "staging")
-        for bad in ["https://evil.test/v/K7QFM2XA", "http://viadere.com/v/K7QFM2XA", "https://viadere.com/v/K7QFM2XA?next=evil", "https://viadere.com/v/K7QFM2XA#x",
-                    "https://viadere.com/k/K7QFM2XA", "https://viadere.com/v/k7qfm2xa", "https://www.viadere.com/v/K7QFM2XA", "viadere://v/K7QFM2XA", ""] {
+        for bad in ["https://evil.test/v/K7QFM2XA", "http://viadere.io/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA?next=evil", "https://viadere.io/v/K7QFM2XA#x",
+                    "https://viadere.io/k/K7QFM2XA", "https://viadere.io/v/k7qfm2xa", "https://www.viadere.io/v/K7QFM2XA", "viadere://v/K7QFM2XA", ""] {
             #expect(VerifyButtonSession(link: bad) == nil, "\(bad)")
         }
         #expect(VerifyButtonSession(link: "https://viadere.cksites.dev/v/K7QFM2XA", allowedDomains: [.production]) == nil, "the integrator can narrow the domains")
-        let ticket = VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: "https://viadere.com/v/K7QFM2XA", expiresAt: Self.now)
+        let ticket = VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now)
         #expect(VerifyButtonSession(ticket: ticket)?.expiresAt == Self.now)
-        let lying = VerificationSessionTicket(sessionId: sessionId, code: "AAAAAAAA", link: "https://viadere.com/v/K7QFM2XA", expiresAt: Self.now)
+        let lying = VerificationSessionTicket(sessionId: sessionId, code: "AAAAAAAA", link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now)
         #expect(VerifyButtonSession(ticket: lying) == nil)
     }
 
     // MARK: Hand-off rule
 
     @Test func phonesHandOffAndComputersShowTheQRFirst() throws {
-        let session = try #require(VerifyButtonSession(link: "https://viadere.com/v/K7QFM2XA", expiresAt: Self.now.addingTimeInterval(300)))
+        let session = try #require(VerifyButtonSession(link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now.addingTimeInterval(300)))
         #expect(VerifyHandoffPlanner.onTap(device: .handheld, session: session, now: Self.now) == .openInApp(session.link))
         #expect(VerifyHandoffPlanner.onTap(device: .computer, session: session, now: Self.now) == .showPanel)
         #expect(VerifyHandoffPlanner.afterOpenInApp(opened: true) == .handedOff)
@@ -51,7 +51,7 @@ struct VerifyButtonSDKTests {
     }
 
     @Test func thePanelStartsWithTheQRAndOffersTheOtherOptions() throws {
-        let session = try #require(VerifyButtonSession(link: "https://viadere.com/v/K7QFM2XA"))
+        let session = try #require(VerifyButtonSession(link: "https://viadere.io/v/K7QFM2XA"))
         var panel = VerifyPanelState(session: session, sendToPhone: false)
         #expect(panel.screen == .qr)
         #expect(panel.options == [.openOnThisDevice, .enterCode, .getApp])
@@ -117,11 +117,11 @@ struct VerifyButtonSDKTests {
     @Test func aTicketWithAnotherHostIsRefusedAndCancelled() async throws {
         let request = CreateVerificationSessionRequest(capability: .ageMinimum, parameters: ["years": .integer(21)], purposeCode: "age_restricted_purchase", origin: origin)
         let good = MockTransport()
-        try good.enqueue(status: 201, json: VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: "https://viadere.com/v/K7QFM2XA", expiresAt: Self.now))
+        try good.enqueue(status: 201, json: VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: "https://viadere.io/v/K7QFM2XA", expiresAt: Self.now))
         let ticket = try await Fixtures.client(good).createVerificationSession(request)
         #expect(ticket.code == "K7QFM2XA")
         #expect(good.requests.first?.url.path == "/v1/business/verification-sessions")
-        for link in ["https://evil.test/v/K7QFM2XA", "https://viadere.com/v/K7QFM2XA?x=1", "https://viadere.com/v/AAAAAAAA"] {
+        for link in ["https://evil.test/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA?x=1", "https://viadere.io/v/AAAAAAAA"] {
             let transport = MockTransport()
             try transport.enqueue(status: 201, json: VerificationSessionTicket(sessionId: sessionId, code: "K7QFM2XA", link: link, expiresAt: Self.now))
             try transport.enqueue(status: 200, json: view(status: .cancelled, result: nil, ref: nil))

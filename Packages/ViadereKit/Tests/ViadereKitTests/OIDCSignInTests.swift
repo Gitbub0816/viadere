@@ -109,7 +109,7 @@ struct OIDCSignInTests {
 
     @Test func aVerifiedSafeActionAddsContextAndReplacesNoCheck() async throws {
         let (store, key) = try await keys()
-        let request = VerifiedSafeActionRequest(issuer: "viadere.com", requestId: ach, device: "Chrome on Windows", location: "United States",
+        let request = VerifiedSafeActionRequest(issuer: "viadere.io", requestId: ach, device: "Chrome on Windows", location: "United States",
                                                 requestedAt: Self.now.addingTimeInterval(-10))
         func model(_ api: MockOIDCDeviceAPI, safeAction: VerifiedSafeActionRequest?, pinned: [P256.Signing.PublicKey]? = nil) -> OIDCSignInViewModel {
             OIDCSignInViewModel(challengeId: ach, api: api, signer: DeviceKeyFactorSigner(keys: store), pinnedKeys: pinned ?? [statementKey.publicKey],
@@ -124,7 +124,7 @@ struct OIDCSignInTests {
         #expect(opened.phase == .reviewing)
         let context = try #require(opened.safeActionContext { _ in "8:14 PM" })
         #expect(context.rows.map(\.label) == [OIDCCopy.requestedByLabel, OIDCCopy.deviceLabel, OIDCCopy.locationLabel, OIDCCopy.requestedAtLabel])
-        #expect(context.rows.map(\.value) == ["viadere.com (verified code)", "Chrome on Windows", "United States", "8:14 PM"])
+        #expect(context.rows.map(\.value) == ["viadere.io (verified code)", "Chrome on Windows", "United States", "8:14 PM"])
         #expect(context.warning == OIDCCopy.relayWarning)
         #expect(!opened.canApprove, "a verified code never fills in the number")
         await opened.approve()

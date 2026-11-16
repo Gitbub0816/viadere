@@ -432,7 +432,7 @@ We use automated tools to protect the service: rate limits, new-device cool-down
 
 ## 20. Our website, cookies and similar technologies
 
-The viadere.com website sets no cookies, runs no scripts, uses no analytics or advertising trackers, uses no browser storage and loads no fonts, images or code from other companies. Cloudflare serves the site and, like any web host, receives your IP address and request headers to deliver it. This is stated in the [Cookie Notice](/legal/cookie-notice/). The business dashboard uses essential session storage described there. The app does not use cookies or advertising identifiers.
+The viadere.io website sets no cookies, runs no scripts, uses no analytics or advertising trackers, uses no browser storage and loads no fonts, images or code from other companies. Cloudflare serves the site and, like any web host, receives your IP address and request headers to deliver it. This is stated in the [Cookie Notice](/legal/cookie-notice/). The business dashboard uses essential session storage described there. The app does not use cookies or advertising identifiers.
 
 ## 21. Changes to this notice
 

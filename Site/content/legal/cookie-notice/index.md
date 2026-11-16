@@ -12,7 +12,7 @@ change_summary: "Second draft: complete notice covering the website, the busines
 **Draft for counsel review.** This notice is not in force. Values in square brackets are choices or facts still to be filled in or confirmed.
 :::
 
-This Cookie Notice explains how [COUNSEL: LEGAL ENTITY NAME] ("**Viadere**") uses cookies and similar technologies, such as local storage, pixels, software development kits and device identifiers, on the viadere.com website, the business dashboard and the Viadere app. It supplements the [Privacy Notice](/legal/privacy-notice/).
+This Cookie Notice explains how [COUNSEL: LEGAL ENTITY NAME] ("**Viadere**") uses cookies and similar technologies, such as local storage, pixels, software development kits and device identifiers, on the viadere.io website, the business dashboard and the Viadere app. It supplements the [Privacy Notice](/legal/privacy-notice/).
 
 ## 1. At a glance
 
@@ -25,9 +25,9 @@ This Cookie Notice explains how [COUNSEL: LEGAL ENTITY NAME] ("**Viadere**") use
 
 A **cookie** is a small text file that a website puts in your browser. **Similar technologies** include local storage and session storage in a browser, tracking pixels, fingerprinting and mobile software development kits (SDKs). A technology is **strictly necessary** when it is essential to deliver a service you have requested, for example to keep you signed in or to keep a connection secure.
 
-## 3. The viadere.com website
+## 3. The viadere.io website
 
-The public website at viadere.com and its developer portal:
+The public website at viadere.io and its developer portal:
 
 | Technology | Used? | Notes |
 |---|---|---|
@@ -35,7 +35,7 @@ The public website at viadere.com and its developer portal:
 | Local storage, session storage or IndexedDB | No | None is used |
 | Scripts | No | The pages run no scripts, and they carry a content security policy that blocks scripts and inline styles |
 | Analytics or advertising trackers, pixels, fingerprinting | No | None |
-| Fonts, images, video, maps or other content from other companies | No | Fonts and images are served from viadere.com |
+| Fonts, images, video, maps or other content from other companies | No | Fonts and images are served from viadere.io |
 | Embedded social-media or video widgets | No | None |
 | Server logs | Yes | Our hosting provider, Cloudflare, receives your IP address and request headers to deliver the pages, as any web host does, and may keep short-lived logs for security and reliability |
 

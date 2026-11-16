@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/schemas/loop-definition-v1.schema.json",
+  "$id": "https://viadere.io/schemas/loop-definition-v1.schema.json",
   "title": "Viadere Loop definition, schema version 1",
   "description": "Documentation of the closed Loop definition contract (SECURITY.md 2.92, plan section 4.3). Normative behavior is ViadereCore LoopDefinition.parse plus LoopPolicyValidator; this schema covers structure only (text, content, graph, registry and publisher rules are in the validator). Conformance vectors: docs/protocol/vectors/loop-definition-v1.json.",
   "type": "object",

@@ -55,7 +55,7 @@ final class StyledCodeDump: XCTestCase {
                 XCTAssertEqual(saved.status, .seeOther, "\(style.name): \(saved.text.prefix(2000))")
                 let page = try await h.page("/dashboard/campaigns/\(campaign.id!.uuidString.lowercased())", owner)
                 XCTAssertEqual(page.status, .ok)
-                let link = try XCTUnwrap(page.text.range(of: "https://viadere.com/c/[^<\"]+", options: .regularExpression).map { String(page.text[$0]).replacingOccurrences(of: "&amp;", with: "&") })
+                let link = try XCTUnwrap(page.text.range(of: "https://viadere.io/c/[^<\"]+", options: .regularExpression).map { String(page.text[$0]).replacingOccurrences(of: "&amp;", with: "&") })
                 let symbology = page.text.contains("data-symbology=\"ckey\"") ? "ckey" : "qr"
                 let files = (page: "\(style.name).html", primary: "\(style.name)-primary.svg", qr: "\(style.name)-qr.svg")
                 try page.body.write(to: root.appendingPathComponent(files.page))

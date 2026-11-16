@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/contracts/schemas/auth-delivery-create-request-v1.schema.json",
+  "$id": "https://viadere.io/contracts/schemas/auth-delivery-create-request-v1.schema.json",
   "title": "Auth delivery create request",
   "description": "POST /v1/business/auth-deliveries. Closed: tenant_id, audience and every other unknown member is 422. The tenant is the API key's business.",
   "type": "object",

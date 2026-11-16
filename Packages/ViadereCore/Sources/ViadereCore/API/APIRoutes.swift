@@ -537,7 +537,7 @@ public enum APIRoutes {
         linkSessionLookup.descriptor, linkSessionComplete.descriptor, linkSessionGet.descriptor,
     ] + verifyEndpoints + organizationEndpoints + profileEndpoints + loopEndpoints + loopConnectedEndpoints + brandKitEndpoints + loopInstallEndpoints + notificationSettingsEndpoints + authDeliveryEndpoints + oidcDeviceEndpoints
 
-    /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.com` in production).
+    /// Web (non-API) paths served on the link domain (`LinkDomain`, `viadere.io` in production).
     public enum Web {
         /// Connect link: `/c/{CODE}` (see `ConnectLink`).
         public static let connectPrefix = "/c/"

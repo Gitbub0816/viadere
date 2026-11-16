@@ -15,7 +15,7 @@ public struct PasskeyRegistrationOptions: Codable, Sendable, Hashable {
     public var ceremonyId: CeremonyID
     /// base64url challenge (≥ 32 random bytes).
     public var challenge: String
-    /// `viadere.com`.
+    /// `viadere.io`.
     public var relyingPartyId: String
     public var relyingPartyName: String
     /// base64url opaque user handle (never contains PII).

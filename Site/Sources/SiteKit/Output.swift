@@ -25,7 +25,7 @@ public enum OutputChecker {
     /// `config.baseURL` host and `allowedLinkHosts` may appear as navigational `<a href>`; nothing external may load.
     public static func check(dist: URL, config: SiteConfig) -> [String] {
         var problems: [String] = []
-        let ownHost = host(config.baseURL) ?? "viadere.com"
+        let ownHost = host(config.baseURL) ?? "viadere.io"
         let allowedLinks = Set(config.allowedLinkHosts.map { $0.lowercased() } + [ownHost])
         let rootPath = dist.standardizedFileURL.path
         for f in htmlFiles(dist) {

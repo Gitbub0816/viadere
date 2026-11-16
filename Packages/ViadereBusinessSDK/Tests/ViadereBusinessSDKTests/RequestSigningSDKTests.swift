@@ -48,7 +48,7 @@ final class RequestSigningSDKTests: XCTestCase {
         for v in Self.vectors.positive where v.name != "parameters_reordered_with_alg" {
             let type = v.request.headers.first { $0[0] == "Content-Type" }?[1]
             let body = Data(v.request.body.utf8)
-            let request = BusinessHTTPRequest(method: v.request.method, url: URL(string: "https://viadere.com" + v.request.pathAndQuery)!,
+            let request = BusinessHTTPRequest(method: v.request.method, url: URL(string: "https://viadere.io" + v.request.pathAndQuery)!,
                                               headers: type.map { ["Content-Type": $0] } ?? [:], body: body.isEmpty ? nil : body)
             let signer = HTTPRequestSigner(key: FixedSigner(keyId: v.keyid, publicKey: DevicePublicKey(Self.privateKey.publicKey), raw: Base64URL.decode(v.signatureRaw)!))
             let signed = try await ViadereRequestSigning.sign(request, with: signer, now: Date(timeIntervalSince1970: TimeInterval(v.created)), nonce: v.nonce)
@@ -64,7 +64,7 @@ final class RequestSigningSDKTests: XCTestCase {
         transport.enqueue(status: 503, raw: "{}")
         let key = SoftwareHTTPRequestSigningKey(keyId: "vsk_0123456789abcdef", privateKey: Self.privateKey)
         let now = Date(timeIntervalSince1970: TimeInterval(Self.vectors.now))
-        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://viadere.com")!, transport: transport,
+        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://viadere.io")!, transport: transport,
                                                retry: RetryPolicy(maxAttempts: 3, baseDelay: 0, maxDelay: 0), sleep: { _ in }, requestSigner: key, now: { now })
         XCTAssertTrue(client.signsRequests)
         _ = try? await client.cancelAuthDelivery(id: AuthDeliveryID(), idempotencyKey: "cancel-1")
@@ -74,12 +74,12 @@ final class RequestSigningSDKTests: XCTestCase {
         var nonces = Set<String>()
         let store = InMemoryReplayGuard()
         for request in sent {
-            let target = String(request.url.absoluteString.dropFirst("https://viadere.com".count))
+            let target = String(request.url.absoluteString.dropFirst("https://viadere.io".count))
             let parsed = try HTTPSignatureVerifier.parse(HTTPSignatureRequest(method: request.method, target: target, fields: request.headers.map { (name: $0.key, value: $0.value) },
                                                                               body: request.body ?? Data()), now: now)
             nonces.insert(parsed.nonce)
             _ = try await HTTPSignatureVerifier.verify(parsed, key: .init(publicKey: key.publicKey, businessId: "b", apiKeyIds: ["k"], revoked: false), businessId: "b",
-                                                       apiKeyId: "k", authorities: ["viadere.com"], replayGuard: store, now: now)
+                                                       apiKeyId: "k", authorities: ["viadere.io"], replayGuard: store, now: now)
         }
         XCTAssertEqual(nonces.count, sent.count, "a retry never reuses a nonce")
         // The API key still travels as the bearer credential.
@@ -100,14 +100,14 @@ final class RequestSigningSDKTests: XCTestCase {
     func testABaseURLWithAPortIsCoveredAsItsAuthority() async throws {
         let transport = MockTransport()
         let key = SoftwareHTTPRequestSigningKey(keyId: "vsk_0123456789abcdef", privateKey: Self.privateKey)
-        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://API.viadere.com:8443")!, transport: transport, retry: .none,
+        let client = try ViadereBusinessClient(apiKey: Fixtures.key, baseURL: URL(string: "https://API.viadere.io:8443")!, transport: transport, retry: .none,
                                                sleep: { _ in }, requestSigner: key)
         _ = try? await client.capabilities()
         let request = try XCTUnwrap(transport.requests.first)
         let parsed = try HTTPSignatureVerifier.parse(HTTPSignatureRequest(method: "GET", target: "/v1/business/capabilities",
                                                                           fields: request.headers.map { (name: $0.key, value: $0.value) }, body: Data()), now: Date())
-        XCTAssertNoThrow(try parsed.verify(publicKey: key.publicKey, authorities: ["api.viadere.com:8443"]))
-        XCTAssertThrowsError(try parsed.verify(publicKey: key.publicKey, authorities: ["api.viadere.com"]))
+        XCTAssertNoThrow(try parsed.verify(publicKey: key.publicKey, authorities: ["api.viadere.io:8443"]))
+        XCTAssertThrowsError(try parsed.verify(publicKey: key.publicKey, authorities: ["api.viadere.io"]))
     }
 
     func testAMalformedKeyIdIsRefusedAtConstruction() {

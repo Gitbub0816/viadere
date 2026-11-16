@@ -28,7 +28,7 @@ struct SafeActionWorld {
         var offline: Bool { get { lock.lock(); defer { lock.unlock() }; return _offline } set { lock.lock(); _offline = newValue; lock.unlock() } }
     }
 
-    init(issuer: String = "viadere.com", replay: any SafeActionReplayStore = InMemorySafeActionReplayStore()) {
+    init(issuer: String = "viadere.io", replay: any SafeActionReplayStore = InMemorySafeActionReplayStore()) {
         self.issuer = issuer
         self.replay = replay
         let box = Box()
@@ -73,12 +73,12 @@ struct SafeActionReaderTests {
         let world = World()
         world.info.body = World.infoBody(location: "United States")
         let outcome = await world.reader().read(try world.code())
-        #expect(outcome == .needsConfirmation(VerifiedSafeActionRequest(issuer: "viadere.com", requestId: World.ach, device: "Chrome on Windows", location: "United States",
+        #expect(outcome == .needsConfirmation(VerifiedSafeActionRequest(issuer: "viadere.io", requestId: World.ach, device: "Chrome on Windows", location: "United States",
                                                                         requestedAt: Date(timeIntervalSince1970: 1_794_082_443))))
         // One request, to the issuer's own host over https, naming only the challenge: no session, no device signature, no cookie.
         let requests = world.transport.requests
         #expect(requests.count == 1)
-        #expect(requests.first?.url.absoluteString == "https://viadere.com/ckey/requests/\(World.ach)")
+        #expect(requests.first?.url.absoluteString == "https://viadere.io/ckey/requests/\(World.ach)")
         #expect(requests.first?.method == .GET)
         #expect(requests.first?.headers == ["Accept": "application/json"])
         #expect(requests.first?.body == nil)
@@ -86,7 +86,7 @@ struct SafeActionReaderTests {
 
     @Test func aPayloadWithoutThePrefixIsNotASafeAction() async throws {
         let world = World()
-        #expect(await world.reader().read("https://viadere.com/o/\(World.ach)") == .notASafeAction)
+        #expect(await world.reader().read("https://viadere.io/o/\(World.ach)") == .notASafeAction)
         #expect(await world.reader().read("CKEY-ACTION:1:AAAA") == .notASafeAction)
         #expect(await world.reader().read("") == .notASafeAction)
         #expect(world.transport.requests.isEmpty)
@@ -97,7 +97,7 @@ struct SafeActionReaderTests {
         let code = try world.code()
         // No pins at all (a build that has none), a pin under another key id, a pin for another issuer.
         #expect(await world.reader(keys: []).read(code) == .rejected(.unknownKey))
-        #expect(await world.reader(keys: [PinnedSafeActionKey(issuer: "viadere.com", keyId: "2025-01", publicKey: world.pin.publicKey)]).read(code) == .rejected(.unknownKey))
+        #expect(await world.reader(keys: [PinnedSafeActionKey(issuer: "viadere.io", keyId: "2025-01", publicKey: world.pin.publicKey)]).read(code) == .rejected(.unknownKey))
         #expect(await world.reader(keys: [PinnedSafeActionKey(issuer: "citeory.com", keyId: world.keyId, publicKey: world.pin.publicKey)]).read(code) == .rejected(.unknownKey))
         // A genuine envelope from the CKey vectors, valid for `citeory.com` under its own key: not this app, not this issuer.
         let foreign = "ckey-action:1:AQELY2l0ZW9yeS5jb20LY29tLnZpYWRlcmUOc2lnbmluLnJlcXVlc3QHMjAyNi0xMRJzZXNzLTQxZmQwYTliZTJjNzQAAAAAau5EYgAAAABq7kTaAAACHa8IJgHKEekWl1IdGliWpiUHh2XxNxnxhSm2S6cTYMkSroRnqeoR2B1OOzpEervNy2wJgYYKO5vXooio3S0L"
@@ -129,11 +129,11 @@ struct SafeActionReaderTests {
         #expect(await world.reader(keys: [edPin]).read(try World().code()) == .rejected(.signature))
         // A genuine code with its request id swapped for another challenge after signing.
         let genuine = try world.code()
-        var bytes = Array(Data(base64Encoded: String(genuine.dropFirst(14)).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/"))!)
+        var bytes = [UInt8](try #require(Base64URL.decode(String(genuine.dropFirst(CKeySafeAction.prefix.count)))))
         let marker = Array("ach_AAEC".utf8)
         let at = try #require(bytes.indices.first { bytes[$0...].starts(with: marker) })
         bytes[at + 4] = UInt8(ascii: "B")
-        let altered = "ckey-action:1:" + Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+        let altered = CKeySafeAction.prefix + Base64URL.encode(Data(bytes))
         #expect(await world.reader().read(altered) == .rejected(.signature))
         #expect(await world.reader().read(String(genuine.dropLast(3))) == .rejected(.malformed))
         #expect(world.transport.requests.isEmpty)
@@ -151,7 +151,7 @@ struct SafeActionReaderTests {
         #expect(await reader.read(try world.code(scope: .sameDevice)) == .rejected(.notAccepted))
         // The pinned key signing for another site's name.
         #expect(await reader.read(try world.code(issuer: "citeory.com")) == .rejected(.notAccepted))
-        #expect(await reader.read(try world.code(issuer: "www.viadere.com")) == .rejected(.notAccepted))
+        #expect(await reader.read(try world.code(issuer: "www.viadere.io")) == .rejected(.notAccepted))
         // Not a challenge id, or carrying parameters the sign-in never has.
         #expect(await reader.read(try world.code(requestId: "sess-41fd0a9be2c74")) == .rejected(.notAccepted))
         #expect(await reader.read(try world.code(params: Data(#"{"approve":true}"#.utf8))) == .rejected(.notAccepted))
@@ -270,7 +270,7 @@ struct SafeActionReaderTests {
         #expect(request.location == "near Lagos")
         let context = OIDCSafeActionContext(request: request) { _ in "8:14 PM" }
         #expect(context.rows.map(\.label) == ["Requested by", "Device", "Location", "Requested"])
-        #expect(context.rows.map(\.value) == ["viadere.com (verified code)", "Chrome on Windows", "near Lagos", "8:14 PM"])
+        #expect(context.rows.map(\.value) == ["viadere.io (verified code)", "Chrome on Windows", "near Lagos", "8:14 PM"])
         #expect(context.warning == "Only continue if this is the device you are using right now. Someone may be showing you a code meant for their own session.")
     }
 
@@ -294,9 +294,9 @@ struct SafeActionReaderTests {
         let edHex = hexOf(ed)
         let key = CKeySafeAction.PublicKey.es256(p256)
         let hex = "ES256:" + compressed
-        #expect(SafeActionKeyPins.parse("2026-11:\(hex)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "2026-11", publicKey: key)])
-        #expect(SafeActionKeyPins.parse("2026-11:ES256:\(uncompressed)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "2026-11", publicKey: key)])
-        #expect(SafeActionKeyPins.parse("ed:Ed25519:\(edHex)", issuer: "viadere.com") == [PinnedSafeActionKey(issuer: "viadere.com", keyId: "ed", publicKey: .ed25519(ed))])
+        #expect(SafeActionKeyPins.parse("2026-11:\(hex)", issuer: "viadere.io") == [PinnedSafeActionKey(issuer: "viadere.io", keyId: "2026-11", publicKey: key)])
+        #expect(SafeActionKeyPins.parse("2026-11:ES256:\(uncompressed)", issuer: "viadere.io") == [PinnedSafeActionKey(issuer: "viadere.io", keyId: "2026-11", publicKey: key)])
+        #expect(SafeActionKeyPins.parse("ed:Ed25519:\(edHex)", issuer: "viadere.io") == [PinnedSafeActionKey(issuer: "viadere.io", keyId: "ed", publicKey: .ed25519(ed))])
         let other = "Ed25519:" + edHex.uppercased()
         #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").map(\.keyId) == ["2026-11", "2027-11"])
         #expect(SafeActionKeyPins.parse(" 2026-11:\(hex) , 2027-11:\(other) ", issuer: "viadere.cksites.dev").allSatisfy { $0.issuer == "viadere.cksites.dev" })
@@ -306,11 +306,11 @@ struct SafeActionReaderTests {
                     "2026-11:\(hex.dropLast())", "2026-11:\(hex)00", "2026-11:\(hex.dropLast())g", "2026-11:ES256:\(hexOf(offCurve))",
                     "2026-11:es256:\(compressed)", "2026-11:ES384:\(compressed)", "2026-11:Ed25519:\(compressed)", "2026-11:ES256:\(edHex)",
                     "2026 11:\(hex)", "2026/11:\(hex)", String(repeating: "k", count: 33) + ":\(hex)", "a:\(hex),a:\(other)", "a:\(hex),", "a:\(hex),b:ES256:nothex",
-                    "viadere.com:2026-11:\(hex)", "REPLACE_ME"] as [String?] {
-            #expect(SafeActionKeyPins.parse(bad, issuer: "viadere.com").isEmpty, "\(bad ?? "nil")")
+                    "viadere.io:2026-11:\(hex)", "REPLACE_ME"] as [String?] {
+            #expect(SafeActionKeyPins.parse(bad, issuer: "viadere.io").isEmpty, "\(bad ?? "nil")")
         }
         // The issuer is never taken from the setting, and must be a plain DNS name.
-        #expect(SafeActionKeyPins.parse("a:\(hex)", issuer: "Viadere.com").isEmpty)
+        #expect(SafeActionKeyPins.parse("a:\(hex)", issuer: "Viadere.io").isEmpty)
         #expect(SafeActionKeyPins.parse("a:\(hex)", issuer: "localhost").isEmpty)
 
         // From the Info.plist, for the build's link domain (staging), and empty when the setting is missing.
@@ -318,7 +318,7 @@ struct SafeActionReaderTests {
                                                           "ViadereCKeySafeActionKeys": "stg-1:\(hex)"], allowLocalHTTP: false)
         #expect(staging.safeActionKeys == [PinnedSafeActionKey(issuer: "viadere.cksites.dev", keyId: "stg-1", publicKey: key)])
         let production = ViadereConfiguration.resolve(info: ["ViadereLinkDomain": "evil.example", "ViadereCKeySafeActionKeys": "p:\(hex)"], allowLocalHTTP: false)
-        #expect(production.safeActionKeys.map(\.issuer) == ["viadere.com"], "production keeps viadere.com whatever the plist says")
+        #expect(production.safeActionKeys.map(\.issuer) == ["viadere.io"], "production keeps viadere.io whatever the plist says")
         #expect(ViadereConfiguration.resolve(info: [:], allowLocalHTTP: false).safeActionKeys.isEmpty)
         #expect(ViadereConfiguration.production.safeActionKeys.isEmpty)
         // The reader built from a configuration uses its bundle id, link domain and pins.

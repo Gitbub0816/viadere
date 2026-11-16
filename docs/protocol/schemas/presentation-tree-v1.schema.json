@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://viadere.com/schemas/presentation-tree-v1.schema.json",
+  "$id": "https://viadere.io/schemas/presentation-tree-v1.schema.json",
   "title": "Viadere presentation tree, version 1",
   "description": "Output of ViadereCore PresentationBuilder, the only producer (SECURITY.md 2.92, ADR-0016). Renderers (SwiftUI production, server-side HTML preview, a future Compose renderer) consume it and nothing else. Child order is reading order. Protected nodes use the neutral protected palette and are never covered by frames. An unknown node kind fails the whole tree (the renderer shows the fallback). Vectors: docs/protocol/vectors/presentation-tree-v1.json.",
   "type": "object",

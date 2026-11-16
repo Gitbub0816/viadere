@@ -61,13 +61,13 @@ final class QRCodeTests: XCTestCase {
     func vectors() -> [(String, QRCode.ErrorCorrection, Int, [String])] {
         [
             ("HELLO WORLD", .medium, 1, ["2cee776cd87923a0", "c7636e44b12237cb", "4a00c00a60fcf7c1", "1e387bd8b7a170bf", "2d21897bf5a7ac60", "ab139df21b793714", "84a0007f0e8c0dba", "0903104ff7b59378"]),
-            ("https://viadere.com/c/AF2345", .low, 2, ["5fd958303ca0771b", "00cd3058a29f5bd2", "3d82c2139cf0f778", "35c8a652e56adc96", "05bad5991918cbe4", "fd2fb07d1edd383f", "abb9a8954496b9a9", "e3f254a4fca6dc5e"]),
-            ("https://viadere.com/c/AF2345", .medium, 3, ["61fd266172432649", "b60d7e35d0e4075c", "e35723e1528f4006", "91e7d56661c569c6", "f74ed026d9216ed8", "f2375d99ccc7fbb7", "ab0c5befedee7e5b", "05b6ed9175e0a475"]),
-            ("https://viadere.com/c/AF2345", .quartile, 3, ["457dc3c8080e8099", "08f62c18300f320f", "f772bb0fb2bb511b", "0f8b115e59bf2490", "aed2b2cfe2775bc4", "caa7394d3cbac23e", "0ed4022eb66cbbc9", "373c84652097ce79"]),
-            ("https://viadere.com/c/AF2345", .high, 4, ["59a4ea70cede9c8d", "acc778738c1d62e3", "7ffc62326bb738bc", "0d4c7f6c054e35aa", "2fc51923abb1e089", "f8a0c2b0b11a0b53", "97c37ac5d09fddf8", "a69338f533948fd1"]),
+            ("https://viadere.io/c/AF2345", .low, 2, ["ea91d2c2f710d333", "a9286c0574ab74b5", "dd830b45453f3780", "d9d45d849a58ff5b", "ee2b2ea8a06bee02", "f8a4d1a1b956a1f3", "71316ae9feead99d", "714272101fc5e522"]),
+            ("https://viadere.io/c/AF2345", .medium, 3, ["e5324977153f6590", "c7e9fc6d8d0cfd46", "ff4fbd663714e538", "e577cc6c6f0195a0", "d8cbd32a1a4ed3fe", "1993151c37f66c1a", "3c36cbc620e03e5d", "c2286c2d006888d9"]),
+            ("https://viadere.io/c/AF2345", .quartile, 3, ["20d77ec65a1f79dd", "b62559653cc1a1a1", "d41779c9772c4e03", "5499802776e8b7eb", "94d6ed10c1ad51a5", "74ac77244beb08c3", "616960b8154ae11d", "4e69d2619e3b3905"]),
+            ("https://viadere.io/c/AF2345", .high, 4, ["39fd8c3079e8eaac", "0af5322841117549", "f67cad11572b60f0", "2cdc1e09e237a0c1", "d8e8b007f5b9c32a", "9d3fa6f04702be38", "d6c18b16dfcad0ca", "bf09b0078e15f7cc"]),
             ("Viadere ✓ trusted way to connect", .medium, 3, ["17500b4d2f4c3484", "f2f334b2db83ac82", "428d7f70b62464fc", "e1ae7e676530def1", "65e7ace98c1930bb", "0d67efab745461c1", "cc272711f6fb1505", "93ef012d5a909d1f"]),
             (String(repeating: "A", count: 150), .medium, 8, ["0fa359aa8b175d9b", "d0bb5ff6ea02e40c", "bff5d45955555edc", "6083ea84067d0179", "1aa3d7608b0808eb", "c3527c43d767aebf", "70dccfbdbe4df34d", "4eaa42ec7578383a"]),
-            ("https://viadere.com/c/AF2345?ctx=eyJhY3QiOiJlbnJvbGxfcmV3YXJkcyIsImNtcCI6InNwcmluZy1mbHllciIsImlhdCI6IjIwMjYtMTAtMjdUMDg6MDA6MDAuMDAwWiJ9&sig=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ0", .medium, 10, ["23e663b2ede8b76a", "cdd466f92b22a5f6", "066d611e3eeda1c2", "fc8fe69d0746f672", "0bce94e4c16c8d06", "6449c38ab0becd29", "cda9caf17b154152", "66f75dc8a2adfb39"]),
+            ("https://viadere.io/c/AF2345?ctx=eyJhY3QiOiJlbnJvbGxfcmV3YXJkcyIsImNtcCI6InNwcmluZy1mbHllciIsImlhdCI6IjIwMjYtMTAtMjdUMDg6MDA6MDAuMDAwWiJ9&sig=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ0", .medium, 10, ["6e2aa121feceb2c6", "679ae6ddabba4e22", "f15b66b1afc8cb08", "1d548031bef2f271", "8e6fe765821442d3", "659b3ea0c3b0b8c9", "bb8a96e456ff86ad", "93b0f9f871055043"]),
             (String(repeating: "B", count: 400), .quartile, 19, ["dc1cf0dfa4d84732", "8d4106c67e5c8884", "d8f6a7dffbf18ed0", "83111c96f9c0a8fa", "a39144078b25eaaf", "826a064d89da3e5e", "bcd9d92cb149ce39", "c7f621f1ff92bb7b"]),
             (String(repeating: "B", count: 1000), .low, 22, ["ff0c01b972c8f504", "9a8da5c60819e135", "c9d8e1a9f0ea1fde", "a120f4285103bbca", "1e183613a3b82efe", "ddcb1804f0d396cc", "6e5256b59f909e27", "ccdfecb142d542cc"]),
             (String(repeating: "C", count: 2900), .low, 40, ["aa322e75bfa77cd4", "044dc6f45ee6e4ef", "8498664c49b229db", "74c762266538165f", "64e56235ded5dd8f", "a30409bd091bc251", "2b24b5510f800e91", "950522eeb91196af"]),
@@ -98,7 +98,7 @@ final class QRCodeTests: XCTestCase {
     func testForcedMasksProduceValidFormatBitsAndDifferentSymbols() throws {
         var seen = Set<String>()
         for mask in 0..<8 {
-            let qr = try QRCode.encode("https://viadere.com/c/AF2345", errorCorrection: .medium, mask: mask, boostErrorCorrection: false)
+            let qr = try QRCode.encode("https://viadere.io/c/AF2345", errorCorrection: .medium, mask: mask, boostErrorCorrection: false)
             XCTAssertEqual(qr.mask, mask)
             seen.insert(Self.sha(qr.rows))
             // Read the first format copy back (row 8, columns 0-5,7,8 / column 8 rows 7,5-0) and compare with the table.
@@ -136,7 +136,7 @@ final class QRCodeTests: XCTestCase {
     }
 
     func testStructureOfEverySymbol() throws {
-        let qr = try QRCode.encode("https://viadere.com/c/AF2345", errorCorrection: .quartile)
+        let qr = try QRCode.encode("https://viadere.io/c/AF2345", errorCorrection: .quartile)
         // Finder patterns: 7x7 rings at three corners; timing patterns alternate on row/column 6; dark module present.
         for (ox, oy) in [(0, 0), (qr.size - 7, 0), (0, qr.size - 7)] {
             for d in 0..<7 {
@@ -150,7 +150,7 @@ final class QRCodeTests: XCTestCase {
     }
 
     func testSVGIsSelfContainedAndEscapesTheTitle() throws {
-        let qr = try QRCode.encode("https://viadere.com/c/AF2345")
+        let qr = try QRCode.encode("https://viadere.io/c/AF2345")
         let svg = qr.svg(title: "A <b>title</b> & more")
         XCTAssertTrue(svg.hasPrefix("<svg xmlns=\"http://www.w3.org/2000/svg\""))
         XCTAssertTrue(svg.contains("viewBox=\"0 0 \(qr.size + 8) \(qr.size + 8)\""))

@@ -9,7 +9,7 @@ import org.junit.Test
 
 /** The pure logic of the Android button: session links, the hand-off rule, the panel, the return check and the QR encoder. */
 class VerifyModelTest {
-    private val link = "https://viadere.com/v/K7QFM2XA"
+    private val link = "https://viadere.io/v/K7QFM2XA"
 
     @Test
     fun onlyAViadereSessionLinkMakesASession() {
@@ -21,11 +21,11 @@ class VerifyModelTest {
         assertFalse(session.isExpired(999))
         assertNotNull(VerifySession.parse("https://viadere.cksites.dev/v/K7QFM2XA"))
         listOf(
-            "http://viadere.com/v/K7QFM2XA", "https://evil.test/v/K7QFM2XA", "https://viadere.com.evil.test/v/K7QFM2XA", "https://viadere.com:443/v/K7QFM2XA",
-            "https://user@viadere.com/v/K7QFM2XA", "https://viadere.com/v/K7QFM2XA?next=x", "https://viadere.com/v/K7QFM2XA#x", "https://viadere.com/v/k7qfm2xa",
-            "https://viadere.com/v/K7QFM2X1", "https://viadere.com/k/K7QFM2XA", "https://www.viadere.com/v/K7QFM2XA", "intent://v/K7QFM2XA", "",
+            "http://viadere.io/v/K7QFM2XA", "https://evil.test/v/K7QFM2XA", "https://viadere.io.evil.test/v/K7QFM2XA", "https://viadere.io:443/v/K7QFM2XA",
+            "https://user@viadere.io/v/K7QFM2XA", "https://viadere.io/v/K7QFM2XA?next=x", "https://viadere.io/v/K7QFM2XA#x", "https://viadere.io/v/k7qfm2xa",
+            "https://viadere.io/v/K7QFM2X1", "https://viadere.io/k/K7QFM2XA", "https://www.viadere.io/v/K7QFM2XA", "intent://v/K7QFM2XA", "",
         ).forEach { assertNull(it, VerifySession.parse(it)) }
-        assertNull(VerifySession.parse("https://viadere.cksites.dev/v/K7QFM2XA", allowedHosts = setOf("viadere.com")))
+        assertNull(VerifySession.parse("https://viadere.cksites.dev/v/K7QFM2XA", allowedHosts = setOf("viadere.io")))
     }
 
     @Test

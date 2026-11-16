@@ -289,7 +289,7 @@ struct ApproveClientTests {
         #expect(members["subject_ref"] == .string(Approve.subject.rawValue) && members["capability"] == .string("transaction.approve"))
         #expect(sent.headers["Idempotency-Key"] == nil, "an enrollment is not blindly retried")
         // The link is the SDK's: your root key id, and the secret in the fragment (which no server receives), never anything the relay sent.
-        #expect(invitation.link == "https://viadere.com/a/ABCDEFGH?rk=\(Self.rootKid)#es=\(invitation.secret.base64URL)")
+        #expect(invitation.link == "https://viadere.io/a/ABCDEFGH?rk=\(Self.rootKid)#es=\(invitation.secret.base64URL)")
         let linkURL = try #require(URL(string: invitation.link))
         let parsed = try #require(ApprovalEnrollmentCode.parse(link: linkURL))
         #expect(parsed.rootKid == Self.rootKid && parsed.secret == invitation.secret)

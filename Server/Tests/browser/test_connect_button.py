@@ -101,19 +101,19 @@ class ConnectButtonBrowserTests(unittest.TestCase):
             self.assertTrue(url.startswith(self.base), f"unexpected request {url}")
 
     def test_valid_codes_link_to_the_connect_page(self):
-        self.assertEqual(self.href("plain"), "https://viadere.com/c/AF2345")
-        self.assertEqual(self.href("dashed"), "https://viadere.com/c/AF2345")
-        self.assertEqual(self.href("ambiguous"), "https://viadere.com/c/AF2315", "I -> 1 like the server")
-        self.assertEqual(self.href("zero"), "https://viadere.com/c/Z02345", "O -> 0 like the server")
+        self.assertEqual(self.href("plain"), "https://viadere.io/c/AF2345")
+        self.assertEqual(self.href("dashed"), "https://viadere.io/c/AF2345")
+        self.assertEqual(self.href("ambiguous"), "https://viadere.io/c/AF2315", "I -> 1 like the server")
+        self.assertEqual(self.href("zero"), "https://viadere.io/c/Z02345", "O -> 0 like the server")
 
     def test_invalid_codes_render_nothing(self):
         for key in ["short", "long", "hostile", "empty", "injected"]:
             self.assertTrue(self.results[key].get("empty"), f"{key} renders nothing")
 
     def test_signed_context(self):
-        self.assertEqual(self.href("signed"), f"https://viadere.com/c/AF2345?ctx={CTX}&sig={SIG}")
+        self.assertEqual(self.href("signed"), f"https://viadere.io/c/AF2345?ctx={CTX}&sig={SIG}")
         for key in ["ctxOnly", "badSig", "badCtx", "bigCtx"]:
-            self.assertEqual(self.href(key), "https://viadere.com/c/AF2345", f"{key} falls back to the plain link")
+            self.assertEqual(self.href(key), "https://viadere.io/c/AF2345", f"{key} falls back to the plain link")
 
     def test_label_is_text_and_bounded(self):
         r = self.results["label"]
@@ -125,7 +125,7 @@ class ConnectButtonBrowserTests(unittest.TestCase):
     def test_every_link_points_at_viadere_com_only(self):
         for key, r in self.results.items():
             if "href" in r:
-                self.assertTrue(r["href"].startswith("https://viadere.com/c/"), key)
+                self.assertTrue(r["href"].startswith("https://viadere.io/c/"), key)
                 self.assertEqual(r["rel"], "noopener noreferrer")
 
     def test_stylesheet_loaded_and_touch_target(self):

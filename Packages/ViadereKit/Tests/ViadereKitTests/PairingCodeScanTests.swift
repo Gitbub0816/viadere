@@ -10,7 +10,7 @@ import ViadereCore
 @MainActor
 struct PairingCodeScanTests {
     static let code = "AB12-CD34-EF56"
-    static let link = "https://viadere.com/p/AB12-CD34-EF56"
+    static let link = "https://viadere.io/p/AB12-CD34-EF56"
 
     private func decide(_ payload: String, _ context: ScanContext, _ symbology: ScannedSymbology = .qr) -> ScannedCodeDecision {
         ScannedCodePolicy.evaluate(payload, symbology: symbology, domain: .production, context: context)
@@ -25,18 +25,18 @@ struct PairingCodeScanTests {
     @Test func everyAlteredFormIsRefusedInThePairingEntry() {
         let refused = [
             // Lookalike hosts and the www alias.
-            "https://viadere.com.evil.example/p/AB12-CD34-EF56", "https://vladere.com/p/AB12-CD34-EF56", "https://www.viadere.com/p/AB12-CD34-EF56",
-            "https://VIADERE.COM/p/AB12-CD34-EF56", "https://viadere.com:8443/p/AB12-CD34-EF56", "https://a@viadere.com/p/AB12-CD34-EF56",
-            "http://viadere.com/p/AB12-CD34-EF56", "viadere://p/AB12-CD34-EF56",
+            "https://viadere.io.evil.example/p/AB12-CD34-EF56", "https://vladere.io/p/AB12-CD34-EF56", "https://www.viadere.io/p/AB12-CD34-EF56",
+            "https://VIADERE.IO/p/AB12-CD34-EF56", "https://viadere.io:8443/p/AB12-CD34-EF56", "https://a@viadere.io/p/AB12-CD34-EF56",
+            "http://viadere.io/p/AB12-CD34-EF56", "viadere://p/AB12-CD34-EF56",
             // Extra path, query, fragment.
-            "https://viadere.com/p/AB12-CD34-EF56/", "https://viadere.com/p/AB12-CD34-EF56/extra", "https://viadere.com/pp/AB12-CD34-EF56",
-            "https://viadere.com/p/AB12-CD34-EF56?ref=1", "https://viadere.com/p/AB12-CD34-EF56#frag",
+            "https://viadere.io/p/AB12-CD34-EF56/", "https://viadere.io/p/AB12-CD34-EF56/extra", "https://viadere.io/pp/AB12-CD34-EF56",
+            "https://viadere.io/p/AB12-CD34-EF56?ref=1", "https://viadere.io/p/AB12-CD34-EF56#frag",
             // Case: the code is printed in upper case only; the path prefix is lower case.
-            "https://viadere.com/p/ab12-cd34-ef56", "https://viadere.com/p/Ab12-CD34-EF56", "https://viadere.com/P/AB12-CD34-EF56",
+            "https://viadere.io/p/ab12-cd34-ef56", "https://viadere.io/p/Ab12-CD34-EF56", "https://viadere.io/P/AB12-CD34-EF56",
             // Length, dashes and the alphabet.
-            "https://viadere.com/p/AB12-CD34-EF5", "https://viadere.com/p/AB12-CD34-EF567", "https://viadere.com/p/AB12CD34EF56",
-            "https://viadere.com/p/AB12-CD34-EFI6", "https://viadere.com/p/AB12-CD34-EFO6", "https://viadere.com/p/AB12-CD34-EFU6",
-            "https://viadere.com/p/AB12-CD34-EF5%36",
+            "https://viadere.io/p/AB12-CD34-EF5", "https://viadere.io/p/AB12-CD34-EF567", "https://viadere.io/p/AB12CD34EF56",
+            "https://viadere.io/p/AB12-CD34-EFI6", "https://viadere.io/p/AB12-CD34-EFO6", "https://viadere.io/p/AB12-CD34-EFU6",
+            "https://viadere.io/p/AB12-CD34-EF5%36",
         ]
         for payload in refused {
             if case .open = decide(payload, .newDevicePairing) { Issue.record("opened \(payload)") }
@@ -47,7 +47,7 @@ struct PairingCodeScanTests {
     }
 
     @Test func thePairingEntryAcceptsNothingButAPairingCode() {
-        for payload in ["https://viadere.com/c/AF2345", "https://viadere.com/v/K7QFM2XA", OIDCChallengeLink.build(challengeId: ScannedCodeTests.ach, domain: .production),
+        for payload in ["https://viadere.io/c/AF2345", "https://viadere.io/v/K7QFM2XA", OIDCChallengeLink.build(challengeId: ScannedCodeTests.ach, domain: .production),
                         "@northwind", "https://example.com", ScannedCodeTests.foreignSafeAction] {
             #expect(decide(payload, .newDevicePairing, .qr) == .rejected(.notAPairingCode), "\(payload)")
         }
@@ -73,7 +73,7 @@ struct PairingCodeScanTests {
         #expect(vm.entry == Self.code && vm.canContinue && vm.phase == .enteringCode)
         #expect(await env.api.startRequests.isEmpty, "the person still taps Continue")
         // Another code in the same entry: refused, the entry is unchanged.
-        #expect(await vm.scanned("https://viadere.com/c/AF2345", symbology: .qr, domain: .production) == .notAPairingCode)
+        #expect(await vm.scanned("https://viadere.io/c/AF2345", symbology: .qr, domain: .production) == .notAPairingCode)
         #expect(vm.entry == Self.code)
     }
 

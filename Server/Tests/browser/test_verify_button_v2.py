@@ -35,7 +35,7 @@ from playwright.sync_api import sync_playwright
 REPO = Path(__file__).resolve().parents[3]
 PUBLIC = REPO / "Server" / "Public" / "verify-button" / "v2"
 VECTORS = json.loads((REPO / "docs" / "protocol" / "vectors" / "ckey-profile0-v1.json").read_text())["vectors"]
-LINK = "https://viadere.com/v/ABCDEFGH"
+LINK = "https://viadere.io/v/ABCDEFGH"
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; "
        "require-trusted-types-for 'script'; trusted-types 'none'")
 
@@ -123,7 +123,7 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
         self.navigations = []
         self.requests = []
         page.on("request", lambda request: self.requests.append(request.url))
-        page.route("https://viadere.com/**", lambda route: (self.navigations.append(route.request.url),
+        page.route("https://viadere.io/**", lambda route: (self.navigations.append(route.request.url),
                                                              route.fulfill(status=200, body="landing", content_type="text/plain")))
         page.goto(self.url)
         page.wait_for_function("customElements.get('viadere-verify') !== undefined")
@@ -149,10 +149,10 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
         self.assertIn("vdv-filled", ok["cls"])
         staging = page.evaluate(RENDER_JS, {"link": "https://viadere.cksites.dev/v/ABCDEFGH"})
         self.assertEqual(staging["href"], "https://viadere.cksites.dev/v/ABCDEFGH")
-        for bad in ["http://viadere.com/v/ABCDEFGH", "https://evil.test/v/ABCDEFGH", "https://viadere.com.evil.test/v/ABCDEFGH",
-                    "https://viadere.com/v/abcdefgh", "https://viadere.com/v/ABCDEFG1", "https://viadere.com/v/ABCDEFGHI",
-                    "https://viadere.com/v/ABCDEFGH?x=1", "https://viadere.com/v/ABCDEFGH#x", "javascript:alert(1)//https://viadere.com/v/ABCDEFGH",
-                    "https://viadere.com/k/ABCDEFGH", " https://viadere.com/v/ABCDEFGH", ""]:
+        for bad in ["http://viadere.io/v/ABCDEFGH", "https://evil.test/v/ABCDEFGH", "https://viadere.io.evil.test/v/ABCDEFGH",
+                    "https://viadere.io/v/abcdefgh", "https://viadere.io/v/ABCDEFG1", "https://viadere.io/v/ABCDEFGHI",
+                    "https://viadere.io/v/ABCDEFGH?x=1", "https://viadere.io/v/ABCDEFGH#x", "javascript:alert(1)//https://viadere.io/v/ABCDEFGH",
+                    "https://viadere.io/k/ABCDEFGH", " https://viadere.io/v/ABCDEFGH", ""]:
             self.assertTrue(page.evaluate(RENDER_JS, {"link": bad}).get("empty"), bad)
         self.assert_no_violations(page)
         ctx.close()
@@ -356,7 +356,7 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
             ref.add_data(qrcode.util.QRData(text.encode(), mode=qrcode.util.MODE_8BIT_BYTE))  # byte mode, as the component encodes
             ref.make(fit=True)
             return [[bool(v) for v in row] for row in ref.get_matrix()]
-        for text in [LINK, "https://viadere.cksites.dev/v/ZZZZ9999", "https://viadere.com/v/23456789", "A", "x" * 120]:
+        for text in [LINK, "https://viadere.cksites.dev/v/ZZZZ9999", "https://viadere.io/v/23456789", "A", "x" * 120]:
             ours = page.evaluate("t => customElements.get('viadere-verify').qr(t)", text)
             matches = [mask for mask in range(8) if reference(text, mask) == ours]
             self.assertEqual(len(matches), 1, f"{text!r}: exactly one reference mask must reproduce the symbol")
@@ -381,7 +381,7 @@ class VerifyButtonV2BrowserTest(unittest.TestCase):
         # Text is encoded as UTF-8 at level M with the smallest version, which is what the panel does with the link.
         named = {v["name"]: v for v in VECTORS}
         link = bytes.fromhex(named["verify-link"]["payload"]).decode()
-        self.assertEqual(link, "https://viadere.com/v/K7QFM2XA")
+        self.assertEqual(link, "https://viadere.io/v/K7QFM2XA")
         self.assertEqual(page.evaluate("t => customElements.get('viadere-verify').ckey(t)", link),
                          {"version": 2, "level": 1, "codeword": named["verify-link"]["codeword"]})
         self.assertEqual(page.evaluate("t => customElements.get('viadere-verify').ckey(t).version", "https://viadere.cksites.dev/v/ZZZZ9999"), 3,

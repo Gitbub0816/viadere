@@ -35,7 +35,7 @@ public enum ViadereSignInSafeAction {
     }
 
     /// The longest text a sign-in envelope from `issuer` can have (a 32-byte key id, the longest allowed): what a scanner has to admit and
-    /// no more. 264 bytes for `viadere.com`.
+    /// no more. 262 bytes for `viadere.io`.
     public static func maxTextBytes(issuer: String) -> Int {
         // version, scope; five length bytes; app, action, key id (max 32), challenge id (26); two timestamps; params length; signature.
         let envelope = 2 + 5 + issuer.utf8.count + appId.utf8.count + action.utf8.count + 32 + 26 + 16 + 2 + CKeySafeAction.signatureBytes

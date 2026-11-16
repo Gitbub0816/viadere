@@ -5,8 +5,8 @@ import ViadereCore
 import AuthenticationServices
 import UIKit
 
-/// Platform passkeys via `ASAuthorizationPlatformPublicKeyCredentialProvider` (relying party `viadere.com`;
-/// requires the `webcredentials:viadere.com` associated domain and the server's apple-app-site-association file).
+/// Platform passkeys via `ASAuthorizationPlatformPublicKeyCredentialProvider` (relying party `viadere.io`;
+/// requires the `webcredentials:viadere.io` associated domain and the server's apple-app-site-association file).
 ///
 /// The Kit never touches `UIApplication` (so it stays safe to link into app extensions); the app passes the window
 /// that should host the system passkey sheet.

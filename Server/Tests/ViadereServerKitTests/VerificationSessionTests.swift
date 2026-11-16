@@ -95,7 +95,7 @@ final class VerificationSessionTests: XCTestCase {
             let r = try await rig(h)
             let consumer = try await h.readyConsumer()
             let t = try await ticket(r, returnURL: r.origin + "/checkout?step=2")
-            XCTAssertEqual(t.link, "https://viadere.com/v/\(t.code)", "a plain link: no secret, no query, nothing about the business")
+            XCTAssertEqual(t.link, "https://viadere.io/v/\(t.code)", "a plain link: no secret, no query, nothing about the business")
             XCTAssertLessThanOrEqual(t.expiresAt.timeIntervalSince(h.clock.now()), 300)
             let open = try await view(r, t.sessionId).json(VerificationSessionView.self)
             XCTAssertEqual(open.status, .open)

@@ -79,7 +79,7 @@ describe("RFC 9421 request signatures: vectors", () => {
     for (const c of vectors.positive.filter((p) => p.name !== "parameters_reordered_with_alg")) {
       const type = c.request.headers.find(([n]) => n === "Content-Type")?.[1];
       const headers = await signRequest(fixedSigner(c.signature_raw_b64url!, c.keyid!), {
-        method: c.request.method, url: "https://viadere.com" + c.request.path_and_query, body: c.request.body === "" ? undefined : c.request.body,
+        method: c.request.method, url: "https://viadere.io" + c.request.path_and_query, body: c.request.body === "" ? undefined : c.request.body,
         contentType: type, created: c.created!, nonce: c.nonce!,
       });
       assert.equal(headers["Signature-Input"], c.signature_input, c.name);
@@ -112,7 +112,7 @@ describe("RFC 9421 request signatures: vectors", () => {
   it("a real software signature verifies through the profile", async () => {
     const signer = { keyId: "vsk_0123456789abcdef", ...softwareSigner(vectorPrivateKey()) };
     assert.equal(signer.publicKey, vectorKey.public_key);
-    const headers = await signRequest(signer, { method: "POST", url: "https://viadere.com/v1/business/auth-deliveries", body: '{"a":1}', contentType: "application/json", created: vectors.now });
+    const headers = await signRequest(signer, { method: "POST", url: "https://viadere.io/v1/business/auth-deliveries", body: '{"a":1}', contentType: "application/json", created: vectors.now });
     const request: SignedRequest = { method: "POST", target: "/v1/business/auth-deliveries", headers: [["Content-Type", "application/json"], ...Object.entries(headers)], body: Buffer.from('{"a":1}') };
     assert.equal(await run({ name: "real", request: { method: "POST", path_and_query: request.target, headers: request.headers as [string, string][], body: '{"a":1}' }, presenter: vectors.positive[0]!.presenter }), "vsk_0123456789abcdef");
   });
@@ -128,14 +128,14 @@ describe("RFC 9421 request signatures: client", () => {
     const { signer } = keyPair();
     const { fetchFn, requests } = scriptedFetch([{ status: 503 }, { status: 503 }, { status: 200, body: view() }]);
     const now = vectors.now;
-    const client = new ViadereClient({ apiKey: API_KEY, baseUrl: "https://api.viadere.com", fetch: fetchFn, sleep: async () => {}, requestSigner: signer, now: () => now });
+    const client = new ViadereClient({ apiKey: API_KEY, baseUrl: "https://api.viadere.io", fetch: fetchFn, sleep: async () => {}, requestSigner: signer, now: () => now });
     await client.cancelAuthDelivery(DELIVERY_ID, { idempotencyKey: "cancel-1" });
     assert.equal(requests.length, 3);
     const nonces = new Set<string>();
     for (const r of requests) {
       const url = new URL(r.url);
       const keyId = await verifyHttpSignature({ method: r.method, target: url.pathname + url.search, headers: Object.entries(r.headers), body: Buffer.from(r.body ?? "") }, {
-        now, authorities: ["api.viadere.com"], businessId: "b", apiKeyId: "k",
+        now, authorities: ["api.viadere.io"], businessId: "b", apiKeyId: "k",
         resolveKey: () => ({ publicKey: signer.publicKey, businessId: "b", apiKeyId: "k", revoked: false }),
         registerNonce: (_s, n) => { const fresh = !nonces.has(n); nonces.add(n); return fresh; },
       });

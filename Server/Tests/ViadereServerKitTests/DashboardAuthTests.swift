@@ -322,7 +322,7 @@ final class DashboardAuthTests: XCTestCase {
             XCTAssertFalse(overview.text.contains(" onclick="))
             XCTAssertNil(overview.text.range(of: "https?://[^\"' <]*", options: .regularExpression).flatMap { r -> String? in
                 let url = String(overview.text[r])
-                return url.contains("viadere.com") || url.contains("www.w3.org") ? nil : url
+                return url.contains("viadere.io") || url.contains("www.w3.org") ? nil : url
             }, "no third-party URL may appear in a dashboard page")
             XCTAssertEqual(overview.headers.first(name: .cacheControl), "no-store")
             // The sign-in page carries exactly one script, pinned by hash.

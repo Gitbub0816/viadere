@@ -114,7 +114,7 @@ targets:
         aps-environment: $(APS_ENVIRONMENT)
         # App Attest: vouches for the keys enrolled at device enrollment. `development` in Debug and Staging, `production` in Release
         # (Configs/*.xcconfig); the server's APP_ATTEST_ENVIRONMENT must match.
-        # Associated domains come from VIADERE_WEB_DOMAIN: viadere.com, or staging.viadere.com in Staging (Configs/*.xcconfig).
+        # Associated domains come from VIADERE_WEB_DOMAIN: viadere.io, or staging.viadere.io in Staging (Configs/*.xcconfig).
         com.apple.developer.devicecheck.appattest-environment: $(APP_ATTEST_ENVIRONMENT)
         com.apple.developer.associated-domains:
           - applinks:$(VIADERE_WEB_DOMAIN)

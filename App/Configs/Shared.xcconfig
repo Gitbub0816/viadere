@@ -5,11 +5,11 @@ MARKETING_VERSION = 1.0.0
 CURRENT_PROJECT_VERSION = 1
 
 // Production API. Pins for this host live in ViadereConfiguration.productionPinning (TODO before release).
-VIADERE_API_BASE_URL = https:/$()/api.viadere.com
+VIADERE_API_BASE_URL = https:/$()/api.viadere.io
 
 // Web domain the app is associated with (entitlements `applinks:` / `webcredentials:` / `appclips:`) and the passkey relying-party ID.
-// Staging.xcconfig points both at staging.viadere.com. The server's RP_ID / RP_ORIGIN must be the same domain.
-VIADERE_WEB_DOMAIN = viadere.com
+// Staging.xcconfig points both at staging.viadere.io. The server's RP_ID / RP_ORIGIN must be the same domain.
+VIADERE_WEB_DOMAIN = viadere.io
 VIADERE_RP_DOMAIN = $(VIADERE_WEB_DOMAIN)
 // Universal-link host (WP-C3): every link the app parses must use it (`/c/`, `/a/`, `/k/`, `/l/`, `/h/`). Defaults to the web domain, so the
 // Staging build gets viadere.cksites.dev; the server's LINK_DOMAIN must be the same value. Read from Info.plist `ViadereLinkDomain`.
