@@ -164,6 +164,3 @@ struct LinkCodeEntrySheet: View {
     }
 }
 
-extension PendingLinkSession: Identifiable {
-    public var id: String { code }
-}

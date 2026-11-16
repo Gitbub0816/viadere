@@ -571,7 +571,9 @@ public final class AppModel {
 /// An enrollment code (and the business root key id it carried) opened from a link or QR.
 /// A link session to present: the code, and the business's secret from the link's fragment (`nil` when the person types the code; then the business's
 /// check code is typed too).
-public struct PendingLinkSession: Sendable, Equatable {
+public struct PendingLinkSession: Sendable, Equatable, Identifiable {
+    /// The link-session code identifies the pending session (one sheet per code).
+    public var id: String { code }
     public var code: String
     public var secret: LinkSessionSecret?
     public var checkCode: String?
