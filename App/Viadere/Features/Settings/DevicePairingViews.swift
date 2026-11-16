@@ -115,7 +115,7 @@ struct PairingRequestsSection: View {
             }
         }
         .task { await model.load() }
-        .sheet(item: Binding(get: { open.map(PairingSheetItem.init) }, set: { if $0 == nil { open = nil } })) { item in
+        .sheet(item: Binding(get: { open.map { PairingSheetItem($0) } }, set: { if $0 == nil { open = nil } })) { item in
             ScrollView { PairingApprovalView(model: item.model) }.viadereScreenBackground()
         }
     }
@@ -123,7 +123,8 @@ struct PairingRequestsSection: View {
 
 private struct PairingSheetItem: Identifiable {
     let model: PairingApprovalViewModel
-    var id: DevicePairingID { model.request.pairingId }
+    let id: DevicePairingID
+    @MainActor init(_ model: PairingApprovalViewModel) { self.model = model; id = model.request.pairingId }
 }
 
 /// New device: onboarding → "I already use Viadere": enter the code, then show the comparison code and wait.

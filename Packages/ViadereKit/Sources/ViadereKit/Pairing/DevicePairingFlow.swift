@@ -428,7 +428,8 @@ public final class PairingApprovalViewModel {
     public private(set) var entry = ""
     public private(set) var notice: String?
     public private(set) var announcement: String?
-    public let request: DevicePairingRequest
+    /// Immutable and Sendable, so views may read it from nonisolated contexts (`Identifiable.id`, `ForEach` key paths).
+    nonisolated public let request: DevicePairingRequest
     private let api: any DevicePairingAPI
     private let signer: any PairingApprovalSigning
     private let timeText: @Sendable (Date) -> String
