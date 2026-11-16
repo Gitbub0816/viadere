@@ -25,7 +25,7 @@
 - **Permanent six-character alphanumeric business codes**, e.g. `AF2345`; never reassign a retired code to another business. Case-insensitive. **I and 1 normalize together; O and 0 normalize together; L remains distinct.** Enforce uniqueness after normalization, including collisions caused by those equivalences. Provide user-friendly code entry and validation.
 - **Embeddable “Connect with Viadere” buttons** for ecommerce sites, apps, checkout/account portals and other business surfaces, with deep-link to installed app, eligible App Clip, or web fallback.
 
-**QR codes are a fourth entry path, not a separate identifier.** Encode the same permanent code in a URL (illustrative: `viadere.com/c/AF2345`) and optionally signed campaign/action context. Support links and NFC where platform rules allow. Business handles, codes, QR, and buttons converge on the same business record and permission flow.
+**QR codes are a fourth entry path, not a separate identifier.** Encode the same permanent code in a URL (illustrative: `viadere.io/c/AF2345`) and optionally signed campaign/action context. Support links and NFC where platform rules allow. Business handles, codes, QR, and buttons converge on the same business record and permission flow.
 
 ## 4. Consumer onboarding and relationship management
 - Create/link Viadere account, register trusted devices, and link verified phone numbers.

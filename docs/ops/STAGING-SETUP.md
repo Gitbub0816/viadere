@@ -17,7 +17,7 @@ Everything below is run from the repository root (`cd viadere`) unless a step sa
 | Bundle ID | Staging keeps `com.viadere.app` (and the extensions' IDs). | The server's `APNS_TOPIC`, App Attest app ID (`TEAMID.com.viadere.app`) and the AASA file (`ServerConfig.appBundleID`) are fixed to that ID, so no server change is needed and one App ID in the portal serves both. Cost: a staging build **replaces** a production install on the same phone (same ID), and you cannot have both side by side. A separate `com.viadere.app.staging` would need a server change (the bundle IDs are constants in `ServerConfig.swift`), another App ID, another provisioning set and a second APNs topic, which is not worth it for one product owner. The staging build is labelled "Viadere Staging" on the home screen. |
 | Domains | API `viadere-api.cksites.dev` (`PUBLIC_BASE_URL`); web/RP origin `viadere.cksites.dev` (`RP_ID`, `RP_ORIGIN`). | Passkeys, the dashboard (`/dashboard`), the operator console and `/.well-known/apple-app-site-association` must all be served from the RP origin, so `viadere.cksites.dev` must route to the same Fly app as the API host (step 7). |
 | Push and App Attest environment | Defaults: APNs `sandbox`, App Attest `development` (matches `fly.staging.toml`). Works for builds you run **from Xcode onto a phone**. | **TestFlight builds are production-signed**: their push tokens belong to the production APNs gateway. For a TestFlight round switch both app and server to production (section 12, step 2). The server drops a token registered for the other environment (`APNSwiftSender`). |
-| Links in SMS and QR codes | Known gap: `ViadereCore.domain` is the constant `viadere.com`, and the server builds handoff/account-link URLs and QR enrollment links from it (`APIRoutes.swift`, `ApprovalEnrollmentCode.swift`). | Staging-generated universal links point at `https://viadere.com/...`, not at staging. Passkeys, push, sign-in approvals, the dashboard and API calls are unaffected. Testing SMS handoff links and QR enrollment end to end needs a Core change (make the link host configurable); until then open those flows by hand on the phone. |
+| Links in SMS and QR codes | Known gap: `ViadereCore.domain` is the constant `viadere.io`, and the server builds handoff/account-link URLs and QR enrollment links from it (`APIRoutes.swift`, `ApprovalEnrollmentCode.swift`). | Staging-generated universal links point at `https://viadere.io/...`, not at staging. Passkeys, push, sign-in approvals, the dashboard and API calls are unaffected. Testing SMS handoff links and QR enrollment end to end needs a Core change (make the link host configurable); until then open those flows by hand on the phone. |
 | Optional, left disabled | Verify (`VERIFY_ENABLED=false`), Approve v2 (`APPROVE_V2_ENABLED=false`), RCS, Wallet passes, Apple Messages for Business, the audit-head export. | Each has an external gate or provider; the toml already sets them off. The generator still produces `KEY_DIRECTORY_LOG_KEY` so Approve v2 can be switched on later. |
 
 ## 1. Install the tools
@@ -56,9 +56,9 @@ You now have: `TEAMID`, `KEYID`, the `.p8` file.
 
 ## 3. Cloudflare account and zone
 
-Staging runs under **`cksites.dev`** until `viadere.com` is registered: the web origin is `viadere.cksites.dev` and the API `viadere-api.cksites.dev`. Both are one level below `cksites.dev`, so the free Universal SSL certificate covers them (a name like `api.viadere.cksites.dev` would need a paid certificate).
+Staging runs under **`cksites.dev`** until `viadere.io` is registered: the web origin is `viadere.cksites.dev` and the API `viadere-api.cksites.dev`. Both are one level below `cksites.dev`, so the free Universal SSL certificate covers them (a name like `api.viadere.cksites.dev` would need a paid certificate).
 
-1. `cksites.dev` must be an **Active** zone in your Cloudflare account. (If you later move to `viadere.com`, add that zone the same way and swap the names in `fly.staging.toml`, `App/Configs/Staging.xcconfig` and this guide.)
+1. `cksites.dev` must be an **Active** zone in your Cloudflare account. (If you later move to `viadere.io`, add that zone the same way and swap the names in `fly.staging.toml`, `App/Configs/Staging.xcconfig` and this guide.)
 2. The zone holds your other sites too. Everything below uses the `viadere` / `viadere-api` names only, so it cannot touch other records. (`Infra/terraform/cloudflare.tf` is for the managed setup; this guide does the staging pieces by hand in the dashboard.)
 
 ## 4. Database (Azure Database for PostgreSQL)
@@ -265,7 +265,7 @@ The marketing site (`Site/`, ADR-04) deploys to Workers Static Assets. Cloudflar
 4. **Domain:** Cloudflare > Workers & Pages > `viadere-site-staging` > Settings > Domains & Routes > Add > **Custom domain** `viadere-site.cksites.dev`. Cloudflare creates the DNS record and certificate. (Not `viadere.cksites.dev`: that host is the server's web origin.)
 5. **Optional, recommended while it is unpublished:** Zero Trust > Access > Applications > Add > Self-hosted, domain `viadere-site.cksites.dev`, policy "Allow" for your own email only.
 
-Pushes keep it current. Production (`viadere-site` on `viadere.com`) deploys only from `main`, through the `site-production` environment.
+Pushes keep it current. Production (`viadere-site` on `viadere.io`) deploys only from `main`, through the `site-production` environment.
 
 ### 13b. From a Mac with Swift
 

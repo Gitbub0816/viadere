@@ -47,7 +47,7 @@ signed decisions with ViadereCore's real verifiers).
 
 ### Staging build
 
-The `Staging` configuration (`Configs/Staging.xcconfig`, scheme **Staging**) is Release-grade (no DEBUG, strict ATS) and points at `https://api-staging.viadere.com` with the passkey domain `staging.viadere.com`, the same bundle IDs, APNs sandbox and App Attest `development`. Fill `VIADERE_PIN_PRIMARY` / `VIADERE_PIN_BACKUP` first (`python3 -I Scripts/compute-spki-pins.py api-staging.viadere.com`); `Scripts/check-release-pins.sh` fails a Staging archive while they are placeholders. Full guide, including TestFlight: [`docs/ops/STAGING-SETUP.md`](../docs/ops/STAGING-SETUP.md).
+The `Staging` configuration (`Configs/Staging.xcconfig`, scheme **Staging**) is Release-grade (no DEBUG, strict ATS) and points at `https://api-staging.viadere.io` with the passkey domain `staging.viadere.io`, the same bundle IDs, APNs sandbox and App Attest `development`. Fill `VIADERE_PIN_PRIMARY` / `VIADERE_PIN_BACKUP` first (`python3 -I Scripts/compute-spki-pins.py api-staging.viadere.io`); `Scripts/check-release-pins.sh` fails a Staging archive while they are placeholders. Full guide, including TestFlight: [`docs/ops/STAGING-SETUP.md`](../docs/ops/STAGING-SETUP.md).
 
 ### Local server
 
@@ -71,9 +71,9 @@ Override the server with `VIADERE_API_BASE_URL` in `Configs/Local.xcconfig`.
 | Bundle ids | `com.viadere.app`, `.NotificationService`, `.NotificationContent`, `.CredentialProvider`, `.Widgets`, `.Clip`, `.watchkitapp` |
 | App group | `group.com.viadere.shared` (app, notification service, notification content, Live Activities widget, credential provider) |
 | Keychain groups | `$(AppIdentifierPrefix)com.viadere.shared` (app + notification service: request key and access token only) and `$(AppIdentifierPrefix)com.viadere.app.approval` (**app only**: the approval keys). The clip keeps its own private keychain and holds a request key only. |
-| Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.com`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip), **App Attest** (`com.apple.developer.devicecheck.appattest-environment` on the app and the clip, `$(APP_ATTEST_ENVIRONMENT)`: `development` in `Debug.xcconfig`, `production` in `Release.xcconfig`; the server's `APP_ATTEST_ENVIRONMENT` must match) |
+| Entitlements | associated domains (`applinks`, `webcredentials`, `appclips:viadere.io`), push, time-sensitive notifications, app groups, keychain sharing, parent-application-identifiers (clip), **App Attest** (`com.apple.developer.devicecheck.appattest-environment` on the app and the clip, `$(APP_ATTEST_ENVIRONMENT)`: `development` in `Debug.xcconfig`, `production` in `Release.xcconfig`; the server's `APP_ATTEST_ENVIRONMENT` must match) |
 | Developer portal | Enable Push, Associated Domains, App Groups, Time Sensitive Notifications, App Clip; register the App Clip experience in App Store Connect |
-| Server (viadere.com) | Serve `/.well-known/apple-app-site-association` with `applinks` (`/c/*`, `/l/*`, `/h/*`), `webcredentials` (this app) and `appclips` (the clip) |
+| Server (viadere.io) | Serve `/.well-known/apple-app-site-association` with `applinks` (`/c/*`, `/l/*`, `/h/*`), `webcredentials` (this app) and `appclips` (the clip) |
 
 Export compliance: `ITSAppUsesNonExemptEncryption = false`. The app uses TLS and CryptoKit/Secure Enclave
 **signatures only** (authentication, no data-confidentiality encryption of its own). **Flag for legal review** before the
@@ -194,7 +194,7 @@ notification opens that arrive while locked are queued and replayed after the un
 **Network.** Ephemeral `URLSession`, no URL cache, no cookies, TLS 1.2+ (server should negotiate 1.3), SPKI SHA-256
 pinning with a backup pin in `PinningSessionDelegate` after normal trust evaluation. Strict ATS.
 
-**Passkeys.** `ASAuthorizationPlatformPublicKeyCredentialProvider` for register and sign-in, RP `viadere.com`.
+**Passkeys.** `ASAuthorizationPlatformPublicKeyCredentialProvider` for register and sign-in, RP `viadere.io`.
 
 ## Push contract (for the server)
 
@@ -359,7 +359,7 @@ two-device pairing; the iOS 26 Credential Exchange types; whether `SecureEnclave
 `ViadereKit/ApproveV2` and `App/Viadere/Features/Approve`. Wire formats: `docs/SECURITY.md` 2.50 to 2.58. The feature is closed (and says so) unless the build pins the transparency-log public key: set `VIADERE_KEY_DIRECTORY_LOG_KEYS` in `Configs/*.xcconfig` (Info.plist key `ViadereKeyDirectoryLogKeys`, comma separated, public keys only; `ViadereServer key-directory-log-key` prints it).
 
 * **Keys.** One Secure Enclave approval key per business relationship (`.biometryCurrentSet` for high and critical capabilities, `.userPresence` otherwise; app-only access group `ViadereApprovalKeychainAccessGroup`, `ThisDeviceOnly`) and one HPKE key in the Keychain (`WhenUnlockedThisDeviceOnly`, never synced). Nothing derives from the device or account keys, so businesses cannot correlate them. `AppleApprovalKeyVault` wraps `SecureEnclaveKeyStore` with a per-enrollment tag prefix.
-* **Enrollment** (`ApproveEnrollmentSheet`, from a `https://viadere.com/a/{CODE}?rk=` link, QR or typed code): shows the verified business, the protection and the business root fingerprint, then signs the enrollment statement with the new key (Face ID) and waits for the business's confirmation. The key becomes active only after the phone verifies that confirmation against the transparency log and finds its own statement digest in it; otherwise the keys are deleted and revoked and the person is told.
+* **Enrollment** (`ApproveEnrollmentSheet`, from a `https://viadere.io/a/{CODE}?rk=` link, QR or typed code): shows the verified business, the protection and the business root fingerprint, then signs the enrollment statement with the new key (Face ID) and waits for the business's confirmation. The key becomes active only after the phone verifies that confirmation against the transparency log and finds its own statement digest in it; otherwise the keys are deleted and revoked and the person is told.
 * **Requests** (`ApproveRequestSheet`): decrypted and verified on the phone (published business signing key, business, customer, key, request id, expiry) before anything is shown; anything that fails is hidden and listed under "Waiting for you" as a failed check. The sheet says whether the request was checked end to end or was passed on by Viadere in the clear (`server_visible`). Deny and Approve are one equal component with Deny first and "This wasn't me" in the footer (see Authentication delivery below); Face ID reads "Approve $X to Y". Prompt fatigue: warning from the third request in an hour (the relay's count or the phone's own), Approve disabled until "I started this myself" is tapped, and "This wasn't me" signs a report.
 * **Directory pinning** (`BusinessDirectoryClient`): first contact pins the business root (out of band when the link carried `rk`); a valid root succession blocks that business and shows both fingerprints (Settings, Approvals) until the person confirms; a contradicted history blocks it until the person forgets the business; a log that shrinks, forks or goes stale is refused.
 * **Freeze:** Settings, Approvals (account) and the business page (one business). Freezing needs no Face ID; turning it off needs Face ID on a trusted device.
