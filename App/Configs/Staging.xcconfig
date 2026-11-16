@@ -8,26 +8,28 @@
 // Per-developer overrides are read FIRST (Shared.xcconfig includes Local.xcconfig), so they can never reach the security settings below.
 // The only overridable staging values are the three push/attest switches (see "TestFlight" below) through the VIADERE_STAGING_* names.
 
-// Staging runs on cksites.dev until viadere.io is registered. Both hosts are one level below cksites.dev, so the free Cloudflare
-// Universal SSL certificate covers them.
+// Staging runs on subdomains of the production domain viadere.io (owner decision 2026-11-16): staging.viadere.io (web, links, passkey RP)
+// and api-staging.viadere.io (API). Both are one level below viadere.io, so the free Cloudflare Universal SSL certificate covers them.
+// They are distinct from the production names: no production link, passkey origin, cookie or pin applies to them (SECURITY.md §2.116).
 // ---- server, domains ---------------------------------------------------------------------------------------------
-VIADERE_API_BASE_URL = https:/$()/viadere-api.cksites.dev
-// Passkey relying party and associated domains: the staging web origin (server RP_ID / RP_ORIGIN). This host must reach the Fly origin so
-// /.well-known/apple-app-site-association is served for it (docs/ops/STAGING-SETUP.md, Cloudflare DNS).
-VIADERE_WEB_DOMAIN = viadere.cksites.dev
-VIADERE_RP_DOMAIN = viadere.cksites.dev
+VIADERE_API_BASE_URL = https:/$()/api-staging.viadere.io
+// Passkey relying party and associated domains: the staging web origin (server RP_ID / RP_ORIGIN). This host must reach the staging origin
+// (Cloudflare Tunnel) so /.well-known/apple-app-site-association is served for it (docs/ops/STAGING-SETUP.md, Infra/cloudflare).
+VIADERE_WEB_DOMAIN = staging.viadere.io
+VIADERE_RP_DOMAIN = staging.viadere.io
 VIADERE_DISPLAY_NAME = Viadere Staging
 
 // ---- ATS: strict, no exceptions (Debug alone defines VIADERE_LOCAL_DEV) -------------------------------------------------
 VIADERE_PLIST_DEFS =
 
-// ---- certificate pins for viadere-api.cksites.dev (SPKI SHA-256, base64) -----------------------------------------------------
+// ---- certificate pins for api-staging.viadere.io (SPKI SHA-256, base64) -----------------------------------------------------
 // A Staging build with placeholders fails closed at runtime and Scripts/check-release-pins.sh fails the archive.
 // Compute them with App/Scripts/compute-spki-pins.py (docs/ops/STAGING-SETUP.md). Pin the CA intermediate(s) of the Cloudflare edge chain, not
 // the leaf: Cloudflare renews the edge certificate (and may switch CAs) without notice. Primary and backup must differ.
 // If a pin contains two slashes in a row, write one of them as $() so xcconfig does not read it as a comment.
-// Computed 2026-10-30 from the live Cloudflare edge chain of viadere-api.cksites.dev (App/Scripts/compute-spki-pins.py):
-// leaf CN=cksites.dev <- Google Trust Services WE1 <- GTS Root R4. Cloudflare Universal SSL may also issue from Let's Encrypt, so the
+// Computed 2026-10-30 from the live Cloudflare edge chain of the previous staging API host (App/Scripts/compute-spki-pins.py):
+// leaf <- Google Trust Services WE1 <- GTS Root R4. They are CA pins, so they carry over to api-staging.viadere.io (same Cloudflare
+// Universal SSL); the owner re-checks them with `python3 -I App/Scripts/compute-spki-pins.py api-staging.viadere.io` once its DNS exists. Cloudflare Universal SSL may also issue from Let's Encrypt, so the
 // ISRG roots are pinned as well (keys published at letsencrypt.org/certs). Re-run the script if Cloudflare changes CA families.
 VIADERE_PIN_PRIMARY = kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=
 VIADERE_PIN_BACKUP = mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=

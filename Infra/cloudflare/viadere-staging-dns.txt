@@ -1,0 +1,12 @@
+; Staging records in the production zone viadere.io (owner decision 2026-11-16). BIND format for reference and Cloudflare's
+; "Import DNS records"; point_staging_to_azure.py and add_asset_host.py create the three tunnel CNAMEs themselves. Replace TUNNEL_ID with
+; the id of the viadere-staging-azure tunnel. All names are one label below viadere.io, so Universal SSL covers them. Never add a record
+; for viadere.io, www.viadere.io or api.viadere.io here: those are production (Infra/cloudflare, production workspace).
+;   site-staging.viadere.io is created by Cloudflare when the Worker custom domain is added (docs/ops/STAGING-SETUP.md, "Marketing site").
+;   MailerSend's sender-domain records for staging.viadere.io are added exactly as MailerSend shows them (DNS only, not proxied).
+$ORIGIN viadere.io.
+$TTL 300
+api-staging.viadere.io.	300	IN	CNAME	TUNNEL_ID.cfargotunnel.com. ; cf_tags=cf-proxied:true
+staging.viadere.io.	300	IN	CNAME	TUNNEL_ID.cfargotunnel.com. ; cf_tags=cf-proxied:true
+assets-staging.viadere.io.	300	IN	CNAME	TUNNEL_ID.cfargotunnel.com. ; cf_tags=cf-proxied:true
+_dmarc.staging.viadere.io.	300	IN	TXT	"v=DMARC1; p=none"

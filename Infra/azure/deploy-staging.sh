@@ -62,5 +62,5 @@ echo "api updated; waiting 150 s for the new revision"
 sleep 150
 az containerapp revision list -n ca-viadere-api -g "$RG" \
   --query "[].{name:name,traffic:properties.trafficWeight,health:properties.healthState,state:properties.runningState}" -o table
-curl -fsS https://viadere-api.cksites.dev/readyz; echo
+curl -fsS https://api-staging.viadere.io/readyz; echo
 echo "DONE: $TAG ($REVISION) is on staging"

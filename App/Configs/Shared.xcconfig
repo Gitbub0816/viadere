@@ -12,7 +12,7 @@ VIADERE_API_BASE_URL = https:/$()/api.viadere.io
 VIADERE_WEB_DOMAIN = viadere.io
 VIADERE_RP_DOMAIN = $(VIADERE_WEB_DOMAIN)
 // Universal-link host (WP-C3): every link the app parses must use it (`/c/`, `/a/`, `/k/`, `/l/`, `/h/`). Defaults to the web domain, so the
-// Staging build gets viadere.cksites.dev; the server's LINK_DOMAIN must be the same value. Read from Info.plist `ViadereLinkDomain`.
+// Staging build gets staging.viadere.io; the server's LINK_DOMAIN must be the same value. Read from Info.plist `ViadereLinkDomain`.
 VIADERE_LINK_DOMAIN = $(VIADERE_WEB_DOMAIN)
 // Viadere's `link-descriptor` public key(s) (base64url X9.63, comma separated; the second during a rotation). The app accepts a business link
 // session only if one of these signed its descriptor; empty = link sessions fail closed. Print it with `ViadereServer link-descriptor-key`.
