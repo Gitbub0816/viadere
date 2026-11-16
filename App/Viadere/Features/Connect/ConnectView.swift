@@ -94,6 +94,14 @@ struct ConnectView: View {
                     showingScanner = false
                     model.addBusinessPresented = false
                     Task { await model.handle(link) }
+                case .safeAction:
+                    // A signed sign-in code: the app model verifies it (pinned key, signature, time, single use) before any review opens.
+                    showingScanner = false
+                    model.addBusinessPresented = false
+                    Task {
+                        _ = model.scanned(payload, symbology: symbology)
+                        await model.deliverScanned()
+                    }
                 }
                 return nil
             } onClose: { showingScanner = false }
