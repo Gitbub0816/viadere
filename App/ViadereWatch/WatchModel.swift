@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import UserNotifications
+import ViadereCore
 import ViadereKit
 import WatchConnectivity
 
@@ -32,8 +33,8 @@ final class WatchModel: NSObject, WCSessionDelegate {
             let actions = model.actions
                 .filter { $0.identifier == AuthNotificationCategory.denyAction || $0.identifier == AuthNotificationCategory.reportAction }
                 .map { UNNotificationAction(identifier: $0.identifier, title: $0.title, options: []) }
-            return UNNotificationCategory(identifier: model.identifier, actions: actions, intentIdentifiers: [],
-                                          hiddenPreviewsBodyPlaceholder: AuthDeliveryCopy.hiddenPreviewsPlaceholder, options: [])
+            // watchOS has no hidden-previews placeholder initializer; the wrist shows the phone's mirrored text.
+            return UNNotificationCategory(identifier: model.identifier, actions: actions, intentIdentifiers: [], options: [])
         }
         center.setNotificationCategories(Set(categories))
     }
